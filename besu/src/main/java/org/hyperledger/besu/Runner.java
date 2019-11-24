@@ -50,6 +50,7 @@ public class Runner implements AutoCloseable {
 
   private final NetworkRunner networkRunner;
   private final Optional<NatService> natService;
+  
   private final Optional<JsonRpcHttpService> jsonRpc;
   private final Optional<GraphQLHttpService> graphQLHttp;
   private final Optional<WebSocketService> websocketRpc;
