@@ -16,7 +16,7 @@ package org.hyperledger.besu.nat.upnp;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import org.hyperledger.besu.nat.NatMethod;
+import org.hyperledger.besu.nat.core.domain.NatMethod;
 import org.hyperledger.besu.nat.core.AbstractNatManager;
 import org.hyperledger.besu.nat.core.NatManager;
 import org.hyperledger.besu.nat.core.domain.NatPortMapping;
