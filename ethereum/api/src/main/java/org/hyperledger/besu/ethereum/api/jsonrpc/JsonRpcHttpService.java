@@ -87,7 +87,7 @@ public class JsonRpcHttpService {
   private final Vertx vertx;
   private final JsonRpcConfiguration config;
   private final Map<String, JsonRpcMethod> rpcMethods;
-  private final Optional<NatService> natService;
+  private final NatService natService;
   private final Path dataDir;
   private final LabelledMetric<OperationTimer> requestTimer;
 
@@ -114,7 +114,7 @@ public class JsonRpcHttpService {
       final Path dataDir,
       final JsonRpcConfiguration config,
       final MetricsSystem metricsSystem,
-      final Optional<NatService> natService,
+      final NatService natService,
       final Map<String, JsonRpcMethod> methods,
       final HealthService livenessService,
       final HealthService readinessService) {
@@ -135,7 +135,7 @@ public class JsonRpcHttpService {
       final Path dataDir,
       final JsonRpcConfiguration config,
       final MetricsSystem metricsSystem,
-      final Optional<NatService> natService,
+      final NatService natService,
       final Map<String, JsonRpcMethod> methods,
       final Optional<AuthenticationService> authenticationService,
       final HealthService livenessService,
@@ -234,20 +234,15 @@ public class JsonRpcHttpService {
                     "JsonRPC service started and listening on {}:{}", config.getHost(), actualPort);
                 config.setPort(actualPort);
 
-                if (natService.isPresent()) {
-                  final NatService service = natService.get();
-                  // request that a NAT port forward for our server port (if UPNP Nat Environment)
-                  if (service.isNatEnvironment() && service.getNatMethod().equals(NatMethod.UPNP)) {
-                    service
-                        .getNatManager()
-                        .ifPresent(
-                            natSystem -> {
-                              final UpnpNatManager upnpNatSystem = (UpnpNatManager) natSystem;
-                              upnpNatSystem.requestPortForward(
-                                  config.getPort(), NetworkProtocol.TCP, NatServiceType.JSON_RPC);
-                            });
-                  }
-                }
+                natService.ifNatEnvironment(
+                    (natService, natSystem) -> {
+                      if (natSystem.getNatMethod().equals(NatMethod.UPNP)) {
+                        final UpnpNatManager upnpNatSystem = (UpnpNatManager) natSystem;
+                        upnpNatSystem.requestPortForward(
+                            config.getPort(), NetworkProtocol.TCP, NatServiceType.JSON_RPC);
+                      }
+                    });
+
                 return;
               }
               httpServer = null;

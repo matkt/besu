@@ -22,6 +22,8 @@ import org.hyperledger.besu.nat.upnp.UpnpNatManager;
 
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.logging.log4j.LogManager;
@@ -47,6 +49,28 @@ public class NatService {
    */
   public boolean isNatEnvironment() {
     return currentNatMethod != NatMethod.NONE;
+  }
+
+  /**
+   * If nat environment is present, performs the given action, otherwise does nothing.
+   *
+   * @param action the action to be performed, if a nat environment is present
+   */
+  public void ifNatEnvironment(final BiConsumer<? super NatService, ? super NatManager> action) {
+    if (isNatEnvironment()) {
+      currentNatManager.ifPresent(natManager -> action.accept(this, natManager));
+    }
+  }
+
+  /**
+   * If nat environment is present, performs the given action, otherwise does nothing.
+   *
+   * @param action the action to be performed, if a nat environment is present
+   */
+  public void ifNatEnvironment(final Consumer<? super NatService> action) {
+    if (isNatEnvironment()) {
+      action.accept(this);
+    }
   }
 
   /**

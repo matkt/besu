@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -54,6 +55,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -215,6 +217,7 @@ public final class DefaultP2PNetworkTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
   public void start_withNatManager() {
     final String externalIp = "127.0.0.3";
     config.getRlpx().setBindPort(30303);
@@ -224,10 +227,19 @@ public final class DefaultP2PNetworkTest {
 
     when(natService.getNatManager()).thenReturn(Optional.of(upnpNatManager));
 
-    when(natService.isNatEnvironment()).thenReturn(true);
     when(natService.getNatMethod()).thenReturn(NatMethod.UPNP);
 
     when(natService.queryExternalIPAddress()).thenReturn(Optional.of(externalIp));
+
+    doAnswer(
+            answer -> {
+              var action = (Consumer<NatService>) answer.getArgument(0);
+              action.accept(natService);
+              return null;
+            })
+        .when(natService)
+        .ifNatEnvironment(any(Consumer.class));
+
     final P2PNetwork network = builder().natService(natService).build();
 
     network.start();

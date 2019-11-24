@@ -18,6 +18,7 @@ package org.hyperledger.besu.nat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.nat.core.NatManager;
@@ -28,6 +29,8 @@ import org.hyperledger.besu.nat.upnp.UpnpNatManager;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
@@ -57,6 +60,44 @@ public class NatServiceTest {
 
     final NatService upnpNatService = new NatService(NatMethod.UPNP);
     assertThat(upnpNatService.isNatEnvironment()).isTrue();
+  }
+
+  @SuppressWarnings("unchecked")
+  @Test
+  public void assertThatIfNatEnvironmentWorksProperlyWithUpNp() {
+
+    final NatManager natSystem = mock(NatManager.class);
+
+    final NatService natService = new NatService(NatMethod.UPNP);
+    natService.setNatSystem(natSystem);
+
+    final Consumer<NatService> consumer = mock(Consumer.class);
+    natService.ifNatEnvironment(consumer);
+
+    final BiConsumer<NatService, NatManager> biConsumer = mock(BiConsumer.class);
+    natService.ifNatEnvironment(biConsumer);
+
+    verify(consumer).accept(natService);
+    verify(biConsumer).accept(natService, natSystem);
+  }
+
+  @SuppressWarnings("unchecked")
+  @Test
+  public void assertThatIfNatEnvironmentWorksProperlyWithoutNat() {
+
+    final NatManager natSystem = mock(NatManager.class);
+
+    final NatService natService = new NatService(NatMethod.NONE);
+    natService.setNatSystem(natSystem);
+
+    final Consumer<NatService> consumer = mock(Consumer.class);
+    natService.ifNatEnvironment(consumer);
+
+    final BiConsumer<NatService, NatManager> biConsumer = mock(BiConsumer.class);
+    natService.ifNatEnvironment(biConsumer);
+
+    verifyNoInteractions(consumer);
+    verifyNoInteractions(biConsumer);
   }
 
   @SuppressWarnings("OptionalGetWithoutIsPresent")
