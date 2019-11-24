@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.nat;
+package org.hyperledger.besu.nat.core.domain;
 
 public enum NatMethod {
   UPNP,

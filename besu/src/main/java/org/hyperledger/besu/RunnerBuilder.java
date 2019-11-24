@@ -86,7 +86,7 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.metrics.prometheus.MetricsConfiguration;
 import org.hyperledger.besu.metrics.prometheus.MetricsService;
-import org.hyperledger.besu.nat.NatMethod;
+import org.hyperledger.besu.nat.core.domain.NatMethod;
 import org.hyperledger.besu.nat.NatService;
 import org.hyperledger.besu.util.NetworkUtility;
 import org.hyperledger.besu.util.bytes.BytesValue;
