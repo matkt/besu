@@ -129,7 +129,7 @@ public class EthEstimateGasTest {
       final long gasEstimate, final boolean isSuccessful) {
     final TransactionSimulatorResult mockTxSimResult =
         getMockTransactionSimulatorResult(isSuccessful);
-    when(mockTxSimResult.getGasEstimate()).thenReturn(gasEstimate);
+    when(mockTxSimResult.getGasEstimateBasedOnGasRemaining()).thenReturn(gasEstimate);
   }
 
   private TransactionSimulatorResult getMockTransactionSimulatorResult(final boolean isSuccessful) {

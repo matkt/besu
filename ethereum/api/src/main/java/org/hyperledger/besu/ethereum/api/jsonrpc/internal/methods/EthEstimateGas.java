@@ -89,7 +89,8 @@ public class EthEstimateGas implements JsonRpcMethod {
     return result ->
         result.isSuccessful()
             ? new JsonRpcSuccessResponse(
-                request.getRequest().getId(), Quantity.create(result.getGasEstimate()))
+                request.getRequest().getId(),
+                Quantity.create(result.getGasEstimateBasedOnGasRemaining()))
             : errorResponse(request, result.getValidationResult());
   }
 

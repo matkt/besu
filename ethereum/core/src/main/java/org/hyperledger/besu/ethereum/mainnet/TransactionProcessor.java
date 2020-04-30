@@ -72,6 +72,13 @@ public interface TransactionProcessor {
      */
     long getGasRefund();
 
+    /**
+     * Returns the gas remaining after the transaction was processed.
+     *
+     * @return the gas remaining after the transaction was processed
+     */
+    long getGasRemaining();
+
     Bytes getOutput();
 
     /**

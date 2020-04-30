@@ -72,6 +72,8 @@ public class PrivateTransactionProcessor {
 
     private final Status status;
 
+    private final long gasRemaining;
+
     private final long gasRefund;
 
     private final List<Log> logs;
@@ -84,16 +86,24 @@ public class PrivateTransactionProcessor {
     public static Result invalid(
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult) {
       return new Result(
-          Status.INVALID, new ArrayList<>(), -1, Bytes.EMPTY, validationResult, Optional.empty());
+          Status.INVALID,
+          new ArrayList<>(),
+          -1,
+          -1,
+          Bytes.EMPTY,
+          validationResult,
+          Optional.empty());
     }
 
     public static Result failed(
+        final long gasRemaining,
         final long gasRefund,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult,
         final Optional<Bytes> revertReason) {
       return new Result(
           Status.FAILED,
           new ArrayList<>(),
+          gasRemaining,
           gasRefund,
           Bytes.EMPTY,
           validationResult,
@@ -102,22 +112,31 @@ public class PrivateTransactionProcessor {
 
     public static Result successful(
         final List<Log> logs,
+        final long gasRemaining,
         final long gasRefund,
         final Bytes output,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult) {
       return new Result(
-          Status.SUCCESSFUL, logs, gasRefund, output, validationResult, Optional.empty());
+          Status.SUCCESSFUL,
+          logs,
+          gasRemaining,
+          gasRefund,
+          output,
+          validationResult,
+          Optional.empty());
     }
 
     Result(
         final Status status,
         final List<Log> logs,
+        final long gasRemaining,
         final long gasRefund,
         final Bytes output,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult,
         final Optional<Bytes> revertReason) {
       this.status = status;
       this.logs = logs;
+      this.gasRemaining = gasRemaining;
       this.gasRefund = gasRefund;
       this.output = output;
       this.validationResult = validationResult;
@@ -132,6 +151,11 @@ public class PrivateTransactionProcessor {
     @Override
     public long getGasRefund() {
       return gasRefund;
+    }
+
+    @Override
+    public long getGasRemaining() {
+      return gasRemaining;
     }
 
     @Override
@@ -302,9 +326,14 @@ public class PrivateTransactionProcessor {
 
     if (initialFrame.getState() == MessageFrame.State.COMPLETED_SUCCESS) {
       return Result.successful(
-          initialFrame.getLogs(), 0, initialFrame.getOutputData(), ValidationResult.valid());
+          initialFrame.getLogs(),
+          initialFrame.getRemainingGas().toLong(),
+          0,
+          initialFrame.getOutputData(),
+          ValidationResult.valid());
     } else {
       return Result.failed(
+          initialFrame.getRemainingGas().toLong(),
           0,
           ValidationResult.invalid(
               TransactionValidator.TransactionInvalidReason.PRIVATE_TRANSACTION_FAILED),
