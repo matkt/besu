@@ -72,7 +72,7 @@ public class PrivateTransactionProcessor {
 
     private final Status status;
 
-    private final long gasRemaining;
+    private final long gasRefund;
 
     private final List<Log> logs;
 
@@ -88,13 +88,13 @@ public class PrivateTransactionProcessor {
     }
 
     public static Result failed(
-        final long gasRemaining,
+        final long gasRefund,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult,
         final Optional<Bytes> revertReason) {
       return new Result(
           Status.FAILED,
           new ArrayList<>(),
-          gasRemaining,
+          gasRefund,
           Bytes.EMPTY,
           validationResult,
           revertReason);
@@ -102,23 +102,23 @@ public class PrivateTransactionProcessor {
 
     public static Result successful(
         final List<Log> logs,
-        final long gasRemaining,
+        final long gasRefund,
         final Bytes output,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult) {
       return new Result(
-          Status.SUCCESSFUL, logs, gasRemaining, output, validationResult, Optional.empty());
+          Status.SUCCESSFUL, logs, gasRefund, output, validationResult, Optional.empty());
     }
 
     Result(
         final Status status,
         final List<Log> logs,
-        final long gasRemaining,
+        final long gasRefund,
         final Bytes output,
         final ValidationResult<TransactionValidator.TransactionInvalidReason> validationResult,
         final Optional<Bytes> revertReason) {
       this.status = status;
       this.logs = logs;
-      this.gasRemaining = gasRemaining;
+      this.gasRefund = gasRefund;
       this.output = output;
       this.validationResult = validationResult;
       this.revertReason = revertReason;
@@ -131,7 +131,7 @@ public class PrivateTransactionProcessor {
 
     @Override
     public long getGasRefund() {
-      return gasRemaining;
+      return gasRefund;
     }
 
     @Override
