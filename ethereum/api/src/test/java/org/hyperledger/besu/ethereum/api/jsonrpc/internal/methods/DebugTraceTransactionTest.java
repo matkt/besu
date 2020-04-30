@@ -107,7 +107,7 @@ public class DebugTraceTransactionTest {
     final TransactionTrace transactionTrace =
         new TransactionTrace(transaction, result, traceFrames);
     when(transaction.getGasLimit()).thenReturn(100L);
-    when(result.getGasRemaining()).thenReturn(27L);
+    when(result.getGasRefund()).thenReturn(27L);
     when(result.getOutput()).thenReturn(Bytes.fromHexString("1234"));
     when(blockHeader.getNumber()).thenReturn(12L);
     when(blockchain.headBlockNumber()).thenReturn(12L);
@@ -164,7 +164,7 @@ public class DebugTraceTransactionTest {
     final TransactionTrace transactionTrace =
         new TransactionTrace(transaction, result, traceFrames);
     when(transaction.getGasLimit()).thenReturn(100L);
-    when(result.getGasRemaining()).thenReturn(27L);
+    when(result.getGasRefund()).thenReturn(27L);
     when(result.getOutput()).thenReturn(Bytes.fromHexString("1234"));
     when(blockHeader.getNumber()).thenReturn(12L);
     when(blockchain.headBlockNumber()).thenReturn(12L);

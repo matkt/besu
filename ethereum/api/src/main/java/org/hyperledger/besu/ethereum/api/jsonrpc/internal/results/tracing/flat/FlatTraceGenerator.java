@@ -509,7 +509,7 @@ public class FlatTraceGenerator {
     if (tracesContexts.size() == 1) {
       gasRemainingBeforeProcessed =
           transactionTrace.getTraceFrames().get(0).getGasRemaining().toLong();
-      gasRemainingAfterProcessed = transactionTrace.getResult().getGasRemaining();
+      gasRemainingAfterProcessed = transactionTrace.getResult().getGasRefund();
       if (gasRemainingAfterProcessed > traceFrame.getGasRemaining().toLong()) {
         gasRefund = gasRemainingAfterProcessed - traceFrame.getGasRemaining().toLong();
       }

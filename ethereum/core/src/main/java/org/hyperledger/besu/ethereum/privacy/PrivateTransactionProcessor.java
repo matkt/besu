@@ -130,7 +130,7 @@ public class PrivateTransactionProcessor {
     }
 
     @Override
-    public long getGasRemaining() {
+    public long getGasRefund() {
       return gasRemaining;
     }
 

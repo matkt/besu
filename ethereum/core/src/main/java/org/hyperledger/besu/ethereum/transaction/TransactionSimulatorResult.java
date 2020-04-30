@@ -39,7 +39,7 @@ public class TransactionSimulatorResult {
   }
 
   public long getGasEstimate() {
-    return transaction.getGasLimit() - result.getGasRemaining();
+    return transaction.getGasLimit() - result.getGasRefund();
   }
 
   public Bytes getOutput() {

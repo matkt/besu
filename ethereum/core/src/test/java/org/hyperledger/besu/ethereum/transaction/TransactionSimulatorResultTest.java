@@ -59,13 +59,13 @@ public class TransactionSimulatorResultTest {
     transactionSimulatorResult.getGasEstimate();
 
     verify(transaction).getGasLimit();
-    verify(result).getGasRemaining();
+    verify(result).getGasRefund();
   }
 
   @Test
   public void shouldCalculateCorrectGasEstimateWhenConsumedAllGas() {
     when(transaction.getGasLimit()).thenReturn(5L);
-    when(result.getGasRemaining()).thenReturn(0L);
+    when(result.getGasRefund()).thenReturn(0L);
 
     assertThat(transactionSimulatorResult.getGasEstimate()).isEqualTo(5L);
   }
@@ -73,7 +73,7 @@ public class TransactionSimulatorResultTest {
   @Test
   public void shouldCalculateCorrectGasEstimateWhenGasWasInsufficient() {
     when(transaction.getGasLimit()).thenReturn(1L);
-    when(result.getGasRemaining()).thenReturn(-5L);
+    when(result.getGasRefund()).thenReturn(-5L);
 
     assertThat(transactionSimulatorResult.getGasEstimate()).isEqualTo(6L);
   }
@@ -81,7 +81,7 @@ public class TransactionSimulatorResultTest {
   @Test
   public void shouldCalculateCorrectGasEstimateWhenGasLimitWasSufficient() {
     when(transaction.getGasLimit()).thenReturn(10L);
-    when(result.getGasRemaining()).thenReturn(3L);
+    when(result.getGasRefund()).thenReturn(3L);
 
     assertThat(transactionSimulatorResult.getGasEstimate()).isEqualTo(7L);
   }

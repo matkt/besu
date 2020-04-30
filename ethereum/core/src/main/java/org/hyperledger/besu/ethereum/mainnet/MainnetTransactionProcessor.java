@@ -125,7 +125,7 @@ public class MainnetTransactionProcessor implements TransactionProcessor {
     }
 
     @Override
-    public long getGasRemaining() {
+    public long getGasRefund() {
       return gasRemaining;
     }
 

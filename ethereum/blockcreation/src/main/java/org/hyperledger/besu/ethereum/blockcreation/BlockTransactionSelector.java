@@ -237,7 +237,7 @@ public class BlockTransactionSelector {
    */
   private void updateTransactionResultTracking(
       final Transaction transaction, final TransactionProcessor.Result result) {
-    final long gasUsedByTransaction = transaction.getGasLimit() - result.getGasRemaining();
+    final long gasUsedByTransaction = transaction.getGasLimit() - result.getGasRefund();
     final long cumulativeGasUsed;
     if (ExperimentalEIPs.eip1559Enabled && eip1559.isPresent()) {
       cumulativeGasUsed =

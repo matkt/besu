@@ -64,13 +64,13 @@ public interface TransactionProcessor {
     Status getStatus();
 
     /**
-     * Returns the gas remaining after the transaction was processed.
+     * Returns the gas refund after the transaction was processed.
      *
      * <p>This is only valid when {@code TransactionProcessor#isSuccessful} returns {@code true}.
      *
-     * @return the gas remaining after the transaction was processed
+     * @return the gas refund after the transaction was processed
      */
-    long getGasRemaining();
+    long getGasRefund();
 
     Bytes getOutput();
 
