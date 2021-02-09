@@ -45,4 +45,6 @@ public interface WorldStateArchive {
 
   Optional<WorldStateProof> getAccountProof(
       Hash worldStateRoot, Address accountAddress, List<UInt256> accountStorageKeys);
+
+  WorldStateArchive getMutableArchive();
 }

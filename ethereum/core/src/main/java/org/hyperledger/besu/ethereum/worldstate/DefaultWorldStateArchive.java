@@ -89,4 +89,9 @@ public class DefaultWorldStateArchive implements WorldStateArchive {
       final List<UInt256> accountStorageKeys) {
     return worldStateProof.getAccountProof(worldStateRoot, accountAddress, accountStorageKeys);
   }
+
+  @Override
+  public WorldStateArchive getMutableArchive() {
+    return this;
+  }
 }

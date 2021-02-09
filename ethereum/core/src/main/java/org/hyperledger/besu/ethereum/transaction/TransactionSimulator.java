@@ -114,7 +114,10 @@ public class TransactionSimulator {
       return Optional.empty();
     }
     final MutableWorldState worldState =
-        worldStateArchive.getMutable(header.getStateRoot(), header.getHash()).orElse(null);
+        worldStateArchive
+            .getMutableArchive()
+            .getMutable(header.getStateRoot(), header.getHash())
+            .orElse(null);
     if (worldState == null) {
       return Optional.empty();
     }

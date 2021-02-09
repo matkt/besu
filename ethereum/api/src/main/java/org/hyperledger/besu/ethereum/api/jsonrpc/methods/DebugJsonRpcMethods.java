@@ -75,7 +75,7 @@ public class DebugJsonRpcMethods extends ApiGroupJsonRpcMethods {
         new BlockReplay(
             protocolSchedule,
             blockchainQueries.getBlockchain(),
-            blockchainQueries.getWorldStateArchive());
+            blockchainQueries.getWorldStateArchive().getMutableArchive());
 
     return mapOf(
         new DebugTraceTransaction(blockchainQueries, new TransactionTracer(blockReplay)),

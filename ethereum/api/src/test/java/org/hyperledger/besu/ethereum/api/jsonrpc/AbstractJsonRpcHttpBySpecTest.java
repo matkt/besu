@@ -116,7 +116,6 @@ public abstract class AbstractJsonRpcHttpBySpecTest extends AbstractJsonRpcHttpS
     try (final Response resp = client.newCall(request).execute()) {
       final int expectedStatusCode = specNode.get("statusCode").asInt();
       assertThat(resp.code()).isEqualTo(expectedStatusCode);
-
       final JsonNode expectedResponse = specNode.get("response");
       if (expectedResponse.isObject()) {
         try {
