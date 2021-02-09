@@ -91,7 +91,7 @@ public class DefaultWorldStateArchive implements WorldStateArchive {
   }
 
   @Override
-  public WorldStateArchive getMutableArchive() {
+  public WorldStateArchive getWrappedArchive() {
     return this;
   }
 }

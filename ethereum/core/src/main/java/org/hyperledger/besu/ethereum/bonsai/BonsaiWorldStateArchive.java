@@ -191,7 +191,7 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
   }
 
   @Override
-  public WorldStateArchive getMutableArchive() {
+  public WorldStateArchive getWrappedArchive() {
     return new BonsaiWrappedWorldStateArchive(provider, blockchain, worldStateStorage);
   }
 

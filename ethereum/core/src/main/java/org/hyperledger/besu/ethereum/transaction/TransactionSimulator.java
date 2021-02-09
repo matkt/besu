@@ -115,7 +115,7 @@ public class TransactionSimulator {
     }
     final MutableWorldState worldState =
         worldStateArchive
-            .getMutableArchive()
+            .getWrappedArchive()
             .getMutable(header.getStateRoot(), header.getHash())
             .orElse(null);
     if (worldState == null) {

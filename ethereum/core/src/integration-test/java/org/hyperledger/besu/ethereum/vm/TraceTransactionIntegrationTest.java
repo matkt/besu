@@ -90,7 +90,7 @@ public class TraceTransactionIntegrationTest {
     final BlockHeader genesisBlockHeader = genesisBlock.getHeader();
     final MutableWorldState worldState =
         worldStateArchive
-            .getMutableArchive()
+            .getWrappedArchive()
             .getMutable(genesisBlockHeader.getStateRoot(), genesisBlockHeader.getHash())
             .get();
     final WorldUpdater createTransactionUpdater = worldState.updater();
@@ -168,7 +168,7 @@ public class TraceTransactionIntegrationTest {
     transactionProcessor.processTransaction(
         blockchain,
         worldStateArchive
-            .getMutableArchive()
+            .getWrappedArchive()
             .getMutable(genesisBlockHeader.getStateRoot(), genesisBlockHeader.getHash())
             .get()
             .updater(),
