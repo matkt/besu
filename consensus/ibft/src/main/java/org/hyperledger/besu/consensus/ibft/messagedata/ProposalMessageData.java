@@ -14,13 +14,12 @@
  */
 package org.hyperledger.besu.consensus.ibft.messagedata;
 
-import org.hyperledger.besu.consensus.common.bft.messagedata.AbstractBftMessageData;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Proposal;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
 import org.apache.tuweni.bytes.Bytes;
 
-public class ProposalMessageData extends AbstractBftMessageData {
+public class ProposalMessageData extends AbstractIbftMessageData {
 
   private static final int MESSAGE_CODE = IbftV2.PROPOSAL;
 

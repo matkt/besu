@@ -22,8 +22,6 @@ import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Optional;
 
-import org.apache.tuweni.units.bigints.UInt64;
-
 public class PingPacketData implements PacketData {
 
   /* Fixed value that represents we're using v5 of the P2P discovery protocol. */
@@ -38,34 +36,22 @@ public class PingPacketData implements PacketData {
   /* In seconds after epoch. */
   private final long expiration;
 
-  /* Current sequence number of the sending node’s record */
-  private final UInt64 enrSeq;
-
   private PingPacketData(
-      final Optional<Endpoint> maybeFrom,
-      final Endpoint to,
-      final long expiration,
-      final UInt64 enrSeq) {
+      final Optional<Endpoint> maybeFrom, final Endpoint to, final long expiration) {
     checkArgument(to != null, "destination endpoint cannot be null");
     checkArgument(expiration >= 0, "expiration cannot be negative");
 
     this.maybeFrom = maybeFrom;
     this.to = to;
     this.expiration = expiration;
-    this.enrSeq = enrSeq;
   }
 
-  public static PingPacketData create(final Endpoint from, final Endpoint to, final UInt64 enrSeq) {
-    checkArgument(
-        enrSeq != null && UInt64.ZERO.compareTo(enrSeq) < 0, "enrSeq cannot be null or negative");
-    return create(from, to, PacketData.defaultExpiration(), enrSeq);
+  public static PingPacketData create(final Endpoint from, final Endpoint to) {
+    return create(from, to, PacketData.defaultExpiration());
   }
 
-  static PingPacketData create(
-      final Endpoint from, final Endpoint to, final long expirationSec, final UInt64 enrSeq) {
-    checkArgument(
-        enrSeq != null && UInt64.ZERO.compareTo(enrSeq) < 0, "enrSeq cannot be null or negative");
-    return new PingPacketData(Optional.of(from), to, expirationSec, enrSeq);
+  static PingPacketData create(final Endpoint from, final Endpoint to, final long expirationSec) {
+    return new PingPacketData(Optional.of(from), to, expirationSec);
   }
 
   public static PingPacketData readFrom(final RLPInput in) {
@@ -75,12 +61,8 @@ public class PingPacketData implements PacketData {
     final Optional<Endpoint> from = Endpoint.maybeDecodeStandalone(in);
     final Endpoint to = Endpoint.decodeStandalone(in);
     final long expiration = in.readLongScalar();
-    UInt64 enrSeq = null;
-    if (!in.isEndOfCurrentList()) {
-      enrSeq = UInt64.fromBytes(in.readBytes());
-    }
     in.leaveListLenient();
-    return new PingPacketData(from, to, expiration, enrSeq);
+    return new PingPacketData(from, to, expiration);
   }
 
   @Override
@@ -95,13 +77,6 @@ public class PingPacketData implements PacketData {
         .encodeStandalone(out);
     to.encodeStandalone(out);
     out.writeLongScalar(expiration);
-    out.writeBytes(
-        getEnrSeq()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Attempting to serialize invalid PING packet. Missing 'enrSeq' field"))
-            .toBytes());
     out.endList();
   }
 
@@ -117,10 +92,6 @@ public class PingPacketData implements PacketData {
     return expiration;
   }
 
-  public Optional<UInt64> getEnrSeq() {
-    return Optional.ofNullable(enrSeq);
-  }
-
   @Override
   public String toString() {
     return "PingPacketData{"
@@ -130,8 +101,6 @@ public class PingPacketData implements PacketData {
         + to
         + ", expiration="
         + expiration
-        + ", enrSeq="
-        + enrSeq
         + '}';
   }
 }

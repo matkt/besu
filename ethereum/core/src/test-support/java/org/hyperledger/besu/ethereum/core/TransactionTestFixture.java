@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.core;
 
 import org.hyperledger.besu.crypto.SECP256K1.KeyPair;
-import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.math.BigInteger;
 import java.util.Optional;
@@ -23,8 +22,6 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 
 public class TransactionTestFixture {
-
-  private TransactionType transactionType = TransactionType.FRONTIER;
 
   private long nonce = 0;
 
@@ -47,7 +44,6 @@ public class TransactionTestFixture {
   public Transaction createTransaction(final KeyPair keys) {
     final Transaction.Builder builder = Transaction.builder();
     builder
-        .type(transactionType)
         .gasLimit(gasLimit)
         .gasPrice(gasPrice)
         .nonce(nonce)
@@ -62,11 +58,6 @@ public class TransactionTestFixture {
     feeCap.ifPresent(builder::feeCap);
 
     return builder.signAndBuild(keys);
-  }
-
-  public TransactionTestFixture type(final TransactionType transactionType) {
-    this.transactionType = transactionType;
-    return this;
   }
 
   public TransactionTestFixture nonce(final long nonce) {

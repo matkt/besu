@@ -16,17 +16,17 @@ package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameterOrBlockHash;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.UInt256Parameter;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.core.Address;
-import org.hyperledger.besu.ethereum.core.Hash;
 
 import org.apache.tuweni.units.bigints.UInt256;
 
-public class EthGetStorageAt extends AbstractBlockParameterOrBlockHashMethod {
-  public EthGetStorageAt(final BlockchainQueries blockchainQueries) {
-    super(blockchainQueries);
+public class EthGetStorageAt extends AbstractBlockParameterMethod {
+
+  public EthGetStorageAt(final BlockchainQueries blockchain) {
+    super(blockchain);
   }
 
   @Override
@@ -35,18 +35,17 @@ public class EthGetStorageAt extends AbstractBlockParameterOrBlockHashMethod {
   }
 
   @Override
-  protected BlockParameterOrBlockHash blockParameterOrBlockHash(
-      final JsonRpcRequestContext request) {
-    return request.getRequiredParameter(2, BlockParameterOrBlockHash.class);
+  protected BlockParameter blockParameter(final JsonRpcRequestContext request) {
+    return request.getRequiredParameter(2, BlockParameter.class);
   }
 
   @Override
-  protected String resultByBlockHash(final JsonRpcRequestContext request, final Hash blockHash) {
+  protected String resultByBlockNumber(
+      final JsonRpcRequestContext request, final long blockNumber) {
     final Address address = request.getRequiredParameter(0, Address.class);
     final UInt256 position = request.getRequiredParameter(1, UInt256Parameter.class).getValue();
-    return blockchainQueries
-        .get()
-        .storageAt(address, position, blockHash)
+    return getBlockchainQueries()
+        .storageAt(address, position, blockNumber)
         .map(UInt256::toHexString)
         .orElse(null);
   }

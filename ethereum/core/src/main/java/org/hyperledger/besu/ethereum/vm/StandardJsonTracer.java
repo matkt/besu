@@ -48,7 +48,7 @@ public class StandardJsonTracer implements OperationTracer {
     return number.isZero() ? "0x0" : number.toShortHexString();
   }
 
-  static String shortBytes(final Bytes bytes) {
+  private static String shortBytes(final Bytes bytes) {
     return bytes.isZero() ? "0x0" : bytes.toShortHexString();
   }
 

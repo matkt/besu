@@ -41,7 +41,7 @@ public class CalculatedDifficultyValidationRule implements AttachedBlockHeaderVa
         difficultyCalculator.nextDifficulty(header.getTimestamp(), parent, context);
 
     if (actualDifficulty.compareTo(expectedDifficulty) != 0) {
-      LOG.info(
+      LOG.trace(
           "Invalid block header: difficulty {} does not equal expected difficulty {}",
           actualDifficulty,
           expectedDifficulty);

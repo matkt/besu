@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.eth.sync.worldstate;
 
 import org.hyperledger.besu.ethereum.core.Hash;
-import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
 
@@ -26,39 +25,23 @@ import org.apache.tuweni.bytes.Bytes;
 
 class CodeNodeDataRequest extends NodeDataRequest {
 
-  final Optional<Hash> accountHash;
-
-  CodeNodeDataRequest(final Hash hash, final Optional<Hash> accountHash) {
+  CodeNodeDataRequest(final Hash hash) {
     super(RequestType.CODE, hash);
-    this.accountHash = accountHash;
   }
 
   @Override
   protected void doPersist(final Updater updater) {
-    updater.putCode(accountHash.orElse(Hash.EMPTY), getHash(), getData());
+    updater.putCode(getHash(), getData());
   }
 
   @Override
-  public Stream<NodeDataRequest> getChildRequests(final WorldStateStorage worldStateStorage) {
+  public Stream<NodeDataRequest> getChildRequests() {
     // Code nodes have nothing further to download
     return Stream.empty();
   }
 
   @Override
   public Optional<Bytes> getExistingData(final WorldStateStorage worldStateStorage) {
-    return worldStateStorage.getCode(getHash(), accountHash.orElse(Hash.EMPTY));
-  }
-
-  public Optional<Hash> getAccountHash() {
-    return accountHash;
-  }
-
-  @Override
-  protected void writeTo(final RLPOutput out) {
-    out.startList();
-    out.writeByte(getRequestType().getValue());
-    out.writeBytes(getHash());
-    getAccountHash().ifPresent(out::writeBytes);
-    out.endList();
+    return worldStateStorage.getCode(getHash());
   }
 }

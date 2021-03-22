@@ -158,7 +158,7 @@ public class PrivacyPrecompiledContract extends AbstractPrecompiledContract {
         privateStateRootResolver.resolveLastStateRoot(privacyGroupId, privateMetadataUpdater);
 
     final MutableWorldState disposablePrivateState =
-        privateWorldStateArchive.getMutable(lastRootHash, null).get();
+        privateWorldStateArchive.getMutable(lastRootHash).get();
 
     final WorldUpdater privateWorldStateUpdater = disposablePrivateState.updater();
 

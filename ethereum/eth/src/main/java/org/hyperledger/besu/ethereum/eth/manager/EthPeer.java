@@ -35,11 +35,11 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.Di
 
 import java.time.Clock;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,7 +65,6 @@ public class EthPeer {
   private final ChainState chainHeadState;
   private final AtomicBoolean statusHasBeenSentToPeer = new AtomicBoolean(false);
   private final AtomicBoolean statusHasBeenReceivedFromPeer = new AtomicBoolean(false);
-  private final AtomicBoolean fullyValidated = new AtomicBoolean(false);
   private final AtomicInteger lastProtocolVersion = new AtomicInteger(0);
 
   private volatile long lastRequestTimestamp = 0;
@@ -77,7 +76,7 @@ public class EthPeer {
 
   private final AtomicReference<Consumer<EthPeer>> onStatusesExchanged = new AtomicReference<>();
   private final PeerReputation reputation = new PeerReputation();
-  private final Map<PeerValidator, Boolean> validationStatus = new ConcurrentHashMap<>();
+  private final Map<PeerValidator, Boolean> validationStatus = new HashMap<>();
 
   @VisibleForTesting
   public EthPeer(
@@ -92,7 +91,7 @@ public class EthPeer {
     knownBlocks =
         Collections.newSetFromMap(
             Collections.synchronizedMap(
-                new LinkedHashMap<>(16, 0.75f, true) {
+                new LinkedHashMap<Hash, Boolean>(16, 0.75f, true) {
                   @Override
                   protected boolean removeEldestEntry(final Map.Entry<Hash, Boolean> eldest) {
                     return size() > maxTrackedSeenBlocks;
@@ -103,7 +102,6 @@ public class EthPeer {
     for (final PeerValidator peerValidator : peerValidators) {
       validationStatus.put(peerValidator, false);
     }
-    fullyValidated.set(peerValidators.isEmpty());
   }
 
   public void markValidated(final PeerValidator validator) {
@@ -111,7 +109,6 @@ public class EthPeer {
       throw new IllegalArgumentException("Attempt to update unknown validation status");
     }
     validationStatus.put(validator, true);
-    fullyValidated.set(validationStatus.values().stream().allMatch(b -> b));
   }
 
   /**
@@ -120,7 +117,12 @@ public class EthPeer {
    * @return {@code true} if all peer validation logic has run and successfully validated this peer
    */
   public boolean isFullyValidated() {
-    return fullyValidated.get();
+    for (final Boolean isValid : validationStatus.values()) {
+      if (!isValid) {
+        return false;
+      }
+    }
+    return true;
   }
 
   public boolean isDisconnected() {
@@ -339,7 +341,7 @@ public class EthPeer {
    *
    * @return true if the peer has sent its initial status message to us.
    */
-  boolean statusHasBeenReceived() {
+  public boolean statusHasBeenReceived() {
     return statusHasBeenReceivedFromPeer.get();
   }
 
@@ -348,7 +350,7 @@ public class EthPeer {
    *
    * @return true if we have sent a status message to this peer.
    */
-  boolean statusHasBeenSentToPeer() {
+  public boolean statusHasBeenSentToPeer() {
     return statusHasBeenSentToPeer.get();
   }
 

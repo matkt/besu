@@ -16,7 +16,7 @@ package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameterOrBlockHash;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcError;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
@@ -24,8 +24,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSucces
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.proof.GetProofResult;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.core.Address;
-import org.hyperledger.besu.ethereum.core.Hash;
-import org.hyperledger.besu.ethereum.core.WorldState;
+import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.proof.WorldStateProof;
 
 import java.util.Arrays;
@@ -35,34 +34,42 @@ import java.util.stream.Collectors;
 
 import org.apache.tuweni.units.bigints.UInt256;
 
-public class EthGetProof extends AbstractBlockParameterOrBlockHashMethod {
+public class EthGetProof extends AbstractBlockParameterMethod {
+
+  private final BlockchainQueries blockchain;
+
   public EthGetProof(final BlockchainQueries blockchain) {
     super(blockchain);
+    this.blockchain = blockchain;
+  }
+
+  private Address getAddress(final JsonRpcRequestContext request) {
+    return request.getRequiredParameter(0, Address.class);
+  }
+
+  private List<UInt256> getStorageKeys(final JsonRpcRequestContext request) {
+    return Arrays.stream(request.getRequiredParameter(1, String[].class))
+        .map(UInt256::fromHexString)
+        .collect(Collectors.toList());
   }
 
   @Override
-  public String getName() {
-    return RpcMethod.ETH_GET_PROOF.getMethodName();
+  protected BlockParameter blockParameter(final JsonRpcRequestContext request) {
+    return request.getRequiredParameter(2, BlockParameter.class);
   }
 
   @Override
-  protected BlockParameterOrBlockHash blockParameterOrBlockHash(
-      final JsonRpcRequestContext request) {
-    return request.getRequiredParameter(2, BlockParameterOrBlockHash.class);
-  }
+  protected Object resultByBlockNumber(
+      final JsonRpcRequestContext requestContext, final long blockNumber) {
 
-  @Override
-  protected Object resultByBlockHash(
-      final JsonRpcRequestContext requestContext, final Hash blockHash) {
-
-    final Address address = requestContext.getRequiredParameter(0, Address.class);
+    final Address address = getAddress(requestContext);
     final List<UInt256> storageKeys = getStorageKeys(requestContext);
 
-    final Optional<WorldState> worldState = getBlockchainQueries().getWorldState(blockHash);
+    final Optional<MutableWorldState> worldState = blockchain.getWorldState(blockNumber);
 
     if (worldState.isPresent()) {
       Optional<WorldStateProof> proofOptional =
-          getBlockchainQueries()
+          blockchain
               .getWorldStateArchive()
               .getAccountProof(worldState.get().rootHash(), address, storageKeys);
       return proofOptional
@@ -83,12 +90,11 @@ public class EthGetProof extends AbstractBlockParameterOrBlockHashMethod {
 
   @Override
   public JsonRpcResponse response(final JsonRpcRequestContext requestContext) {
-    return (JsonRpcResponse) handleParamTypes(requestContext);
+    return (JsonRpcResponse) findResultByParamType(requestContext);
   }
 
-  private List<UInt256> getStorageKeys(final JsonRpcRequestContext request) {
-    return Arrays.stream(request.getRequiredParameter(1, String[].class))
-        .map(UInt256::fromHexString)
-        .collect(Collectors.toList());
+  @Override
+  public String getName() {
+    return RpcMethod.ETH_GET_PROOF.getMethodName();
   }
 }

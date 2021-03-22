@@ -23,7 +23,6 @@ import java.util.Collections;
 import java.util.List;
 
 public class OrionTestHarnessFactory {
-  private static final String storage = "memory";
 
   public static OrionTestHarness create(
       final Path tempDir, final OrionKeyConfiguration orionConfig) {
@@ -70,7 +69,8 @@ public class OrionTestHarnessFactory {
       final Path[] key1pubs,
       final Path[] key1keys,
       final List<String> othernodes) {
+
     return new OrionTestHarness(
-        new OrionConfiguration(key1pubs, key1keys, tempDir, othernodes, false, storage));
+        new OrionConfiguration(key1pubs, key1keys, tempDir, othernodes, false));
   }
 }

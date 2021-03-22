@@ -16,11 +16,10 @@ package org.hyperledger.besu.consensus.ibft.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
-import org.hyperledger.besu.consensus.common.bft.BftBlockInterface;
-import org.hyperledger.besu.consensus.common.bft.ConsensusRoundHelpers;
-import org.hyperledger.besu.consensus.common.bft.ConsensusRoundIdentifier;
-import org.hyperledger.besu.consensus.common.bft.ProposedBlockHelpers;
+import org.hyperledger.besu.consensus.ibft.ConsensusRoundIdentifier;
+import org.hyperledger.besu.consensus.ibft.IbftBlockHeaderFunctions;
+import org.hyperledger.besu.consensus.ibft.IbftBlockInterface;
+import org.hyperledger.besu.consensus.ibft.TestHelpers;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Proposal;
 import org.hyperledger.besu.consensus.ibft.payload.MessageFactory;
 import org.hyperledger.besu.crypto.NodeKeyUtils;
@@ -43,7 +42,7 @@ public class ProposalBlockConsistencyValidatorTest {
       new ConsensusRoundIdentifier(chainHeight, 4);
 
   private final Block block =
-      ProposedBlockHelpers.createProposalBlock(Collections.emptyList(), roundIdentifier);
+      TestHelpers.createProposalBlock(Collections.emptyList(), roundIdentifier);
   private ProposalBlockConsistencyValidator consistencyChecker;
 
   @Before
@@ -58,10 +57,10 @@ public class ProposalBlockConsistencyValidatorTest {
         proposerMessageFactory.createProposal(roundIdentifier, block, Optional.empty());
 
     final Block misMatchedBlock =
-        BftBlockInterface.replaceRoundInBlock(
+        IbftBlockInterface.replaceRoundInBlock(
             block,
             roundIdentifier.getRoundNumber() + 1,
-            BftBlockHeaderFunctions.forCommittedSeal());
+            IbftBlockHeaderFunctions.forCommittedSeal());
 
     assertThat(
             consistencyChecker.validateProposalMatchesBlock(
@@ -71,8 +70,7 @@ public class ProposalBlockConsistencyValidatorTest {
 
   @Test
   public void blockDigestMatchesButRoundDiffersFails() {
-    final ConsensusRoundIdentifier futureRound =
-        ConsensusRoundHelpers.createFrom(roundIdentifier, 0, +1);
+    final ConsensusRoundIdentifier futureRound = TestHelpers.createFrom(roundIdentifier, 0, +1);
     final Proposal proposalMsg =
         proposerMessageFactory.createProposal(futureRound, block, Optional.empty());
 
@@ -83,8 +81,7 @@ public class ProposalBlockConsistencyValidatorTest {
 
   @Test
   public void blockWithMismatchedNumberFails() {
-    final ConsensusRoundIdentifier futureHeight =
-        ConsensusRoundHelpers.createFrom(roundIdentifier, +1, 0);
+    final ConsensusRoundIdentifier futureHeight = TestHelpers.createFrom(roundIdentifier, +1, 0);
     final Proposal proposalMsg =
         proposerMessageFactory.createProposal(futureHeight, block, Optional.empty());
 

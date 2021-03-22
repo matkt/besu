@@ -47,7 +47,7 @@ public class GenesisConfigOptionsTest {
   public void shouldUseIbftLegacyWhenIbftInConfig() {
     final GenesisConfigOptions config = fromConfigOptions(singletonMap("ibft", emptyMap()));
     assertThat(config.isIbftLegacy()).isTrue();
-    assertThat(config.getIbftLegacyConfigOptions()).isNotSameAs(BftConfigOptions.DEFAULT);
+    assertThat(config.getIbftLegacyConfigOptions()).isNotSameAs(IbftConfigOptions.DEFAULT);
     assertThat(config.getConsensusEngine()).isEqualTo("ibft");
   }
 
@@ -55,7 +55,7 @@ public class GenesisConfigOptionsTest {
   public void shouldNotUseIbftLegacyIfIbftNotPresent() {
     final GenesisConfigOptions config = fromConfigOptions(emptyMap());
     assertThat(config.isIbftLegacy()).isFalse();
-    assertThat(config.getIbftLegacyConfigOptions()).isSameAs(BftConfigOptions.DEFAULT);
+    assertThat(config.getIbftLegacyConfigOptions()).isSameAs(IbftConfigOptions.DEFAULT);
   }
 
   @Test
@@ -128,13 +128,13 @@ public class GenesisConfigOptionsTest {
   public void shouldGetConstantinopleFixBlockNumber() {
     final GenesisConfigOptions config =
         fromConfigOptions(singletonMap("constantinopleFixBlock", 1000));
-    assertThat(config.getPetersburgBlockNumber()).hasValue(1000);
+    assertThat(config.getConstantinopleFixBlockNumber()).hasValue(1000);
   }
 
   @Test
   public void shouldGetPetersburgBlockNumber() {
     final GenesisConfigOptions config = fromConfigOptions(singletonMap("petersburgBlock", 1000));
-    assertThat(config.getPetersburgBlockNumber()).hasValue(1000);
+    assertThat(config.getConstantinopleFixBlockNumber()).hasValue(1000);
   }
 
   @Test
@@ -144,7 +144,7 @@ public class GenesisConfigOptionsTest {
     configMap.put("petersburgBlock", 1000);
     final GenesisConfigOptions config = fromConfigOptions(configMap);
     assertThatExceptionOfType(RuntimeException.class)
-        .isThrownBy(config::getPetersburgBlockNumber)
+        .isThrownBy(config::getConstantinopleFixBlockNumber)
         .withMessage(
             "Genesis files cannot specify both petersburgBlock and constantinopleFixBlock.");
   }
@@ -163,14 +163,24 @@ public class GenesisConfigOptionsTest {
 
   @Test
   public void shouldGetBerlinBlockNumber() {
-    final GenesisConfigOptions config = fromConfigOptions(singletonMap("berlinBlock", 1000));
-    assertThat(config.getBerlinBlockNumber()).hasValue(1000);
+    try {
+      ExperimentalEIPs.berlinEnabled = true;
+      final GenesisConfigOptions config = fromConfigOptions(singletonMap("berlinBlock", 1000));
+      assertThat(config.getBerlinBlockNumber()).hasValue(1000);
+    } finally {
+      ExperimentalEIPs.berlinEnabled = ExperimentalEIPs.BERLIN_ENABLED_DEFAULT_VALUE;
+    }
   }
 
   @Test
-  public void shouldGetYoloV3BlockNumber() {
-    final GenesisConfigOptions config = fromConfigOptions(singletonMap("yoloV3Block", 1000));
-    assertThat(config.getBerlinBlockNumber()).hasValue(1000);
+  public void shouldGetYoloV2BlockNumber() {
+    try {
+      ExperimentalEIPs.berlinEnabled = true;
+      final GenesisConfigOptions config = fromConfigOptions(singletonMap("yoloV2Block", 1000));
+      assertThat(config.getBerlinBlockNumber()).hasValue(1000);
+    } finally {
+      ExperimentalEIPs.berlinEnabled = ExperimentalEIPs.BERLIN_ENABLED_DEFAULT_VALUE;
+    }
   }
 
   @Test
@@ -194,7 +204,7 @@ public class GenesisConfigOptionsTest {
     assertThat(config.getSpuriousDragonBlockNumber()).isEmpty();
     assertThat(config.getByzantiumBlockNumber()).isEmpty();
     assertThat(config.getConstantinopleBlockNumber()).isEmpty();
-    assertThat(config.getPetersburgBlockNumber()).isEmpty();
+    assertThat(config.getConstantinopleFixBlockNumber()).isEmpty();
     assertThat(config.getIstanbulBlockNumber()).isEmpty();
     assertThat(config.getMuirGlacierBlockNumber()).isEmpty();
     assertThat(config.getBerlinBlockNumber()).isEmpty();

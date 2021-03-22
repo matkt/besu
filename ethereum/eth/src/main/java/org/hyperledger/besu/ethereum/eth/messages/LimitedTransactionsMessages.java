@@ -44,15 +44,18 @@ public final class LimitedTransactionsMessages {
     for (final Transaction transaction : transactions) {
       final BytesValueRLPOutput encodedTransaction = new BytesValueRLPOutput();
       transaction.writeTo(encodedTransaction);
-      final Bytes encodedBytes = encodedTransaction.encoded();
-      if (messageSize != 0 // always at least one message
-          && messageSize + encodedBytes.size() > LIMIT) {
+      Bytes encodedBytes = encodedTransaction.encoded();
+      // Break if individual transaction size exceeds limit
+      if (encodedBytes.size() > LIMIT && (messageSize != 0)) {
         break;
       }
       message.writeRaw(encodedBytes);
       includedTransactions.add(transaction);
       // Check if last transaction to add to the message
       messageSize += encodedBytes.size();
+      if (messageSize > LIMIT) {
+        break;
+      }
     }
     message.endList();
     return new LimitedTransactionsMessages(

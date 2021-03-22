@@ -111,7 +111,6 @@ public class StateTestVersionedTransaction {
         .to(to)
         .value(values.get(indexes.value))
         .payload(payloads.get(indexes.data))
-        .guessType()
         .signAndBuild(keys);
   }
 }

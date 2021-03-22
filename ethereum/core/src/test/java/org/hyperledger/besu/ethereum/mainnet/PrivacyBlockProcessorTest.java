@@ -121,6 +121,7 @@ public class PrivacyBlockProcessorTest {
             any());
   }
 
+  @SuppressWarnings({"rawtypes", "unchecked"})
   @Test
   public void mustPerformRehydration() {
     final BlockDataGenerator blockDataGenerator = new BlockDataGenerator();
@@ -149,10 +150,9 @@ public class PrivacyBlockProcessorTest {
     when(blockchain.getBlockHeader(any())).thenReturn(Optional.of(firstBlock.getHeader()));
     final ProtocolSpec protocolSpec = mockProtocolSpec();
     when(protocolSchedule.getByBlockNumber(anyLong())).thenReturn(protocolSpec);
-    when(publicWorldStateArchive.getMutable(any(), any()))
-        .thenReturn(Optional.of(mutableWorldState));
+    when(publicWorldStateArchive.getMutable(any())).thenReturn(Optional.of(mutableWorldState));
     final MutableWorldState mockPrivateStateArchive = mockPrivateStateArchive();
-    when(privateWorldStateArchive.getMutable(any(), any()))
+    when(privateWorldStateArchive.getMutable(any()))
         .thenReturn(Optional.of(mockPrivateStateArchive));
 
     final PrivacyGroupHeadBlockMap expected =
@@ -188,6 +188,7 @@ public class PrivacyBlockProcessorTest {
     return mockPrivateState;
   }
 
+  @SuppressWarnings("rawtypes")
   private ProtocolSpec mockProtocolSpec() {
     final ProtocolSpec protocolSpec = mock(ProtocolSpec.class);
     final MainnetTransactionProcessor mockPublicTransactionProcessor =

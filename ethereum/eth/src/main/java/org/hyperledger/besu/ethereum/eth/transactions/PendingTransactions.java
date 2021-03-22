@@ -25,9 +25,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.Wei;
+import org.hyperledger.besu.ethereum.core.fees.EIP1559;
 import org.hyperledger.besu.ethereum.transaction.TransactionInvalidReason;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
-import org.hyperledger.besu.plugin.data.TransactionType;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
@@ -99,13 +99,14 @@ public class PendingTransactions {
       final Clock clock,
       final MetricsSystem metricsSystem,
       final Supplier<BlockHeader> chainHeadHeaderSupplier,
+      final Optional<EIP1559> eip1559,
       final Percentage priceBump) {
     this.maxTransactionRetentionHours = maxTransactionRetentionHours;
     this.maxPendingTransactions = maxPendingTransactions;
     this.clock = clock;
     this.newPooledHashes = EvictingQueue.create(maxPooledTransactionHashes);
     this.chainHeadHeaderSupplier = chainHeadHeaderSupplier;
-    this.transactionReplacementHandler = new TransactionPoolReplacementHandler(priceBump);
+    this.transactionReplacementHandler = new TransactionPoolReplacementHandler(eip1559, priceBump);
     final LabelledMetric<Counter> transactionAddedCounter =
         metricsSystem.createLabelledCounter(
             BesuMetricCategory.TRANSACTION_POOL,
@@ -123,12 +124,6 @@ public class PendingTransactions {
             "Count of transactions removed from the transaction pool",
             "source",
             "operation");
-
-    metricsSystem.createIntegerGauge(
-        BesuMetricCategory.TRANSACTION_POOL,
-        "transactions",
-        "Current size of the transaction pool",
-        pendingTransactions::size);
   }
 
   public void evictOldTransactions() {
@@ -241,9 +236,7 @@ public class PendingTransactions {
 
   private AccountTransactionOrder createSenderTransactionOrder(final Address address) {
     return new AccountTransactionOrder(
-        transactionsBySender
-            .get(address)
-            .streamTransactionInfos()
+        transactionsBySender.get(address).getTransactionsInfos().values().stream()
             .map(TransactionInfo::getTransaction));
   }
 
@@ -279,7 +272,7 @@ public class PendingTransactions {
     final TransactionInfo existingTransaction =
         getTrackedTransactionBySenderAndNonce(transactionInfo);
     if (existingTransaction != null) {
-      if (existingTransaction.transaction.getType().equals(TransactionType.FRONTIER)
+      if (existingTransaction.transaction.isFrontierTransaction()
           && !transactionReplacementHandler.shouldReplace(
               existingTransaction, transactionInfo, chainHeadHeaderSupplier.get())) {
         return REJECTED_UNDERPRICED_REPLACEMENT;
@@ -300,8 +293,13 @@ public class PendingTransactions {
   private void removeTransactionTrackedBySenderAndNonce(final Transaction transaction) {
     Optional.ofNullable(transactionsBySender.get(transaction.getSender()))
         .ifPresent(
-            transactionsForSender ->
-                transactionsForSender.removeTrackedTransaction(transaction.getNonce()));
+            transactionsForSender -> {
+              transactionsForSender.getTransactionsInfos().remove(transaction.getNonce());
+              if (transactionsForSender.getTransactionsInfos().isEmpty()) {
+                transactionsBySender.remove(transaction.getSender());
+                transactionsForSender.updateGaps();
+              }
+            });
   }
 
   private TransactionInfo getTrackedTransactionBySenderAndNonce(
@@ -309,7 +307,7 @@ public class PendingTransactions {
     final TransactionsForSenderInfo transactionsForSenderInfo =
         transactionsBySender.computeIfAbsent(
             transactionInfo.getSender(), key -> new TransactionsForSenderInfo());
-    return transactionsForSenderInfo.getTransactionInfoForNonce(transactionInfo.getNonce());
+    return transactionsForSenderInfo.getTransactionsInfos().get(transactionInfo.getNonce());
   }
 
   private void notifyTransactionAdded(final Transaction transaction) {
@@ -359,9 +357,15 @@ public class PendingTransactions {
 
   public OptionalLong getNextNonceForSender(final Address sender) {
     final TransactionsForSenderInfo transactionsForSenderInfo = transactionsBySender.get(sender);
-    return transactionsForSenderInfo == null
-        ? OptionalLong.empty()
-        : transactionsForSenderInfo.maybeNextNonce();
+    if (transactionsForSenderInfo == null
+        || transactionsForSenderInfo.getTransactionsInfos().isEmpty()) {
+      return OptionalLong.empty();
+    } else {
+      final OptionalLong maybeNextGap = transactionsForSenderInfo.maybeNextGap();
+      return maybeNextGap.isEmpty()
+          ? OptionalLong.of(transactionsForSenderInfo.getTransactionsInfos().lastKey() + 1)
+          : maybeNextGap;
+    }
   }
 
   public void tryEvictTransactionHash(final Hash hash) {

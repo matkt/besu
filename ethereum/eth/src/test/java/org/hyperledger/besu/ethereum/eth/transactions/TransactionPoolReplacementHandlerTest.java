@@ -24,7 +24,6 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.eth.transactions.PendingTransactions.TransactionInfo;
-import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.util.Collection;
 import java.util.List;
@@ -76,7 +75,7 @@ public class TransactionPoolReplacementHandlerTest {
   @Test
   public void shouldReplace() {
     assertThat(
-            new TransactionPoolReplacementHandler(rules)
+            new TransactionPoolReplacementHandler(rules, Optional.empty())
                 .shouldReplace(oldTransactionInfo, newTransactionInfo, header))
         .isEqualTo(expectedResult);
   }
@@ -95,7 +94,7 @@ public class TransactionPoolReplacementHandlerTest {
   private static TransactionInfo mockTransactionInfo() {
     final TransactionInfo transactionInfo = mock(TransactionInfo.class);
     final Transaction transaction = mock(Transaction.class);
-    when(transaction.getType()).thenReturn(TransactionType.FRONTIER);
+    when(transaction.isFrontierTransaction()).thenReturn(true);
     when(transactionInfo.getTransaction()).thenReturn(transaction);
     return transactionInfo;
   }

@@ -137,11 +137,9 @@ public class PrunerIntegrationTest {
 
       // Assert that blocks from mark point onward are still accessible
       for (int i = fullyMarkedBlockNum; i <= blockchain.getChainHeadBlockNumber(); i++) {
-        final BlockHeader blockHeader = blockchain.getBlockHeader(i).get();
-        final Hash stateRoot = blockHeader.getStateRoot();
-        assertThat(worldStateArchive.get(stateRoot, blockHeader.getHash())).isPresent();
-        final WorldState markedState =
-            worldStateArchive.get(stateRoot, blockHeader.getHash()).get();
+        final Hash stateRoot = blockchain.getBlockHeader(i).get().getStateRoot();
+        assertThat(worldStateArchive.get(stateRoot)).isPresent();
+        final WorldState markedState = worldStateArchive.get(stateRoot).get();
         // Traverse accounts and make sure all are accessible
         final int expectedAccounts = accountsPerBlock * i;
         final long accounts =
@@ -157,8 +155,7 @@ public class PrunerIntegrationTest {
       for (int i = 0; i < fullyMarkedBlockNum; i++) {
         final BlockHeader curHeader = blockchain.getBlockHeader(i).get();
         if (!curHeader.getStateRoot().equals(Hash.EMPTY_TRIE_HASH)) {
-          assertThat(worldStateArchive.get(curHeader.getStateRoot(), curHeader.getHash()))
-              .isEmpty();
+          assertThat(worldStateArchive.get(curHeader.getStateRoot())).isEmpty();
         }
       }
 
@@ -175,10 +172,8 @@ public class PrunerIntegrationTest {
   private void generateBlockchainData(final int numBlocks, final int numAccounts) {
     Block parentBlock = blockchain.getChainHeadBlock();
     for (int i = 0; i < numBlocks; i++) {
-      final BlockHeader parentHeader = parentBlock.getHeader();
-      final Hash parentHash = parentBlock.getHash();
       final MutableWorldState worldState =
-          worldStateArchive.getMutable(parentHeader.getStateRoot(), parentHash).get();
+          worldStateArchive.getMutable(parentBlock.getHeader().getStateRoot()).get();
       gen.createRandomContractAccountsWithNonEmptyStorage(worldState, numAccounts);
       final Hash stateRoot = worldState.rootHash();
 
@@ -186,8 +181,8 @@ public class PrunerIntegrationTest {
           gen.block(
               BlockOptions.create()
                   .setStateRoot(stateRoot)
-                  .setBlockNumber(parentHeader.getNumber() + 1L)
-                  .setParentHash(parentHash));
+                  .setBlockNumber(parentBlock.getHeader().getNumber() + 1L)
+                  .setParentHash(parentBlock.getHash()));
       final List<TransactionReceipt> receipts = gen.receipts(block);
       blockchain.appendBlock(block, receipts);
       parentBlock = block;
@@ -243,7 +238,7 @@ public class PrunerIntegrationTest {
 
   private MerklePatriciaTrie<Bytes32, Bytes> createStorageTrie(final Bytes32 rootHash) {
     return new StoredMerklePatriciaTrie<>(
-        (location, hash) -> worldStateStorage.getAccountStorageTrieNode(null, location, hash),
+        worldStateStorage::getAccountStorageTrieNode,
         rootHash,
         Function.identity(),
         Function.identity());

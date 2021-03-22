@@ -51,8 +51,6 @@ public class PipelineBuilder<I, T> {
   private final ReadPipe<T> pipeEnd;
   private final int bufferSize;
   private final LabelledMetric<Counter> outputCounter;
-  private final boolean tracingEnabled;
-  private final String pipelineName;
 
   public PipelineBuilder(
       final Pipe<I> inputPipe,
@@ -61,9 +59,7 @@ public class PipelineBuilder<I, T> {
       final String lastStageName,
       final ReadPipe<T> pipeEnd,
       final int bufferSize,
-      final LabelledMetric<Counter> outputCounter,
-      final boolean tracingEnabled,
-      final String pipelineName) {
+      final LabelledMetric<Counter> outputCounter) {
     checkArgument(!pipes.isEmpty(), "Must have at least one pipe in a pipeline");
     this.lastStageName = lastStageName;
     this.outputCounter = outputCounter;
@@ -72,8 +68,6 @@ public class PipelineBuilder<I, T> {
     this.pipes = pipes;
     this.pipeEnd = pipeEnd;
     this.bufferSize = bufferSize;
-    this.tracingEnabled = tracingEnabled;
-    this.pipelineName = pipelineName;
   }
 
   /**
@@ -87,29 +81,17 @@ public class PipelineBuilder<I, T> {
    * @param itemCounter the counter to increment for each output of a stage. Must accept two labels,
    *     the stage name and action (output or drained).
    * @param <T> the type of items input into the pipeline.
-   * @param tracingEnabled whether this pipeline should be traced
-   * @param pipelineName the name of the pipeline for tracing purposes
    * @return a {@link PipelineBuilder} ready to extend the pipeline with additional stages.
    */
   public static <T> PipelineBuilder<T, T> createPipelineFrom(
       final String sourceName,
       final Iterator<T> source,
       final int bufferSize,
-      final LabelledMetric<Counter> itemCounter,
-      final boolean tracingEnabled,
-      final String pipelineName) {
+      final LabelledMetric<Counter> itemCounter) {
     final Pipe<T> pipe = createPipe(bufferSize, sourceName, itemCounter);
     final IteratorSourceStage<T> sourceStage = new IteratorSourceStage<>(sourceName, source, pipe);
     return new PipelineBuilder<>(
-        pipe,
-        singleton(sourceStage),
-        singleton(pipe),
-        sourceName,
-        pipe,
-        bufferSize,
-        itemCounter,
-        tracingEnabled,
-        pipelineName);
+        pipe, singleton(sourceStage), singleton(pipe), sourceName, pipe, bufferSize, itemCounter);
   }
 
   /**
@@ -121,27 +103,13 @@ public class PipelineBuilder<I, T> {
    * @param outputCounter the counter to increment for each output of a stage. Must have a single
    *     label which will be filled with the stage name.
    * @param <T> the type of items input into the pipeline.
-   * @param tracingEnabled whether this pipeline should be traced
-   * @param pipelineName the name of the pipeline for tracing purposes
    * @return a {@link PipelineBuilder} ready to extend the pipeline with additional stages.
    */
   public static <T> PipelineBuilder<T, T> createPipeline(
-      final String sourceName,
-      final int bufferSize,
-      final LabelledMetric<Counter> outputCounter,
-      final boolean tracingEnabled,
-      final String pipelineName) {
+      final String sourceName, final int bufferSize, final LabelledMetric<Counter> outputCounter) {
     final Pipe<T> pipe = createPipe(bufferSize, sourceName, outputCounter);
     return new PipelineBuilder<>(
-        pipe,
-        emptyList(),
-        singleton(pipe),
-        sourceName,
-        pipe,
-        bufferSize,
-        outputCounter,
-        tracingEnabled,
-        pipelineName);
+        pipe, emptyList(), singleton(pipe), sourceName, pipe, bufferSize, outputCounter);
   }
 
   /**
@@ -248,9 +216,7 @@ public class PipelineBuilder<I, T> {
             maximumBatchSize,
             outputCounter.labels(lastStageName + "_outputPipe", "batches")),
         (int) Math.ceil(((double) bufferSize) / maximumBatchSize),
-        outputCounter,
-        tracingEnabled,
-        pipelineName);
+        outputCounter);
   }
 
   /**
@@ -308,12 +274,7 @@ public class PipelineBuilder<I, T> {
    */
   public Pipeline<I> andFinishWith(final String stageName, final Consumer<T> completer) {
     return new Pipeline<>(
-        inputPipe,
-        pipelineName,
-        tracingEnabled,
-        stages,
-        pipes,
-        new CompleterStage<>(stageName, pipeEnd, completer));
+        inputPipe, stages, pipes, new CompleterStage<>(stageName, pipeEnd, completer));
   }
 
   private <O> PipelineBuilder<I, O> thenProcessInParallel(
@@ -336,9 +297,7 @@ public class PipelineBuilder<I, T> {
         stageName,
         newPipeEnd,
         newBufferSize,
-        outputCounter,
-        tracingEnabled,
-        pipelineName);
+        outputCounter);
   }
 
   private <O> PipelineBuilder<I, O> addStage(
@@ -358,9 +317,7 @@ public class PipelineBuilder<I, T> {
         processStage.getName(),
         outputPipe,
         newBufferSize,
-        outputCounter,
-        tracingEnabled,
-        pipelineName);
+        outputCounter);
   }
 
   private <X> List<X> concat(final Collection<X> existing, final X newItem) {

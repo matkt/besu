@@ -26,9 +26,8 @@ public interface MutableWorldState extends WorldState, MutableWorldView {
   /**
    * Persist accumulated changes to underlying storage.
    *
-   * @param blockHeader If persisting for an imported block, the block hash of the world state this
-   *     represents. If this does not represent a forward transition from one block to the next
-   *     `null` should be passed in.
+   * @param blockhash the block hash of the world state this represents. If this does not represent
+   *     a forward transition from one block to the next `null` should be passed in.
    */
-  void persist(BlockHeader blockHeader);
+  void persist(Hash blockhash);
 }

@@ -49,7 +49,7 @@ public class TimestampBoundedByFutureParameter implements DetachedBlockHeaderVal
         TimeUnit.SECONDS.convert(System.currentTimeMillis(), TimeUnit.MILLISECONDS)
             + acceptableClockDriftSeconds;
     if (Long.compareUnsigned(timestamp, timestampMargin) > 0) {
-      LOG.info(
+      LOG.trace(
           "Invalid block header: timestamp {} is greater than the timestamp margin {}",
           timestamp,
           timestampMargin);

@@ -35,8 +35,6 @@ import org.hyperledger.besu.ethereum.api.query.BlockWithMetadata;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.api.query.TransactionWithMetadata;
 import org.hyperledger.besu.ethereum.blockcreation.EthHashMiningCoordinator;
-import org.hyperledger.besu.ethereum.chain.Blockchain;
-import org.hyperledger.besu.ethereum.chain.ChainHead;
 import org.hyperledger.besu.ethereum.core.Address;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
@@ -108,9 +106,7 @@ public class JsonRpcHttpServiceTest {
   protected static final BigInteger CHAIN_ID = BigInteger.valueOf(123);
   protected static P2PNetwork peerDiscoveryMock;
   protected static EthPeers ethPeersMock;
-  protected static Blockchain blockchain;
   protected static BlockchainQueries blockchainQueries;
-  protected static ChainHead chainHead;
   protected static Synchronizer synchronizer;
   protected static final Collection<RpcApi> JSON_RPC_APIS =
       Arrays.asList(RpcApis.ETH, RpcApis.NET, RpcApis.WEB3, RpcApis.ADMIN);
@@ -121,9 +117,7 @@ public class JsonRpcHttpServiceTest {
   public static void initServerAndClient() throws Exception {
     peerDiscoveryMock = mock(P2PNetwork.class);
     ethPeersMock = mock(EthPeers.class);
-    blockchain = mock(Blockchain.class);
     blockchainQueries = mock(BlockchainQueries.class);
-    chainHead = mock(ChainHead.class);
     synchronizer = mock(Synchronizer.class);
 
     final Set<Capability> supportedCapabilities = new HashSet<>();
@@ -558,10 +552,6 @@ public class JsonRpcHttpServiceTest {
 
   @Test
   public void ethGetUncleCountByBlockNumberPending() throws Exception {
-    final int uncleCount = 0;
-    when(blockchainQueries.headBlockNumber()).thenReturn(0L);
-    when(blockchainQueries.getOmmerCount(eq(0L))).thenReturn(Optional.of(uncleCount));
-
     final String id = "123";
     final String params = "\"params\": [\"pending\"]";
     final RequestBody body =
@@ -634,10 +624,8 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockBalance = "0x35";
-    when(blockchainQueries.getBlockchain()).thenReturn(blockchain);
-    when(blockchainQueries.getBlockchain().getChainHead()).thenReturn(chainHead);
-    when(blockchainQueries.getBlockchain().getChainHead().getHash()).thenReturn(Hash.ZERO);
-    when(blockchainQueries.accountBalance(eq(address), eq(Hash.ZERO)))
+    when(blockchainQueries.headBlockNumber()).thenReturn(0L);
+    when(blockchainQueries.accountBalance(eq(address), eq(0L)))
         .thenReturn(Optional.of(Wei.fromHexString(mockBalance)));
 
     final String id = "123";
@@ -668,10 +656,8 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final Wei mockBalance = Wei.of(0);
-    when(blockchainQueries.getBlockchain()).thenReturn(blockchain);
-    when(blockchainQueries.getBlockchain().getChainHead()).thenReturn(chainHead);
-    when(blockchainQueries.getBlockchain().getChainHead().getHash()).thenReturn(Hash.ZERO);
-    when(blockchainQueries.accountBalance(eq(address), eq(Hash.ZERO)))
+    when(blockchainQueries.headBlockNumber()).thenReturn(0L);
+    when(blockchainQueries.accountBalance(eq(address), eq(0L)))
         .thenReturn(Optional.of(mockBalance));
 
     final String id = "123";
@@ -702,9 +688,7 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockBalance = "0x33";
-    final Hash blockHash =
-        Hash.fromHexString("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
-    when(blockchainQueries.accountBalance(eq(address), eq(blockHash)))
+    when(blockchainQueries.accountBalance(eq(address), eq(0L)))
         .thenReturn(Optional.of(Wei.fromHexString(mockBalance)));
 
     final String id = "123";
@@ -736,10 +720,7 @@ public class JsonRpcHttpServiceTest {
     final Address address = gen.address();
     final String mockBalance = "0x32";
     final long blockNumber = 13L;
-    final Hash blockHash =
-        Hash.fromHexString("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
-    when(blockchainQueries.headBlockNumber()).thenReturn(21L);
-    when(blockchainQueries.accountBalance(eq(address), eq(blockHash)))
+    when(blockchainQueries.accountBalance(eq(address), eq(blockNumber)))
         .thenReturn(Optional.of(Wei.fromHexString(mockBalance)));
 
     final String id = "123";
@@ -1967,10 +1948,8 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockStorage = "0x0000000000000000000000000000000000000000000000000000000000000001";
-    when(blockchainQueries.getBlockchain()).thenReturn(blockchain);
-    when(blockchainQueries.getBlockchain().getChainHead()).thenReturn(chainHead);
-    when(blockchainQueries.getBlockchain().getChainHead().getHash()).thenReturn(Hash.ZERO);
-    when(blockchainQueries.storageAt(eq(address), eq(UInt256.ZERO), eq(Hash.ZERO)))
+    when(blockchainQueries.headBlockNumber()).thenReturn(0L);
+    when(blockchainQueries.storageAt(eq(address), eq(UInt256.ZERO), eq(0L)))
         .thenReturn(Optional.of(UInt256.fromHexString(mockStorage)));
 
     final String id = "88";
@@ -2004,10 +1983,8 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockStorage = "0x0000000000000000000000000000000000000000000000000000000000000006";
-    when(blockchainQueries.getBlockchain()).thenReturn(blockchain);
-    when(blockchainQueries.getBlockchain().getChainHead()).thenReturn(chainHead);
-    when(blockchainQueries.getBlockchain().getChainHead().getHash()).thenReturn(Hash.ZERO);
-    when(blockchainQueries.storageAt(eq(address), eq(UInt256.ONE), eq(Hash.ZERO)))
+    when(blockchainQueries.headBlockNumber()).thenReturn(0L);
+    when(blockchainQueries.storageAt(eq(address), eq(UInt256.ONE), eq(0L)))
         .thenReturn(Optional.of(UInt256.fromHexString(mockStorage)));
 
     final String id = "88";
@@ -2041,9 +2018,7 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockStorage = "0x0000000000000000000000000000000000000000000000000000000000000006";
-    final Hash blockHash =
-        Hash.fromHexString("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
-    when(blockchainQueries.storageAt(address, UInt256.ONE, blockHash))
+    when(blockchainQueries.storageAt(address, UInt256.ONE, 0L))
         .thenReturn(Optional.of(UInt256.fromHexString(mockStorage)));
 
     final String id = "88";
@@ -2077,9 +2052,7 @@ public class JsonRpcHttpServiceTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Address address = gen.address();
     final String mockStorage = "0x0000000000000000000000000000000000000000000000000000000000000002";
-    final Hash blockHash =
-        Hash.fromHexString("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
-    when(blockchainQueries.storageAt(address, UInt256.ZERO, blockHash))
+    when(blockchainQueries.storageAt(address, UInt256.ZERO, 0L))
         .thenReturn(Optional.of(UInt256.fromHexString(mockStorage)));
 
     final String id = "999";

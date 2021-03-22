@@ -121,7 +121,7 @@ public class MainnetBlockBodyValidator implements BlockBodyValidator {
 
   private static boolean validateTransactionsRoot(final Bytes32 expected, final Bytes32 actual) {
     if (!expected.equals(actual)) {
-      LOG.info(
+      LOG.warn(
           "Invalid block: transaction root mismatch (expected={}, actual={})", expected, actual);
       return false;
     }

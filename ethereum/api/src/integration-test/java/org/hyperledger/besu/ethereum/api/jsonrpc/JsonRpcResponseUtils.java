@@ -35,7 +35,6 @@ import static org.hyperledger.besu.ethereum.api.jsonrpc.JsonRpcResponseKey.TRANS
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import org.hyperledger.besu.crypto.SECP256K1;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.BlockResult;
@@ -52,7 +51,6 @@ import org.hyperledger.besu.ethereum.core.LogsBloomFilter;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.Wei;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
-import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -147,15 +145,12 @@ public class JsonRpcResponseUtils {
   public TransactionResult transaction(
       final String blockHash,
       final String blockNumber,
-      final String chainId,
       final String fromAddress,
       final String gas,
       final String gasPrice,
       final String hash,
       final String input,
       final String nonce,
-      final String publicKey,
-      final String raw,
       final String toAddress,
       final String transactionIndex,
       final String value,
@@ -164,7 +159,6 @@ public class JsonRpcResponseUtils {
       final String s) {
 
     final Transaction transaction = mock(Transaction.class);
-    when(transaction.getType()).thenReturn(TransactionType.FRONTIER);
     when(transaction.getGasPrice()).thenReturn(Wei.fromHexString(gasPrice));
     when(transaction.getNonce()).thenReturn(unsignedLong(nonce));
     when(transaction.getV()).thenReturn(bigInteger(v));
@@ -176,17 +170,6 @@ public class JsonRpcResponseUtils {
     when(transaction.getPayload()).thenReturn(bytes(input));
     when(transaction.getValue()).thenReturn(wei(value));
     when(transaction.getGasLimit()).thenReturn(unsignedLong(gas));
-    when(transaction.getChainId()).thenReturn(Optional.ofNullable(bigInteger(chainId)));
-    when(transaction.getPublicKey()).thenReturn(Optional.ofNullable(publicKey));
-    when(transaction.getSignature())
-        .thenReturn(
-            SECP256K1.Signature.create(
-                Bytes.fromHexString(r).toUnsignedBigInteger(),
-                Bytes.fromHexString(s).toUnsignedBigInteger(),
-                Bytes.fromHexString(v)
-                    .toUnsignedBigInteger()
-                    .subtract(Transaction.REPLAY_UNPROTECTED_V_BASE)
-                    .byteValueExact()));
 
     return new TransactionCompleteResult(
         new TransactionWithMetadata(
@@ -215,7 +198,7 @@ public class JsonRpcResponseUtils {
   }
 
   private BigInteger bigInteger(final String hex) {
-    return hex == null ? null : new BigInteger(removeHexPrefix(hex), HEX_RADIX);
+    return new BigInteger(removeHexPrefix(hex), HEX_RADIX);
   }
 
   private Wei wei(final String hex) {

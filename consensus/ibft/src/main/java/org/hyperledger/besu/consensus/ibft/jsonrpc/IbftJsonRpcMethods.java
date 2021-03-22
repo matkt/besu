@@ -19,8 +19,8 @@ import org.hyperledger.besu.consensus.common.EpochManager;
 import org.hyperledger.besu.consensus.common.VoteProposer;
 import org.hyperledger.besu.consensus.common.VoteTallyCache;
 import org.hyperledger.besu.consensus.common.VoteTallyUpdater;
-import org.hyperledger.besu.consensus.common.bft.BftBlockInterface;
-import org.hyperledger.besu.consensus.common.bft.BftContext;
+import org.hyperledger.besu.consensus.ibft.IbftBlockInterface;
+import org.hyperledger.besu.consensus.ibft.IbftContext;
 import org.hyperledger.besu.consensus.ibft.jsonrpc.methods.IbftDiscardValidatorVote;
 import org.hyperledger.besu.consensus.ibft.jsonrpc.methods.IbftGetPendingVotes;
 import org.hyperledger.besu.consensus.ibft.jsonrpc.methods.IbftGetSignerMetrics;
@@ -54,8 +54,9 @@ public class IbftJsonRpcMethods extends ApiGroupJsonRpcMethods {
     final MutableBlockchain mutableBlockchain = context.getBlockchain();
     final BlockchainQueries blockchainQueries =
         new BlockchainQueries(context.getBlockchain(), context.getWorldStateArchive());
-    final VoteProposer voteProposer = context.getConsensusState(BftContext.class).getVoteProposer();
-    final BlockInterface blockInterface = new BftBlockInterface();
+    final VoteProposer voteProposer =
+        context.getConsensusState(IbftContext.class).getVoteProposer();
+    final BlockInterface blockInterface = new IbftBlockInterface();
 
     final VoteTallyCache voteTallyCache = createVoteTallyCache(context, mutableBlockchain);
 
@@ -70,9 +71,11 @@ public class IbftJsonRpcMethods extends ApiGroupJsonRpcMethods {
 
   private VoteTallyCache createVoteTallyCache(
       final ProtocolContext context, final MutableBlockchain blockchain) {
-    final EpochManager epochManager = context.getConsensusState(BftContext.class).getEpochManager();
-    final BftBlockInterface bftBlockInterface = new BftBlockInterface();
-    final VoteTallyUpdater voteTallyUpdater = new VoteTallyUpdater(epochManager, bftBlockInterface);
-    return new VoteTallyCache(blockchain, voteTallyUpdater, epochManager, bftBlockInterface);
+    final EpochManager epochManager =
+        context.getConsensusState(IbftContext.class).getEpochManager();
+    final IbftBlockInterface ibftBlockInterface = new IbftBlockInterface();
+    final VoteTallyUpdater voteTallyUpdater =
+        new VoteTallyUpdater(epochManager, ibftBlockInterface);
+    return new VoteTallyCache(blockchain, voteTallyUpdater, epochManager, ibftBlockInterface);
   }
 }

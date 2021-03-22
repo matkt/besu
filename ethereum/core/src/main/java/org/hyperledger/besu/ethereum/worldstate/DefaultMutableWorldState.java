@@ -19,7 +19,6 @@ import org.hyperledger.besu.ethereum.core.Account;
 import org.hyperledger.besu.ethereum.core.AccountState;
 import org.hyperledger.besu.ethereum.core.AccountStorageEntry;
 import org.hyperledger.besu.ethereum.core.Address;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.UpdateTrackingAccount;
@@ -96,20 +95,12 @@ public class DefaultMutableWorldState implements MutableWorldState {
 
   private MerklePatriciaTrie<Bytes32, Bytes> newAccountStorageTrie(final Bytes32 rootHash) {
     return new StoredMerklePatriciaTrie<>(
-        (location, hash) -> worldStateStorage.getAccountStorageTrieNode(null, location, hash),
-        rootHash,
-        b -> b,
-        b -> b);
+        worldStateStorage::getAccountStorageTrieNode, rootHash, b -> b, b -> b);
   }
 
   @Override
   public Hash rootHash() {
     return Hash.wrap(accountStateTrie.getRootHash());
-  }
-
-  @Override
-  public Hash frontierRootHash() {
-    return rootHash();
   }
 
   @Override
@@ -178,17 +169,15 @@ public class DefaultMutableWorldState implements MutableWorldState {
   }
 
   @Override
-  public void persist(final BlockHeader blockHeader) {
+  public void persist(final Hash blockhash) {
     final WorldStateStorage.Updater stateUpdater = worldStateStorage.updater();
     // Store updated code
     for (final Bytes code : updatedAccountCode.values()) {
-      stateUpdater.putCode(null, code);
+      stateUpdater.putCode(code);
     }
     // Commit account storage tries
     for (final MerklePatriciaTrie<Bytes32, Bytes> updatedStorage : updatedStorageTries.values()) {
-      updatedStorage.commit(
-          (location, hash, value) ->
-              stateUpdater.putAccountStorageTrieNode(null, location, hash, value));
+      updatedStorage.commit(stateUpdater::putAccountStorageTrieNode);
     }
     // Commit account updates
     accountStateTrie.commit(stateUpdater::putAccountStateTrieNode);
@@ -290,7 +279,7 @@ public class DefaultMutableWorldState implements MutableWorldState {
       if (codeHash.equals(Hash.EMPTY)) {
         return Bytes.EMPTY;
       }
-      return worldStateStorage.getCode(codeHash, null).orElse(Bytes.EMPTY);
+      return worldStateStorage.getCode(codeHash).orElse(Bytes.EMPTY);
     }
 
     @Override

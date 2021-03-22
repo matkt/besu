@@ -204,8 +204,6 @@ public class ThreadBesuNodeRunner implements BesuNodeRunner {
                     .collect(Collectors.toList()))
             .besuPluginContext(new BesuPluginContextImpl())
             .autoLogBloomCaching(false)
-            .storageProvider(storageProvider)
-            .forkIdSupplier(() -> besuController.getProtocolManager().getForkIdAsBytesList())
             .build();
 
     runner.start();
@@ -252,15 +250,5 @@ public class ThreadBesuNodeRunner implements BesuNodeRunner {
     } else {
       LOG.error("There was a request to kill an unknown node: {}", name);
     }
-  }
-
-  @Override
-  public void startConsoleCapture() {
-    throw new RuntimeException("Console contents can only be captured in process execution");
-  }
-
-  @Override
-  public String getConsoleContents() {
-    throw new RuntimeException("Console contents can only be captured in process execution");
   }
 }

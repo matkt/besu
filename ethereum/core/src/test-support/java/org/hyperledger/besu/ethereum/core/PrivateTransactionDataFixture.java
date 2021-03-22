@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.privacy.VersionedPrivateTransaction;
 import org.hyperledger.besu.ethereum.privacy.storage.PrivateBlockMetadata;
 import org.hyperledger.besu.ethereum.privacy.storage.PrivateTransactionMetadata;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
-import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.math.BigInteger;
 import java.util.Collections;
@@ -87,7 +86,6 @@ public class PrivateTransactionDataFixture {
   private static Transaction privacyMarkerTransaction(
       final Bytes transactionKey, final Address precompiledContractAddress) {
     return Transaction.builder()
-        .type(TransactionType.FRONTIER)
         .nonce(DEFAULT_NONCE)
         .gasPrice(DEFAULT_GAS_PRICE)
         .gasLimit(DEFAULT_GAS_LIMIT)

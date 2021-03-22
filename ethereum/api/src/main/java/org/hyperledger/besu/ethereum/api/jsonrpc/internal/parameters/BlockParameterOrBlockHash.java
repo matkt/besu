@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters;
 
-import org.hyperledger.besu.config.JsonUtil;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Hash;
 
@@ -23,8 +22,6 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * Represents a block parameter that can be a special value ("pending", "earliest", "latest") or a
@@ -39,56 +36,31 @@ public class BlockParameterOrBlockHash {
   private final BlockParameterType type;
   private final OptionalLong number;
   private final Optional<Hash> blockHash;
-  private final boolean requireCanonical;
 
   @JsonCreator
-  public BlockParameterOrBlockHash(final Object value) throws JsonProcessingException {
-    if (value instanceof String) {
-      final String normalizedValue = String.valueOf(value).toLowerCase();
+  public BlockParameterOrBlockHash(final String value) {
+    final String normalizedValue = value.toLowerCase();
 
-      if (Objects.equals(normalizedValue, "earliest")) {
-        type = BlockParameterType.EARLIEST;
-        number = OptionalLong.of(BlockHeader.GENESIS_BLOCK_NUMBER);
-        blockHash = Optional.empty();
-        requireCanonical = false;
-      } else if (Objects.equals(normalizedValue, "latest")) {
-        type = BlockParameterType.LATEST;
-        number = OptionalLong.empty();
-        blockHash = Optional.empty();
-        requireCanonical = false;
-      } else if (Objects.equals(normalizedValue, "pending")) {
-        type = BlockParameterType.PENDING;
-        number = OptionalLong.empty();
-        blockHash = Optional.empty();
-        requireCanonical = false;
-      } else if (normalizedValue.length() > 16) {
-        type = BlockParameterType.HASH;
-        number = OptionalLong.empty();
-        blockHash = Optional.of(Hash.fromHexStringLenient(normalizedValue));
-        requireCanonical = false;
-      } else {
-        type = BlockParameterType.NUMERIC;
-        number = OptionalLong.of(Long.decode(value.toString()));
-        blockHash = Optional.empty();
-        requireCanonical = false;
-      }
+    if (Objects.equals(normalizedValue, "earliest")) {
+      type = BlockParameterType.EARLIEST;
+      number = OptionalLong.of(BlockHeader.GENESIS_BLOCK_NUMBER);
+      blockHash = Optional.empty();
+    } else if (Objects.equals(normalizedValue, "latest")) {
+      type = BlockParameterType.LATEST;
+      number = OptionalLong.empty();
+      blockHash = Optional.empty();
+    } else if (Objects.equals(normalizedValue, "pending")) {
+      type = BlockParameterType.PENDING;
+      number = OptionalLong.empty();
+      blockHash = Optional.empty();
+    } else if (normalizedValue.length() > 16) {
+      type = BlockParameterType.HASH;
+      number = OptionalLong.empty();
+      blockHash = Optional.of(Hash.fromHexStringLenient(normalizedValue));
     } else {
-      JsonNode jsonNode = JsonUtil.objectNodeFromString(JsonUtil.getJson(value));
-      if (jsonNode.get("blockHash") != null) {
-        type = BlockParameterType.HASH;
-        number = OptionalLong.empty();
-        blockHash = Optional.of(Hash.fromHexStringLenient(jsonNode.get("blockHash").asText()));
-        if (jsonNode.get("requireCanonical") != null) {
-          requireCanonical = jsonNode.get("requireCanonical").asBoolean();
-        } else {
-          requireCanonical = false;
-        }
-      } else {
-        type = BlockParameterType.NUMERIC;
-        number = OptionalLong.of(Long.decode(jsonNode.get("blockNumber").asText()));
-        blockHash = Optional.empty();
-        requireCanonical = false;
-      }
+      type = BlockParameterType.NUMERIC;
+      number = OptionalLong.of(Long.decode(value));
+      blockHash = Optional.empty();
     }
   }
 
@@ -98,10 +70,6 @@ public class BlockParameterOrBlockHash {
 
   public Optional<Hash> getHash() {
     return blockHash;
-  }
-
-  public boolean getRequireCanonical() {
-    return requireCanonical;
   }
 
   public boolean isPending() {

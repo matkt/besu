@@ -74,10 +74,6 @@ public class DiscoveryProtocolLogger {
         return "FINDN";
       case NEIGHBORS:
         return "NEIGH";
-      case ENR_REQUEST:
-        return "ENRREQ";
-      case ENR_RESPONSE:
-        return "ENRRESP";
     }
     return null;
   }

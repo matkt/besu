@@ -142,10 +142,18 @@ public class TransactionPool implements BlockAddedObserver {
 
   public ValidationResult<TransactionInvalidReason> addLocalTransaction(
       final Transaction transaction) {
-    if (!configuration.getTxFeeCap().isZero()
-        && minTransactionGasPrice(transaction).compareTo(configuration.getTxFeeCap()) > 0) {
-      return ValidationResult.invalid(TransactionInvalidReason.TX_FEECAP_EXCEEDED);
+    if (transaction.isFrontierTransaction()
+        && (!ExperimentalEIPs.eip1559Enabled || this.eip1559.isEmpty())) {
+      final Wei transactionGasPrice = minTransactionGasPrice(transaction);
+      if (transactionGasPrice.compareTo(minTransactionGasPrice) < 0) {
+        return ValidationResult.invalid(TransactionInvalidReason.GAS_PRICE_TOO_LOW);
+      }
+      if (!configuration.getTxFeeCap().isZero()
+          && transactionGasPrice.compareTo(configuration.getTxFeeCap()) > 0) {
+        return ValidationResult.invalid(TransactionInvalidReason.TX_FEECAP_EXCEEDED);
+      }
     }
+
     final ValidationResult<TransactionInvalidReason> validationResult =
         validateTransaction(transaction);
     if (validationResult.isValid()) {
@@ -251,7 +259,7 @@ public class TransactionPool implements BlockAddedObserver {
 
     return protocolContext
         .getWorldStateArchive()
-        .get(chainHeadBlockHeader.getStateRoot(), chainHeadBlockHeader.getHash())
+        .get(chainHeadBlockHeader.getStateRoot())
         .map(
             worldState -> {
               final Account senderAccount = worldState.get(transaction.getSender());

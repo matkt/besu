@@ -135,8 +135,6 @@ public class BlockPropagationManagerTest {
 
     blockPropagationManager.start();
 
-    // Setup additonal peer for best peers list
-    EthProtocolManagerTestUtil.createPeer(ethProtocolManager, 0);
     // Setup peer and messages
     final RespondingEthPeer peer = EthProtocolManagerTestUtil.createPeer(ethProtocolManager, 0);
     final NewBlockHashesMessage nextAnnouncement =

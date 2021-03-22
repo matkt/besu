@@ -52,6 +52,7 @@ public class TransactionPoolFactory {
             clock,
             metricsSystem,
             protocolContext.getBlockchain()::getChainHeadHeader,
+            eip1559,
             transactionPoolConfiguration.getPriceBump());
 
     final PeerTransactionTracker transactionTracker = new PeerTransactionTracker();

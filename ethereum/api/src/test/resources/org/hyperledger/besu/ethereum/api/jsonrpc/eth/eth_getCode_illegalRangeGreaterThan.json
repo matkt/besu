@@ -11,10 +11,7 @@
   "response": {
     "jsonrpc": "2.0",
     "id": 13,
-    "error": {
-      "code": -32602,
-      "message": "Invalid params"
-    }
+    "result": null
   },
-  "statusCode": 400
+  "statusCode": 200
 }

@@ -38,7 +38,6 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.units.bigints.UInt64;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
@@ -75,7 +74,7 @@ public class PeerDiscoveryTableRefreshTest {
     controller.start();
 
     final PingPacketData mockPing =
-        PingPacketData.create(localPeer.getEndpoint(), remotePeer.getEndpoint(), UInt64.ONE);
+        PingPacketData.create(localPeer.getEndpoint(), remotePeer.getEndpoint());
     final Packet mockPingPacket = Packet.create(PacketType.PING, mockPing, localKeyPair);
 
     doAnswer(
@@ -89,13 +88,13 @@ public class PeerDiscoveryTableRefreshTest {
 
     // Send a PING, so as to add a Peer in the controller.
     final PingPacketData ping =
-        PingPacketData.create(remotePeer.getEndpoint(), localPeer.getEndpoint(), UInt64.ONE);
+        PingPacketData.create(remotePeer.getEndpoint(), localPeer.getEndpoint());
     final Packet pingPacket = Packet.create(PacketType.PING, ping, remoteKeyPair);
     controller.onMessage(pingPacket, remotePeer);
 
     // Answer localPeer PING to complete bonding
     final PongPacketData pong =
-        PongPacketData.create(localPeer.getEndpoint(), mockPingPacket.getHash(), UInt64.ONE);
+        PongPacketData.create(localPeer.getEndpoint(), mockPingPacket.getHash());
     final Packet pongPacket = Packet.create(PacketType.PONG, pong, remoteKeyPair);
     controller.onMessage(pongPacket, remotePeer);
 

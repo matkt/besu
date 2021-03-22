@@ -53,7 +53,6 @@ public class DefaultSynchronizer implements Synchronizer {
   private final BlockPropagationManager blockPropagationManager;
   private final Optional<FastSyncDownloader> fastSyncDownloader;
   private final FullSyncDownloader fullSyncDownloader;
-  private final ProtocolContext protocolContext;
 
   public DefaultSynchronizer(
       final SynchronizerConfiguration syncConfig,
@@ -70,7 +69,6 @@ public class DefaultSynchronizer implements Synchronizer {
     this.maybePruner = maybePruner;
     this.syncState = syncState;
 
-    this.protocolContext = protocolContext;
     ChainHeadTracker.trackChainHeadForPeers(
         ethContext,
         protocolSchedule,
@@ -179,11 +177,6 @@ public class DefaultSynchronizer implements Synchronizer {
       LOG.error("Fast sync failed, please try again.", error);
       throw new FastSyncException(error);
     } else {
-      result
-          .getPivotBlockHeader()
-          .ifPresent(
-              blockHeader ->
-                  protocolContext.getWorldStateArchive().setArchiveStateUnSafe(blockHeader));
       LOG.info(
           "Fast sync completed successfully with pivot block {}",
           result.getPivotBlockNumber().getAsLong());

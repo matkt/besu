@@ -21,7 +21,6 @@ import org.hyperledger.besu.crypto.SECP256K1.KeyPair;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Account;
 import org.hyperledger.besu.ethereum.core.Block;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.Gas;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
@@ -36,7 +35,6 @@ import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
-import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.util.List;
 import java.util.Map;
@@ -79,7 +77,6 @@ public class TraceTransactionIntegrationTest {
     final KeyPair keyPair = KeyPair.generate();
     final Transaction createTransaction =
         Transaction.builder()
-            .type(TransactionType.FRONTIER)
             .gasLimit(300_000)
             .gasPrice(Wei.ZERO)
             .nonce(0)
@@ -87,19 +84,16 @@ public class TraceTransactionIntegrationTest {
             .value(Wei.ZERO)
             .signAndBuild(keyPair);
 
-    final BlockHeader genesisBlockHeader = genesisBlock.getHeader();
     final MutableWorldState worldState =
-        worldStateArchive
-            .getMutable(genesisBlockHeader.getStateRoot(), genesisBlockHeader.getHash())
-            .get();
+        worldStateArchive.getMutable(genesisBlock.getHeader().getStateRoot()).get();
     final WorldUpdater createTransactionUpdater = worldState.updater();
     TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             blockchain,
             createTransactionUpdater,
-            genesisBlockHeader,
+            genesisBlock.getHeader(),
             createTransaction,
-            genesisBlockHeader.getCoinbase(),
+            genesisBlock.getHeader().getCoinbase(),
             blockHashLookup,
             false,
             TransactionValidationParams.blockReplay());
@@ -116,7 +110,6 @@ public class TraceTransactionIntegrationTest {
         new DebugOperationTracer(new TraceOptions(true, true, true));
     final Transaction executeTransaction =
         Transaction.builder()
-            .type(TransactionType.FRONTIER)
             .gasLimit(300_000)
             .gasPrice(Wei.ZERO)
             .nonce(1)
@@ -129,9 +122,9 @@ public class TraceTransactionIntegrationTest {
         transactionProcessor.processTransaction(
             blockchain,
             storeUpdater,
-            genesisBlockHeader,
+            genesisBlock.getHeader(),
             executeTransaction,
-            genesisBlockHeader.getCoinbase(),
+            genesisBlock.getHeader().getCoinbase(),
             tracer,
             blockHashLookup,
             false);
@@ -163,18 +156,14 @@ public class TraceTransactionIntegrationTest {
     final Transaction transaction =
         Transaction.readFrom(
             new BytesValueRLPInput(Bytes.fromHexString(CONTRACT_CREATION_TX), false));
-    final BlockHeader genesisBlockHeader = genesisBlock.getHeader();
     transactionProcessor.processTransaction(
         blockchain,
-        worldStateArchive
-            .getMutable(genesisBlockHeader.getStateRoot(), genesisBlockHeader.getHash())
-            .get()
-            .updater(),
-        genesisBlockHeader,
+        worldStateArchive.getMutable(genesisBlock.getHeader().getStateRoot()).get().updater(),
+        genesisBlock.getHeader(),
         transaction,
-        genesisBlockHeader.getCoinbase(),
+        genesisBlock.getHeader().getCoinbase(),
         tracer,
-        new BlockHashLookup(genesisBlockHeader, blockchain),
+        new BlockHashLookup(genesisBlock.getHeader(), blockchain),
         false);
 
     final int expectedDepth = 0; // Reference impl returned 1. Why the difference?

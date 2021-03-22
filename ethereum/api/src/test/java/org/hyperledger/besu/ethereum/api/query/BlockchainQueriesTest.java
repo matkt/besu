@@ -204,10 +204,8 @@ public class BlockchainQueriesTest {
     final BlockchainWithData data = setupBlockchain(3, addresses, storageKeys);
     final BlockchainQueries queries = data.blockchainQueries;
 
-    final BlockHeader blockHeader0 = data.blockData.get(2).block.getHeader();
-    final Hash latestStateRoot0 = blockHeader0.getStateRoot();
-    final WorldState worldState0 =
-        data.worldStateArchive.get(latestStateRoot0, blockHeader0.getHash()).get();
+    final Hash latestStateRoot0 = data.blockData.get(2).block.getHeader().getStateRoot();
+    final WorldState worldState0 = data.worldStateArchive.get(latestStateRoot0).get();
     addresses.forEach(
         address ->
             storageKeys.forEach(
@@ -217,10 +215,8 @@ public class BlockchainQueriesTest {
                   assertThat(result).contains(actualAccount0.getStorageValue(storageKey));
                 }));
 
-    final BlockHeader header1 = data.blockData.get(1).block.getHeader();
-    final Hash latestStateRoot1 = header1.getStateRoot();
-    final WorldState worldState1 =
-        data.worldStateArchive.get(latestStateRoot1, header1.getHash()).get();
+    final Hash latestStateRoot1 = data.blockData.get(1).block.getHeader().getStateRoot();
+    final WorldState worldState1 = data.worldStateArchive.get(latestStateRoot1).get();
     addresses.forEach(
         address ->
             storageKeys.forEach(
@@ -240,9 +236,8 @@ public class BlockchainQueriesTest {
 
     for (int i = 0; i < blockCount; i++) {
       final long curBlockNumber = i;
-      final BlockHeader header = data.blockData.get(i).block.getHeader();
-      final Hash stateRoot = header.getStateRoot();
-      final WorldState worldState = data.worldStateArchive.get(stateRoot, header.getHash()).get();
+      final Hash stateRoot = data.blockData.get(i).block.getHeader().getStateRoot();
+      final WorldState worldState = data.worldStateArchive.get(stateRoot).get();
       assertThat(addresses).isNotEmpty();
 
       addresses.forEach(
@@ -400,7 +395,7 @@ public class BlockchainQueriesTest {
 
   @Test
   public void getOmmerByBlockHashAndIndexShouldReturnExpectedOmmerHeader() {
-    final BlockchainWithData data = setupBlockchain(4);
+    final BlockchainWithData data = setupBlockchain(3);
     final BlockchainQueries queries = data.blockchainQueries;
     final Block targetBlock = data.blockData.get(data.blockData.size() - 1).block;
     final BlockHeader ommerBlockHeader = targetBlock.getBody().getOmmers().get(0);
@@ -448,16 +443,15 @@ public class BlockchainQueriesTest {
 
   @Test
   public void getOmmerByBlockNumberAndIndexShouldReturnExpectedOmmerHeader() {
-    final BlockchainWithData data = setupBlockchain(4);
+    final BlockchainWithData data = setupBlockchain(3);
     final BlockchainQueries queries = data.blockchainQueries;
     final Block targetBlock = data.blockData.get(data.blockData.size() - 1).block;
-    final List<BlockHeader> ommers = targetBlock.getBody().getOmmers();
-    final int ommerIndex = ommers.size() - 1;
+    final BlockHeader ommerBlockHeader = targetBlock.getBody().getOmmers().get(1);
 
     final BlockHeader retrievedOmmerBlockHeader =
-        queries.getOmmer(targetBlock.getHeader().getNumber(), ommerIndex).get();
+        queries.getOmmer(targetBlock.getHeader().getNumber(), 1).get();
 
-    assertThat(retrievedOmmerBlockHeader).isEqualTo(ommers.get(ommerIndex));
+    assertThat(retrievedOmmerBlockHeader).isEqualTo(ommerBlockHeader);
   }
 
   @Test
@@ -485,7 +479,7 @@ public class BlockchainQueriesTest {
 
   @Test
   public void getLatestBlockOmmerByIndexShouldReturnExpectedOmmerHeader() {
-    final BlockchainWithData data = setupBlockchain(4);
+    final BlockchainWithData data = setupBlockchain(3);
     final BlockchainQueries queries = data.blockchainQueries;
     final Block targetBlock = data.blockData.get(data.blockData.size() - 1).block;
     final BlockHeader ommerBlockHeader = targetBlock.getBody().getOmmers().get(0);

@@ -81,11 +81,7 @@ public class MetricsHttpService implements MetricsService {
     // Create the HTTP server and a router object.
     httpServer =
         vertx.createHttpServer(
-            new HttpServerOptions()
-                .setHost(config.getHost())
-                .setPort(config.getPort())
-                .setHandle100ContinueAutomatically(true)
-                .setCompressionSupported(true));
+            new HttpServerOptions().setHost(config.getHost()).setPort(config.getPort()));
 
     final Router router = Router.router(vertx);
 

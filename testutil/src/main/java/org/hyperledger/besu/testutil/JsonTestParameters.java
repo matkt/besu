@@ -39,7 +39,6 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 
 /**
  * Utility class for generating JUnit test parameters from json files. Each set of test parameters
@@ -88,8 +87,7 @@ public class JsonTestParameters<S, T> {
     void generate(String name, S mappedType, Collector<T> collector);
   }
 
-  private static final ObjectMapper objectMapper =
-      new ObjectMapper().registerModule(new Jdk8Module());
+  private static final ObjectMapper objectMapper = new ObjectMapper();
 
   // The type to which the json file is directly mapped
   private final Class<S> jsonFileMappedType;

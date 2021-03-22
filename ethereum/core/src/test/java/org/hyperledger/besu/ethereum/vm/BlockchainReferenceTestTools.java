@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.vm;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.config.experimental.ExperimentalEIPs;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -77,6 +78,11 @@ public class BlockchainReferenceTestTools {
 
     // Don't do time consuming tests
     params.ignore("CALLBlake2f_MaxRounds.*");
+
+    // Berlin isn't finalized
+    if (!ExperimentalEIPs.berlinEnabled) {
+      params.ignore(".*[_-]Berlin");
+    }
   }
 
   public static Collection<Object[]> generateTestParametersForConfig(final String[] filePath) {
@@ -84,11 +90,9 @@ public class BlockchainReferenceTestTools {
   }
 
   public static void executeTest(final BlockchainReferenceTestCaseSpec spec) {
-    final BlockHeader genesisBlockHeader = spec.getGenesisBlockHeader();
     final MutableWorldState worldState =
-        spec.getWorldStateArchive()
-            .getMutable(genesisBlockHeader.getStateRoot(), genesisBlockHeader.getHash())
-            .get();
+        spec.getWorldStateArchive().getMutable(spec.getGenesisBlockHeader().getStateRoot()).get();
+    final BlockHeader genesisBlockHeader = spec.getGenesisBlockHeader();
     assertThat(worldState.rootHash()).isEqualTo(genesisBlockHeader.getStateRoot());
 
     final ProtocolSchedule schedule =

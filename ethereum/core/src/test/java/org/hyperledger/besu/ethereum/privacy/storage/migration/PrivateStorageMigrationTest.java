@@ -33,7 +33,6 @@ import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Address;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.Transaction;
@@ -51,7 +50,6 @@ import org.hyperledger.besu.ethereum.privacy.storage.PrivateStateKeyValueStorage
 import org.hyperledger.besu.ethereum.privacy.storage.PrivateStateStorage;
 import org.hyperledger.besu.ethereum.privacy.storage.PrivateTransactionMetadata;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
-import org.hyperledger.besu.plugin.data.TransactionType;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
@@ -298,13 +296,11 @@ public class PrivateStorageMigrationTest {
   }
 
   private void mockBlockInBlockchain(final Block block) {
-    final BlockHeader blockHeader = block.getHeader();
-    final Hash blockHash = block.getHash();
-    when(blockchain.getBlockByNumber(blockHeader.getNumber())).thenReturn(Optional.of(block));
-    when(blockchain.getBlockHeader(blockHash)).thenReturn(Optional.of(blockHeader));
-    when(blockchain.getBlockBody(blockHash)).thenReturn(Optional.of(block.getBody()));
+    when(blockchain.getBlockByNumber(block.getHeader().getNumber())).thenReturn(Optional.of(block));
+    when(blockchain.getBlockHeader(block.getHash())).thenReturn(Optional.of(block.getHeader()));
+    when(blockchain.getBlockBody(block.getHash())).thenReturn(Optional.of(block.getBody()));
 
-    when(publicWorldStateArchive.getMutable(blockHeader.getStateRoot(), blockHash))
+    when(publicWorldStateArchive.getMutable(block.getHeader().getStateRoot()))
         .thenReturn(Optional.of(publicMutableWorldState));
   }
 
@@ -315,7 +311,6 @@ public class PrivateStorageMigrationTest {
 
   private Transaction publicTransaction() {
     return Transaction.builder()
-        .type(TransactionType.FRONTIER)
         .nonce(0)
         .gasPrice(Wei.of(1000))
         .gasLimit(3000000)

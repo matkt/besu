@@ -33,7 +33,6 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
   "blockNumber",
   "result",
   "error",
-  "revertReason",
   "subtraces",
   "traceAddress",
   "transactionHash",
@@ -48,7 +47,6 @@ public class FlatTrace implements Trace {
   private final Integer transactionPosition;
   private final String transactionHash;
   private final Optional<String> error;
-  private final String revertReason;
   private final int subtraces;
   private final List<Integer> traceAddress;
   private final String type;
@@ -74,34 +72,7 @@ public class FlatTrace implements Trace {
         blockHash,
         transactionPosition,
         transactionHash,
-        error,
-        null);
-  }
-
-  protected FlatTrace(
-      final Action.Builder actionBuilder,
-      final Result.Builder resultBuilder,
-      final int subtraces,
-      final List<Integer> traceAddress,
-      final String type,
-      final Long blockNumber,
-      final String blockHash,
-      final Integer transactionPosition,
-      final String transactionHash,
-      final Optional<String> error,
-      final String revertReason) {
-    this(
-        actionBuilder != null ? actionBuilder.build() : null,
-        resultBuilder != null ? resultBuilder.build() : null,
-        subtraces,
-        traceAddress,
-        type,
-        blockNumber,
-        blockHash,
-        transactionPosition,
-        transactionHash,
-        error,
-        revertReason);
+        error);
   }
 
   protected FlatTrace(
@@ -114,8 +85,7 @@ public class FlatTrace implements Trace {
       final String blockHash,
       final Integer transactionPosition,
       final String transactionHash,
-      final Optional<String> error,
-      final String revertReason) {
+      final Optional<String> error) {
     this.action = action;
     this.result = result;
     this.subtraces = subtraces;
@@ -126,7 +96,6 @@ public class FlatTrace implements Trace {
     this.transactionPosition = transactionPosition;
     this.transactionHash = transactionHash;
     this.error = error;
-    this.revertReason = revertReason;
   }
 
   static Builder freshBuilder(final TransactionTrace transactionTrace) {
@@ -162,11 +131,6 @@ public class FlatTrace implements Trace {
   @JsonInclude(NON_NULL)
   public String getError() {
     return error.orElse(null);
-  }
-
-  @JsonInclude(NON_NULL)
-  public String getRevertReason() {
-    return revertReason;
   }
 
   /**
@@ -253,7 +217,6 @@ public class FlatTrace implements Trace {
     private String transactionHash;
     private Integer transactionPosition;
     private Optional<String> error = Optional.empty();
-    private String revertReason;
 
     protected Builder() {}
 
@@ -302,11 +265,6 @@ public class FlatTrace implements Trace {
       return this;
     }
 
-    public Builder revertReason(final String revertReason) {
-      this.revertReason = revertReason;
-      return this;
-    }
-
     public String getType() {
       return type;
     }
@@ -339,10 +297,6 @@ public class FlatTrace implements Trace {
       return error;
     }
 
-    public String getRevertReason() {
-      return revertReason;
-    }
-
     void incSubTraces() {
       this.subtraces++;
     }
@@ -358,8 +312,7 @@ public class FlatTrace implements Trace {
           blockHash,
           transactionPosition,
           transactionHash,
-          error,
-          revertReason);
+          error);
     }
 
     public Result.Builder getResultBuilder() {

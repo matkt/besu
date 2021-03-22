@@ -21,10 +21,8 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockchainSetupUtil;
 import org.hyperledger.besu.ethereum.core.Difficulty;
-import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.EthProtocolConfiguration;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
 import org.hyperledger.besu.ethereum.eth.manager.EthProtocolManager;
@@ -33,6 +31,7 @@ import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.manager.RespondingEthPeer;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncTarget;
+import org.hyperledger.besu.ethereum.mainnet.MainnetProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -62,7 +61,7 @@ public class FullSyncTargetManagerTest {
     final BlockchainSetupUtil localBlockchainSetup = BlockchainSetupUtil.forTesting();
     localBlockchain = localBlockchainSetup.getBlockchain();
 
-    final ProtocolSchedule protocolSchedule = ProtocolScheduleFixture.MAINNET;
+    final ProtocolSchedule protocolSchedule = MainnetProtocolSchedule.create();
     final ProtocolContext protocolContext =
         new ProtocolContext(localBlockchain, localWorldState, null);
     ethProtocolManager =
@@ -91,9 +90,7 @@ public class FullSyncTargetManagerTest {
 
   @Test
   public void findSyncTarget_withHeightEstimates() {
-    final BlockHeader chainHeadHeader = localBlockchain.getChainHeadHeader();
-    when(localWorldState.isWorldStateAvailable(
-            chainHeadHeader.getStateRoot(), chainHeadHeader.getHash()))
+    when(localWorldState.isWorldStateAvailable(localBlockchain.getChainHeadHeader().getStateRoot()))
         .thenReturn(true);
     final RespondingEthPeer bestPeer =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, Difficulty.MAX_VALUE, 4);
@@ -108,9 +105,7 @@ public class FullSyncTargetManagerTest {
 
   @Test
   public void findSyncTarget_noHeightEstimates() {
-    final BlockHeader chainHeadHeader = localBlockchain.getChainHeadHeader();
-    when(localWorldState.isWorldStateAvailable(
-            chainHeadHeader.getStateRoot(), chainHeadHeader.getHash()))
+    when(localWorldState.isWorldStateAvailable(localBlockchain.getChainHeadHeader().getStateRoot()))
         .thenReturn(true);
     final RespondingEthPeer bestPeer =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, Difficulty.MAX_VALUE, 0);
@@ -123,9 +118,7 @@ public class FullSyncTargetManagerTest {
 
   @Test
   public void shouldDisconnectPeerIfWorldStateIsUnavailableForCommonAncestor() {
-    final BlockHeader chainHeadHeader = localBlockchain.getChainHeadHeader();
-    when(localWorldState.isWorldStateAvailable(
-            chainHeadHeader.getStateRoot(), chainHeadHeader.getHash()))
+    when(localWorldState.isWorldStateAvailable(localBlockchain.getChainHeadHeader().getStateRoot()))
         .thenReturn(false);
     final RespondingEthPeer bestPeer =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, 20);
@@ -140,9 +133,7 @@ public class FullSyncTargetManagerTest {
 
   @Test
   public void shouldAllowSyncTargetWhenIfWorldStateIsAvailableForCommonAncestor() {
-    final BlockHeader chainHeadHeader = localBlockchain.getChainHeadHeader();
-    when(localWorldState.isWorldStateAvailable(
-            chainHeadHeader.getStateRoot(), chainHeadHeader.getHash()))
+    when(localWorldState.isWorldStateAvailable(localBlockchain.getChainHeadHeader().getStateRoot()))
         .thenReturn(true);
     final RespondingEthPeer bestPeer =
         EthProtocolManagerTestUtil.createPeer(ethProtocolManager, 20);

@@ -47,14 +47,6 @@ public class ForkId {
     return hash;
   }
 
-  public List<Bytes> getForkIdAsBytesList() {
-    List<Bytes> bytesList = new ArrayList<>();
-    bytesList.add(hash);
-    bytesList.add(next);
-
-    return bytesList;
-  }
-
   void createForkIdRLP() {
     final BytesValueRLPOutput out = new BytesValueRLPOutput();
     writeTo(out);

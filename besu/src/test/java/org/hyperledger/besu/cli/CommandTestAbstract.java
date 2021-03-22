@@ -32,7 +32,6 @@ import org.hyperledger.besu.chainimport.JsonBlockImporter;
 import org.hyperledger.besu.chainimport.RlpBlockImporter;
 import org.hyperledger.besu.cli.config.EthNetworkConfig;
 import org.hyperledger.besu.cli.options.unstable.EthProtocolOptions;
-import org.hyperledger.besu.cli.options.unstable.LauncherOptions;
 import org.hyperledger.besu.cli.options.unstable.MetricsCLIOptions;
 import org.hyperledger.besu.cli.options.unstable.NetworkingOptions;
 import org.hyperledger.besu.cli.options.unstable.SynchronizerOptions;
@@ -237,8 +236,6 @@ public abstract class CommandTestAbstract {
     when(mockRunnerBuilder.pidPath(any())).thenReturn(mockRunnerBuilder);
     when(mockRunnerBuilder.ethstatsUrl(anyString())).thenReturn(mockRunnerBuilder);
     when(mockRunnerBuilder.ethstatsContact(anyString())).thenReturn(mockRunnerBuilder);
-    when(mockRunnerBuilder.storageProvider(any())).thenReturn(mockRunnerBuilder);
-    when(mockRunnerBuilder.forkIdSupplier(any())).thenReturn(mockRunnerBuilder);
     when(mockRunnerBuilder.build()).thenReturn(mockRunner);
 
     final Bytes32 keyPairPrvKey =
@@ -407,10 +404,6 @@ public abstract class CommandTestAbstract {
 
     public MetricsCLIOptions getMetricsCLIOptions() {
       return unstableMetricsCLIOptions;
-    }
-
-    public LauncherOptions getLauncherOptions() {
-      return unstableLauncherOptions;
     }
 
     public void close() {

@@ -91,10 +91,8 @@ public class WebSocketService {
                 new HttpServerOptions()
                     .setHost(configuration.getHost())
                     .setPort(configuration.getPort())
-                    .setHandle100ContinueAutomatically(true)
-                    .setCompressionSupported(true)
-                    .addWebSocketSubProtocol("undefined"))
-            .webSocketHandler(websocketHandler())
+                    .setWebsocketSubProtocols("undefined"))
+            .websocketHandler(websocketHandler())
             .requestHandler(httpHandler())
             .listen(startHandler(resultFuture));
 

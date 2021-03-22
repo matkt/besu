@@ -93,8 +93,6 @@ public class JsonRpcMethodsFactory {
                   blockchainQueries, protocolSchedule, metricsSystem, transactionPool, dataDir),
               new EeaJsonRpcMethods(
                   blockchainQueries, protocolSchedule, transactionPool, privacyParameters),
-              new GoQuorumJsonRpcPrivacyMethods(
-                  blockchainQueries, protocolSchedule, transactionPool, privacyParameters),
               new EthJsonRpcMethods(
                   blockchainQueries,
                   synchronizer,

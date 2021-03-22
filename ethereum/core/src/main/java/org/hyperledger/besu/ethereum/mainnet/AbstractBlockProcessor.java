@@ -31,18 +31,13 @@ import org.hyperledger.besu.ethereum.vm.OperationTracer;
 import org.hyperledger.besu.plugin.data.TransactionType;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
-import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.Tracer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 public abstract class AbstractBlockProcessor implements BlockProcessor {
-
   @FunctionalInterface
   public interface TransactionReceiptFactory {
 
@@ -55,9 +50,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   private static final Logger LOG = LogManager.getLogger();
 
-  private static final Tracer tracer =
-      OpenTelemetry.getGlobalTracer("org.hyperledger.besu.block", "1.0.0");
-
   static final int MAX_GENERATION = 6;
 
   public static class Result implements BlockProcessor.Result {
@@ -68,20 +60,10 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     private final boolean successful;
 
     private final List<TransactionReceipt> receipts;
-    private final List<TransactionReceipt> privateReceipts;
 
     public static AbstractBlockProcessor.Result successful(
         final List<TransactionReceipt> receipts) {
       return new AbstractBlockProcessor.Result(true, ImmutableList.copyOf(receipts));
-    }
-
-    public static Result successful(
-        final List<TransactionReceipt> publicTxReceipts,
-        final List<TransactionReceipt> privateTxReceipts) {
-      return new AbstractBlockProcessor.Result(
-          true,
-          ImmutableList.copyOf(publicTxReceipts),
-          Collections.unmodifiableList(privateTxReceipts));
     }
 
     public static AbstractBlockProcessor.Result failed() {
@@ -91,16 +73,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     Result(final boolean successful, final List<TransactionReceipt> receipts) {
       this.successful = successful;
       this.receipts = receipts;
-      this.privateReceipts = Collections.emptyList();
-    }
-
-    public Result(
-        final boolean successful,
-        final ImmutableList<TransactionReceipt> publicReceipts,
-        final List<TransactionReceipt> privateReceipts) {
-      this.successful = successful;
-      this.receipts = publicReceipts;
-      this.privateReceipts = privateReceipts;
     }
 
     @Override
@@ -109,27 +81,22 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     }
 
     @Override
-    public List<TransactionReceipt> getPrivateReceipts() {
-      return privateReceipts;
-    }
-
-    @Override
     public boolean isSuccessful() {
       return successful;
     }
   }
 
-  protected final MainnetTransactionProcessor transactionProcessor;
+  private final MainnetTransactionProcessor transactionProcessor;
 
-  protected final AbstractBlockProcessor.TransactionReceiptFactory transactionReceiptFactory;
+  private final AbstractBlockProcessor.TransactionReceiptFactory transactionReceiptFactory;
 
   final Wei blockReward;
 
-  protected final boolean skipZeroBlockRewards;
+  private final boolean skipZeroBlockRewards;
 
-  protected final MiningBeneficiaryCalculator miningBeneficiaryCalculator;
+  private final MiningBeneficiaryCalculator miningBeneficiaryCalculator;
 
-  protected final TransactionGasBudgetCalculator gasBudgetCalculator;
+  private final TransactionGasBudgetCalculator gasBudgetCalculator;
 
   protected AbstractBlockProcessor(
       final MainnetTransactionProcessor transactionProcessor,
@@ -154,80 +121,66 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       final List<Transaction> transactions,
       final List<BlockHeader> ommers,
       final PrivateMetadataUpdater privateMetadataUpdater) {
-    final Span globalProcessBlock =
-        tracer.spanBuilder("processBlock").setSpanKind(Span.Kind.INTERNAL).startSpan();
-    try {
-      final List<TransactionReceipt> receipts = new ArrayList<>();
-      long currentGasUsed = 0;
-      for (final Transaction transaction : transactions) {
-        if (!hasAvailableBlockBudget(blockHeader, transaction, currentGasUsed)) {
-          return AbstractBlockProcessor.Result.failed();
-        }
 
-        final WorldUpdater worldStateUpdater = worldState.updater();
-        final BlockHashLookup blockHashLookup = new BlockHashLookup(blockHeader, blockchain);
-        final Address miningBeneficiary =
-            miningBeneficiaryCalculator.calculateBeneficiary(blockHeader);
-
-        final TransactionProcessingResult result =
-            transactionProcessor.processTransaction(
-                blockchain,
-                worldStateUpdater,
-                blockHeader,
-                transaction,
-                miningBeneficiary,
-                OperationTracer.NO_TRACING,
-                blockHashLookup,
-                true,
-                TransactionValidationParams.processingBlock(),
-                privateMetadataUpdater);
-        if (result.isInvalid()) {
-          LOG.info(
-              "Block processing error: transaction invalid '{}'. Block {} Transaction {}",
-              result.getValidationResult().getInvalidReason(),
-              blockHeader.getHash().toHexString(),
-              transaction.getHash().toHexString());
-          return AbstractBlockProcessor.Result.failed();
-        }
-
-        worldStateUpdater.commit();
-
-        currentGasUsed += transaction.getGasLimit() - result.getGasRemaining();
-
-        final TransactionReceipt transactionReceipt =
-            transactionReceiptFactory.create(
-                transaction.getType(), result, worldState, currentGasUsed);
-        receipts.add(transactionReceipt);
-      }
-
-      if (!rewardCoinbase(worldState, blockHeader, ommers, skipZeroBlockRewards)) {
-        // no need to log, rewardCoinbase logs the error.
+    final List<TransactionReceipt> receipts = new ArrayList<>();
+    long currentGasUsed = 0;
+    for (final Transaction transaction : transactions) {
+      final long remainingGasBudget = blockHeader.getGasLimit() - currentGasUsed;
+      if (!gasBudgetCalculator.hasBudget(
+          transaction, blockHeader.getNumber(), blockHeader.getGasLimit(), currentGasUsed)) {
+        LOG.info(
+            "Block processing error: transaction gas limit {} exceeds available block budget"
+                + " remaining {}. Block {} Transaction {}",
+            transaction.getGasLimit(),
+            remainingGasBudget,
+            blockHeader.getHash().toHexString(),
+            transaction.getHash().toHexString());
         return AbstractBlockProcessor.Result.failed();
       }
 
-      worldState.persist(blockHeader);
-      return AbstractBlockProcessor.Result.successful(receipts);
-    } finally {
-      globalProcessBlock.end();
-    }
-  }
+      final WorldUpdater worldStateUpdater = worldState.updater();
+      final BlockHashLookup blockHashLookup = new BlockHashLookup(blockHeader, blockchain);
+      final Address miningBeneficiary =
+          miningBeneficiaryCalculator.calculateBeneficiary(blockHeader);
 
-  protected boolean hasAvailableBlockBudget(
-      final BlockHeader blockHeader, final Transaction transaction, final long currentGasUsed) {
-    if (!gasBudgetCalculator.hasBudget(
-        transaction, blockHeader.getNumber(), blockHeader.getGasLimit(), currentGasUsed)) {
-      final long remainingGasBudget = blockHeader.getGasLimit() - currentGasUsed;
-      LOG.info(
-          "Block processing error: transaction gas limit {} exceeds available block budget"
-              + " remaining {}. Block {} Transaction {}",
-          transaction.getGasLimit(),
-          remainingGasBudget,
-          blockHeader.getHash().toHexString(),
-          transaction.getHash().toHexString());
-      return false;
+      final TransactionProcessingResult result =
+          transactionProcessor.processTransaction(
+              blockchain,
+              worldStateUpdater,
+              blockHeader,
+              transaction,
+              miningBeneficiary,
+              OperationTracer.NO_TRACING,
+              blockHashLookup,
+              true,
+              TransactionValidationParams.processingBlock(),
+              privateMetadataUpdater);
+      if (result.isInvalid()) {
+        LOG.info(
+            "Block processing error: transaction invalid '{}'. Block {} Transaction {}",
+            result.getValidationResult().getInvalidReason(),
+            blockHeader.getHash().toHexString(),
+            transaction.getHash().toHexString());
+        return AbstractBlockProcessor.Result.failed();
+      }
+
+      worldStateUpdater.commit();
+
+      currentGasUsed += transaction.getGasLimit() - result.getGasRemaining();
+
+      final TransactionReceipt transactionReceipt =
+          transactionReceiptFactory.create(
+              transaction.getType(), result, worldState, currentGasUsed);
+      receipts.add(transactionReceipt);
     }
 
-    return true;
+    if (!rewardCoinbase(worldState, blockHeader, ommers, skipZeroBlockRewards)) {
+      // no need to log, rewardCoinbase logs the error.
+      return AbstractBlockProcessor.Result.failed();
+    }
+
+    worldState.persist(blockHeader.getHash());
+    return AbstractBlockProcessor.Result.successful(receipts);
   }
 
   protected MiningBeneficiaryCalculator getMiningBeneficiaryCalculator() {

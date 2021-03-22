@@ -15,7 +15,7 @@
 package org.hyperledger.besu.consensus.ibftlegacy.headervalidationrules;
 
 import org.hyperledger.besu.consensus.common.ValidatorProvider;
-import org.hyperledger.besu.consensus.common.bft.BftContext;
+import org.hyperledger.besu.consensus.ibft.IbftContext;
 import org.hyperledger.besu.consensus.ibftlegacy.IbftBlockHashing;
 import org.hyperledger.besu.consensus.ibftlegacy.IbftExtraData;
 import org.hyperledger.besu.consensus.ibftlegacy.IbftHelpers;
@@ -55,7 +55,7 @@ public class IbftExtraDataValidationRule implements AttachedBlockHeaderValidatio
     try {
       final ValidatorProvider validatorProvider =
           context
-              .getConsensusState(BftContext.class)
+              .getConsensusState(IbftContext.class)
               .getVoteTallyCache()
               .getVoteTallyAfterBlock(parent);
       final IbftExtraData ibftExtraData = IbftExtraData.decode(header);
@@ -65,7 +65,7 @@ public class IbftExtraDataValidationRule implements AttachedBlockHeaderValidatio
       final Collection<Address> storedValidators = validatorProvider.getValidators();
 
       if (!storedValidators.contains(proposer)) {
-        LOG.info("Invalid block header: Proposer sealing block is not a member of the validators.");
+        LOG.trace("Proposer sealing block is not a member of the validators.");
         return false;
       }
 
@@ -81,31 +81,29 @@ public class IbftExtraDataValidationRule implements AttachedBlockHeaderValidatio
           new TreeSet<>(ibftExtraData.getValidators());
 
       if (!Iterables.elementsEqual(ibftExtraData.getValidators(), sortedReportedValidators)) {
-        LOG.info(
-            "Invalid block header: Validators are not sorted in ascending order. Expected {} but got {}.",
+        LOG.trace(
+            "Validators are not sorted in ascending order. Expected {} but got {}.",
             sortedReportedValidators,
             ibftExtraData.getValidators());
         return false;
       }
 
       if (!Iterables.elementsEqual(ibftExtraData.getValidators(), storedValidators)) {
-        LOG.info(
-            "Invalid block header: Incorrect validators. Expected {} but got {}.",
+        LOG.trace(
+            "Incorrect validators. Expected {} but got {}.",
             storedValidators,
             ibftExtraData.getValidators());
         return false;
       }
 
     } catch (final RLPException ex) {
-      LOG.info(
-          "Invalid block header: ExtraData field was unable to be deserialised into an IBFT Struct.",
-          ex);
+      LOG.trace("ExtraData field was unable to be deserialised into an IBFT Struct.", ex);
       return false;
     } catch (final IllegalArgumentException ex) {
-      LOG.info("Invalid block header: Failed to verify extra data", ex);
+      LOG.trace("Failed to verify extra data", ex);
       return false;
     } catch (final RuntimeException ex) {
-      LOG.info("Invalid block header: Failed to find validators at parent");
+      LOG.trace("Failed to find validators at parent");
       return false;
     }
 
@@ -118,16 +116,15 @@ public class IbftExtraDataValidationRule implements AttachedBlockHeaderValidatio
     final int minimumSealsRequired =
         IbftHelpers.calculateRequiredValidatorQuorum(storedValidators.size());
     if (committers.size() < minimumSealsRequired) {
-      LOG.info(
-          "Invalid block header: Insufficient committers to seal block. (Required {}, received {})",
+      LOG.trace(
+          "Insufficient committers to seal block. (Required {}, received {})",
           minimumSealsRequired,
           committers.size());
       return false;
     }
 
     if (!storedValidators.containsAll(committers)) {
-      LOG.info(
-          "Invalid block header: Not all committers are in the locally maintained validator list.");
+      LOG.trace("Not all committers are in the locally maintained validator list.");
       return false;
     }
 

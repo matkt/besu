@@ -29,17 +29,15 @@ public interface GenesisConfigOptions {
 
   boolean isIbft2();
 
-  boolean isQbft();
-
   boolean isClique();
 
   String getConsensusEngine();
 
-  BftConfigOptions getIbftLegacyConfigOptions();
+  IbftConfigOptions getIbftLegacyConfigOptions();
 
   CliqueConfigOptions getCliqueConfigOptions();
 
-  BftConfigOptions getBftConfigOptions();
+  IbftConfigOptions getIbft2ConfigOptions();
 
   EthashConfigOptions getEthashConfigOptions();
 
@@ -55,7 +53,7 @@ public interface GenesisConfigOptions {
 
   OptionalLong getConstantinopleBlockNumber();
 
-  OptionalLong getPetersburgBlockNumber();
+  OptionalLong getConstantinopleFixBlockNumber();
 
   OptionalLong getIstanbulBlockNumber();
 

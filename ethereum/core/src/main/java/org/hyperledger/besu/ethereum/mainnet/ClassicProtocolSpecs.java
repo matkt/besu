@@ -87,8 +87,7 @@ public class ClassicProtocolSpecs {
                 blockReward,
                 miningBeneficiaryCalculator,
                 skipZeroBlockRewards,
-                gasBudgetCalculator,
-                goQuorumPrivacyParameters) ->
+                gasBudgetCalculator) ->
                 new ClassicBlockProcessor(
                     transactionProcessor,
                     transactionReceiptFactory,
@@ -188,7 +187,7 @@ public class ClassicProtocolSpecs {
             ecip1017EraRounds,
             quorumCompatibilityMode)
         .evmBuilder(MainnetEvmRegistries::constantinople)
-        .gasCalculator(PetersburgGasCalculator::new)
+        .gasCalculator(ConstantinopleFixGasCalculator::new)
         .evmBuilder(gasCalculator -> MainnetEvmRegistries.constantinople(gasCalculator))
         .precompileContractRegistryBuilder(MainnetPrecompiledContractRegistries::istanbul)
         .name("Agharta");

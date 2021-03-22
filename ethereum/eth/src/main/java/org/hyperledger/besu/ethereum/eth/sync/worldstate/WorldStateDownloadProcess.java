@@ -206,7 +206,7 @@ public class WorldStateDownloadProcess {
 
       final Pipeline<Task<NodeDataRequest>> completionPipeline =
           PipelineBuilder.<Task<NodeDataRequest>>createPipeline(
-                  "requestDataAvailable", bufferCapacity, outputCounter, true, "node_data_request")
+                  "requestDataAvailable", bufferCapacity, outputCounter)
               .andFinishWith(
                   "requestCompleteTask",
                   task ->
@@ -219,9 +219,7 @@ public class WorldStateDownloadProcess {
                   "requestDequeued",
                   new TaskQueueIterator(downloadState),
                   bufferCapacity,
-                  outputCounter,
-                  true,
-                  "world_state_download")
+                  outputCounter)
               .thenFlatMapInParallel(
                   "requestLoadLocalData",
                   task -> loadLocalDataStep.loadLocalData(task, requestsToComplete),

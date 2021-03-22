@@ -71,11 +71,6 @@ class StoredNode<V> implements Node<V> {
   }
 
   @Override
-  public Optional<Bytes> getLocation() {
-    return Optional.ofNullable(location);
-  }
-
-  @Override
   public Optional<V> getValue() {
     return load().getValue();
   }
@@ -118,12 +113,7 @@ class StoredNode<V> implements Node<V> {
           nodeFactory
               .retrieve(location, hash)
               .orElseThrow(
-                  () ->
-                      new MerkleTrieException(
-                          "Unable to load trie node value for hash "
-                              + hash
-                              + " location "
-                              + location));
+                  () -> new MerkleTrieException("Unable to load trie node value for hash " + hash));
     }
 
     return loaded;

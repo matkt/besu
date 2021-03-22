@@ -162,8 +162,8 @@ public class ProtocolScheduleBuilder {
             quorumCompatibilityMode));
     addProtocolSpec(
         protocolSchedule,
-        config.getPetersburgBlockNumber(),
-        MainnetProtocolSpecs.petersburgDefinition(
+        config.getConstantinopleFixBlockNumber(),
+        MainnetProtocolSpecs.constantinopleFixDefinition(
             chainId,
             config.getContractSizeLimit(),
             config.getEvmStackSize(),
@@ -188,15 +188,17 @@ public class ProtocolScheduleBuilder {
             isRevertReasonEnabled,
             quorumCompatibilityMode));
 
-    addProtocolSpec(
-        protocolSchedule,
-        config.getBerlinBlockNumber(),
-        MainnetProtocolSpecs.berlinDefinition(
-            chainId,
-            config.getContractSizeLimit(),
-            config.getEvmStackSize(),
-            isRevertReasonEnabled,
-            quorumCompatibilityMode));
+    if (ExperimentalEIPs.berlinEnabled) {
+      addProtocolSpec(
+          protocolSchedule,
+          config.getBerlinBlockNumber(),
+          MainnetProtocolSpecs.berlinDefinition(
+              chainId,
+              config.getContractSizeLimit(),
+              config.getEvmStackSize(),
+              isRevertReasonEnabled,
+              quorumCompatibilityMode));
+    }
 
     if (ExperimentalEIPs.eip1559Enabled) {
       final Optional<TransactionPriceCalculator> transactionPriceCalculator =
@@ -219,7 +221,7 @@ public class ProtocolScheduleBuilder {
         .getClassicForkBlock()
         .ifPresent(
             classicBlockNumber -> {
-              final ProtocolSpec originalProtocolSpec =
+              final ProtocolSpec originalProtocolSpce =
                   protocolSchedule.getByBlockNumber(classicBlockNumber);
               addProtocolSpec(
                   protocolSchedule,
@@ -228,7 +230,7 @@ public class ProtocolScheduleBuilder {
                       config.getContractSizeLimit(),
                       config.getEvmStackSize(),
                       quorumCompatibilityMode));
-              protocolSchedule.putMilestone(classicBlockNumber + 1, originalProtocolSpec);
+              protocolSchedule.putMilestone(classicBlockNumber + 1, originalProtocolSpce);
             });
 
     addProtocolSpec(
@@ -360,11 +362,14 @@ public class ProtocolScheduleBuilder {
     lastForkBlock =
         validateForkOrder("Constantinople", config.getConstantinopleBlockNumber(), lastForkBlock);
     lastForkBlock =
-        validateForkOrder("Petersburg", config.getPetersburgBlockNumber(), lastForkBlock);
+        validateForkOrder(
+            "ConstantinopleFix", config.getConstantinopleFixBlockNumber(), lastForkBlock);
     lastForkBlock = validateForkOrder("Istanbul", config.getIstanbulBlockNumber(), lastForkBlock);
     lastForkBlock =
         validateForkOrder("MuirGlacier", config.getMuirGlacierBlockNumber(), lastForkBlock);
-    lastForkBlock = validateForkOrder("Berlin", config.getBerlinBlockNumber(), lastForkBlock);
+    if (ExperimentalEIPs.berlinEnabled) {
+      lastForkBlock = validateForkOrder("Berlin", config.getBerlinBlockNumber(), lastForkBlock);
+    }
     assert (lastForkBlock >= 0);
   }
 

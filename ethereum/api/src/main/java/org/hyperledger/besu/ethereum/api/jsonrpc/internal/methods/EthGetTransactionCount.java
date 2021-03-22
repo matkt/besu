@@ -16,11 +16,10 @@ package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameterOrBlockHash;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.core.Address;
-import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.eth.transactions.PendingTransactions;
 
 import java.util.OptionalLong;
@@ -28,7 +27,8 @@ import java.util.function.Supplier;
 
 import com.google.common.base.Suppliers;
 
-public class EthGetTransactionCount extends AbstractBlockParameterOrBlockHashMethod {
+public class EthGetTransactionCount extends AbstractBlockParameterMethod {
+
   private final Supplier<PendingTransactions> pendingTransactions;
   private final boolean resultAsDecimal;
 
@@ -52,9 +52,8 @@ public class EthGetTransactionCount extends AbstractBlockParameterOrBlockHashMet
   }
 
   @Override
-  protected BlockParameterOrBlockHash blockParameterOrBlockHash(
-      final JsonRpcRequestContext request) {
-    return request.getRequiredParameter(1, BlockParameterOrBlockHash.class);
+  protected BlockParameter blockParameter(final JsonRpcRequestContext request) {
+    return request.getRequiredParameter(1, BlockParameter.class);
   }
 
   @Override
@@ -69,10 +68,13 @@ public class EthGetTransactionCount extends AbstractBlockParameterOrBlockHashMet
   }
 
   @Override
-  protected String resultByBlockHash(final JsonRpcRequestContext request, final Hash blockHash) {
+  protected String resultByBlockNumber(
+      final JsonRpcRequestContext request, final long blockNumber) {
     final Address address = request.getRequiredParameter(0, Address.class);
-    final long transactionCount = getBlockchainQueries().getTransactionCount(address, blockHash);
-
+    if (blockNumber > getBlockchainQueries().headBlockNumber()) {
+      return null;
+    }
+    final long transactionCount = getBlockchainQueries().getTransactionCount(address, blockNumber);
     return resultAsDecimal ? Long.toString(transactionCount) : Quantity.create(transactionCount);
   }
 }

@@ -25,17 +25,15 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public interface WorldStateStorage {
 
-  Optional<Bytes> getCode(Bytes32 codeHash, Hash accountHash);
-
-  Optional<Bytes> getAccountTrieNodeData(Bytes location, Bytes32 hash);
+  Optional<Bytes> getCode(Bytes32 codeHash);
 
   Optional<Bytes> getAccountStateTrieNode(Bytes location, Bytes32 nodeHash);
 
-  Optional<Bytes> getAccountStorageTrieNode(Hash accountHash, Bytes location, Bytes32 nodeHash);
+  Optional<Bytes> getAccountStorageTrieNode(Bytes location, Bytes32 nodeHash);
 
   Optional<Bytes> getNodeData(Bytes location, Bytes32 hash);
 
-  boolean isWorldStateAvailable(Bytes32 rootHash, Hash blockHash);
+  boolean isWorldStateAvailable(Bytes32 rootHash);
 
   default boolean contains(final Bytes32 hash) {
     // we don't have location info
@@ -52,22 +50,19 @@ public interface WorldStateStorage {
 
   interface Updater {
 
-    Updater putCode(Hash accountHash, Bytes32 nodeHash, Bytes code);
+    Updater removeAccountStateTrieNode(Bytes32 nodeHash);
 
-    default Updater putCode(final Hash accountHash, final Bytes code) {
+    Updater putCode(Bytes32 nodeHash, Bytes code);
+
+    default Updater putCode(final Bytes code) {
       // Skip the hash calculation for empty code
       final Hash codeHash = code.size() == 0 ? Hash.EMPTY : Hash.hash(code);
-      return putCode(accountHash, codeHash, code);
+      return putCode(codeHash, code);
     }
-
-    Updater saveWorldState(Bytes blockHash, Bytes32 nodeHash, Bytes node);
 
     Updater putAccountStateTrieNode(Bytes location, Bytes32 nodeHash, Bytes node);
 
-    Updater removeAccountStateTrieNode(Bytes location, Bytes32 nodeHash);
-
-    Updater putAccountStorageTrieNode(
-        Hash accountHash, Bytes location, Bytes32 nodeHash, Bytes node);
+    Updater putAccountStorageTrieNode(Bytes location, Bytes32 nodeHash, Bytes node);
 
     void commit();
 

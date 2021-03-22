@@ -30,15 +30,16 @@ public class AncestryValidationRule implements DetachedBlockHeaderValidationRule
   @Override
   public boolean validate(final BlockHeader header, final BlockHeader parent) {
     if (!header.getParentHash().equals(parent.getHash())) {
-      LOG.info(
-          "Invalid block header:  Parent hash {} does not match " + "supplied parent header {}.",
+      LOG.trace(
+          "Invalid parent block header.  Parent hash {} does not match "
+              + "supplied parent header {}.",
           header.getParentHash(),
           parent.getHash());
       return false;
     }
 
     if (header.getNumber() != (parent.getNumber() + 1)) {
-      LOG.info(
+      LOG.trace(
           "Invalid block header: number {} is not one more than parent number {}",
           header.getNumber(),
           parent.getNumber());

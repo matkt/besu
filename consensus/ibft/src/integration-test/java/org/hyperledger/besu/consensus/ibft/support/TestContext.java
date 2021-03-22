@@ -14,13 +14,12 @@
  */
 package org.hyperledger.besu.consensus.ibft.support;
 
-import org.hyperledger.besu.consensus.common.bft.BftExecutors;
-import org.hyperledger.besu.consensus.common.bft.ConsensusRoundIdentifier;
-import org.hyperledger.besu.consensus.common.bft.EventMultiplexer;
-import org.hyperledger.besu.consensus.common.bft.inttest.NodeParams;
-import org.hyperledger.besu.consensus.common.bft.statemachine.BftEventHandler;
-import org.hyperledger.besu.consensus.common.bft.statemachine.BftFinalState;
+import org.hyperledger.besu.consensus.ibft.ConsensusRoundIdentifier;
+import org.hyperledger.besu.consensus.ibft.EventMultiplexer;
+import org.hyperledger.besu.consensus.ibft.IbftExecutors;
 import org.hyperledger.besu.consensus.ibft.payload.MessageFactory;
+import org.hyperledger.besu.consensus.ibft.statemachine.IbftController;
+import org.hyperledger.besu.consensus.ibft.statemachine.IbftFinalState;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Address;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -42,31 +41,28 @@ public class TestContext {
 
   private final Map<Address, ValidatorPeer> remotePeers;
   private final MutableBlockchain blockchain;
-  private final BftExecutors bftExecutors;
-  private final BftEventHandler controller;
-  private final BftFinalState finalState;
+  private final IbftExecutors ibftExecutors;
+  private final IbftController controller;
+  private final IbftFinalState finalState;
   private final EventMultiplexer eventMultiplexer;
-  private final MessageFactory messageFactory;
 
   public TestContext(
       final Map<Address, ValidatorPeer> remotePeers,
       final MutableBlockchain blockchain,
-      final BftExecutors bftExecutors,
-      final BftEventHandler controller,
-      final BftFinalState finalState,
-      final EventMultiplexer eventMultiplexer,
-      final MessageFactory messageFactory) {
+      final IbftExecutors ibftExecutors,
+      final IbftController controller,
+      final IbftFinalState finalState,
+      final EventMultiplexer eventMultiplexer) {
     this.remotePeers = remotePeers;
     this.blockchain = blockchain;
-    this.bftExecutors = bftExecutors;
+    this.ibftExecutors = ibftExecutors;
     this.controller = controller;
     this.finalState = finalState;
     this.eventMultiplexer = eventMultiplexer;
-    this.messageFactory = messageFactory;
   }
 
   public void start() {
-    bftExecutors.start();
+    ibftExecutors.start();
     controller.start();
   }
 
@@ -74,7 +70,7 @@ public class TestContext {
     return blockchain;
   }
 
-  public BftEventHandler getController() {
+  public IbftController getController() {
     return controller;
   }
 
@@ -83,7 +79,7 @@ public class TestContext {
   }
 
   public MessageFactory getLocalNodeMessageFactory() {
-    return messageFactory;
+    return finalState.getMessageFactory();
   }
 
   public Block createBlockForProposal(

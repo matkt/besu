@@ -85,8 +85,7 @@ public class EeaSendRawTransaction implements JsonRpcMethod {
       final Optional<Bytes> maybePrivacyGroupId = privateTransaction.getPrivacyGroupId();
 
       final Optional<PrivacyGroup> maybePrivacyGroup =
-          findPrivacyGroup(
-              privacyController, maybePrivacyGroupId, enclavePublicKey, privateTransaction);
+          findPrivacyGroup(maybePrivacyGroupId, enclavePublicKey, privateTransaction);
 
       final ValidationResult<TransactionInvalidReason> validationResult =
           privacyController.validatePrivateTransaction(privateTransaction, enclavePublicKey);
@@ -96,15 +95,14 @@ public class EeaSendRawTransaction implements JsonRpcMethod {
             id, convertTransactionInvalidReason(validationResult.getInvalidReason()));
       }
 
-      final JsonRpcResponse ret =
-          createPMTAndAddToTxPool(
-              id,
-              privateTransaction,
-              maybePrivacyGroup,
-              maybePrivacyGroupId,
-              enclavePublicKey,
-              Address.DEFAULT_PRIVACY);
-      return ret;
+      final Transaction privacyMarkerTransaction =
+          createPMT(privateTransaction, maybePrivacyGroup, maybePrivacyGroupId, enclavePublicKey);
+
+      return transactionPool
+          .addLocalTransaction(privacyMarkerTransaction)
+          .either(
+              () -> new JsonRpcSuccessResponse(id, privacyMarkerTransaction.getHash().toString()),
+              errorReason -> getJsonRpcErrorResponse(id, errorReason));
 
     } catch (final JsonRpcErrorResponseException e) {
       return new JsonRpcErrorResponse(id, e.getJsonRpcError());
@@ -117,7 +115,6 @@ public class EeaSendRawTransaction implements JsonRpcMethod {
   }
 
   Optional<PrivacyGroup> findPrivacyGroup(
-      final PrivacyController privacyController,
       final Optional<Bytes> maybePrivacyGroupId,
       final String enclavePublicKey,
       final PrivateTransaction privateTransaction) {
@@ -126,23 +123,15 @@ public class EeaSendRawTransaction implements JsonRpcMethod {
     return maybePrivacyGroup;
   }
 
-  JsonRpcResponse createPMTAndAddToTxPool(
-      final Object id,
+  Transaction createPMT(
       final PrivateTransaction privateTransaction,
       final Optional<PrivacyGroup> maybePrivacyGroup,
       final Optional<Bytes> maybePrivacyGroupId,
-      final String enclavePublicKey,
-      final Address privacyPrecompileAddress) {
+      final String enclavePublicKey) {
     final String privateTransactionLookupId =
         privacyController.sendTransaction(privateTransaction, enclavePublicKey, maybePrivacyGroup);
-    final Transaction privacyMarkerTransaction =
-        privacyController.createPrivacyMarkerTransaction(
-            privateTransactionLookupId, privateTransaction, privacyPrecompileAddress);
-    return transactionPool
-        .addLocalTransaction(privacyMarkerTransaction)
-        .either(
-            () -> new JsonRpcSuccessResponse(id, privacyMarkerTransaction.getHash().toString()),
-            errorReason -> getJsonRpcErrorResponse(id, errorReason));
+    return privacyController.createPrivacyMarkerTransaction(
+        privateTransactionLookupId, privateTransaction, Address.DEFAULT_PRIVACY);
   }
 
   JsonRpcErrorResponse getJsonRpcErrorResponse(

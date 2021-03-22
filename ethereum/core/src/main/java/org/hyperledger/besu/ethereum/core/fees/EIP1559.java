@@ -14,12 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.core.fees;
 
+import static java.lang.Math.floorDiv;
 import static java.lang.Math.max;
+import static org.hyperledger.besu.ethereum.core.AcceptedTransactionTypes.FEE_MARKET_TRANSITIONAL_TRANSACTIONS;
+import static org.hyperledger.besu.ethereum.core.AcceptedTransactionTypes.FRONTIER_TRANSACTIONS;
 
 import org.hyperledger.besu.config.experimental.ExperimentalEIPs;
+import org.hyperledger.besu.ethereum.core.AcceptedTransactionTypes;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-
-import java.math.BigInteger;
+import org.hyperledger.besu.ethereum.core.Transaction;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -46,19 +49,19 @@ public class EIP1559 {
       return parentBaseFee;
     } else if (parentBlockGasUsed > targetGasUsed) {
       gasDelta = parentBlockGasUsed - targetGasUsed;
-      final BigInteger pBaseFee = BigInteger.valueOf(parentBaseFee);
-      final BigInteger gDelta = BigInteger.valueOf(gasDelta);
-      final BigInteger target = BigInteger.valueOf(targetGasUsed);
-      final BigInteger denominator = BigInteger.valueOf(feeMarket.getBasefeeMaxChangeDenominator());
-      feeDelta = max(pBaseFee.multiply(gDelta).divide(target).divide(denominator).longValue(), 1);
+      feeDelta =
+          max(
+              floorDiv(
+                  floorDiv(parentBaseFee * gasDelta, targetGasUsed),
+                  feeMarket.getBasefeeMaxChangeDenominator()),
+              1);
       baseFee = parentBaseFee + feeDelta;
     } else {
       gasDelta = targetGasUsed - parentBlockGasUsed;
-      final BigInteger pBaseFee = BigInteger.valueOf(parentBaseFee);
-      final BigInteger gDelta = BigInteger.valueOf(gasDelta);
-      final BigInteger target = BigInteger.valueOf(targetGasUsed);
-      final BigInteger denominator = BigInteger.valueOf(feeMarket.getBasefeeMaxChangeDenominator());
-      feeDelta = pBaseFee.multiply(gDelta).divide(target).divide(denominator).longValue();
+      feeDelta =
+          floorDiv(
+              floorDiv(parentBaseFee * gasDelta, targetGasUsed),
+              feeMarket.getBasefeeMaxChangeDenominator());
       baseFee = parentBaseFee - feeDelta;
     }
     LOG.trace(
@@ -90,6 +93,29 @@ public class EIP1559 {
   public long getForkBlock() {
     guardActivation();
     return initialForkBlknum;
+  }
+
+  public boolean isValidFormat(
+      final Transaction transaction, final AcceptedTransactionTypes acceptedTransactionTypes) {
+    if (transaction == null) {
+      return false;
+    }
+    switch (acceptedTransactionTypes) {
+      case FRONTIER_TRANSACTIONS:
+        return transaction.isFrontierTransaction();
+      case FEE_MARKET_TRANSITIONAL_TRANSACTIONS:
+        return transaction.isFrontierTransaction() || transaction.isEIP1559Transaction();
+      case FEE_MARKET_TRANSACTIONS:
+        return transaction.isEIP1559Transaction();
+      default:
+        return false;
+    }
+  }
+
+  public boolean isValidTransaction(final long blockNumber, final Transaction transaction) {
+    return isValidFormat(
+        transaction,
+        isEIP1559(blockNumber) ? FEE_MARKET_TRANSITIONAL_TRANSACTIONS : FRONTIER_TRANSACTIONS);
   }
 
   private void guardActivation() {

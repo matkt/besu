@@ -18,6 +18,7 @@ package org.hyperledger.besu.ethereum.bonsai;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.InMemoryStorageProvider;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
@@ -38,7 +39,7 @@ public class RollingImport {
         new RollingFileReader((i, c) -> Path.of(String.format(arg[0] + "-%04d.rdat", i)), false);
 
     final InMemoryStorageProvider provider = new InMemoryStorageProvider();
-    final BonsaiWorldStateArchive archive = new BonsaiWorldStateArchive(provider, null);
+    final BonsaiWorldStateArchive archive = new BonsaiWorldStateArchive(provider);
     final InMemoryKeyValueStorage accountStorage =
         (InMemoryKeyValueStorage)
             provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE);
@@ -58,8 +59,11 @@ public class RollingImport {
     final BonsaiPersistedWorldState bonsaiState =
         new BonsaiPersistedWorldState(
             archive,
-            new BonsaiWorldStateKeyValueStorage(
-                accountStorage, codeStorage, storageStorage, trieBranchStorage, trieLogStorage));
+            accountStorage,
+            codeStorage,
+            storageStorage,
+            trieBranchStorage,
+            trieLogStorage);
 
     int count = 0;
     while (!reader.isDone()) {
@@ -73,7 +77,7 @@ public class RollingImport {
         final BonsaiWorldStateUpdater updater = (BonsaiWorldStateUpdater) bonsaiState.updater();
         updater.rollForward(layer);
         updater.commit();
-        bonsaiState.persist(null);
+        bonsaiState.persist(Hash.wrap(layer.getBlockHash()));
         if (count % 10000 == 0) {
           System.out.println(". - " + count);
         } else if (count % 100 == 0) {
@@ -101,7 +105,7 @@ public class RollingImport {
         final BonsaiWorldStateUpdater updater = (BonsaiWorldStateUpdater) bonsaiState.updater();
         updater.rollBack(layer);
         updater.commit();
-        bonsaiState.persist(null);
+        bonsaiState.persist(Hash.wrap(layer.getBlockHash()));
         if (count % 10000 == 0) {
           System.out.println(". - " + count);
         } else if (count % 100 == 0) {

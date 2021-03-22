@@ -16,21 +16,23 @@ package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameterOrBlockHash;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.core.Address;
-import org.hyperledger.besu.ethereum.core.Hash;
 
 import java.util.function.Supplier;
 
-public class EthGetBalance extends AbstractBlockParameterOrBlockHashMethod {
-  public EthGetBalance(final BlockchainQueries blockchainQueries) {
-    super(blockchainQueries);
+import com.google.common.base.Suppliers;
+
+public class EthGetBalance extends AbstractBlockParameterMethod {
+
+  public EthGetBalance(final BlockchainQueries blockchain) {
+    this(Suppliers.ofInstance(blockchain));
   }
 
-  public EthGetBalance(final Supplier<BlockchainQueries> blockchainQueries) {
-    super(blockchainQueries);
+  public EthGetBalance(final Supplier<BlockchainQueries> blockchain) {
+    super(blockchain);
   }
 
   @Override
@@ -39,17 +41,16 @@ public class EthGetBalance extends AbstractBlockParameterOrBlockHashMethod {
   }
 
   @Override
-  protected BlockParameterOrBlockHash blockParameterOrBlockHash(
-      final JsonRpcRequestContext request) {
-    return request.getRequiredParameter(1, BlockParameterOrBlockHash.class);
+  protected BlockParameter blockParameter(final JsonRpcRequestContext request) {
+    return request.getRequiredParameter(1, BlockParameter.class);
   }
 
   @Override
-  protected String resultByBlockHash(final JsonRpcRequestContext request, final Hash blockHash) {
+  protected String resultByBlockNumber(
+      final JsonRpcRequestContext request, final long blockNumber) {
     final Address address = request.getRequiredParameter(0, Address.class);
-    return blockchainQueries
-        .get()
-        .accountBalance(address, blockHash)
+    return getBlockchainQueries()
+        .accountBalance(address, blockNumber)
         .map(Quantity::create)
         .orElse(null);
   }

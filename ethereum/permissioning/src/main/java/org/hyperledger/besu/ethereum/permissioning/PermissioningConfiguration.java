@@ -20,12 +20,12 @@ public class PermissioningConfiguration {
 
   private final Optional<LocalPermissioningConfiguration> localConfig;
   private final Optional<SmartContractPermissioningConfiguration> smartContractConfig;
-  private final Optional<GoQuorumPermissioningConfiguration> quorumPermissioningConfig;
+  private final Optional<QuorumPermissioningConfiguration> quorumPermissioningConfig;
 
   public PermissioningConfiguration(
       final Optional<LocalPermissioningConfiguration> localConfig,
       final Optional<SmartContractPermissioningConfiguration> smartContractConfig,
-      final Optional<GoQuorumPermissioningConfiguration> quorumPermissioningConfig) {
+      final Optional<QuorumPermissioningConfiguration> quorumPermissioningConfig) {
     this.localConfig = localConfig;
     this.smartContractConfig = smartContractConfig;
     this.quorumPermissioningConfig = quorumPermissioningConfig;
@@ -39,7 +39,7 @@ public class PermissioningConfiguration {
     return smartContractConfig;
   }
 
-  public Optional<GoQuorumPermissioningConfiguration> getQuorumPermissioningConfig() {
+  public Optional<QuorumPermissioningConfiguration> getQuorumPermissioningConfig() {
     return quorumPermissioningConfig;
   }
 

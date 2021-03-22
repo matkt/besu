@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.consensus.ibft.payload;
 
-import org.hyperledger.besu.consensus.common.bft.payload.SignedData;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
@@ -39,8 +38,8 @@ public class PreparedCertificate {
     final List<SignedData<PreparePayload>> prepareMessages;
 
     rlpInput.enterList();
-    proposalMessage = PayloadDeserializers.readSignedProposalPayloadFrom(rlpInput);
-    prepareMessages = rlpInput.readList(PayloadDeserializers::readSignedPreparePayloadFrom);
+    proposalMessage = SignedData.readSignedProposalPayloadFrom(rlpInput);
+    prepareMessages = rlpInput.readList(SignedData::readSignedPreparePayloadFrom);
     rlpInput.leaveList();
 
     return new PreparedCertificate(proposalMessage, prepareMessages);

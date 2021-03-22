@@ -96,7 +96,7 @@ public class TransactionTest {
   }
 
   @Test
-  public void petersburg() {
+  public void constantinopleFix() {
     milestone("ConstantinopleFix");
   }
 

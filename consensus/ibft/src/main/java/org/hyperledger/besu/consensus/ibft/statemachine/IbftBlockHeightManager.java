@@ -18,18 +18,17 @@ import static org.hyperledger.besu.consensus.ibft.statemachine.IbftBlockHeightMa
 import static org.hyperledger.besu.consensus.ibft.statemachine.IbftBlockHeightManager.MessageAge.FUTURE_ROUND;
 import static org.hyperledger.besu.consensus.ibft.statemachine.IbftBlockHeightManager.MessageAge.PRIOR_ROUND;
 
-import org.hyperledger.besu.consensus.common.bft.BlockTimer;
-import org.hyperledger.besu.consensus.common.bft.ConsensusRoundIdentifier;
-import org.hyperledger.besu.consensus.common.bft.events.RoundExpiry;
-import org.hyperledger.besu.consensus.common.bft.messagewrappers.BftMessage;
-import org.hyperledger.besu.consensus.common.bft.payload.Payload;
-import org.hyperledger.besu.consensus.common.bft.statemachine.BftFinalState;
+import org.hyperledger.besu.consensus.ibft.BlockTimer;
+import org.hyperledger.besu.consensus.ibft.ConsensusRoundIdentifier;
+import org.hyperledger.besu.consensus.ibft.ibftevent.RoundExpiry;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Commit;
+import org.hyperledger.besu.consensus.ibft.messagewrappers.IbftMessage;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Prepare;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Proposal;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.RoundChange;
 import org.hyperledger.besu.consensus.ibft.network.IbftMessageTransmitter;
 import org.hyperledger.besu.consensus.ibft.payload.MessageFactory;
+import org.hyperledger.besu.consensus.ibft.payload.Payload;
 import org.hyperledger.besu.consensus.ibft.validation.FutureRoundProposalMessageValidator;
 import org.hyperledger.besu.consensus.ibft.validation.MessageValidatorFactory;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -54,7 +53,7 @@ import org.apache.logging.log4j.Logger;
  * and sends a Proposal message. If the round times out prior to importing a block, this class is
  * responsible for creating a RoundChange message and transmitting it.
  */
-public class IbftBlockHeightManager implements BaseIbftBlockHeightManager {
+public class IbftBlockHeightManager implements BlockHeightManager {
 
   private static final Logger LOG = LogManager.getLogger();
 
@@ -68,7 +67,7 @@ public class IbftBlockHeightManager implements BaseIbftBlockHeightManager {
   private final FutureRoundProposalMessageValidator futureRoundProposalMessageValidator;
   private final Clock clock;
   private final Function<ConsensusRoundIdentifier, RoundState> roundStateCreator;
-  private final BftFinalState finalState;
+  private final IbftFinalState finalState;
 
   private Optional<PreparedRoundArtifacts> latestPreparedRoundArtifacts = Optional.empty();
 
@@ -76,18 +75,16 @@ public class IbftBlockHeightManager implements BaseIbftBlockHeightManager {
 
   public IbftBlockHeightManager(
       final BlockHeader parentHeader,
-      final BftFinalState finalState,
+      final IbftFinalState finalState,
       final RoundChangeManager roundChangeManager,
       final IbftRoundFactory ibftRoundFactory,
       final Clock clock,
-      final MessageValidatorFactory messageValidatorFactory,
-      final MessageFactory messageFactory) {
+      final MessageValidatorFactory messageValidatorFactory) {
     this.parentHeader = parentHeader;
     this.roundFactory = ibftRoundFactory;
     this.blockTimer = finalState.getBlockTimer();
-    this.transmitter =
-        new IbftMessageTransmitter(messageFactory, finalState.getValidatorMulticaster());
-    this.messageFactory = messageFactory;
+    this.transmitter = finalState.getTransmitter();
+    this.messageFactory = finalState.getMessageFactory();
     this.clock = clock;
     this.roundChangeManager = roundChangeManager;
     this.finalState = finalState;
@@ -192,7 +189,7 @@ public class IbftBlockHeightManager implements BaseIbftBlockHeightManager {
     actionOrBufferMessage(commit, currentRound::handleCommitMessage, RoundState::addCommitMessage);
   }
 
-  private <P extends Payload, M extends BftMessage<P>> void actionOrBufferMessage(
+  private <P extends Payload, M extends IbftMessage<P>> void actionOrBufferMessage(
       final M ibftMessage,
       final Consumer<M> inRoundHandler,
       final BiConsumer<RoundState, M> buffer) {
