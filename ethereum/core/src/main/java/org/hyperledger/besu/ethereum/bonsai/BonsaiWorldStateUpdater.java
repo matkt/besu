@@ -326,30 +326,36 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
   @Override
   public UInt256 getPriorStorageValue(final Address address, final UInt256 storageKey) {
     // TODO maybe log the read into the trie layer?
-    if (storageToClear.contains(address)) {
-      return UInt256.ZERO;
+    if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
+      System.out.println("entered"+storageKey);
+    }
+    if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
+      System.out.println("entered ++"+storageKey);
     }
     final Map<Hash, BonsaiValue<UInt256>> localAccountStorage =
         storageToUpdate.computeIfAbsent(address, key -> new HashMap<>());
     final Hash slotHashBytes = Hash.hash(storageKey.toBytes());
     final BonsaiValue<UInt256> value = localAccountStorage.get(slotHashBytes);
     if (value != null) {
+      if(value.isCleared()){
+        return UInt256.ZERO;
+      }
       final UInt256 updated = value.getUpdated();
       if (updated != null) {
-        if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+        if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
           System.out.println("loaded updated"+storageKey);
         }
         return updated;
       }
       final UInt256 original = value.getPrior();
       if (original != null) {
-        if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+        if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
           System.out.println("loaded getPrior"+storageKey);
         }
         return original;
       }
     }
-    if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+    if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
       System.out.println("getStorageValue"+storageKey);
     }
     return getStorageValue(address, storageKey);

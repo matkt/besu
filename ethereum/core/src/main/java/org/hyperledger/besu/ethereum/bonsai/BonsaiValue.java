@@ -24,10 +24,12 @@ import java.util.function.BiConsumer;
 public class BonsaiValue<T> {
   private T prior;
   private T updated;
+  private boolean cleared;
 
   BonsaiValue(final T prior, final T updated) {
     this.prior = prior;
     this.updated = updated;
+    this.cleared = false;
   }
 
   public T getPrior() {
@@ -43,6 +45,7 @@ public class BonsaiValue<T> {
   }
 
   public void setUpdated(final T updated) {
+    this.cleared = updated == null;
     this.updated = updated;
   }
 
@@ -67,6 +70,10 @@ public class BonsaiValue<T> {
 
   boolean isUnchanged() {
     return Objects.equals(updated, prior);
+  }
+
+  public boolean isCleared() {
+    return cleared;
   }
 
   @Override

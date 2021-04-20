@@ -99,6 +99,9 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
   public void setWrappedAccount(final A account) {
     if (this.account == null) {
       this.account = account;
+      if(account.getAddress().toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
+        System.out.println("setWrappedAccount"+account.getAddress());
+      }
       storageWasCleared = false;
     } else {
       throw new IllegalStateException("Already tracking a wrapped account");
@@ -220,10 +223,13 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
   @Override
   public UInt256 getOriginalStorageValue(final UInt256 key) {
     if (transactionBoundary) {
+      System.out.println("par ici ");
       return getStorageValue(key);
     } else if (storageWasCleared || account == null) {
+      System.out.println("oula ");
       return UInt256.ZERO;
     } else {
+      System.out.println("par la "+account.getClass());
       return account.getOriginalStorageValue(key);
     }
   }
