@@ -116,8 +116,8 @@ public class BonsaiPersistedWorldState implements MutableWorldState, BonsaiWorld
             .keySet()
             .forEach(
                 k -> stateUpdater.removeStorageValueBySlotHash(Hash.hash(address), Hash.wrap(k)));
+        entriesToDelete.keySet().forEach(storageTrie::remove);
         if (entriesToDelete.size() == 256) {
-          entriesToDelete.keySet().forEach(storageTrie::remove);
           entriesToDelete = storageTrie.entriesFrom(Bytes32.ZERO, 256);
         } else {
           break;
@@ -129,46 +129,46 @@ public class BonsaiPersistedWorldState implements MutableWorldState, BonsaiWorld
     // that we can get the storage state hash
     for (final Map.Entry<Address, Map<Hash, BonsaiValue<UInt256>>> storageAccountUpdate :
         updater.getStorageToUpdate().entrySet()) {
+      if (storageAccountUpdate.getValue().isEmpty()) {
+        continue;
+      }
       final Address updatedAddress = storageAccountUpdate.getKey();
       final Hash updatedAddressHash = Hash.hash(updatedAddress);
-      if (updater.getAccountsToUpdate().containsKey(updatedAddress)) {
-        final BonsaiValue<BonsaiAccount> accountValue =
-            updater.getAccountsToUpdate().get(updatedAddress);
-        final BonsaiAccount accountOriginal = accountValue.getPrior();
-        final Hash storageRoot =
-            (accountOriginal == null) ? Hash.EMPTY_TRIE_HASH : accountOriginal.getStorageRoot();
-        final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
-            new StoredMerklePatriciaTrie<>(
-                (location, key) -> getStorageTrieNode(updatedAddressHash, location, key),
-                storageRoot,
-                Function.identity(),
-                Function.identity());
+      final BonsaiValue<BonsaiAccount> accountValue =
+          updater.getAccountsToUpdate().get(updatedAddress);
+      final BonsaiAccount accountOriginal = accountValue.getPrior();
+      final Hash storageRoot =
+          (accountOriginal == null) ? Hash.EMPTY_TRIE_HASH : accountOriginal.getStorageRoot();
+      final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
+          new StoredMerklePatriciaTrie<>(
+              (location, key) -> getStorageTrieNode(updatedAddressHash, location, key),
+              storageRoot,
+              Function.identity(),
+              Function.identity());
 
-        // for manicured tries and composting, collect branches here (not implemented)
+      // for manicured tries and composting, collect branches here (not implemented)
 
-        for (final Map.Entry<Hash, BonsaiValue<UInt256>> storageUpdate :
-            storageAccountUpdate.getValue().entrySet()) {
-          final Hash keyHash = storageUpdate.getKey();
-          final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
-          if (updatedStorage == null || updatedStorage.equals(UInt256.ZERO)) {
-            stateUpdater.removeStorageValueBySlotHash(updatedAddressHash, keyHash);
-            storageTrie.remove(keyHash);
-          } else {
-            final Bytes32 updatedStorageBytes = updatedStorage.toBytes();
-            stateUpdater.putStorageValueBySlotHash(
-                updatedAddressHash, keyHash, updatedStorageBytes);
-            storageTrie.put(keyHash, BonsaiWorldView.encodeTrieValue(updatedStorageBytes));
-          }
+      for (final Map.Entry<Hash, BonsaiValue<UInt256>> storageUpdate :
+          storageAccountUpdate.getValue().entrySet()) {
+        final Hash keyHash = storageUpdate.getKey();
+        final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
+        if (updatedStorage == null || updatedStorage.equals(UInt256.ZERO)) {
+          stateUpdater.removeStorageValueBySlotHash(updatedAddressHash, keyHash);
+          storageTrie.remove(keyHash);
+        } else {
+          final Bytes32 updatedStorageBytes = updatedStorage.toBytes();
+          stateUpdater.putStorageValueBySlotHash(updatedAddressHash, keyHash, updatedStorageBytes);
+          storageTrie.put(keyHash, BonsaiWorldView.encodeTrieValue(updatedStorageBytes));
         }
+      }
 
-        final BonsaiAccount accountUpdated = accountValue.getUpdated();
-        if (accountUpdated != null) {
-          storageTrie.commit(
-              (location, key, value) ->
-                  writeStorageTrieNode(stateUpdater, updatedAddressHash, location, key, value));
-          final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
-          accountUpdated.setStorageRoot(newStorageRoot);
-        }
+      final BonsaiAccount accountUpdated = accountValue.getUpdated();
+      if (accountUpdated != null) {
+        storageTrie.commit(
+            (location, key, value) ->
+                writeStorageTrieNode(stateUpdater, updatedAddressHash, location, key, value));
+        final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
+        accountUpdated.setStorageRoot(newStorageRoot);
       }
       // for manicured tries and composting, trim and compost here
     }
@@ -202,10 +202,12 @@ public class BonsaiPersistedWorldState implements MutableWorldState, BonsaiWorld
       final BonsaiValue<BonsaiAccount> bonsaiValue = accountUpdate.getValue();
       final BonsaiAccount updatedAccount = bonsaiValue.getUpdated();
       if (updatedAccount == null) {
+        System.out.println("remove account " + bonsaiValue.toString());
         final Hash addressHash = Hash.hash(accountKey);
         accountTrie.remove(addressHash);
         stateUpdater.removeAccountInfoState(addressHash);
       } else {
+        System.out.println("updatedAccount account " + updatedAccount.toString());
         final Hash addressHash = updatedAccount.getAddressHash();
         final Bytes accountValue = updatedAccount.serializeAccount();
         stateUpdater.putAccountInfoState(Hash.hash(accountKey), accountValue);

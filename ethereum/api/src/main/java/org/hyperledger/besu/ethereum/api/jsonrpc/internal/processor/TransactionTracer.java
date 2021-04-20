@@ -135,6 +135,7 @@ public class TransactionTracer {
                 }
               }
               return Optional.of(traces);
+
             })
         .orElse(new ArrayList<>());
   }

@@ -18,6 +18,11 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
+import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
+
+import java.util.function.Supplier;
+
+import com.google.common.base.Suppliers;
 
 public class EthAccounts implements JsonRpcMethod {
 

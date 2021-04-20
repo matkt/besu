@@ -150,10 +150,12 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
   @Override
   public void commit() {
     for (final Address deletedAddress : getDeletedAccounts()) {
+      System.out.printf("Deleteing %s%n", deletedAddress.toHexString());
       final BonsaiValue<BonsaiAccount> accountValue =
           accountsToUpdate.computeIfAbsent(
               deletedAddress,
               __ -> loadAccountFromParent(deletedAddress, new BonsaiValue<>(null, null)));
+      final BonsaiAccount originalValue = accountValue.getPrior();
       storageToClear.add(deletedAddress);
       final BonsaiValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
       if (codeValue != null) {
@@ -174,14 +176,23 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
       while (iter.hasNext()) {
         final Map.Entry<Hash, BonsaiValue<UInt256>> updateEntry = iter.next();
         final BonsaiValue<UInt256> updatedSlot = updateEntry.getValue();
-        if (updatedSlot.getPrior() == null || updatedSlot.getPrior().isZero()) {
+        if (updatedSlot != null) {
+          System.out.printf(
+              " original = %s updated = %s%n", updatedSlot.getPrior(), updatedSlot.getUpdated());
+        }
+        if (updatedSlot.getPrior() == null
+            || updatedSlot.getPrior().isZero()
+            || originalValue == null) {
+          // if we are deleting an empty value we don't need to record a diff.
+          // if the old value was null, zero, or the old account didn't exist
+          // we can just remove it.
+          System.out.println("Removed");
           iter.remove();
         } else {
           updatedSlot.setUpdated(null);
         }
       }
 
-      final BonsaiAccount originalValue = accountValue.getPrior();
       if (originalValue != null) {
         // Enumerate and delete addresses not updated
         wrappedWorldView()
@@ -197,6 +208,8 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
       }
       if (deletedStorageUpdates.isEmpty()) {
         storageToUpdate.remove(deletedAddress);
+      } else {
+        System.out.println(storageToUpdate.get(deletedAddress));
       }
       accountValue.setUpdated(null);
     }
@@ -294,18 +307,20 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
 
   @Override
   public Optional<UInt256> getStorageValueBySlotHash(final Address address, final Hash slotHash) {
-    final Map<Hash, BonsaiValue<UInt256>> localAccountStorage = storageToUpdate.get(address);
-    if (localAccountStorage != null && localAccountStorage.containsKey(slotHash)) {
-      return Optional.ofNullable(localAccountStorage.get(slotHash).getUpdated());
+    if (address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")) {
+      new Exception("gettingStorage on problematic account").printStackTrace(System.out);
     }
-    final Optional<UInt256> valueUInt =
-        wrappedWorldView().getStorageValueBySlotHash(address, slotHash);
-    valueUInt.ifPresent(
-        v ->
-            storageToUpdate
-                .computeIfAbsent(address, key -> new HashMap<>())
-                .put(slotHash, new BonsaiValue<>(v, v)));
-    return valueUInt;
+    final Map<Hash, BonsaiValue<UInt256>> localAccountStorage =
+        storageToUpdate.computeIfAbsent(address, key -> new HashMap<>());
+    final BonsaiValue<UInt256> value = localAccountStorage.get(slotHash);
+    if (value != null) {
+      return Optional.ofNullable(value.getUpdated());
+    } else {
+      final Optional<UInt256> valueUInt =
+          wrappedWorldView().getStorageValueBySlotHash(address, slotHash);
+      valueUInt.ifPresent(v -> localAccountStorage.put(slotHash, new BonsaiValue<>(v, v)));
+      return valueUInt;
+    }
   }
 
   @Override
@@ -314,18 +329,28 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
     if (storageToClear.contains(address)) {
       return UInt256.ZERO;
     }
-    final Map<Hash, BonsaiValue<UInt256>> localAccountStorage = storageToUpdate.get(address);
-    final Hash slotHash = Hash.hash(storageKey.toBytes());
-    if (localAccountStorage != null && localAccountStorage.containsKey(slotHash)) {
-      final BonsaiValue<UInt256> value = localAccountStorage.get(slotHash);
+    final Map<Hash, BonsaiValue<UInt256>> localAccountStorage =
+        storageToUpdate.computeIfAbsent(address, key -> new HashMap<>());
+    final Hash slotHashBytes = Hash.hash(storageKey.toBytes());
+    final BonsaiValue<UInt256> value = localAccountStorage.get(slotHashBytes);
+    if (value != null) {
       final UInt256 updated = value.getUpdated();
       if (updated != null) {
+        if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+          System.out.println("loaded updated"+storageKey);
+        }
         return updated;
       }
       final UInt256 original = value.getPrior();
       if (original != null) {
+        if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+          System.out.println("loaded getPrior"+storageKey);
+        }
         return original;
       }
+    }
+    if(address.toHexString().equals("0xfb4384bc0b9246adb3897a059ac02bb79bbf00a1")){
+      System.out.println("getStorageValue"+storageKey);
     }
     return getStorageValue(address, storageKey);
   }

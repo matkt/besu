@@ -61,6 +61,16 @@ public class SStoreOperation extends AbstractOperation {
 
     final Address address = account.getAddress();
     final boolean slotIsWarm = frame.warmUpStorage(address, key.toBytes());
+    if(account.getAddress().toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7") || account.getAddressHash().toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")) {
+      System.out.printf(
+              "sstore before %s %s (%s) = %s after = %s original = %s%n",
+              address,
+              key,
+              slotIsWarm,
+              account.getStorageValue(key).toShortHexString(),
+              value.toShortHexString(),
+              account.getOriginalStorageValue(key).toShortHexString());
+    }
     final Gas cost =
         gasCalculator()
             .calculateStorageCost(account, key, value)

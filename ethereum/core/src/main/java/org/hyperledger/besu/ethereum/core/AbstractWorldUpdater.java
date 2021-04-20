@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * An abstract implementation of a {@link WorldUpdater} that buffers update over the {@link
@@ -196,6 +197,12 @@ public abstract class AbstractWorldUpdater<W extends WorldView, A extends Accoun
       // Our own updates should apply on top of the updates we're stacked on top, so our deletions
       // may kill some of "their" updates, and our updates may review some of the account "they"
       // deleted.
+      getDeletedAccounts().forEach(new Consumer<Address>() {
+        @Override
+        public void accept(final Address address) {
+          System.out.println("removed address "+address);
+        }
+      });
       getDeletedAccounts().forEach(wrapped.updatedAccounts::remove);
       getUpdatedAccounts().forEach(a -> wrapped.deletedAccounts.remove(a.getAddress()));
 

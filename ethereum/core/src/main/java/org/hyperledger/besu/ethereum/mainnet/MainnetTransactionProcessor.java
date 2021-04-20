@@ -251,7 +251,7 @@ public class MainnetTransactionProcessor {
       final TransactionValidationParams transactionValidationParams,
       final PrivateMetadataUpdater privateMetadataUpdater) {
     try {
-      LOG.trace("Starting execution of {}", transaction);
+      LOG.info("PLOUF Starting execution of {}", transaction);
       ValidationResult<TransactionInvalidReason> validationResult =
           transactionValidator.validate(transaction, blockHeader.getBaseFee());
       // Make sure the transaction is intrinsically valid before trying to
@@ -377,6 +377,12 @@ public class MainnetTransactionProcessor {
       // after the other so that if it is the same account somehow, we end up with the right result)
       final Gas selfDestructRefund =
           gasCalculator.getSelfDestructRefundAmount().times(initialFrame.getSelfDestructs().size());
+
+      LOG.info(
+          "PLOUF  {\"output\":\"{}\",\"gasUsed\":\"{}\",\"time\":0)",
+          initialFrame.getOutputData().toShortHexString(),
+          Gas.of(transaction.getGasLimit()).minus(initialFrame.getRemainingGas()));
+
       final Gas refundGas = initialFrame.getGasRefund().plus(selfDestructRefund);
       final Gas refunded = refunded(transaction, initialFrame.getRemainingGas(), refundGas);
       final Wei refundedWei = refunded.priceFor(transactionGasPrice);

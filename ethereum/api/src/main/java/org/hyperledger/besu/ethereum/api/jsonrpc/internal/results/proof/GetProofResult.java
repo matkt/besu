@@ -106,6 +106,10 @@ public class GetProofResult {
   public String getNonce() {
     return Quantity.create(nonce);
   }
+  public long getNonce2() {
+    return nonce;
+  }
+
 
   @JsonGetter(value = "storageHash")
   public String getStorageHash() {
