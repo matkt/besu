@@ -99,9 +99,6 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
   public void setWrappedAccount(final A account) {
     if (this.account == null) {
       this.account = account;
-      if(account.getAddress().toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
-        System.out.println("setWrappedAccount"+account.getAddress());
-      }
       storageWasCleared = false;
     } else {
       throw new IllegalStateException("Already tracking a wrapped account");

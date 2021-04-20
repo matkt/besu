@@ -358,6 +358,9 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
     if(address.toHexString().equals("0x01e8338b7931d21755586f119726a70cd7805bc7")){
       System.out.println("getStorageValue"+storageKey);
     }
+    if (storageToClear.contains(address)) {
+      return UInt256.ZERO;
+    }
     return getStorageValue(address, storageKey);
   }
 

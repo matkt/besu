@@ -187,7 +187,7 @@ public class EVM {
 
     traceLine.put("opName", frame.getCurrentOperation().getName());
     traceLine.put("error", error);
-    //LOG.info(traceLine.toString());
+    LOG.info(traceLine.toString());
     //    }
   }
 
