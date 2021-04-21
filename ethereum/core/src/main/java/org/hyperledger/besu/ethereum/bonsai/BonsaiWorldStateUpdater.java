@@ -278,6 +278,10 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
         storageToUpdate.remove(updatedAddress);
       }
 
+      if (tracked.getStorageWasCleared()) {
+        tracked.setStorageWasCleared(false); //already cleared on this transaction
+      }
+
       // TODO maybe add address preimage?
     }
   }

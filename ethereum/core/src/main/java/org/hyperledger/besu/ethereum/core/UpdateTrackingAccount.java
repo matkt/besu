@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.hyperledger.besu.ethereum.bonsai.BonsaiAccount;
 
 /**
  * A implementation of {@link MutableAccount} that tracks updates made to the account since the
@@ -99,6 +100,7 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
   public void setWrappedAccount(final A account) {
     if (this.account == null) {
       this.account = account;
+      System.out.println(account.getAddress().toHexString() +" storageWasCleared "+storageWasCleared);
       storageWasCleared = false;
     } else {
       throw new IllegalStateException("Already tracking a wrapped account");
@@ -219,16 +221,16 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
 
   @Override
   public UInt256 getOriginalStorageValue(final UInt256 key) {
-    if (transactionBoundary) {
-      System.out.println("par ici ");
-      return getStorageValue(key);
-    } else if (storageWasCleared || account == null) {
-      System.out.println("oula ");
-      return UInt256.ZERO;
-    } else {
-      System.out.println("par la "+account.getClass());
-      return account.getOriginalStorageValue(key);
-    }
+      if (transactionBoundary) {
+        System.out.println("par ici ");
+        return getStorageValue(key);
+      } else if ((storageWasCleared || account == null)) {
+        System.out.println("oula ");
+        return UInt256.ZERO;
+      } else {
+        System.out.println("par la "+account.getClass());
+        return account.getOriginalStorageValue(key);
+      }
   }
 
   @Override
@@ -258,12 +260,17 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount,
 
   @Override
   public void clearStorage() {
+    System.out.println(address.toHexString()+" clearStorage ");
     storageWasCleared = true;
     updatedStorage.clear();
   }
 
   public boolean getStorageWasCleared() {
     return storageWasCleared;
+  }
+
+  public void setStorageWasCleared(final boolean storageWasCleared) {
+    this.storageWasCleared = storageWasCleared;
   }
 
   @Override

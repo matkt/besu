@@ -126,6 +126,7 @@ public class MainnetContractCreationProcessor extends AbstractMessageProcessor {
       } else {
         contract.incrementBalance(frame.getValue());
         contract.setNonce(initialContractNonce);
+        System.out.println("new contract");
         contract.clearStorage();
         frame.setState(MessageFrame.State.CODE_EXECUTING);
       }
