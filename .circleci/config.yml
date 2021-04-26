@@ -7,9 +7,6 @@ executors:
   besu_executor_med: # 2cpu, 4G ram
     docker:
       - image: circleci/openjdk:11.0.8-jdk-buster
-        auth:
-          username: $DOCKER_USER_RO
-          password: $DOCKER_PASSWORD_RO
     resource_class: medium
     working_directory: ~/project
     environment:
@@ -18,9 +15,6 @@ executors:
   besu_executor_xl: # 8cpu, 16G ram
     docker:
       - image: circleci/openjdk:11.0.8-jdk-buster
-        auth:
-          username: $DOCKER_USER_RO
-          password: $DOCKER_PASSWORD_RO
     resource_class: xlarge
     working_directory: ~/project
     environment:
@@ -30,11 +24,29 @@ executors:
     machine:
       image: ubuntu-2004:202010-01
 
+  acceptance_tests_executor:
+    machine:
+      image: ubuntu-2004:202101-01
+    resource_class: xlarge
+
 notify:
   webhooks:
     - url: $HUBOT_URL
 
 commands:
+
+  check-tests-needed:
+    description: "Checks if tests are needed"
+    steps:
+      - checkout
+      - run:
+          name: Checking for changes
+          command: |
+            changes=`git --no-pager diff --name-only master...HEAD`
+            if [ "$changes" = ".circleci/config.yml" ]; then
+              echo "Only found a CHANGELOG change. Stopping build"
+              circleci-agent step halt
+            fi
   prepare:
     description: "Prepare"
     steps:
@@ -82,6 +94,7 @@ jobs:
   assemble:
     executor: besu_executor_xl
     steps:
+      - check-tests-needed
       - prepare
       - run:
           name: DCO check
@@ -103,12 +116,15 @@ jobs:
             - ./
       - store_artifacts:
           name: Distribution artifacts
-          path:  build/distributions
+          path: build/distributions
           destination: distributions
           when: always
   testWindows:
-    executor: win/default
+    executor:
+      name: win/default
+      shell: bash.exe
     steps:
+      - check-tests-needed
       - attach_workspace:
           at: ~/project
       - run:
@@ -123,12 +139,13 @@ jobs:
           name: Test Besu Windows executable
           no_output_timeout: 10m
           command: |
-            build\distributions\besu\bin\besu.bat --help
-            build\distributions\besu\bin\besu.bat --version
+            ./build/distributions/besu/bin/besu.bat --help
+            ./build/distributions/besu/bin/besu.bat --version
 
   unitTests:
     executor: besu_executor_xl
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -142,6 +159,7 @@ jobs:
   integrationTests:
     executor: besu_executor_xl
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -162,6 +180,7 @@ jobs:
   referenceTests:
     executor: besu_executor_xl
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -177,6 +196,7 @@ jobs:
     parallelism: 8
     executor: besu_executor_xl
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -199,6 +219,7 @@ jobs:
     parallelism: 1
     executor: machine_executor
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -208,9 +229,28 @@ jobs:
           command: ./gradlew --no-daemon containerTests -i
       - capture_test_results
 
+  acceptanceTestsQuorum:
+    parallelism: 1
+    executor: acceptance_tests_executor
+    steps:
+      - check-tests-needed
+      - prepare
+      - attach_workspace:
+          at: ~/project
+      - run:
+          name: Quorum Acceptance Tests (failures ignored)
+          no_output_timeout: 40m
+          command: ./gradlew --no-daemon acceptanceTestsQuorum || true # ignore result of job for now, until all issues are fixed
+      - store_artifacts:
+          path: build/quorum-at
+          destination: quorum-at-artifacts
+      - store_test_results:
+          path: build/quorum-at/openjdk-latest/reports/xml-report
+
   buildDocker:
     executor: besu_executor_med
     steps:
+      - check-tests-needed
       - prepare
       - attach_workspace:
           at: ~/project
@@ -272,36 +312,27 @@ workflows:
       - unitTests:
           requires:
             - assemble
-          context:
-            - besu-dockerhub-ro
       - testWindows:
           requires:
             - assemble
       - referenceTests:
           requires:
             - assemble
-          context:
-            - besu-dockerhub-ro            
       - integrationTests:
           requires:
             - assemble
-          context:
-            - besu-dockerhub-ro            
       - acceptanceTests:
           requires:
             - assemble
-          context:
-            - besu-dockerhub-ro
+      - acceptanceTestsQuorum:
+          requires:
+            - buildDocker
       - containerTests:
           requires:
             - assemble
-          context:
-            - besu-dockerhub-ro
       - buildDocker:
           requires:
-            - unitTests
-          context:
-            - besu-dockerhub-ro            
+            - assemble
       - publish:
           filters:
             branches:
@@ -315,9 +346,6 @@ workflows:
             - acceptanceTests
             - referenceTests
             - buildDocker
-            - buildDocker
-          context:
-            - besu-dockerhub-ro
       - publishDocker:
           filters:
             branches:
