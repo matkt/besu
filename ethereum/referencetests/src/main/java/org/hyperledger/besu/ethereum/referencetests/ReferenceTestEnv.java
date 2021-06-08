@@ -25,6 +25,8 @@ import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.LogsBloomFilter;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 
+import java.util.Optional;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -49,7 +51,8 @@ public class ReferenceTestEnv extends BlockHeader {
       @JsonProperty("currentDifficulty") final String difficulty,
       @JsonProperty("currentGasLimit") final String gasLimit,
       @JsonProperty("currentNumber") final String number,
-      @JsonProperty("currentTimestamp") final String timestamp) {
+      @JsonProperty("currentTimestamp") final String timestamp,
+      @JsonProperty(value = "currentBaseFee") final String baseFee) {
     super(
         generateTestBlockHash(Long.decode(number) - 1),
         Hash.EMPTY, // ommersHash
@@ -64,7 +67,7 @@ public class ReferenceTestEnv extends BlockHeader {
         0L,
         Long.decode(timestamp),
         Bytes.EMPTY,
-        0L,
+        Optional.ofNullable(baseFee).map(Long::decode).orElse(0L),
         Hash.ZERO,
         0L,
         new MainnetBlockHeaderFunctions());
