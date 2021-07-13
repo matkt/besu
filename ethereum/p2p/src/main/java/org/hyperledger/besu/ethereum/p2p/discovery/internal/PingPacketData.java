@@ -72,12 +72,14 @@ public class PingPacketData implements PacketData {
     in.enterList();
     // The first element signifies the "version", but this value is ignored as of EIP-8
     in.readBigIntegerScalar();
-    final Optional<Endpoint> from = Endpoint.maybeDecodeStandalone(in);
+    final Optional<Endpoint> from = Optional.empty();
+    in.skipNext();
     final Endpoint to = Endpoint.decodeStandalone(in);
-    final long expiration = in.readLongScalar();
+    long expiration = in.readLongScalar();
+
     UInt64 enrSeq = null;
     if (!in.isEndOfCurrentList()) {
-      enrSeq = UInt64.fromBytes(in.readBytes());
+      enrSeq = UInt64.valueOf(in.readLongScalar());;
     }
     in.leaveListLenient();
     return new PingPacketData(from, to, expiration, enrSeq);
@@ -95,13 +97,7 @@ public class PingPacketData implements PacketData {
         .encodeStandalone(out);
     to.encodeStandalone(out);
     out.writeLongScalar(expiration);
-    out.writeBytes(
-        getEnrSeq()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Attempting to serialize invalid PING packet. Missing 'enrSeq' field"))
-            .toBytes());
+    out.writeLongScalar(enrSeq.toLong());
     out.endList();
   }
 

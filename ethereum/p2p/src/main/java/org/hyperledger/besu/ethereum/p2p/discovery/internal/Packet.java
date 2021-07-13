@@ -123,6 +123,7 @@ public class Packet {
     } catch (final RLPException e) {
       throw new PeerDiscoveryPacketDecodingException("Malformed packet of type: " + packetType, e);
     } catch (final IllegalArgumentException e) {
+      new IllegalArgumentException(e).printStackTrace(System.out);
       throw new PeerDiscoveryPacketDecodingException(
           "Failed decoding packet of type: " + packetType, e);
     }

@@ -57,7 +57,7 @@ public class PongPacketData implements PacketData {
     final long expiration = in.readLongScalar();
     UInt64 enrSeq = null;
     if (!in.isEndOfCurrentList()) {
-      enrSeq = UInt64.fromBytes(in.readBytes());
+      enrSeq = UInt64.valueOf(in.readLongScalar());
     }
     in.leaveListLenient();
     return new PongPacketData(to, hash, expiration, enrSeq);
@@ -69,13 +69,7 @@ public class PongPacketData implements PacketData {
     to.encodeStandalone(out);
     out.writeBytes(pingHash);
     out.writeLongScalar(expiration);
-    out.writeBytes(
-        getEnrSeq()
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Attempting to serialize invalid PONG packet. Missing 'enrSeq' field"))
-            .toBytes());
+    out.writeLongScalar(enrSeq.toLong());
     out.endList();
   }
 
