@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.WorldState;
 import org.hyperledger.besu.ethereum.proof.WorldStateProof;
+import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 
@@ -48,8 +49,10 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
 
   private final BonsaiPersistedWorldState persistedState;
   private final Map<Bytes32, BonsaiLayeredWorldState> layeredWorldStatesByHash;
+  private final Map<Bytes32, BonsaiLayeredWorldState> layeredWorldStatesByRoot;
   private final BonsaiWorldStateKeyValueStorage worldStateStorage;
   private final long maxLayersToLoad;
+  private final WorldStateProofProvider worldStateProof;
 
   public BonsaiWorldStateArchive(final StorageProvider provider, final Blockchain blockchain) {
     this(provider, blockchain, RETAINED_LAYERS, new HashMap<>());
@@ -70,6 +73,7 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
     this.worldStateStorage = new BonsaiWorldStateKeyValueStorage(provider);
     this.persistedState = new BonsaiPersistedWorldState(this, worldStateStorage);
     this.layeredWorldStatesByHash = layeredWorldStatesByHash;
+    this.layeredWorldStatesByRoot = new HashMap<>();
     this.maxLayersToLoad = maxLayersToLoad;
     blockchain.observeBlockAdded(
         event -> {
@@ -82,10 +86,13 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
                     bonsaiLayeredWorldState.setNextWorldView(
                         Optional.of(layeredWorldStatesByHash.get(eventBlockHeader.getHash())));
                   }
+                  layeredWorldStatesByRoot.put(eventBlockHeader.getStateRoot(), bonsaiLayeredWorldState);
                   return bonsaiLayeredWorldState;
                 });
           }
         });
+
+    this.worldStateProof = new WorldStateProofProvider(worldStateStorage);
   }
 
   @Override
@@ -94,6 +101,14 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
       return Optional.of(layeredWorldStatesByHash.get(blockHash));
     } else if (rootHash.equals(persistedState.blockHash())) {
       return Optional.of(persistedState);
+    } else {
+      return Optional.empty();
+    }
+  }
+
+  public Optional<WorldState> get(final Hash rootHash) {
+    if (layeredWorldStatesByRoot.containsKey(rootHash)) {
+      return Optional.of(layeredWorldStatesByRoot.get(rootHash));
     } else {
       return Optional.empty();
     }
@@ -263,9 +278,16 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
       final Hash worldStateRoot,
       final Address accountAddress,
       final List<UInt256> accountStorageKeys) {
-    // FIXME we can do proofs for layered tries and the persisted trie
-    return Optional.empty();
+    return worldStateProof.getAccountProof(worldStateRoot, accountAddress, accountStorageKeys);
   }
+
+  public List<Bytes> getAccountProof(
+          final Hash worldStateRoot,
+          final Hash accountHash,
+          final List<UInt256> accountStorageKeys) {
+    return worldStateProof.getProofRelatedNodes(worldStateRoot, accountHash, accountStorageKeys);
+  }
+
 
   void scrubLayeredCache(final long newMaxHeight) {
     final long waterline = newMaxHeight - RETAINED_LAYERS;

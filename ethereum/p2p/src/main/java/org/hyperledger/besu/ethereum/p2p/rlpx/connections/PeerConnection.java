@@ -54,6 +54,7 @@ public interface PeerConnection {
   default Capability capability(final String protocol) {
     for (final Capability cap : getAgreedCapabilities()) {
       if (cap.getName().equalsIgnoreCase(protocol)) {
+        System.out.println("protocol "+protocol);
         return cap;
       }
     }

@@ -85,7 +85,7 @@ public class ChainHeadTracker implements ConnectCallback {
               } else {
                 LOG.debug(
                     "Failed to retrieve chain head information. Disconnecting " + peer, error);
-                peer.disconnect(DisconnectReason.USELESS_PEER);
+               // peer.disconnect(DisconnectReason.USELESS_PEER);
               }
             });
   }

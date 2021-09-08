@@ -44,6 +44,9 @@ public class CapabilityMultiplexer {
     for (final SubProtocol subProtocol : subProtocols) {
       this.subProtocols.put(subProtocol.getName(), subProtocol);
     }
+    for (final SubProtocol subProtocol : subProtocols) {
+      this.subProtocols.put("snap", subProtocol);
+    }
     agreedCaps = calculateAgreedCapabilities(a, b);
     capabilityOffsets = calculateCapabilityOffsets(agreedCaps);
   }
@@ -78,7 +81,7 @@ public class CapabilityMultiplexer {
   public ProtocolMessage demultiplex(final MessageData receivedMessage) {
     final Map.Entry<Range<Integer>, Capability> agreedCap =
         agreedCaps.getEntry(receivedMessage.getCode());
-
+    System.out.println("demultiplex "+agreedCap);
     if (agreedCap == null) {
       return new ProtocolMessage(null, receivedMessage);
     }
@@ -115,6 +118,7 @@ public class CapabilityMultiplexer {
     final List<Capability> caps = new ArrayList<>(a);
     caps.sort(CAPABILITY_COMPARATOR);
     caps.retainAll(b);
+    System.out.println(a + " " + b);
 
     final ImmutableRangeMap.Builder<Integer, Capability> builder = ImmutableRangeMap.builder();
     // Reserve some messages for WireProtocol
@@ -130,6 +134,8 @@ public class CapabilityMultiplexer {
       prevProtocol = curProtocol;
       final SubProtocol subProtocol = subProtocols.get(cap.getName());
       final int messageSpace = subProtocol == null ? 0 : subProtocol.messageSpace(cap.getVersion());
+
+      System.out.println(messageSpace);
       if (messageSpace > 0) {
         builder.put(Range.closedOpen(offset, offset + messageSpace), cap);
       }

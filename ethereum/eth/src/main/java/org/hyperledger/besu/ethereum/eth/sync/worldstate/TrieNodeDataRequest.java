@@ -26,7 +26,7 @@ import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
 
-abstract class TrieNodeDataRequest extends NodeDataRequest {
+public abstract class TrieNodeDataRequest extends NodeDataRequest {
 
   protected TrieNodeDataRequest(
       final RequestType requestType, final Hash hash, final Optional<Bytes> location) {

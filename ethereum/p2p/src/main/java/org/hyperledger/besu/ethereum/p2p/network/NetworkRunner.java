@@ -110,9 +110,11 @@ public class NetworkRunner implements AutoCloseable {
     for (final ProtocolManager protocolManager : protocolManagers) {
       for (final Capability supportedCapability : protocolManager.getSupportedCapabilities()) {
         final SubProtocol protocol = subProtocols.get(supportedCapability.getName());
+        System.out.println("Getname "+supportedCapability.getName());
         network.subscribe(
             supportedCapability,
             (cap, message) -> {
+              System.out.println("ici "+cap.getName());
               final int code = message.getData().getCode();
               if (!protocol.isValidMessageCode(cap.getVersion(), code)) {
                 inboundMessageCounter.labels(cap.toString(), "Invalid", "").inc();
@@ -174,6 +176,9 @@ public class NetworkRunner implements AutoCloseable {
       final Map<String, SubProtocol> subProtocolMap = new HashMap<>();
       for (final SubProtocol subProtocol : subProtocols) {
         subProtocolMap.put(subProtocol.getName(), subProtocol);
+      }
+      for (final SubProtocol subProtocol : subProtocols) {
+        subProtocolMap.put("snap", subProtocol);
       }
       final List<Capability> caps =
           protocolManagers.stream()

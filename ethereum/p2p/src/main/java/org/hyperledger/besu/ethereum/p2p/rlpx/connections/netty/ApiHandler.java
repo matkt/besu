@@ -54,6 +54,7 @@ final class ApiHandler extends SimpleChannelInboundHandler<MessageData> {
 
   @Override
   protected void channelRead0(final ChannelHandlerContext ctx, final MessageData originalMessage) {
+    System.out.println("channelRead0 "+originalMessage);
     final CapabilityMultiplexer.ProtocolMessage demultiplexed =
         multiplexer.demultiplex(originalMessage);
 

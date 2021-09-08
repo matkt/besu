@@ -200,6 +200,7 @@ public final class StatusMessage extends AbstractMessageData {
       in.enterList();
 
       final int protocolVersion = in.readIntScalar();
+      System.out.println("protocolVersion "+protocolVersion);
       final BigInteger networkId = in.readBigIntegerScalar();
       final Difficulty totalDifficulty = Difficulty.of(in.readUInt256Scalar());
       final Hash bestHash = Hash.wrap(in.readBytes32());

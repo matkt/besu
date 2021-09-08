@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.bonsai;
 
 import org.hyperledger.besu.ethereum.core.Hash;
+import org.hyperledger.besu.ethereum.core.WorldState;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.MerklePatriciaTrie;
@@ -23,11 +24,18 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 
 public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
@@ -40,6 +48,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
   protected final KeyValueStorage codeStorage;
   protected final KeyValueStorage storageStorage;
   protected final KeyValueStorage trieBranchStorage;
+  protected final KeyValueStorage snapTrieBranchBucketStorage;
   protected final KeyValueStorage trieLogStorage;
 
   public BonsaiWorldStateKeyValueStorage(final StorageProvider provider) {
@@ -52,6 +61,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE);
     trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
+    snapTrieBranchBucketStorage =
+            provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE_BUCKET);
   }
 
   public BonsaiWorldStateKeyValueStorage(
@@ -59,11 +70,13 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
       final KeyValueStorage codeStorage,
       final KeyValueStorage storageStorage,
       final KeyValueStorage trieBranchStorage,
+      final KeyValueStorage snapTrieBranchBucketStorage,
       final KeyValueStorage trieLogStorage) {
     this.accountStorage = accountStorage;
     this.codeStorage = codeStorage;
     this.storageStorage = storageStorage;
     this.trieBranchStorage = trieBranchStorage;
+    this.snapTrieBranchBucketStorage = snapTrieBranchBucketStorage;
     this.trieLogStorage = trieLogStorage;
   }
 
@@ -76,6 +89,28 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     return accountStorage.get(accountHash.toArrayUnsafe()).map(Bytes::wrap);
   }
 
+  public List<Bytes32> streamAccounts(final Bytes32 startKeyHash, final Bytes32 endKeyHash) {
+    System.out.println(startKeyHash);
+    List<Bytes32> hashes = new ArrayList<>();
+    final Iterator<Bytes> iterator = accountStorage
+            .streamKeys()
+            .sorted()
+            .map(Bytes::wrap).iterator();
+    while (iterator.hasNext()){
+      Bytes32 hash = Bytes32.wrap(iterator.next());
+      if(hash.compareTo(startKeyHash) >= 0) {
+        hashes.add(hash);
+      }
+      if(hash.compareTo(endKeyHash) > 0){
+        break;
+      }
+    }
+
+    System.out.println(hashes);
+
+    return hashes;
+  }
+
   @Override
   public Optional<Bytes> getAccountTrieNodeData(final Bytes location, final Bytes32 hash) {
     // for Bonsai trie fast sync this method should return an empty
@@ -84,12 +119,21 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
   @Override
   public Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
+    return getAccountStateTrieNode(Optional.empty(), location, nodeHash);
+  }
+  @Override
+  public Optional<Bytes> getAccountStateTrieNode(final Optional<Hash> stateRoot, final Bytes location, final Bytes32 nodeHash) {
     if (nodeHash.equals(MerklePatriciaTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerklePatriciaTrie.EMPTY_TRIE_NODE);
     } else {
-      return trieBranchStorage.get(location.toArrayUnsafe()).map(Bytes::wrap);
+      System.out.println("stateroot"+stateRoot+" "+location);
+      return stateRoot.map(hash -> snapTrieBranchBucketStorage.get(Bytes.concatenate(hash, location).toArrayUnsafe())
+              .map(Bytes::wrap))
+              .orElseGet(() -> trieBranchStorage.get(location.toArrayUnsafe()).map(Bytes::wrap));
     }
   }
+
+
 
   @Override
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -102,6 +146,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
           .map(Bytes::wrap);
     }
   }
+
 
   public Optional<byte[]> getTrieLog(final Hash blockHash) {
     return trieLogStorage.get(blockHash.toArrayUnsafe());
@@ -156,6 +201,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
         codeStorage.startTransaction(),
         storageStorage.startTransaction(),
         trieBranchStorage.startTransaction(),
+            snapTrieBranchBucketStorage.startTransaction(),
         trieLogStorage.startTransaction());
   }
 
@@ -180,19 +226,21 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     private final KeyValueStorageTransaction codeStorageTransaction;
     private final KeyValueStorageTransaction storageStorageTransaction;
     private final KeyValueStorageTransaction trieBranchStorageTransaction;
+    private final KeyValueStorageTransaction snapTrieBranchBucketStorageTransaction;
     private final KeyValueStorageTransaction trieLogStorageTransaction;
-
     public Updater(
         final KeyValueStorageTransaction accountStorageTransaction,
         final KeyValueStorageTransaction codeStorageTransaction,
         final KeyValueStorageTransaction storageStorageTransaction,
         final KeyValueStorageTransaction trieBranchStorageTransaction,
+        final KeyValueStorageTransaction snapTrieBranchBucketStorageTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction) {
 
       this.accountStorageTransaction = accountStorageTransaction;
       this.codeStorageTransaction = codeStorageTransaction;
       this.storageStorageTransaction = storageStorageTransaction;
       this.trieBranchStorageTransaction = trieBranchStorageTransaction;
+      this.snapTrieBranchBucketStorageTransaction = snapTrieBranchBucketStorageTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
     }
 
@@ -233,8 +281,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     }
 
     @Override
-    public Updater putAccountStateTrieNode(
-        final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+    public Updater putAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash, final Bytes node) {
       if (nodeHash.equals(MerklePatriciaTrie.EMPTY_TRIE_NODE_HASH)) {
         // Don't save empty nodes
         return this;
@@ -276,6 +323,10 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
       return trieBranchStorageTransaction;
     }
 
+    public KeyValueStorageTransaction getSnapTrieBranchBucketStorageTransaction() {
+      return snapTrieBranchBucketStorageTransaction;
+    }
+
     public KeyValueStorageTransaction getTrieLogStorageTransaction() {
       return trieLogStorageTransaction;
     }
@@ -286,6 +337,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
       codeStorageTransaction.commit();
       storageStorageTransaction.commit();
       trieBranchStorageTransaction.commit();
+      snapTrieBranchBucketStorageTransaction.commit();
       trieLogStorageTransaction.commit();
     }
 
@@ -295,6 +347,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
       codeStorageTransaction.rollback();
       storageStorageTransaction.rollback();
       trieBranchStorageTransaction.rollback();
+      snapTrieBranchBucketStorageTransaction.rollback();
       trieLogStorageTransaction.rollback();
     }
   }

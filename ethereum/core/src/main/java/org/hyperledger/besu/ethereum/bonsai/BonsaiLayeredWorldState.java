@@ -24,6 +24,8 @@ import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.WorldState;
 import org.hyperledger.besu.ethereum.core.WorldUpdater;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 
 import java.util.HashMap;
@@ -34,6 +36,9 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+
+import static org.hyperledger.besu.ethereum.bonsai.BonsaiAccount.fromRLP;
 
 /** A World State backed first by trie log layer and then by another world state. */
 public class BonsaiLayeredWorldState implements MutableWorldState, BonsaiWorldView, WorldState {
@@ -206,6 +211,7 @@ public class BonsaiLayeredWorldState implements MutableWorldState, BonsaiWorldVi
     return results;
   }
 
+
   @Override
   public Account get(final Address address) {
     // this must be iterative and lambda light because the stack may blow up
@@ -236,6 +242,34 @@ public class BonsaiLayeredWorldState implements MutableWorldState, BonsaiWorldVi
     return null;
   }
 
+  public StateTrieAccountValue get(final Hash hash) {
+    // this must be iterative and lambda light because the stack may blow up
+    // mainly because we don't have tail calls.
+    BonsaiLayeredWorldState currentLayer = this;
+    while (currentLayer != null) {
+      final Optional<StateTrieAccountValue> maybeStateTrieAccount =
+              currentLayer.trieLog.getAccount(hash);
+      final Optional<StateTrieAccountValue> maybePriorStateTrieAccount =
+              currentLayer.trieLog.getPriorAccount(hash);
+      if (currentLayer == this && maybeStateTrieAccount.isPresent()) {
+        return  maybeStateTrieAccount.get();
+      } else if (maybePriorStateTrieAccount.isPresent()) {
+        return  maybeStateTrieAccount.get();
+      } else if (maybeStateTrieAccount.isPresent()) {
+        return null;
+      }
+      if (currentLayer.getNextWorldView().isEmpty()) {
+        currentLayer = null;
+      } else if (currentLayer.getNextWorldView().get() instanceof BonsaiLayeredWorldState) {
+        currentLayer = (BonsaiLayeredWorldState) currentLayer.getNextWorldView().get();
+      } else {
+        return StateTrieAccountValue.readFrom(RLP.input(((BonsaiPersistedWorldState)currentLayer.getNextWorldView().get()).getWorldStateStorage().getAccount(hash).get()));
+      }
+    }
+    return null;
+  }
+
+
   @Override
   public Hash rootHash() {
     return worldStateRootHash;
@@ -253,7 +287,33 @@ public class BonsaiLayeredWorldState implements MutableWorldState, BonsaiWorldVi
 
   @Override
   public Stream<StreamableAccount> streamAccounts(final Bytes32 startKeyHash, final int limit) {
-    throw new UnsupportedOperationException("Bonsai does not support pruning and debug RPCs");
+    return null;
+  }
+  
+  public Stream<SnapAccount> streamAccounts(final Bytes32 startKeyHash, final Bytes32 endKeyHash) {
+    final BonsaiWorldStateKeyValueStorage worldStateStorage =
+            ((BonsaiPersistedWorldState) archive.getMutable()).getWorldStateStorage();
+    return worldStateStorage
+            .streamAccounts(startKeyHash, endKeyHash).stream()
+            .map(account -> new SnapAccount(Hash.wrap(account), get(Hash.wrap(account))));
+  }
+
+  public static class SnapAccount {
+    Hash accountHash;
+            StateTrieAccountValue stateTrieAccountValue;
+
+    public SnapAccount(final Hash accountHash, final StateTrieAccountValue stateTrieAccountValue) {
+      this.accountHash = accountHash;
+      this.stateTrieAccountValue = stateTrieAccountValue;
+    }
+
+    public Hash getAccountHash() {
+      return accountHash;
+    }
+
+    public StateTrieAccountValue getStateTrieAccountValue() {
+      return stateTrieAccountValue;
+    }
   }
 
   @Override
@@ -267,6 +327,7 @@ public class BonsaiLayeredWorldState implements MutableWorldState, BonsaiWorldVi
             bonsaiPersistedWorldState.getWorldStateStorage().codeStorage,
             bonsaiPersistedWorldState.getWorldStateStorage().storageStorage,
             bonsaiPersistedWorldState.getWorldStateStorage().trieBranchStorage,
+                bonsaiPersistedWorldState.getWorldStateStorage().snapTrieBranchBucketStorage,
             bonsaiPersistedWorldState.getWorldStateStorage().trieLogStorage));
   }
 

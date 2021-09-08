@@ -22,6 +22,7 @@ import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.NodeDataRequest;
+import org.hyperledger.besu.ethereum.eth.sync.worldstate.SnapWorldStateDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloader;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
@@ -88,16 +89,10 @@ public class FastDownloaderFactory {
             getStateQueueDirectory(dataDirectory),
             metricsSystem,
             syncConfig.getWorldStateTaskCacheSize());
-    final WorldStateDownloader worldStateDownloader =
-        new WorldStateDownloader(
+    final SnapWorldStateDownloader worldStateDownloader =
+        new SnapWorldStateDownloader(
             ethContext,
             worldStateStorage,
-            taskCollection,
-            syncConfig.getWorldStateHashCountPerRequest(),
-            syncConfig.getWorldStateRequestParallelism(),
-            syncConfig.getWorldStateMaxRequestsWithoutProgress(),
-            syncConfig.getWorldStateMinMillisBeforeStalling(),
-            clock,
             metricsSystem);
     final FastSyncDownloader fastSyncDownloader =
         new FastSyncDownloader(

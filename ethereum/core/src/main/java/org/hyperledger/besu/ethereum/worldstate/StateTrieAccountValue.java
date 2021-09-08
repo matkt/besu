@@ -145,4 +145,13 @@ public class StateTrieAccountValue {
 
     return new StateTrieAccountValue(nonce, balance, storageRoot, codeHash, version);
   }
+
+  public void toRLP(final RLPOutput out) {
+    out.startList();
+    out.writeLongScalar(nonce);
+    out.writeUInt256Scalar(balance);
+    out.writeBytes(storageRoot);
+    out.writeBytes(codeHash);
+    out.endList();
+  }
 }

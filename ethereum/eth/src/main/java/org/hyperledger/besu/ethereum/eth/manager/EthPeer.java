@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.eth.messages.EthPV62;
 import org.hyperledger.besu.ethereum.eth.messages.EthPV63;
 import org.hyperledger.besu.ethereum.eth.messages.EthPV65;
+import org.hyperledger.besu.ethereum.eth.messages.GetAccountRangeMessage;
 import org.hyperledger.besu.ethereum.eth.messages.GetBlockBodiesMessage;
 import org.hyperledger.besu.ethereum.eth.messages.GetBlockHeadersMessage;
 import org.hyperledger.besu.ethereum.eth.messages.GetNodeDataMessage;
@@ -188,6 +189,12 @@ public class EthPeer {
     }
   }
 
+
+  public RequestManager.ResponseStream sendSnapMessage(final MessageData messageData) throws PeerNotConnected {
+    connection.send(Capability.create("snap",1), messageData);
+    return null;
+  }
+
   public RequestManager.ResponseStream getHeadersByHash(
       final Hash hash, final int maxHeaders, final int skip, final boolean reverse)
       throws PeerNotConnected {
@@ -227,6 +234,17 @@ public class EthPeer {
       throws PeerNotConnected {
     final GetNodeDataMessage message = GetNodeDataMessage.create(nodeHashes);
     return sendRequest(nodeDataRequestManager, message);
+  }
+
+
+  public RequestManager.ResponseStream getAccountRange(
+                                                       final long requestId,
+                                                       final Hash rootHash,
+                                                       final Hash startingHash,
+                                                       final Hash endingHash)
+          throws PeerNotConnected {
+    final GetAccountRangeMessage message = GetAccountRangeMessage.create(requestId, rootHash, startingHash, endingHash);
+    return sendSnapMessage(message);
   }
 
   public RequestManager.ResponseStream getPooledTransactions(final List<Hash> hashes)

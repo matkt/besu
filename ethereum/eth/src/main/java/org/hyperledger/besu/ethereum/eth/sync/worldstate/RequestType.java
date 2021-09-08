@@ -17,7 +17,8 @@ package org.hyperledger.besu.ethereum.eth.sync.worldstate;
 public enum RequestType {
   ACCOUNT_TRIE_NODE((byte) 1),
   STORAGE_TRIE_NODE((byte) 2),
-  CODE((byte) 3);
+  CODE((byte) 3),
+  ACCOUNT_DATA_RANGE((byte) 0),;
 
   private final byte value;
 

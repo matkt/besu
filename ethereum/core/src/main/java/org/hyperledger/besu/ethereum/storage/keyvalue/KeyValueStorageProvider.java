@@ -88,6 +88,10 @@ public class KeyValueStorageProvider implements StorageProvider {
     return storageInstances.computeIfAbsent(segment, storageCreator);
   }
 
+  public KeyValueStorage getStorageByName(final SegmentIdentifier segment) {
+    return storageInstances.computeIfAbsent(segment, storageCreator);
+  }
+
   @Override
   public WorldStateStorage createPrivateWorldStateStorage() {
     return new WorldStateKeyValueStorage(

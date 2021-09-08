@@ -19,10 +19,12 @@ import org.hyperledger.besu.ethereum.core.Hash;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.Proof;
+import org.hyperledger.besu.ethereum.trie.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.Optional;
@@ -39,6 +41,46 @@ public class WorldStateProofProvider {
 
   public WorldStateProofProvider(final WorldStateStorage worldStateStorage) {
     this.worldStateStorage = worldStateStorage;
+  }
+
+  public void verifyRangeProof(){
+    MerklePatriciaTrie<Bytes, Bytes> trie = new SimpleMerklePatriciaTrie<>(b -> b);
+
+  }
+
+  public Optional<WorldStateProof> getAccountProof(
+          final Hash worldStateRoot,
+          final Hash accountHash,
+          final List<UInt256> accountStorageKeys) {
+    if (!worldStateStorage.isWorldStateAvailable(worldStateRoot, null)) {
+      return Optional.empty();
+    } else {
+      final Proof<Bytes> accountProof =
+              newAccountStateTrie(worldStateRoot).getValueWithProof(accountHash);
+      return accountProof
+              .getValue()
+              .map(RLP::input)
+              .map(StateTrieAccountValue::readFrom)
+              .map(
+                      account -> {
+                        final SortedMap<UInt256, Proof<Bytes>> storageProofs =
+                                getStorageProofs(accountHash, account, accountStorageKeys);
+                        return new WorldStateProof(account, accountProof, storageProofs);
+                      });
+    }
+  }
+
+  public List<Bytes> getProofRelatedNodes(
+          final Hash worldStateRoot,
+          final Hash accountHash,
+          final List<UInt256> accountStorageKeys) {
+    if (!worldStateStorage.isWorldStateAvailable(worldStateRoot, null)) {
+      return new ArrayList<>();
+    } else {
+      final Proof<Bytes> accountProof =
+              newAccountStateTrie(worldStateRoot).getValueWithProof(accountHash);
+      return accountProof.getProofRelatedNodes();
+    }
   }
 
   public Optional<WorldStateProof> getAccountProof(
@@ -80,7 +122,8 @@ public class WorldStateProofProvider {
 
   private MerklePatriciaTrie<Bytes32, Bytes> newAccountStateTrie(final Bytes32 rootHash) {
     return new StoredMerklePatriciaTrie<>(
-        worldStateStorage::getAccountStateTrieNode, rootHash, b -> b, b -> b);
+            (location, hash) ->
+        worldStateStorage.getAccountStateTrieNode(Optional.of(Hash.wrap(rootHash)), location, hash), rootHash, b -> b, b -> b);
   }
 
   private MerklePatriciaTrie<Bytes32, Bytes> newAccountStorageTrie(

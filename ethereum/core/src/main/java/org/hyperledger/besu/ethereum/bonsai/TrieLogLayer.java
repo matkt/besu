@@ -48,6 +48,8 @@ import org.apache.tuweni.units.bigints.UInt256;
 public class TrieLogLayer {
 
   private Hash blockHash;
+
+  private final Map<Hash, Address> acHashAddressMap;
   private final Map<Address, BonsaiValue<StateTrieAccountValue>> accounts;
   private final Map<Address, BonsaiValue<Bytes>> code;
   private final Map<Address, Map<Hash, BonsaiValue<UInt256>>> storage;
@@ -55,6 +57,7 @@ public class TrieLogLayer {
 
   TrieLogLayer() {
     // TODO when tuweni fixes zero length byte comparison consider TreeMap
+    this.acHashAddressMap = new HashMap<>();
     this.accounts = new HashMap<>();
     this.code = new HashMap<>();
     this.storage = new HashMap<>();
@@ -79,12 +82,14 @@ public class TrieLogLayer {
       final StateTrieAccountValue oldValue,
       final StateTrieAccountValue newValue) {
     checkState(!frozen, "Layer is Frozen");
+    acHashAddressMap.put(Hash.hash(address), address);
     accounts.put(address, new BonsaiValue<>(oldValue, newValue));
   }
 
   void addCodeChange(
       final Address address, final Bytes oldValue, final Bytes newValue, final Hash blockHash) {
     checkState(!frozen, "Layer is Frozen");
+    acHashAddressMap.put(Hash.hash(address), address);
     code.put(
         address,
         new BonsaiValue<>(
@@ -94,6 +99,7 @@ public class TrieLogLayer {
   void addStorageChange(
       final Address address, final Hash slotHash, final UInt256 oldValue, final UInt256 newValue) {
     checkState(!frozen, "Layer is Frozen");
+    acHashAddressMap.put(Hash.hash(address), address);
     storage
         .computeIfAbsent(address, a -> new TreeMap<>())
         .put(slotHash, new BonsaiValue<>(oldValue, newValue));
@@ -265,8 +271,17 @@ public class TrieLogLayer {
     return Optional.ofNullable(accounts.get(address)).map(BonsaiValue::getPrior);
   }
 
+  public Optional<StateTrieAccountValue> getPriorAccount(final Hash hash) {
+    return Optional.ofNullable(accounts.get(acHashAddressMap.get(hash))).map(BonsaiValue::getPrior);
+  }
+
   public Optional<StateTrieAccountValue> getAccount(final Address address) {
     return Optional.ofNullable(accounts.get(address)).map(BonsaiValue::getUpdated);
+  }
+
+
+  public Optional<StateTrieAccountValue> getAccount(final Hash hash) {
+    return Optional.ofNullable(accounts.get(acHashAddressMap.get(hash))).map(BonsaiValue::getUpdated);
   }
 
   public String dump() {
