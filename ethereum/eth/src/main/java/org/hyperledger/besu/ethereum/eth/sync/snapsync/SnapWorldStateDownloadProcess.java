@@ -43,14 +43,17 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
   private final Pipeline<Task<SnapDataRequest>> completionPipeline;
 
   private final WritePipe<Task<SnapDataRequest>> requestsToComplete;
+  private final Pipeline<Task<SnapDataRequest>> fetchCodePipeline;
 
   private SnapWorldStateDownloadProcess(
       final Pipeline<Task<SnapDataRequest>> fetchDataPipeline,
       final Pipeline<Task<SnapDataRequest>> completionPipeline,
-      final WritePipe<Task<SnapDataRequest>> requestsToComplete) {
+      final WritePipe<Task<SnapDataRequest>> requestsToComplete,
+      final Pipeline<Task<SnapDataRequest>> fetchCodePipeline) {
     this.fetchDataPipeline = fetchDataPipeline;
     this.completionPipeline = completionPipeline;
     this.requestsToComplete = requestsToComplete;
+    this.fetchCodePipeline = fetchCodePipeline;
   }
 
   public static Builder builder() {
@@ -60,20 +63,23 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
   @Override
   public CompletableFuture<Void> start(final EthScheduler ethScheduler) {
     final CompletableFuture<Void> fetchDataFuture = ethScheduler.startPipeline(fetchDataPipeline);
+    final CompletableFuture<Void> fetchCodeFuture = ethScheduler.startPipeline(fetchCodePipeline);
     final CompletableFuture<Void> completionFuture = ethScheduler.startPipeline(completionPipeline);
 
-    fetchDataFuture.whenComplete(
-        (result, error) -> {
-          if (error != null) {
-            if (!(ExceptionUtils.rootCause(error) instanceof CancellationException)) {
-              LOG.error("Pipeline failed", error);
-            }
-            completionPipeline.abort();
-          } else {
-            // No more data to fetch, so propagate the pipe closure onto the completion pipe.
-            requestsToComplete.close();
-          }
-        });
+    fetchDataFuture
+        .thenCombine(fetchCodeFuture, (unused, unused2) -> null)
+        .whenComplete(
+            (result, error) -> {
+              if (error != null) {
+                if (!(ExceptionUtils.rootCause(error) instanceof CancellationException)) {
+                  LOG.error("Pipeline failed", error);
+                }
+                completionPipeline.abort();
+              } else {
+                // No more data to fetch, so propagate the pipe closure onto the completion pipe.
+                requestsToComplete.close();
+              }
+            });
 
     completionFuture.exceptionally(
         error -> {
@@ -192,8 +198,24 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
                   })
               .andFinishWith("batchDataDownloaded", requestsToComplete::put);
 
+      final Pipeline<Task<SnapDataRequest>> fetchCodePipeline =
+          createPipelineFrom(
+                  "requestDequeued",
+                  new TaskQueueIterator<>(downloadState, downloadState::dequeueCodeRequestBlocking),
+                  bufferCapacity,
+                  outputCounter,
+                  true,
+                  "code_blocks_download_pipeline")
+              .thenProcessAsync(
+                  "batchDownloadCodeBlocksData",
+                  requestTask ->
+                      requestDataStep.requestData(requestTask, snapSyncState, downloadState),
+                  maxOutstandingRequests)
+              .thenProcess("batchPersistData", task -> persistDataStep.persist(task))
+              .andFinishWith("batchDataDownloaded", requestsToComplete::put);
+
       return new SnapWorldStateDownloadProcess(
-          fetchDataPipeline, completionPipeline, requestsToComplete);
+          fetchDataPipeline, completionPipeline, requestsToComplete, fetchCodePipeline);
     }
   }
 }

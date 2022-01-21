@@ -20,10 +20,13 @@ import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.worldstate.FastWorldStateDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+import org.hyperledger.besu.services.tasks.InMemoryTaskQueue;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
+import org.hyperledger.besu.services.tasks.Task;
 
 import java.time.Clock;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -34,6 +37,8 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
   private final FastSyncActions fastSyncActions;
   private final SnapSyncState snapSyncState;
   private final FastWorldStateDownloader healProcess;
+
+  private final InMemoryTaskQueue<SnapDataRequest> codeBlocksCollection = new InMemoryTaskQueue<>();
 
   public SnapWorldDownloadState(
       final FastSyncActions fastSyncActions,
@@ -113,6 +118,49 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
                   snapSyncState.unlockResettingPivotBlock();
                 });
       }
+    }
+  }
+
+  public synchronized Task<SnapDataRequest> dequeueCodeRequestBlocking() {
+    while (!internalFuture.isDone()) {
+      Task<SnapDataRequest> task = codeBlocksCollection.remove();
+      if (task != null) {
+        return task;
+      }
+      try {
+        wait();
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return null;
+      }
+    }
+    return null;
+  }
+
+  @Override
+  public synchronized void enqueueRequest(final SnapDataRequest request) {
+    if (!internalFuture.isDone()) {
+      if (request instanceof GetBytecodeRequest) {
+        codeBlocksCollection.add(request);
+      } else {
+        pendingRequests.add(request);
+      }
+      notifyAll();
+    }
+  }
+
+  @Override
+  public synchronized void enqueueRequests(final Stream<SnapDataRequest> requests) {
+    if (!internalFuture.isDone()) {
+      requests.forEach(
+          request -> {
+            if (request instanceof GetBytecodeRequest) {
+              codeBlocksCollection.add(request);
+            } else {
+              pendingRequests.add(request);
+            }
+          });
+      notifyAll();
     }
   }
 }
