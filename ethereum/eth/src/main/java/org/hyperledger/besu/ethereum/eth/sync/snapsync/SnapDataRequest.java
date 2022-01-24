@@ -14,14 +14,19 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static org.hyperledger.besu.ethereum.eth.sync.fastsync.worldstate.NodeDataRequest.MAX_CHILDREN;
+
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
+import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloaderException;
 import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.services.tasks.TasksPriorityProvider;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import kotlin.collections.ArrayDeque;
@@ -36,6 +41,11 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
   private final Hash originalRootHash;
 
   private Optional<Bytes> data;
+  private Optional<SnapDataRequest> possibleParent = Optional.empty();
+  private int depth;
+  private long priority;
+  private final AtomicInteger pendingChildren = new AtomicInteger(0);
+  private boolean requiresPersisting = true;
 
   protected SnapDataRequest(final RequestType requestType, final Hash originalRootHash) {
     this.requestType = requestType;
@@ -63,6 +73,19 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
     return new GetBytecodeRequest(getOriginalRootHash(), accountHashes, codeHashes);
   }
 
+  public static AccountTrieNodeDataHealRequest createAccountDataRequest(
+      final Hash hash, final Hash originalRootHash, final Optional<Bytes> location) {
+    return new AccountTrieNodeDataHealRequest(hash, originalRootHash, location);
+  }
+
+  public static StorageTrieNodeDataHealRequest createStorageDataRequest(
+      final Hash hash,
+      final Optional<Hash> accountHash,
+      final Hash originalRootHash,
+      final Optional<Bytes> location) {
+    return new StorageTrieNodeDataHealRequest(hash, accountHash, originalRootHash, location);
+  }
+
   public RequestType getRequestType() {
     return requestType;
   }
@@ -87,7 +110,19 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
 
   public int persist(
       final WorldStateStorage worldStateStorage, final WorldStateStorage.Updater updater) {
-    return doPersist(worldStateStorage, updater);
+    if (pendingChildren.get() > 0) {
+      return 0; // we do nothing. Our last child will eventually persist us.
+    }
+    int saved =0;
+    if (requiresPersisting) {
+      checkNotNull(getData(), "Must set data before node can be persisted.");
+      saved = doPersist(worldStateStorage, updater);
+    }
+    if (possibleParent.isPresent()) {
+      return possibleParent.get().saveParent(worldStateStorage, updater)
+          + saved;
+    }
+    return saved;
   }
 
   protected abstract int doPersist(
@@ -102,7 +137,37 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
   public abstract Stream<SnapDataRequest> getChildRequests(
       final WorldStateStorage worldStateStorage);
 
-  public abstract void clear();
+  public void clear() {}
+
+  protected void registerParent(final SnapDataRequest parent) {
+    if (this.possibleParent.isPresent()) {
+      throw new WorldStateDownloaderException("Cannot set parent twice");
+    }
+    this.possibleParent = Optional.of(parent);
+    this.depth = parent.depth + 1;
+    this.priority = parent.priority * MAX_CHILDREN + parent.incrementChildren();
+  }
+
+  private int saveParent(
+      final WorldStateStorage worldStateStorage, final WorldStateStorage.Updater updater) {
+    if (pendingChildren.decrementAndGet() == 0) {
+      return persist(worldStateStorage, updater);
+    }
+    return 0;
+  }
+
+  public boolean isRoot() {
+    return possibleParent.isEmpty();
+  }
+
+  private int incrementChildren() {
+    return pendingChildren.incrementAndGet();
+  }
+
+  public void setRequiresPersisting(final boolean requiresPersisting) {
+
+    this.requiresPersisting = requiresPersisting;
+  }
 
   @Value.Immutable
   public abstract static class ExistingData {
@@ -114,4 +179,9 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
     @Value.Parameter
     public abstract Optional<Bytes> data();
   }
+
+  public Optional<Bytes> getExistingData(final WorldStateStorage worldStateStorage) {
+    return Optional.empty();
+  }
+  ;
 }

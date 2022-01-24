@@ -41,6 +41,7 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
 import org.hyperledger.besu.plugin.services.permissioning.NodeMessagePermissioningProvider;
 
+import java.math.BigInteger;
 import java.time.Clock;
 import java.util.Collections;
 import java.util.HashMap;
@@ -308,9 +309,13 @@ public class EthPeer {
     return sendRequest(requestManagers.get(SnapProtocol.NAME).get(SnapV1.GET_BYTECODES), message);
   }
 
-  public RequestManager.ResponseStream getSnapTrieNode(final GetTrieNodes message)
-      throws PeerNotConnected {
-    return sendRequest(requestManagers.get(SnapProtocol.NAME).get(SnapV1.GET_TRIE_NODES), message);
+  public RequestManager.ResponseStream getSnapTrieNode(
+      final Hash stateRoot, final List<List<Bytes>> message) throws PeerNotConnected {
+    final GetTrieNodes getTrieNodes =
+        GetTrieNodes.create(
+            stateRoot, message, BigInteger.valueOf(512 * 1024)); // NOT USE MAGIC NUMBER
+    return sendRequest(
+        requestManagers.get(SnapProtocol.NAME).get(SnapV1.GET_TRIE_NODES), getTrieNodes);
   }
 
   private RequestManager.ResponseStream sendRequest(

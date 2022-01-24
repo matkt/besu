@@ -14,11 +14,14 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.metrics.RunnableCounter;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.tasks.Task;
+
+import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -31,33 +34,70 @@ public class PersistDataStep {
 
   private final WorldStateStorage worldStateStorage;
 
-  private final RunnableCounter completedNodes;
+  private final SnapSyncState snapSyncState;
+  private final RunnableCounter generatedNodes;
+  private final RunnableCounter healedNodes;
 
   public PersistDataStep(
-      final WorldStateStorage worldStateStorage, final MetricsSystem metricsSystem) {
+      final WorldStateStorage worldStateStorage, final SnapSyncState snapSyncState, final MetricsSystem metricsSystem) {
     this.worldStateStorage = worldStateStorage;
+    this.snapSyncState = snapSyncState;
 
-    this.completedNodes =
+    this.generatedNodes =
         new RunnableCounter(
             metricsSystem.createCounter(
                 BesuMetricCategory.SYNCHRONIZER,
-                "snapsync_world_state_completed_nodes_total",
-                "Total number of node data completed as part of snap sync world state download"),
-            this::displayWorldStateSyncProgress,
+                "snapsync_world_state_generated_nodes_total",
+                "Total number of data nodes generated as part of snap sync world state download"),
+                this::displayWorldStateSyncProgress,
+            DISPLAY_PROGRESS_STEP);
+    this.healedNodes =
+        new RunnableCounter(
+            metricsSystem.createCounter(
+                BesuMetricCategory.SYNCHRONIZER,
+                "snapsync_world_state_healed_nodes_total",
+                "Total number of data nodes healed as part of snap sync world state heal process"),
+                this::displayWorldStateSyncProgress,
             DISPLAY_PROGRESS_STEP);
   }
 
-  public Task<SnapDataRequest> persist(final Task<SnapDataRequest> task) {
-    final WorldStateStorage.Updater updater = worldStateStorage.updater();
+  private void persist(
+      final WorldStateStorage.Updater updater,
+      final Task<SnapDataRequest> task,
+      final WorldDownloadState<SnapDataRequest> downloadState) {
     if (task.getData().getData().isPresent()) {
+      if (task.getData() instanceof TrieNodeDataHealRequest && task.getData().isRoot()) {
+        downloadState.setRootNodeData(task.getData().getData().get());
+      }
       final int persistedNodes = task.getData().persist(worldStateStorage, updater);
-      completedNodes.inc(persistedNodes);
+//      LOG.warn("persisted {}",persistedNodes);
+      if (snapSyncState.isHealInProgress()){
+        healedNodes.inc(persistedNodes);
+      } else{
+        generatedNodes.inc(persistedNodes);
+
+      }
     }
+  }
+
+  public Task<SnapDataRequest> persistAndCommit(
+      final Task<SnapDataRequest> task, final WorldDownloadState<SnapDataRequest> downloadState) {
+    final WorldStateStorage.Updater updater = worldStateStorage.updater();
+    persist(updater, task, downloadState);
     updater.commit();
     return task;
   }
 
+  public List<Task<SnapDataRequest>> persistAndCommit(
+      final List<Task<SnapDataRequest>> tasks,
+      final WorldDownloadState<SnapDataRequest> downloadState) {
+    final WorldStateStorage.Updater updater = worldStateStorage.updater();
+    tasks.forEach(t -> persist(updater, t, downloadState));
+    updater.commit();
+    return tasks;
+  }
+
   private void displayWorldStateSyncProgress() {
-    LOG.info("Generated {} world state nodes from snapsync", completedNodes.get());
+    LOG.info("Generated {} world state nodes (healed {})",  generatedNodes.get(),healedNodes.get());
   }
 }

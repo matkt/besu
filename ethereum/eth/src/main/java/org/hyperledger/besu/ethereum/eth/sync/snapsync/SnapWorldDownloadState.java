@@ -14,10 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncActions;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncState;
-import org.hyperledger.besu.ethereum.eth.sync.fastsync.worldstate.FastWorldStateDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.services.tasks.InMemoryTaskQueue;
@@ -25,6 +25,7 @@ import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 import org.hyperledger.besu.services.tasks.Task;
 
 import java.time.Clock;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -36,9 +37,10 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
 
   private final FastSyncActions fastSyncActions;
   private final SnapSyncState snapSyncState;
-  private final FastWorldStateDownloader healProcess;
 
   private final InMemoryTaskQueue<SnapDataRequest> codeBlocksCollection = new InMemoryTaskQueue<>();
+  private final InMemoryTasksPriorityQueues<SnapDataRequest> trieNodes =
+      new InMemoryTasksPriorityQueues<>();
 
   public SnapWorldDownloadState(
       final FastSyncActions fastSyncActions,
@@ -46,12 +48,10 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
       final InMemoryTasksPriorityQueues<SnapDataRequest> pendingRequests,
       final int maxRequestsWithoutProgress,
       final long minMillisBeforeStalling,
-      final FastWorldStateDownloader healProcess,
       final Clock clock) {
     super(pendingRequests, maxRequestsWithoutProgress, minMillisBeforeStalling, clock);
     this.fastSyncActions = fastSyncActions;
     this.snapSyncState = snapSyncState;
-    this.healProcess = healProcess;
   }
 
   @Override
@@ -64,27 +64,28 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
   @Override
   public synchronized boolean checkCompletion(
       final WorldStateStorage worldStateStorage, final BlockHeader header) {
-
-    if (!internalFuture.isDone() && pendingRequests.allTasksCompleted()) {
+    if (!internalFuture.isDone()
+        && pendingRequests.allTasksCompleted()
+        && codeBlocksCollection.allTasksCompleted()
+        && trieNodes.allTasksCompleted()) {
       if (!snapSyncState.isHealInProgress()) {
-        LOG.info("Starting heal process on state root " + header.getStateRoot());
-        healProcess
-            .run(fastSyncActions, snapSyncState)
-            .whenComplete(
-                (unused, throwable) -> {
-                  if (throwable == null) {
-                    internalFuture.complete(null);
-                  } else {
-                    internalFuture.completeExceptionally(throwable);
-                  }
-                });
-      } else if (!snapSyncState.isResettingPivotBlock()) {
+        LOG.info("Starting heal process on state root {}", header.getStateRoot());
+        if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
+          ((BonsaiWorldStateKeyValueStorage) worldStateStorage).clearReadAccessDatabase();
+        }
+        snapSyncState.setSnapHealInProgress(true);
+        enqueueRequest(
+            SnapDataRequest.createAccountDataRequest(
+                header.getStateRoot(), header.getStateRoot(), Optional.empty()));
+      } else {
+        final WorldStateStorage.Updater updater = worldStateStorage.updater();
+        updater.saveWorldState(header.getHash(), header.getStateRoot(), rootNodeData);
+        updater.commit();
         LOG.info("Finished downloading world state from peers");
         internalFuture.complete(null);
         return true;
       }
     }
-
     return false;
   }
 
@@ -137,11 +138,29 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
     return null;
   }
 
+  public synchronized Task<SnapDataRequest> dequeueTrieRequestBlocking() {
+    while (!internalFuture.isDone()) {
+      Task<SnapDataRequest> task = trieNodes.remove();
+      if (task != null) {
+        return task;
+      }
+      try {
+        wait();
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return null;
+      }
+    }
+    return null;
+  }
+
   @Override
   public synchronized void enqueueRequest(final SnapDataRequest request) {
     if (!internalFuture.isDone()) {
       if (request instanceof GetBytecodeRequest) {
         codeBlocksCollection.add(request);
+      } else if (request instanceof TrieNodeDataHealRequest) {
+        trieNodes.add(request);
       } else {
         pendingRequests.add(request);
       }
@@ -152,14 +171,7 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
   @Override
   public synchronized void enqueueRequests(final Stream<SnapDataRequest> requests) {
     if (!internalFuture.isDone()) {
-      requests.forEach(
-          request -> {
-            if (request instanceof GetBytecodeRequest) {
-              codeBlocksCollection.add(request);
-            } else {
-              pendingRequests.add(request);
-            }
-          });
+      requests.forEach(this::enqueueRequest);
       notifyAll();
     }
   }

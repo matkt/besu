@@ -44,16 +44,19 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
 
   private final WritePipe<Task<SnapDataRequest>> requestsToComplete;
   private final Pipeline<Task<SnapDataRequest>> fetchCodePipeline;
+  private final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline;
 
   private SnapWorldStateDownloadProcess(
       final Pipeline<Task<SnapDataRequest>> fetchDataPipeline,
       final Pipeline<Task<SnapDataRequest>> completionPipeline,
       final WritePipe<Task<SnapDataRequest>> requestsToComplete,
-      final Pipeline<Task<SnapDataRequest>> fetchCodePipeline) {
+      final Pipeline<Task<SnapDataRequest>> fetchCodePipeline,
+      final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline) {
     this.fetchDataPipeline = fetchDataPipeline;
     this.completionPipeline = completionPipeline;
     this.requestsToComplete = requestsToComplete;
     this.fetchCodePipeline = fetchCodePipeline;
+    this.fetchTrieNodesPipeline = fetchTrieNodesPipeline;
   }
 
   public static Builder builder() {
@@ -64,10 +67,13 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
   public CompletableFuture<Void> start(final EthScheduler ethScheduler) {
     final CompletableFuture<Void> fetchDataFuture = ethScheduler.startPipeline(fetchDataPipeline);
     final CompletableFuture<Void> fetchCodeFuture = ethScheduler.startPipeline(fetchCodePipeline);
+    final CompletableFuture<Void> fetchTrieFuture =
+        ethScheduler.startPipeline(fetchTrieNodesPipeline);
     final CompletableFuture<Void> completionFuture = ethScheduler.startPipeline(completionPipeline);
 
     fetchDataFuture
         .thenCombine(fetchCodeFuture, (unused, unused2) -> null)
+        .thenCombine(fetchTrieFuture, (unused, unused2) -> null)
         .whenComplete(
             (result, error) -> {
               if (error != null) {
@@ -104,6 +110,7 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
     private int maxOutstandingRequests;
     private SnapWorldDownloadState downloadState;
     private MetricsSystem metricsSystem;
+    private LoadLocalDataStep loadLocalDataStep;
     private RequestDataStep requestDataStep;
     private SnapSyncState snapSyncState;
     private PersistDataStep persistDataStep;
@@ -116,6 +123,11 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
 
     public Builder maxOutstandingRequests(final int maxOutstandingRequests) {
       this.maxOutstandingRequests = maxOutstandingRequests;
+      return this;
+    }
+
+    public Builder loadLocalDataStep(final LoadLocalDataStep loadLocalDataStep) {
+      this.loadLocalDataStep = loadLocalDataStep;
       return this;
     }
 
@@ -150,12 +162,14 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
     }
 
     public SnapWorldStateDownloadProcess build() {
+      checkNotNull(loadLocalDataStep);
       checkNotNull(requestDataStep);
       checkNotNull(persistDataStep);
       checkNotNull(completeTaskStep);
       checkNotNull(downloadState);
       checkNotNull(snapSyncState);
       checkNotNull(metricsSystem);
+      checkNotNull(loadLocalDataStep);
 
       // Room for the requests we expect to do in parallel plus some buffer but not unlimited.
       final int bufferCapacity = hashCountPerRequest * 2;
@@ -179,7 +193,7 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
       final Pipeline<Task<SnapDataRequest>> fetchDataPipeline =
           createPipelineFrom(
                   "requestDequeued",
-                  new TaskQueueIterator<>(downloadState),
+                  new TaskQueueIterator<>(downloadState, downloadState::dequeueRequestBlocking),
                   bufferCapacity,
                   outputCounter,
                   true,
@@ -189,7 +203,8 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
                   requestTask ->
                       requestDataStep.requestData(requestTask, snapSyncState, downloadState),
                   maxOutstandingRequests)
-              .thenProcess("batchPersistData", task -> persistDataStep.persist(task))
+              .thenProcess(
+                  "batchPersistData", task -> persistDataStep.persistAndCommit(task, downloadState))
               .thenProcess(
                   "checkNewPivotBlock",
                   task -> {
@@ -211,11 +226,40 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
                   requestTask ->
                       requestDataStep.requestData(requestTask, snapSyncState, downloadState),
                   maxOutstandingRequests)
-              .thenProcess("batchPersistData", task -> persistDataStep.persist(task))
+              .thenProcess(
+                  "batchPersistData", task -> persistDataStep.persistAndCommit(task, downloadState))
               .andFinishWith("batchDataDownloaded", requestsToComplete::put);
 
+      final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline =
+          createPipelineFrom(
+                  "requestTrieNodesDequeued",
+                  new TaskQueueIterator<>(downloadState, downloadState::dequeueTrieRequestBlocking),
+                  bufferCapacity,
+                  outputCounter,
+                  true,
+                  "trie_blocks_heal_download_pipeline")
+              .thenFlatMapInParallel(
+                  "requestLoadLocalData",
+                  task -> loadLocalDataStep.loadLocalData(task, requestsToComplete),
+                  3,
+                  bufferCapacity)
+              .inBatches(hashCountPerRequest)
+              .thenProcessAsync(
+                  "batchDownloadTrieBlocksData",
+                  requestTasks ->
+                      requestDataStep.requestTrieNodeByPath(requestTasks, snapSyncState),
+                  maxOutstandingRequests)
+              .thenProcess(
+                  "batchPersistData", task -> persistDataStep.persistAndCommit(task, downloadState))
+              .andFinishWith(
+                  "batchDataDownloaded", tasks -> tasks.forEach(requestsToComplete::put));
+
       return new SnapWorldStateDownloadProcess(
-          fetchDataPipeline, completionPipeline, requestsToComplete, fetchCodePipeline);
+          fetchDataPipeline,
+          completionPipeline,
+          requestsToComplete,
+          fetchCodePipeline,
+          fetchTrieNodesPipeline);
     }
   }
 }

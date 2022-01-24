@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 public class TaskQueueIterator<REQUEST extends TasksPriorityProvider>
     implements Iterator<Task<REQUEST>> {
 
-  private final WorldDownloadState<REQUEST> downloadState;
+  private final WorldDownloadState<? super REQUEST> downloadState;
   private final Supplier<Task<REQUEST>> supplier;
 
   public TaskQueueIterator(final WorldDownloadState<REQUEST> downloadState) {
@@ -31,7 +31,8 @@ public class TaskQueueIterator<REQUEST extends TasksPriorityProvider>
   }
 
   public TaskQueueIterator(
-      final WorldDownloadState<REQUEST> downloadState, final Supplier<Task<REQUEST>> supplier) {
+      final WorldDownloadState<? super REQUEST> downloadState,
+      final Supplier<Task<REQUEST>> supplier) {
     this.supplier = supplier;
     this.downloadState = downloadState;
   }

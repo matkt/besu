@@ -138,7 +138,6 @@ public class SnapWorldStateDownloader implements WorldStateDownloader {
               snapTaskCollection,
               maxNodeRequestsWithoutProgress,
               minMillisBeforeStalling,
-              healProcess,
               clock);
 
       // snapsync already done, switch to fastsync
@@ -160,8 +159,9 @@ public class SnapWorldStateDownloader implements WorldStateDownloader {
           SnapWorldStateDownloadProcess.builder()
               .hashCountPerRequest(hashCountPerRequest)
               .maxOutstandingRequests(maxOutstandingRequests)
-              .requestDataStep(new RequestDataStep(ethContext, worldStateStorage, metricsSystem))
-              .persistDataStep(new PersistDataStep(worldStateStorage, metricsSystem))
+              .loadLocalDataStep(new LoadLocalDataStep(worldStateStorage, metricsSystem))
+              .requestDataStep(new RequestDataStep(ethContext, metricsSystem, worldStateStorage))
+              .persistDataStep(new PersistDataStep(worldStateStorage,snapSyncState, metricsSystem))
               .completeTaskStep(maybeCompleteTask.get())
               .downloadState(newDownloadState)
               .fastSyncState(snapSyncState)
