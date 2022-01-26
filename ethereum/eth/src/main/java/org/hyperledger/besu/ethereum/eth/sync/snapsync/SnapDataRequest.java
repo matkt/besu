@@ -113,14 +113,13 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
     if (pendingChildren.get() > 0) {
       return 0; // we do nothing. Our last child will eventually persist us.
     }
-    int saved =0;
+    int saved = 0;
     if (requiresPersisting) {
       checkNotNull(getData(), "Must set data before node can be persisted.");
       saved = doPersist(worldStateStorage, updater);
     }
     if (possibleParent.isPresent()) {
-      return possibleParent.get().saveParent(worldStateStorage, updater)
-          + saved;
+      return possibleParent.get().saveParent(worldStateStorage, updater) + saved;
     }
     return saved;
   }

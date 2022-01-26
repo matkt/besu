@@ -39,7 +39,9 @@ public class PersistDataStep {
   private final RunnableCounter healedNodes;
 
   public PersistDataStep(
-      final WorldStateStorage worldStateStorage, final SnapSyncState snapSyncState, final MetricsSystem metricsSystem) {
+      final WorldStateStorage worldStateStorage,
+      final SnapSyncState snapSyncState,
+      final MetricsSystem metricsSystem) {
     this.worldStateStorage = worldStateStorage;
     this.snapSyncState = snapSyncState;
 
@@ -49,7 +51,7 @@ public class PersistDataStep {
                 BesuMetricCategory.SYNCHRONIZER,
                 "snapsync_world_state_generated_nodes_total",
                 "Total number of data nodes generated as part of snap sync world state download"),
-                this::displayWorldStateSyncProgress,
+            this::displayWorldStateSyncProgress,
             DISPLAY_PROGRESS_STEP);
     this.healedNodes =
         new RunnableCounter(
@@ -57,7 +59,7 @@ public class PersistDataStep {
                 BesuMetricCategory.SYNCHRONIZER,
                 "snapsync_world_state_healed_nodes_total",
                 "Total number of data nodes healed as part of snap sync world state heal process"),
-                this::displayWorldStateSyncProgress,
+            this::displayHealProgress,
             DISPLAY_PROGRESS_STEP);
   }
 
@@ -70,12 +72,11 @@ public class PersistDataStep {
         downloadState.setRootNodeData(task.getData().getData().get());
       }
       final int persistedNodes = task.getData().persist(worldStateStorage, updater);
-//      LOG.warn("persisted {}",persistedNodes);
-      if (snapSyncState.isHealInProgress()){
+      //      LOG.warn("persisted {}",persistedNodes);
+      if (snapSyncState.isHealInProgress()) {
         healedNodes.inc(persistedNodes);
-      } else{
+      } else {
         generatedNodes.inc(persistedNodes);
-
       }
     }
   }
@@ -98,6 +99,10 @@ public class PersistDataStep {
   }
 
   private void displayWorldStateSyncProgress() {
-    LOG.info("Generated {} world state nodes (healed {})",  generatedNodes.get(),healedNodes.get());
+    LOG.info("Generated {} world state nodes", generatedNodes.get());
+  }
+
+  private void displayHealProgress() {
+    LOG.info("Healed {} world sync nodes", healedNodes.get());
   }
 }

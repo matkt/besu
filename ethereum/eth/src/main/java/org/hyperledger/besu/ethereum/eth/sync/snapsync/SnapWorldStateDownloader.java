@@ -161,7 +161,7 @@ public class SnapWorldStateDownloader implements WorldStateDownloader {
               .maxOutstandingRequests(maxOutstandingRequests)
               .loadLocalDataStep(new LoadLocalDataStep(worldStateStorage, metricsSystem))
               .requestDataStep(new RequestDataStep(ethContext, metricsSystem, worldStateStorage))
-              .persistDataStep(new PersistDataStep(worldStateStorage,snapSyncState, metricsSystem))
+              .persistDataStep(new PersistDataStep(worldStateStorage, snapSyncState, metricsSystem))
               .completeTaskStep(maybeCompleteTask.get())
               .downloadState(newDownloadState)
               .fastSyncState(snapSyncState)
