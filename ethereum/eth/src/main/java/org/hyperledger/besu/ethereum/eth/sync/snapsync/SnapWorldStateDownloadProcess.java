@@ -228,6 +228,12 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
                   maxOutstandingRequests)
               .thenProcess(
                   "batchPersistData", task -> persistDataStep.persistAndCommit(task, downloadState))
+                  .thenProcess(
+                          "checkNewPivotBlock",
+                          task -> {
+                            downloadState.checkNewPivotBlock(snapSyncState);
+                            return task;
+                          })
               .andFinishWith("batchDataDownloaded", requestsToComplete::put);
 
       final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline =
@@ -251,6 +257,12 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
                   maxOutstandingRequests)
               .thenProcess(
                   "batchPersistData", task -> persistDataStep.persistAndCommit(task, downloadState))
+                  .thenProcess(
+                          "checkNewPivotBlock",
+                          task -> {
+                            downloadState.checkNewPivotBlock(snapSyncState);
+                            return task;
+                          })
               .andFinishWith(
                   "batchDataDownloaded", tasks -> tasks.forEach(requestsToComplete::put));
 

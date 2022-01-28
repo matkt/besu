@@ -74,6 +74,12 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
   }
 
   public static AccountTrieNodeDataHealRequest createAccountDataRequest(
+          final Hash hash,final Optional<Bytes> location) {
+    return new AccountTrieNodeDataHealRequest(hash, hash, location);
+  }
+
+
+  public static AccountTrieNodeDataHealRequest createAccountDataRequest(
       final Hash hash, final Hash originalRootHash, final Optional<Bytes> location) {
     return new AccountTrieNodeDataHealRequest(hash, originalRootHash, location);
   }

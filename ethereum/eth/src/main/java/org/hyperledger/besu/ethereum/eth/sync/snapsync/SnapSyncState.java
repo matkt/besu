@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.SealableBlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncState;
 
 import java.util.Optional;
@@ -63,6 +64,13 @@ public class SnapSyncState extends FastSyncState {
 
   public void setOriginalPivotBlockNumber(final OptionalLong originalPivotBlockNumber) {
     this.originalPivotBlockNumber = originalPivotBlockNumber;
+  }
+
+  public boolean isValidTask(final SnapDataRequest request) {
+    return getPivotBlockHeader()
+            .map(SealableBlockHeader::getStateRoot)
+            .filter(hash -> hash.equals(request.getOriginalRootHash()))
+            .isPresent();
   }
 
   public boolean lockResettingPivotBlock() {

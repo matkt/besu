@@ -76,8 +76,7 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
         }
         snapSyncState.setSnapHealInProgress(true);
         enqueueRequest(
-            SnapDataRequest.createAccountDataRequest(
-                header.getStateRoot(), header.getStateRoot(), Optional.empty()));
+            SnapDataRequest.createAccountDataRequest(header.getStateRoot(), Optional.empty()));
       } else {
         final WorldStateStorage.Updater updater = worldStateStorage.updater();
         updater.saveWorldState(header.getHash(), header.getStateRoot(), rootNodeData);
@@ -110,6 +109,11 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
                                     newPivotBlockHeader.getNumber(),
                                     newPivotBlockHeader.getStateRoot());
                                 snapSyncState.setCurrentHeader(newPivotBlockHeader);
+                                if(snapSyncState.isHealInProgress()){
+                                  clearQueues();
+                                  enqueueRequest(
+                                          SnapDataRequest.createAccountDataRequest(newPivotBlockHeader.getStateRoot(), Optional.empty()));
+                                }
                               }
                               requestComplete(true);
                               snapSyncState.unlockResettingPivotBlock();
@@ -161,7 +165,9 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
       if (request instanceof GetBytecodeRequest) {
         codeBlocksCollection.add(request);
       } else if (request instanceof TrieNodeDataHealRequest) {
-        trieNodes.add(request);
+        if (snapSyncState.isValidTask(request)) { //TODO: Before merge move me somewhere else
+          trieNodes.add(request);
+        }
       } else {
         pendingRequests.add(request);
       }
@@ -175,5 +181,12 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
       requests.forEach(this::enqueueRequest);
       notifyAll();
     }
+  }
+
+  private void clearQueues(){
+    pendingRequests.clear();
+    trieNodes.clear();
+    codeBlocksCollection.clear();
+    outstandingRequests.clear();
   }
 }

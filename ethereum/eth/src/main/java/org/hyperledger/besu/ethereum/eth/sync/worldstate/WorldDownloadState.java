@@ -43,7 +43,7 @@ public abstract class WorldDownloadState<REQUEST extends TasksPriorityProvider> 
 
   protected final int maxRequestsWithoutProgress;
   private final Clock clock;
-  private final Set<EthTask<?>> outstandingRequests =
+  protected final Set<EthTask<?>> outstandingRequests =
       Collections.newSetFromMap(new ConcurrentHashMap<>());
   protected CompletableFuture<Void> internalFuture;
   private CompletableFuture<Void> downloadFuture;
