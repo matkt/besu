@@ -14,6 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import java.time.Clock;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncActions;
@@ -23,27 +27,24 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.services.tasks.InMemoryTaskQueue;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 import org.hyperledger.besu.services.tasks.Task;
+import org.slf4j.Logger;
 
-import java.time.Clock;
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> {
-  private static final Logger LOG = LogManager.getLogger();
+
+  private static final Logger LOG = getLogger(SnapWorldDownloadState.class);
+
 
   private final FastSyncActions fastSyncActions;
   private final SnapSyncState snapSyncState;
 
   private final InMemoryTaskQueue<SnapDataRequest> codeBlocksCollection = new InMemoryTaskQueue<>();
   private final InMemoryTasksPriorityQueues<SnapDataRequest> trieNodes =
-      new InMemoryTasksPriorityQueues<>();
+          new InMemoryTasksPriorityQueues<>();
 
   public SnapWorldDownloadState(
-      final FastSyncActions fastSyncActions,
+          final FastSyncActions fastSyncActions,
       final SnapSyncState snapSyncState,
       final InMemoryTasksPriorityQueues<SnapDataRequest> pendingRequests,
       final int maxRequestsWithoutProgress,

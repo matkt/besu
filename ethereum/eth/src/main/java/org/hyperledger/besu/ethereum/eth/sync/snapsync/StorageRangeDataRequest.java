@@ -14,10 +14,20 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MAX_RANGE;
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.findNewBeginElementInRange;
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.STORAGE_RANGE;
-
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import kotlin.collections.ArrayDeque;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.messages.snap.GetStorageRangeMessage;
@@ -32,29 +42,19 @@ import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
+import org.slf4j.Logger;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MAX_RANGE;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.findNewBeginElementInRange;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.STORAGE_RANGE;
+import static org.slf4j.LoggerFactory.getLogger;
 
-import kotlin.collections.ArrayDeque;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-
-/** Returns a list of storages and the merkle proofs of an entire range */
+/**
+ * Returns a list of storages and the merkle proofs of an entire range
+ */
 public class StorageRangeDataRequest extends SnapDataRequest {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(StorageRangeDataRequest.class);
 
   private final GetStorageRangeMessage request;
   private GetStorageRangeMessage.StorageRange range;
@@ -62,11 +62,11 @@ public class StorageRangeDataRequest extends SnapDataRequest {
   private boolean isTaskCompleted = true;
 
   protected StorageRangeDataRequest(
-      final Hash rootHash,
-      final ArrayDeque<Bytes32> accountsHashes,
-      final ArrayDeque<Bytes32> storageRoots,
-      final Bytes32 startKeyHash,
-      final Bytes32 endKeyHash) {
+          final Hash rootHash,
+          final ArrayDeque<Bytes32> accountsHashes,
+          final ArrayDeque<Bytes32> storageRoots,
+          final Bytes32 startKeyHash,
+          final Bytes32 endKeyHash) {
     super(STORAGE_RANGE, rootHash);
     LOG.trace(
         "create get storage range data request for {} accounts {} with root hash={} from {} to {}",

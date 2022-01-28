@@ -14,6 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import java.nio.file.Path;
+import java.time.Clock;
+import java.util.Optional;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
@@ -32,27 +35,23 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
+import org.slf4j.Logger;
 
-import java.nio.file.Path;
-import java.time.Clock;
-import java.util.Optional;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class SnapDownloaderFactory extends FastDownloaderFactory {
+  private static final Logger LOG = getLogger(SnapDownloaderFactory.class);
 
-  private static final Logger LOG = LogManager.getLogger();
 
   public static Optional<FastSyncDownloader<?>> createSnapDownloader(
-      final SynchronizerConfiguration syncConfig,
-      final Path dataDirectory,
-      final ProtocolSchedule protocolSchedule,
-      final ProtocolContext protocolContext,
-      final MetricsSystem metricsSystem,
-      final EthContext ethContext,
-      final WorldStateStorage worldStateStorage,
-      final SyncState syncState,
+          final SynchronizerConfiguration syncConfig,
+          final Path dataDirectory,
+          final ProtocolSchedule protocolSchedule,
+          final ProtocolContext protocolContext,
+          final MetricsSystem metricsSystem,
+          final EthContext ethContext,
+          final WorldStateStorage worldStateStorage,
+          final SyncState syncState,
       final Clock clock) {
 
     final Path fastSyncDataDirectory = dataDirectory.resolve(FAST_SYNC_FOLDER);

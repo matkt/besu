@@ -14,11 +14,20 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MAX_RANGE;
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MIN_RANGE;
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.findNewBeginElementInRange;
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.ACCOUNT_RANGE;
-
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.stream.Stream;
+import com.google.common.collect.Lists;
+import kotlin.collections.ArrayDeque;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.messages.snap.AccountRangeMessage;
@@ -35,29 +44,21 @@ import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
+import org.slf4j.Logger;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
-import java.util.stream.Stream;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MAX_RANGE;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.MIN_RANGE;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RangeManager.findNewBeginElementInRange;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.ACCOUNT_RANGE;
+import static org.slf4j.LoggerFactory.getLogger;
 
-import com.google.common.collect.Lists;
-import kotlin.collections.ArrayDeque;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-
-/** Returns a list of accounts and the merkle proofs of an entire range */
+/**
+ * Returns a list of accounts and the merkle proofs of an entire range
+ */
 public class AccountRangeDataRequest extends SnapDataRequest {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(AccountRangeDataRequest.class);
+
 
   private static final int MAX_ACCOUNT_PER_REQUEST = 85;
 
@@ -66,7 +67,7 @@ public class AccountRangeDataRequest extends SnapDataRequest {
   private AccountRangeMessage.AccountRangeData response;
 
   protected AccountRangeDataRequest(
-      final Hash originalRootHash, final Bytes32 startKeyHash, final Bytes32 endKeyHash) {
+          final Hash originalRootHash, final Bytes32 startKeyHash, final Bytes32 endKeyHash) {
     super(ACCOUNT_RANGE, originalRootHash);
     LOG.trace(
         "create get account range data request with root hash={} from {} to {}",

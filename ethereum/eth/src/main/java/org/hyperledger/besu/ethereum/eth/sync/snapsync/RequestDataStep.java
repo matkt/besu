@@ -14,6 +14,14 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
@@ -30,22 +38,15 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.tasks.Task;
 import org.hyperledger.besu.util.ExceptionUtils;
-
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeoutException;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
 import org.immutables.value.Value;
+import org.slf4j.Logger;
+
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class RequestDataStep {
-  private static final Logger LOG = LogManager.getLogger();
+    private static final Logger LOG = getLogger(RequestDataStep.class);
+    
+    
   private final BiFunction<SnapDataRequest, BlockHeader, EthTask<? extends AbstractSnapMessageData>>
       requestTaskFactory;
 

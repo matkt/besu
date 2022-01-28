@@ -14,9 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-import static org.hyperledger.besu.services.pipeline.PipelineBuilder.createPipelineFrom;
-
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.TaskQueueIterator;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloadProcess;
@@ -30,15 +29,16 @@ import org.hyperledger.besu.services.pipeline.PipelineBuilder;
 import org.hyperledger.besu.services.pipeline.WritePipe;
 import org.hyperledger.besu.services.tasks.Task;
 import org.hyperledger.besu.util.ExceptionUtils;
+import org.slf4j.Logger;
 
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static org.hyperledger.besu.services.pipeline.PipelineBuilder.createPipelineFrom;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(SnapWorldStateDownloadProcess.class);
+
+
   private final Pipeline<Task<SnapDataRequest>> fetchDataPipeline;
   private final Pipeline<Task<SnapDataRequest>> completionPipeline;
 
@@ -47,8 +47,8 @@ public class SnapWorldStateDownloadProcess implements WorldStateDownloadProcess 
   private final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline;
 
   private SnapWorldStateDownloadProcess(
-      final Pipeline<Task<SnapDataRequest>> fetchDataPipeline,
-      final Pipeline<Task<SnapDataRequest>> completionPipeline,
+          final Pipeline<Task<SnapDataRequest>> fetchDataPipeline,
+          final Pipeline<Task<SnapDataRequest>> completionPipeline,
       final WritePipe<Task<SnapDataRequest>> requestsToComplete,
       final Pipeline<Task<SnapDataRequest>> fetchCodePipeline,
       final Pipeline<Task<SnapDataRequest>> fetchTrieNodesPipeline) {

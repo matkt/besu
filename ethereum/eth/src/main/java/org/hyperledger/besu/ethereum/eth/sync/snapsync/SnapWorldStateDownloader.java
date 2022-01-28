@@ -14,6 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
+import java.time.Clock;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.IntSupplier;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
@@ -28,19 +34,12 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
+import org.slf4j.Logger;
 
-import java.time.Clock;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.function.IntSupplier;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class SnapWorldStateDownloader implements WorldStateDownloader {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(SnapWorldStateDownloader.class);
 
   private final long minMillisBeforeStalling;
   private final Clock clock;

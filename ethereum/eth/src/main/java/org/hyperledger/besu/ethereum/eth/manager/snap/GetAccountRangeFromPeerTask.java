@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.eth.manager.snap;
 
+import java.util.Optional;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
@@ -24,24 +25,23 @@ import org.hyperledger.besu.ethereum.eth.messages.snap.GetAccountRangeMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV1;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.slf4j.Logger;
 
-import java.util.Optional;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class GetAccountRangeFromPeerTask extends AbstractPeerRequestTask<AccountRangeMessage> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(GetAccountRangeFromPeerTask.class);
+
 
   private final GetAccountRangeMessage message;
   private final BlockHeader blockHeader;
 
   private GetAccountRangeFromPeerTask(
-      final EthContext ethContext,
-      final GetAccountRangeMessage message,
-      final BlockHeader blockHeader,
-      final MetricsSystem metricsSystem) {
+          final EthContext ethContext,
+          final GetAccountRangeMessage message,
+          final BlockHeader blockHeader,
+          final MetricsSystem metricsSystem) {
     super(ethContext, SnapV1.ACCOUNT_RANGE, metricsSystem);
     this.message = message;
     this.blockHeader = blockHeader;

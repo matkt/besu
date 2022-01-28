@@ -14,8 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.eth.manager.snap;
 
-import static java.util.Collections.emptyMap;
-
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import kotlin.collections.ArrayDeque;
+import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
@@ -26,30 +30,25 @@ import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV1;
 import org.hyperledger.besu.ethereum.eth.messages.snap.TrieNodes;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.slf4j.Logger;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-import kotlin.collections.ArrayDeque;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
+import static java.util.Collections.emptyMap;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class GetTrieNodeFromPeerTask extends AbstractPeerRequestTask<Map<Hash, Bytes>> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(GetTrieNodeFromPeerTask.class);
+
 
   private final List<Hash> hashes;
   private final List<List<Bytes>> paths;
   private final BlockHeader blockHeader;
 
   private GetTrieNodeFromPeerTask(
-      final EthContext ethContext,
-      final List<Hash> hashes,
-      final List<List<Bytes>> paths,
-      final BlockHeader blockHeader,
+          final EthContext ethContext,
+          final List<Hash> hashes,
+          final List<List<Bytes>> paths,
+          final BlockHeader blockHeader,
       final MetricsSystem metricsSystem) {
     super(ethContext, SnapV1.TRIE_NODES, metricsSystem);
     this.hashes = hashes;

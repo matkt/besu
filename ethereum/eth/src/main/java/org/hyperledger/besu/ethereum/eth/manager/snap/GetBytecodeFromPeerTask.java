@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.eth.manager.snap;
 
+import java.util.Optional;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
@@ -24,25 +25,24 @@ import org.hyperledger.besu.ethereum.eth.messages.snap.GetByteCodesMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV1;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.slf4j.Logger;
 
-import java.util.Optional;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class GetBytecodeFromPeerTask extends AbstractPeerRequestTask<ByteCodesMessage> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(GetBytecodeFromPeerTask.class);
+
 
   private final GetByteCodesMessage message;
   private final BlockHeader blockHeader;
   ;
 
   private GetBytecodeFromPeerTask(
-      final EthContext ethContext,
-      final GetByteCodesMessage message,
-      final BlockHeader blockHeader,
-      final MetricsSystem metricsSystem) {
+          final EthContext ethContext,
+          final GetByteCodesMessage message,
+          final BlockHeader blockHeader,
+          final MetricsSystem metricsSystem) {
     super(ethContext, SnapV1.STORAGE_RANGE, metricsSystem);
     this.message = message;
     this.blockHeader = blockHeader;

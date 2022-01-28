@@ -14,8 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
-import static org.hyperledger.besu.util.FutureUtils.exceptionallyCompose;
-
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
 import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncActions;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncDownloader;
@@ -23,27 +23,26 @@ import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.fastsync.FastSyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloader;
 import org.hyperledger.besu.services.tasks.TaskCollection;
+import org.slf4j.Logger;
 
-import java.nio.file.Path;
-import java.util.concurrent.CompletableFuture;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import static org.hyperledger.besu.util.FutureUtils.exceptionallyCompose;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class SnapSyncDownloader extends FastSyncDownloader<SnapDataRequest> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(SnapSyncDownloader.class);
+
 
   public SnapSyncDownloader(
-      final FastSyncActions fastSyncActions,
-      final WorldStateDownloader worldStateDownloader,
-      final FastSyncStateStorage fastSyncStateStorage,
-      final TaskCollection<SnapDataRequest> taskCollection,
-      final Path fastSyncDataDirectory,
-      final FastSyncState initialFastSyncState) {
+          final FastSyncActions fastSyncActions,
+          final WorldStateDownloader worldStateDownloader,
+          final FastSyncStateStorage fastSyncStateStorage,
+          final TaskCollection<SnapDataRequest> taskCollection,
+          final Path fastSyncDataDirectory,
+          final FastSyncState initialFastSyncState) {
     super(
-        fastSyncActions,
-        worldStateDownloader,
+            fastSyncActions,
+            worldStateDownloader,
         fastSyncStateStorage,
         taskCollection,
         fastSyncDataDirectory,

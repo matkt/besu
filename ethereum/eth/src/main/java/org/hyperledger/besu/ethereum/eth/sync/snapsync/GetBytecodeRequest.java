@@ -14,8 +14,16 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync;
 
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.BYTECODES;
-
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import kotlin.collections.ArrayDeque;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.messages.snap.ByteCodesMessage;
@@ -24,34 +32,27 @@ import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
 import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
+import org.slf4j.Logger;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.RequestType.BYTECODES;
+import static org.slf4j.LoggerFactory.getLogger;
 
-import kotlin.collections.ArrayDeque;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-
-/** Returns a list of bytecodes */
+/**
+ * Returns a list of bytecodes
+ */
 public class GetBytecodeRequest extends SnapDataRequest {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = getLogger(GetBytecodeRequest.class);
+
 
   private final GetByteCodesMessage request;
   private GetByteCodesMessage.CodeHashes codeHashes;
   private ByteCodesMessage.ByteCodes response;
 
   protected GetBytecodeRequest(
-      final Hash rootHash,
-      final ArrayDeque<Bytes32> accountHashes,
-      final ArrayDeque<Bytes32> codeHashes) {
+          final Hash rootHash,
+          final ArrayDeque<Bytes32> accountHashes,
+          final ArrayDeque<Bytes32> codeHashes) {
     super(BYTECODES, rootHash);
     LOG.trace(
         "create get bytecode data request for {} accounts with root hash={}",
