@@ -83,12 +83,6 @@ public class SimpleMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
   }
 
   @Override
-  public void removePath(final K path, final RemoveVisitor<V> removeVisitor) {
-    checkNotNull(path);
-    this.root = root.accept(removeVisitor, path);
-  }
-
-  @Override
   public Bytes32 getRootHash() {
     return root.getHash();
   }
@@ -106,11 +100,6 @@ public class SimpleMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
   @Override
   public Map<Bytes32, V> entriesFrom(final Bytes32 startKeyHash, final int limit) {
     return StorageEntriesCollector.collectEntries(root, startKeyHash, limit);
-  }
-
-  @Override
-  public Map<Bytes32, V> entriesFrom(final Function<Node<V>, Map<Bytes32, V>> handler) {
-    return handler.apply(root);
   }
 
   @Override
