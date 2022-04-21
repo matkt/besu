@@ -25,7 +25,7 @@ public class NullNode<V> implements Node<V> {
   @SuppressWarnings("rawtypes")
   private static final NullNode instance = new NullNode();
 
-  private NullNode() {}
+  protected NullNode() {}
 
   @SuppressWarnings("unchecked")
   public static <V> NullNode<V> instance() {
@@ -94,6 +94,16 @@ public class NullNode<V> implements Node<V> {
 
   @Override
   public void markDirty() {
+    // do nothing
+  }
+
+  @Override
+  public boolean isHealNeeded() {
+    return false;
+  }
+
+  @Override
+  public void markHealNeeded() {
     // do nothing
   }
 }

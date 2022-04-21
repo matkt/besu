@@ -16,7 +16,6 @@ package org.hyperledger.besu.evm.processor;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.evm.EVM;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
@@ -31,14 +30,14 @@ import java.util.List;
 import java.util.Optional;
 
 import com.google.common.collect.ImmutableSet;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** A contract creation message processor. */
 public class ContractCreationProcessor extends AbstractMessageProcessor {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ContractCreationProcessor.class);
 
   private final boolean requireCodeDepositToSucceed;
 
@@ -120,9 +119,9 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
   public void codeSuccess(final MessageFrame frame, final OperationTracer operationTracer) {
     final Bytes contractCode = frame.getOutputData();
 
-    final Gas depositFee = gasCalculator.codeDepositGasCost(contractCode.size());
+    final long depositFee = gasCalculator.codeDepositGasCost(contractCode.size());
 
-    if (frame.getRemainingGas().compareTo(depositFee) < 0) {
+    if (frame.getRemainingGas() < depositFee) {
       LOG.trace(
           "Not enough gas to pay the code deposit fee for {}: "
               + "remaining gas = {} < {} = deposit fee",
@@ -139,7 +138,12 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
         frame.setState(MessageFrame.State.COMPLETED_SUCCESS);
       }
     } else {
-      if (contractValidationRules.stream().allMatch(rule -> rule.validate(frame))) {
+      final var invalidReason =
+          contractValidationRules.stream()
+              .map(rule -> rule.validate(frame))
+              .filter(Optional::isPresent)
+              .findFirst();
+      if (invalidReason.isEmpty()) {
         frame.decrementRemainingGas(depositFee);
 
         // Finalize contract creation, setting the contract code.
@@ -153,10 +157,10 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
             frame.getRemainingGas());
         frame.setState(MessageFrame.State.COMPLETED_SUCCESS);
       } else {
-        frame.setExceptionalHaltReason(Optional.of(ExceptionalHaltReason.INSUFFICIENT_GAS));
+        final Optional<ExceptionalHaltReason> exceptionalHaltReason = invalidReason.get();
+        frame.setExceptionalHaltReason(exceptionalHaltReason);
         frame.setState(MessageFrame.State.EXCEPTIONAL_HALT);
-        operationTracer.traceAccountCreationResult(
-            frame, Optional.of(ExceptionalHaltReason.INSUFFICIENT_GAS));
+        operationTracer.traceAccountCreationResult(frame, exceptionalHaltReason);
       }
     }
   }

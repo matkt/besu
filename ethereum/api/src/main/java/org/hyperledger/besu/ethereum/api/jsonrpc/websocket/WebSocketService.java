@@ -18,6 +18,7 @@ import static com.google.common.collect.Streams.stream;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.AuthenticationService;
 import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.AuthenticationUtils;
+import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.DefaultAuthenticationService;
 import org.hyperledger.besu.ethereum.api.jsonrpc.websocket.subscription.SubscriptionManager;
 
 import java.net.InetSocketAddress;
@@ -41,12 +42,12 @@ import io.vertx.core.net.SocketAddress;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class WebSocketService {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(WebSocketService.class);
 
   private static final InetSocketAddress EMPTY_SOCKET_ADDRESS = new InetSocketAddress("0.0.0.0", 0);
   private static final String APPLICATION_JSON = "application/json";
@@ -70,10 +71,10 @@ public class WebSocketService {
         vertx,
         configuration,
         websocketRequestHandler,
-        AuthenticationService.create(vertx, configuration));
+        DefaultAuthenticationService.create(vertx, configuration));
   }
 
-  private WebSocketService(
+  public WebSocketService(
       final Vertx vertx,
       final WebSocketConfiguration configuration,
       final WebSocketRequestHandler websocketRequestHandler,
@@ -99,7 +100,9 @@ public class WebSocketService {
                     .setPort(configuration.getPort())
                     .setHandle100ContinueAutomatically(true)
                     .setCompressionSupported(true)
-                    .addWebSocketSubProtocol("undefined"))
+                    .addWebSocketSubProtocol("undefined")
+                    .setMaxWebSocketFrameSize(configuration.getMaxFrameSize())
+                    .setMaxWebSocketMessageSize(configuration.getMaxFrameSize() * 4))
             .webSocketHandler(websocketHandler())
             .connectionHandler(connectionHandler())
             .requestHandler(httpHandler())
@@ -130,12 +133,26 @@ public class WebSocketService {
                 buffer.toString(),
                 socketAddressAsString(socketAddress));
 
-            AuthenticationUtils.getUser(
-                authenticationService,
-                token,
-                user ->
-                    websocketRequestHandler.handle(
-                        authenticationService, websocket, buffer.toString(), user));
+            if (authenticationService.isPresent()) {
+              authenticationService
+                  .get()
+                  .authenticate(
+                      token,
+                      user ->
+                          websocketRequestHandler.handle(
+                              authenticationService,
+                              websocket,
+                              buffer.toString(),
+                              user,
+                              configuration.getRpcApisNoAuth()));
+            } else {
+              websocketRequestHandler.handle(
+                  Optional.empty(),
+                  websocket,
+                  buffer.toString(),
+                  Optional.empty(),
+                  configuration.getRpcApisNoAuth());
+            }
           });
 
       websocket.textMessageHandler(
@@ -145,12 +162,26 @@ public class WebSocketService {
                 payload,
                 socketAddressAsString(socketAddress));
 
-            AuthenticationUtils.getUser(
-                authenticationService,
-                token,
-                user ->
-                    websocketRequestHandler.handle(
-                        authenticationService, websocket, payload, user));
+            if (authenticationService.isPresent()) {
+              authenticationService
+                  .get()
+                  .authenticate(
+                      token,
+                      user ->
+                          websocketRequestHandler.handle(
+                              authenticationService,
+                              websocket,
+                              payload,
+                              user,
+                              configuration.getRpcApisNoAuth()));
+            } else {
+              websocketRequestHandler.handle(
+                  Optional.empty(),
+                  websocket,
+                  payload,
+                  Optional.empty(),
+                  configuration.getRpcApisNoAuth());
+            }
           });
 
       websocket.closeHandler(
@@ -216,7 +247,7 @@ public class WebSocketService {
       router
           .post("/login")
           .produces(APPLICATION_JSON)
-          .handler(AuthenticationService::handleDisabledLogin);
+          .handler(DefaultAuthenticationService::handleDisabledLogin);
     }
 
     router.route().handler(WebSocketService::handleHttpNotSupported);

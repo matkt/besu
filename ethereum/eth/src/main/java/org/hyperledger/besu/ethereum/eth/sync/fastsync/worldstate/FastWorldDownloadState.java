@@ -18,29 +18,34 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
-import org.hyperledger.besu.services.tasks.CachingTaskCollection;
+import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 
 import java.time.Clock;
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FastWorldDownloadState extends WorldDownloadState<NodeDataRequest> {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(FastWorldDownloadState.class);
 
   public FastWorldDownloadState(
-      final CachingTaskCollection<NodeDataRequest> pendingRequests,
+      final WorldStateStorage worldStateStorage,
+      final InMemoryTasksPriorityQueues<NodeDataRequest> pendingRequests,
       final int maxRequestsWithoutProgress,
       final long minMillisBeforeStalling,
       final Clock clock) {
-    super(pendingRequests, maxRequestsWithoutProgress, minMillisBeforeStalling, clock);
+    super(
+        worldStateStorage,
+        pendingRequests,
+        maxRequestsWithoutProgress,
+        minMillisBeforeStalling,
+        clock);
   }
 
   @Override
-  public synchronized boolean checkCompletion(
-      final WorldStateStorage worldStateStorage, final BlockHeader header) {
+  public synchronized boolean checkCompletion(final BlockHeader header) {
     if (!internalFuture.isDone() && pendingRequests.allTasksCompleted()) {
       if (rootNodeData == null) {
         enqueueRequest(

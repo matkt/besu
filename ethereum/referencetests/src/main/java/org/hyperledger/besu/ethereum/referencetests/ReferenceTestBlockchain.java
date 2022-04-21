@@ -30,6 +30,7 @@ import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,8 @@ public class ReferenceTestBlockchain implements Blockchain {
       "Blocks must not be looked up by number in the EVM. The block being processed may not be on the canonical chain.";
   private static final String CHAIN_HEAD_ERROR =
       "Chain head is inherently non-deterministic. The block currently being processed should be treated as the chain head.";
+  private static final String FINALIZED_ERROR =
+      "Finalized block is inherently non-deterministic. The block currently being processed should be treated as the finalized block.";
   private final Map<Hash, BlockHeader> hashToHeader = new HashMap<>();
 
   public ReferenceTestBlockchain() {
@@ -90,6 +93,11 @@ public class ReferenceTestBlockchain implements Blockchain {
   @Override
   public ChainHead getChainHead() {
     throw new NonDeterministicOperationException(CHAIN_HEAD_ERROR);
+  }
+
+  @Override
+  public Optional<Hash> getFinalized() {
+    throw new NonDeterministicOperationException(FINALIZED_ERROR);
   }
 
   @Override
@@ -165,5 +173,18 @@ public class ReferenceTestBlockchain implements Blockchain {
     NonDeterministicOperationException(final String message) {
       super(message);
     }
+  }
+
+  @Override
+  public Comparator<BlockHeader> getBlockChoiceRule() {
+    return (a, b) -> {
+      throw new NonDeterministicOperationException(
+          "ReferenceTestBlockchian for VMTest Chains do not support fork choice rules");
+    };
+  }
+
+  @Override
+  public void setBlockChoiceRule(final Comparator<BlockHeader> blockChoiceRule) {
+    throw new UnsupportedOperationException("Not Used for Reference Tests");
   }
 }

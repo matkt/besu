@@ -145,6 +145,17 @@ public class WebSocketRequestHandlerTest {
   @Test
   public void handlerBatchRequestContainingErrorsShouldRespondWithBatchErrors(
       final TestContext context) {
+    ServerWebSocket websocketMock = mock(ServerWebSocket.class);
+
+    when(websocketMock.textHandlerID()).thenReturn(UUID.randomUUID().toString());
+
+    WebSocketRequestHandler handleBadCalls =
+        new WebSocketRequestHandler(
+            vertx,
+            methods,
+            mock(EthScheduler.class),
+            TimeoutOptions.defaultOptions().getTimeoutSeconds());
+
     final Async async = context.async();
 
     final JsonObject requestJson =
@@ -152,22 +163,21 @@ public class WebSocketRequestHandlerTest {
     final JsonRpcErrorResponse expectedErrorResponse1 =
         new JsonRpcErrorResponse(1, JsonRpcError.METHOD_NOT_FOUND);
 
-    final JsonArray arrayJson = new JsonArray(List.of(requestJson, ""));
-    final JsonRpcErrorResponse expectedErrorResponse2 =
-        new JsonRpcErrorResponse(null, JsonRpcError.INVALID_REQUEST);
+    final JsonArray arrayJson = new JsonArray(List.of(requestJson, requestJson));
 
     final JsonArray expectedBatchResponse =
-        new JsonArray(List.of(expectedErrorResponse1, expectedErrorResponse2));
+        new JsonArray(List.of(expectedErrorResponse1, expectedErrorResponse1));
 
     when(websocketMock.writeFrame(argThat(this::isFinalFrame))).then(completeOnLastFrame(async));
 
-    handler.handle(websocketMock, arrayJson.toString());
+    handleBadCalls.handle(websocketMock, arrayJson.toString());
 
     async.awaitSuccess(WebSocketRequestHandlerTest.VERTX_AWAIT_TIMEOUT_MILLIS);
 
     // can verify only after async not before
     verify(websocketMock).writeFrame(argThat(isFrameWithText(Json.encode(expectedBatchResponse))));
     verify(websocketMock).writeFrame(argThat(this::isFinalFrame));
+    verifyNoInteractions(jsonRpcMethodMock);
   }
 
   @Test
@@ -225,6 +235,7 @@ public class WebSocketRequestHandlerTest {
 
     verify(websocketMock).writeFrame(argThat(isFrameWithText(Json.encode(expectedResponse))));
     verify(websocketMock).writeFrame(argThat(this::isFinalFrame));
+    verifyNoInteractions(jsonRpcMethodMock);
   }
 
   @Test

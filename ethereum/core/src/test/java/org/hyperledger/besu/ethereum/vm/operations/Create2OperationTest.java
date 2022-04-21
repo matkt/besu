@@ -25,7 +25,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.evm.Code;
-import org.hyperledger.besu.evm.Gas;
+import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.ConstantinopleGasCalculator;
@@ -56,6 +56,7 @@ public class Create2OperationTest {
   private final WorldUpdater worldUpdater = mock(WorldUpdater.class);
   private final WrappedEvmAccount account = mock(WrappedEvmAccount.class);
   private final MutableAccount mutableAccount = mock(MutableAccount.class);
+  private final EVM evm = mock(EVM.class);
   private final Create2Operation operation =
       new Create2Operation(new ConstantinopleGasCalculator());
 
@@ -141,7 +142,7 @@ public class Create2OperationTest {
             .sender(Address.fromHexString(sender))
             .value(Wei.ZERO)
             .apparentValue(Wei.ZERO)
-            .code(new Code(codeBytes, Hash.hash(codeBytes)))
+            .code(Code.createLegacyCode(codeBytes, Hash.hash(codeBytes)))
             .depth(1)
             .completer(__ -> {})
             .address(Address.fromHexString(sender))
@@ -151,7 +152,7 @@ public class Create2OperationTest {
             .messageFrameStack(new ArrayDeque<>())
             .miningBeneficiary(Address.ZERO)
             .originator(Address.ZERO)
-            .initialGas(Gas.of(100000))
+            .initialGas(100_000L)
             .worldUpdater(worldUpdater)
             .build();
     messageFrame.pushStackItem(UInt256.fromHexString(salt));
@@ -164,6 +165,10 @@ public class Create2OperationTest {
     when(mutableAccount.getBalance()).thenReturn(Wei.ZERO);
     when(worldUpdater.getAccount(any())).thenReturn(account);
     when(worldUpdater.updater()).thenReturn(worldUpdater);
+    when(evm.getCode(any(), any()))
+        .thenAnswer(
+            invocation ->
+                Code.createLegacyCode(invocation.getArgument(1), invocation.getArgument(0)));
   }
 
   @Test
@@ -174,8 +179,9 @@ public class Create2OperationTest {
 
   @Test
   public void shouldCalculateGasPrice() {
-    final OperationResult result = operation.execute(messageFrame, null);
+    final OperationResult result = operation.execute(messageFrame, evm);
     assertThat(result.getHaltReason()).isEmpty();
-    assertThat(result.getGasCost()).contains(Gas.of(expectedGas));
+    assertThat(result.getGasCost().isPresent()).isTrue();
+    assertThat(result.getGasCost().getAsLong()).isEqualTo(expectedGas);
   }
 }

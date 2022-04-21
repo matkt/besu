@@ -17,7 +17,6 @@ package org.hyperledger.besu.consensus.common.bft;
 import org.hyperledger.besu.config.BftConfigOptions;
 import org.hyperledger.besu.config.GenesisConfigOptions;
 import org.hyperledger.besu.consensus.common.ForksSchedule;
-import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.PrivacyParameters;
 import org.hyperledger.besu.ethereum.mainnet.BlockHeaderValidator;
@@ -28,14 +27,13 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolScheduleBuilder;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecAdapters;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecBuilder;
+import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /** Defines the protocol behaviours for a blockchain using a BFT consensus mechanism. */
 public abstract class BaseBftProtocolSchedule {
@@ -59,12 +57,7 @@ public abstract class BaseBftProtocolSchedule {
                     forkSpec.getBlock(),
                     builder ->
                         applyBftChanges(
-                            forkSpec.getValue(),
-                            builder,
-                            config.isQuorum(),
-                            createBlockHeaderRuleset(forkSpec.getValue()),
-                            bftExtraDataCodec,
-                            Optional.of(forkSpec.getValue().getBlockRewardWei()))));
+                            builder, forkSpec.getValue(), config.isQuorum(), bftExtraDataCodec)));
 
     final ProtocolSpecAdapters specAdapters = new ProtocolSpecAdapters(specMap);
 
@@ -79,49 +72,34 @@ public abstract class BaseBftProtocolSchedule {
         .createProtocolSchedule();
   }
 
-  protected abstract Supplier<BlockHeaderValidator.Builder> createBlockHeaderRuleset(
-      final BftConfigOptions config);
+  protected abstract BlockHeaderValidator.Builder createBlockHeaderRuleset(
+      final BftConfigOptions config, final FeeMarket feeMarket);
 
   private ProtocolSpecBuilder applyBftChanges(
-      final BftConfigOptions configOptions,
       final ProtocolSpecBuilder builder,
+      final BftConfigOptions configOptions,
       final boolean goQuorumMode,
-      final Supplier<BlockHeaderValidator.Builder> blockHeaderRuleset,
-      final BftExtraDataCodec bftExtraDataCodec,
-      final Optional<BigInteger> blockReward) {
-
+      final BftExtraDataCodec bftExtraDataCodec) {
     if (configOptions.getEpochLength() <= 0) {
       throw new IllegalArgumentException("Epoch length in config must be greater than zero");
     }
-
-    if (blockReward.isPresent() && blockReward.get().signum() < 0) {
+    if (configOptions.getBlockRewardWei().signum() < 0) {
       throw new IllegalArgumentException("Bft Block reward in config cannot be negative");
     }
 
-    builder
-        .blockHeaderValidatorBuilder(feeMarket -> blockHeaderRuleset.get())
-        .ommerHeaderValidatorBuilder(feeMarket -> blockHeaderRuleset.get())
+    return builder
+        .blockHeaderValidatorBuilder(
+            feeMarket -> createBlockHeaderRuleset(configOptions, feeMarket))
+        .ommerHeaderValidatorBuilder(
+            feeMarket -> createBlockHeaderRuleset(configOptions, feeMarket))
         .blockBodyValidatorBuilder(MainnetBlockBodyValidator::new)
         .blockValidatorBuilder(MainnetProtocolSpecs.blockValidatorBuilder(goQuorumMode))
         .blockImporterBuilder(MainnetBlockImporter::new)
         .difficultyCalculator((time, parent, protocolContext) -> BigInteger.ONE)
         .skipZeroBlockRewards(true)
-        .blockHeaderFunctions(BftBlockHeaderFunctions.forOnchainBlock(bftExtraDataCodec));
-
-    blockReward.ifPresent(bigInteger -> builder.blockReward(Wei.of(bigInteger)));
-
-    if (configOptions.getMiningBeneficiary().isPresent()) {
-      final Address miningBeneficiary;
-      try {
-        // Precalculate beneficiary to ensure string is valid now, rather than on lambda execution.
-        miningBeneficiary = Address.fromHexString(configOptions.getMiningBeneficiary().get());
-      } catch (final IllegalArgumentException e) {
-        throw new IllegalArgumentException(
-            "Mining beneficiary in config is not a valid ethereum address", e);
-      }
-      builder.miningBeneficiaryCalculator(header -> miningBeneficiary);
-    }
-
-    return builder;
+        .blockHeaderFunctions(BftBlockHeaderFunctions.forOnchainBlock(bftExtraDataCodec))
+        .blockReward(Wei.of(configOptions.getBlockRewardWei()))
+        .miningBeneficiaryCalculator(
+            header -> configOptions.getMiningBeneficiary().orElseGet(header::getCoinbase));
   }
 }

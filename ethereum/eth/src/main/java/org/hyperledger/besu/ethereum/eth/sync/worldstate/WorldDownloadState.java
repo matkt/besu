@@ -18,8 +18,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.manager.task.EthTask;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 import org.hyperledger.besu.services.tasks.Task;
-import org.hyperledger.besu.services.tasks.TaskCollection;
+import org.hyperledger.besu.services.tasks.TasksPriorityProvider;
 import org.hyperledger.besu.util.ExceptionUtils;
 
 import java.time.Clock;
@@ -30,15 +31,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public abstract class WorldDownloadState<REQUEST> {
-  private static final Logger LOG = LogManager.getLogger();
+public abstract class WorldDownloadState<REQUEST extends TasksPriorityProvider> {
+  private static final Logger LOG = LoggerFactory.getLogger(WorldDownloadState.class);
 
   private boolean downloadWasResumed;
-  protected final TaskCollection<REQUEST> pendingRequests;
+  protected final InMemoryTasksPriorityQueues<REQUEST> pendingRequests;
 
   protected final int maxRequestsWithoutProgress;
   private final Clock clock;
@@ -51,13 +52,17 @@ public abstract class WorldDownloadState<REQUEST> {
   private final long minMillisBeforeStalling;
   private volatile long timestampOfLastProgress;
   protected Bytes rootNodeData;
+
+  protected final WorldStateStorage worldStateStorage;
   protected WorldStateDownloadProcess worldStateDownloadProcess;
 
   public WorldDownloadState(
-      final TaskCollection<REQUEST> pendingRequests,
+      final WorldStateStorage worldStateStorage,
+      final InMemoryTasksPriorityQueues<REQUEST> pendingRequests,
       final int maxRequestsWithoutProgress,
       final long minMillisBeforeStalling,
       final Clock clock) {
+    this.worldStateStorage = worldStateStorage;
     this.minMillisBeforeStalling = minMillisBeforeStalling;
     this.timestampOfLastProgress = clock.millis();
     this.downloadWasResumed = !pendingRequests.isEmpty();
@@ -103,10 +108,8 @@ public abstract class WorldDownloadState<REQUEST> {
         LOG.info("World state download failed. ", error);
       }
     }
-    for (final EthTask<?> outstandingRequest : outstandingRequests) {
-      outstandingRequest.cancel();
-    }
-    pendingRequests.clear();
+
+    cleanupQueues();
 
     if (error != null) {
       if (worldStateDownloadProcess != null) {
@@ -116,6 +119,13 @@ public abstract class WorldDownloadState<REQUEST> {
     } else {
       downloadFuture.complete(result);
     }
+  }
+
+  protected synchronized void cleanupQueues() {
+    for (final EthTask<?> outstandingRequest : outstandingRequests) {
+      outstandingRequest.cancel();
+    }
+    pendingRequests.clear();
   }
 
   public boolean downloadWasResumed() {
@@ -236,6 +246,5 @@ public abstract class WorldDownloadState<REQUEST> {
     this.worldStateDownloadProcess = worldStateDownloadProcess;
   }
 
-  public abstract boolean checkCompletion(
-      final WorldStateStorage worldStateStorage, final BlockHeader header);
+  public abstract boolean checkCompletion(final BlockHeader header);
 }

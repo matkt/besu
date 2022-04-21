@@ -14,8 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.stratum;
 
-import static org.apache.logging.log4j.LogManager.getLogger;
-
+import org.hyperledger.besu.consensus.merge.blockcreation.TransitionCoordinator;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequest;
@@ -39,8 +38,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.vertx.core.json.DecodeException;
 import io.vertx.core.json.JsonObject;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Implementation of the stratum+tcp protocol.
@@ -48,7 +48,7 @@ import org.apache.tuweni.bytes.Bytes;
  * <p>This protocol allows miners to submit EthHash solutions over a persistent TCP connection.
  */
 public class Stratum1Protocol implements StratumProtocol {
-  private static final Logger LOG = getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(Stratum1Protocol.class);
   private static final JsonMapper mapper = new JsonMapper();
   private static final String STRATUM_1 = "EthereumStratum/1.0.0";
 
@@ -83,16 +83,21 @@ public class Stratum1Protocol implements StratumProtocol {
       final MiningCoordinator miningCoordinator,
       final Supplier<String> jobIdSupplier,
       final Supplier<String> subscriptionIdCreator) {
-    if (!(miningCoordinator instanceof PoWMiningCoordinator)) {
+    MiningCoordinator maybePowMiner = miningCoordinator;
+    if (maybePowMiner instanceof TransitionCoordinator) {
+      maybePowMiner = ((TransitionCoordinator) maybePowMiner).getPreMergeObject();
+    }
+
+    if (!(maybePowMiner instanceof PoWMiningCoordinator)) {
       throw new IllegalArgumentException(
           "Stratum1 requires an PoWMiningCoordinator not "
-              + ((miningCoordinator == null) ? "null" : miningCoordinator.getClass().getName()));
+              + ((maybePowMiner == null) ? "null" : maybePowMiner.getClass().getName()));
     }
     this.extranonce = extranonce;
-    this.miningCoordinator = miningCoordinator;
+    this.miningCoordinator = maybePowMiner;
     this.jobIdSupplier = jobIdSupplier;
     this.subscriptionIdCreator = subscriptionIdCreator;
-    this.epochCalculator = ((PoWMiningCoordinator) miningCoordinator).getEpochCalculator();
+    this.epochCalculator = ((PoWMiningCoordinator) maybePowMiner).getEpochCalculator();
   }
 
   @Override

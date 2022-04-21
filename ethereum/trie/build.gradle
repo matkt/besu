@@ -37,6 +37,9 @@ dependencies {
   implementation 'org.apache.tuweni:tuweni-bytes'
   implementation 'org.bouncycastle:bcprov-jdk15on'
 
+  annotationProcessor "org.immutables:value"
+  implementation "org.immutables:value-annotations"
+
   testImplementation project(':testutil')
   testImplementation project(path: ':ethereum:referencetests', configuration: 'testOutput')
 
@@ -44,7 +47,10 @@ dependencies {
   testImplementation 'junit:junit'
   testImplementation 'org.apache.tuweni:tuweni-units'
   testImplementation 'org.assertj:assertj-core'
+  testImplementation 'org.junit.jupiter:junit-jupiter'
   testImplementation 'org.mockito:mockito-core'
+
+  testRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
 }
 
 test { exclude 'org/hyperledger/besu/ethereum/trie/TrieRefTest.class' }

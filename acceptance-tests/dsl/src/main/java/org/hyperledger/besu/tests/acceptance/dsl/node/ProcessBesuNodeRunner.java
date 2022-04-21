@@ -46,15 +46,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.ThreadContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 public class ProcessBesuNodeRunner implements BesuNodeRunner {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ProcessBesuNodeRunner.class);
   private static final Logger PROCESS_LOG =
-      LogManager.getLogger("org.hyperledger.besu.SubProcessLog");
+      LoggerFactory.getLogger("org.hyperledger.besu.SubProcessLog");
 
   private final Map<String, Process> besuProcesses = new HashMap<>();
   private final ExecutorService outputProcessorExecutor = Executors.newCachedThreadPool();
@@ -168,6 +168,10 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
       params.add(node.jsonRpcListenPort().map(Object::toString).get());
       params.add("--rpc-http-api");
       params.add(apiList(node.jsonRpcConfiguration().getRpcApis()));
+      if (!node.jsonRpcConfiguration().getNoAuthRpcApis().isEmpty()) {
+        params.add("--rpc-http-api-methods-no-auth");
+        params.add(apiList(node.jsonRpcConfiguration().getNoAuthRpcApis()));
+      }
       if (node.jsonRpcConfiguration().isAuthenticationEnabled()) {
         params.add("--rpc-http-authentication-enabled");
       }
@@ -185,6 +189,14 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
       }
     }
 
+    if (node.isEngineRpcEnabled()) {
+      params.add("--Xmerge-support");
+      params.add("true");
+
+      params.add("--engine-rpc-http-port");
+      params.add(node.jsonEngineListenPort().get().toString());
+    }
+
     if (node.wsRpcEnabled()) {
       params.add("--rpc-ws-enabled");
       params.add("--rpc-ws-host");
@@ -193,6 +205,10 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
       params.add(node.wsRpcListenPort().map(Object::toString).get());
       params.add("--rpc-ws-api");
       params.add(apiList(node.webSocketConfiguration().getRpcApis()));
+      if (!node.webSocketConfiguration().getRpcApisNoAuth().isEmpty()) {
+        params.add("--rpc-ws-api-methods-no-auth");
+        params.add(apiList(node.webSocketConfiguration().getRpcApisNoAuth()));
+      }
       if (node.webSocketConfiguration().isAuthenticationEnabled()) {
         params.add("--rpc-ws-authentication-enabled");
       }
@@ -209,6 +225,9 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
         params.add("--rpc-ws-authentication-jwt-algorithm");
         params.add(node.webSocketConfiguration().getAuthenticationAlgorithm().toString());
       }
+      // TODO: properly handle engine rpc, set port to 0 to make tests pass
+      params.add("--engine-rpc-ws-port");
+      params.add("0");
     }
 
     if (node.isMetricsEnabled()) {
@@ -362,6 +381,9 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
     params.add("--auto-log-bloom-caching-enabled");
     params.add("false");
 
+    params.add("--strict-tx-replay-protection-enabled");
+    params.add(Boolean.toString(node.isStrictTxReplayProtectionEnabled()));
+
     final String level = System.getProperty("root.log.level");
     if (level != null) {
       params.add("--logging=" + level);
@@ -407,7 +429,7 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
       waitForFile(dataDir, "besu.ports");
       waitForFile(dataDir, "besu.networks");
     }
-    ThreadContext.remove("node");
+    MDC.remove("node");
   }
 
   private boolean isNotAliveOrphan(final String name) {
@@ -419,7 +441,7 @@ public class ProcessBesuNodeRunner implements BesuNodeRunner {
     try (final BufferedReader in =
         new BufferedReader(new InputStreamReader(process.getInputStream(), UTF_8))) {
 
-      ThreadContext.put("node", node.getName());
+      MDC.put("node", node.getName());
 
       String line = in.readLine();
       while (line != null) {

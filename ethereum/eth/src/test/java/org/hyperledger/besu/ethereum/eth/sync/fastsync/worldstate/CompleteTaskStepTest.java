@@ -22,31 +22,22 @@ import static org.mockito.Mockito.verify;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.eth.sync.worldstate.StubTask;
-import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.Test;
-import org.mockito.ArgumentCaptor;
 
 public class CompleteTaskStepTest {
 
   private static final Hash ROOT_HASH = Hash.hash(Bytes.of(1, 2, 3));
-  private final WorldStateStorage worldStateStorage = mock(WorldStateStorage.class);
   private final FastWorldDownloadState downloadState = mock(FastWorldDownloadState.class);
   private final BlockHeader blockHeader =
       new BlockHeaderTestFixture().stateRoot(ROOT_HASH).buildHeader();
 
   private final CompleteTaskStep completeTaskStep =
-      new CompleteTaskStep(worldStateStorage, new NoOpMetricsSystem(), () -> 3);
-
-  @SuppressWarnings("unchecked")
-  private final ArgumentCaptor<Stream<NodeDataRequest>> streamCaptor =
-      ArgumentCaptor.forClass(Stream.class);
+      new CompleteTaskStep(new NoOpMetricsSystem(), () -> 3);
 
   @Test
   public void shouldMarkTaskAsFailedIfItDoesNotHaveData() {
@@ -58,11 +49,11 @@ public class CompleteTaskStepTest {
     assertThat(task.isCompleted()).isFalse();
     assertThat(task.isFailed()).isTrue();
     verify(downloadState).notifyTaskAvailable();
-    verify(downloadState, never()).checkCompletion(worldStateStorage, blockHeader);
+    verify(downloadState, never()).checkCompletion(blockHeader);
   }
 
   @Test
-  public void shouldEnqueueChildrenAndMarkCompleteWhenTaskHasData() {
+  public void shouldMarkCompleteWhenTaskHasData() {
     // Use an arbitrary but actually valid trie node to get children from.
     final StubTask task = validTask();
     completeTaskStep.markAsCompleteOrFailed(blockHeader, downloadState, task);
@@ -70,13 +61,7 @@ public class CompleteTaskStepTest {
     assertThat(task.isCompleted()).isTrue();
     assertThat(task.isFailed()).isFalse();
 
-    verify(downloadState).enqueueRequests(streamCaptor.capture());
-    assertThat(streamCaptor.getValue())
-        .usingRecursiveFieldByFieldElementComparator()
-        .containsExactlyInAnyOrderElementsOf(
-            () -> task.getData().getChildRequests(worldStateStorage).iterator());
-
-    verify(downloadState).checkCompletion(worldStateStorage, blockHeader);
+    verify(downloadState).checkCompletion(blockHeader);
   }
 
   private StubTask validTask() {

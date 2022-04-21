@@ -21,8 +21,9 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.ethereum.core.MessageFrameTestFixture;
 import org.hyperledger.besu.evm.EVM;
-import org.hyperledger.besu.evm.Gas;
+import org.hyperledger.besu.evm.contractvalidation.MaxCodeSizeRule;
 import org.hyperledger.besu.evm.contractvalidation.PrefixCodeRule;
+import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.evm.processor.ContractCreationProcessor;
@@ -55,13 +56,15 @@ public class MainnetContractCreationProcessorTest {
             1,
             Collections.emptyList());
     final Bytes contractCode = Bytes.fromHexString("EF01010101010101");
-    MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
     messageFrame.setOutputData(contractCode);
-    messageFrame.setGasRemaining(Gas.of(100));
+    messageFrame.setGasRemaining(100L);
 
-    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(Gas.of(10));
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
     processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
     assertThat(messageFrame.getState()).isEqualTo(EXCEPTIONAL_HALT);
+    assertThat(messageFrame.getExceptionalHaltReason())
+        .contains(ExceptionalHaltReason.INVALID_CODE);
   }
 
   @Test
@@ -75,11 +78,11 @@ public class MainnetContractCreationProcessorTest {
             1,
             Collections.emptyList());
     final Bytes contractCode = Bytes.fromHexString("0101010101010101");
-    MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
     messageFrame.setOutputData(contractCode);
-    messageFrame.setGasRemaining(Gas.of(100));
+    messageFrame.setGasRemaining(100L);
 
-    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(Gas.of(10));
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
     processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
     assertThat(messageFrame.getState()).isEqualTo(COMPLETED_SUCCESS);
   }
@@ -90,11 +93,68 @@ public class MainnetContractCreationProcessorTest {
         new ContractCreationProcessor(
             gasCalculator, evm, true, Collections.emptyList(), 1, Collections.emptyList());
     final Bytes contractCode = Bytes.fromHexString("0F01010101010101");
-    MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
     messageFrame.setOutputData(contractCode);
-    messageFrame.setGasRemaining(Gas.of(100));
+    messageFrame.setGasRemaining(100L);
 
-    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(Gas.of(10));
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
+    processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
+    assertThat(messageFrame.getState()).isEqualTo(COMPLETED_SUCCESS);
+  }
+
+  @Test
+  public void shouldThrowAnExceptionWhenCodeContractTooLarge() {
+    processor =
+        new ContractCreationProcessor(
+            gasCalculator,
+            evm,
+            true,
+            Collections.singletonList(MaxCodeSizeRule.of(24 * 1024)),
+            1,
+            Collections.emptyList());
+    final Bytes contractCode = Bytes.fromHexString("00".repeat(24 * 1024 + 1));
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    messageFrame.setOutputData(contractCode);
+    messageFrame.setGasRemaining(100L);
+
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
+    processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
+    assertThat(messageFrame.getState()).isEqualTo(EXCEPTIONAL_HALT);
+    assertThat(messageFrame.getExceptionalHaltReason())
+        .contains(ExceptionalHaltReason.CODE_TOO_LARGE);
+  }
+
+  @Test
+  public void shouldNotThrowAnExceptionWhenCodeContractTooLarge() {
+    processor =
+        new ContractCreationProcessor(
+            gasCalculator,
+            evm,
+            true,
+            Collections.singletonList(MaxCodeSizeRule.of(24 * 1024)),
+            1,
+            Collections.emptyList());
+    final Bytes contractCode = Bytes.fromHexString("00".repeat(24 * 1024));
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    messageFrame.setOutputData(contractCode);
+    messageFrame.setGasRemaining(100L);
+
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
+    processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
+    assertThat(messageFrame.getState()).isEqualTo(COMPLETED_SUCCESS);
+  }
+
+  @Test
+  public void shouldNotThrowAnExceptionWhenCodeSizeRuleNotAdded() {
+    processor =
+        new ContractCreationProcessor(
+            gasCalculator, evm, true, Collections.emptyList(), 1, Collections.emptyList());
+    final Bytes contractCode = Bytes.fromHexString("00".repeat(24 * 1024 + 1));
+    final MessageFrame messageFrame = new MessageFrameTestFixture().build();
+    messageFrame.setOutputData(contractCode);
+    messageFrame.setGasRemaining(100L);
+
+    when(gasCalculator.codeDepositGasCost(contractCode.size())).thenReturn(10L);
     processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
     assertThat(messageFrame.getState()).isEqualTo(COMPLETED_SUCCESS);
   }

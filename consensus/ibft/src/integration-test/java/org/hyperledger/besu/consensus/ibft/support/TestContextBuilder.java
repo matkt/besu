@@ -300,7 +300,7 @@ public class TestContextBuilder {
             .coinbase(AddressHelpers.ofValue(1))
             .minTransactionGasPrice(Wei.ZERO)
             .extraData(Bytes.wrap("Ibft Int tests".getBytes(UTF_8)))
-            .enabled(true)
+            .miningEnabled(true)
             .build();
 
     final StubGenesisConfigOptions genesisConfigOptions = new StubGenesisConfigOptions();
@@ -334,27 +334,27 @@ public class TestContextBuilder {
         new GasPricePendingTransactionsSorter(
             TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
             1,
-            1,
             clock,
             metricsSystem,
             blockChain::getChainHeadHeader,
             TransactionPoolConfiguration.DEFAULT_PRICE_BUMP);
 
     final Address localAddress = Util.publicKeyToAddress(nodeKey.getPublicKey());
-    final BftBlockCreatorFactory blockCreatorFactory =
-        new BftBlockCreatorFactory(
+    final BftBlockCreatorFactory<?> blockCreatorFactory =
+        new BftBlockCreatorFactory<>(
             pendingTransactions, // changed from IbftBesuController
             protocolContext,
             protocolSchedule,
+            forksSchedule,
             miningParams,
-            localAddress,
             localAddress,
             IBFT_EXTRA_DATA_ENCODER);
 
     final ProposerSelector proposerSelector =
         new ProposerSelector(blockChain, blockInterface, true, validatorProvider);
 
-    final BftExecutors bftExecutors = BftExecutors.create(new NoOpMetricsSystem());
+    final BftExecutors bftExecutors =
+        BftExecutors.create(new NoOpMetricsSystem(), BftExecutors.ConsensusType.IBFT);
     final BftFinalState finalState =
         new BftFinalState(
             protocolContext.getConsensusContext(BftContext.class).getValidatorProvider(),

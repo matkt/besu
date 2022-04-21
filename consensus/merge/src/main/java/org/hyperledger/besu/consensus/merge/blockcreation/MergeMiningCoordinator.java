@@ -16,11 +16,13 @@ package org.hyperledger.besu.consensus.merge.blockcreation;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.BlockValidator.Result;
 import org.hyperledger.besu.ethereum.blockcreation.MiningCoordinator;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import org.apache.tuweni.bytes.Bytes32;
 
@@ -31,13 +33,80 @@ public interface MergeMiningCoordinator extends MiningCoordinator {
       final Bytes32 random,
       final Address feeRecipient);
 
-  boolean executeBlock(final Block block);
+  Result executeBlock(final Block block);
 
-  void updateForkChoice(final Hash headBlockHash, final Hash finalizedBlockHash);
+  ForkchoiceResult updateForkChoice(final Hash headBlockHash, final Hash finalizedBlockHash);
 
-  Optional<Hash> getLatestValidAncestor(Hash blockhash);
+  Optional<Hash> getLatestValidAncestor(Hash blockHash);
 
   Optional<Hash> getLatestValidAncestor(BlockHeader blockheader);
 
+  boolean latestValidAncestorDescendsFromTerminal(final BlockHeader blockHeader);
+
   boolean isBackwardSyncing();
+
+  CompletableFuture<Void> appendNewPayloadToSync(Block newPayload);
+
+  Optional<BlockHeader> getOrSyncHeaderByHash(Hash blockhash);
+
+  boolean isMiningBeforeMerge();
+
+  class ForkchoiceResult {
+    private final Optional<String> errorMessage;
+    private final Optional<BlockHeader> newFinalized;
+    private final Optional<BlockHeader> newHead;
+    private final Optional<Hash> latestValid;
+
+    private ForkchoiceResult(
+        final Optional<String> errorMessage,
+        final Optional<BlockHeader> newFinalized,
+        final Optional<BlockHeader> newHead,
+        final Optional<Hash> latestValid) {
+      this.errorMessage = errorMessage;
+      this.newFinalized = newFinalized;
+      this.newHead = newHead;
+      this.latestValid = latestValid;
+    }
+
+    public static ForkchoiceResult withFailure(final String errorMessage, final Hash latestValid) {
+      return new ForkchoiceResult(
+          Optional.of(errorMessage),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.ofNullable(latestValid));
+    }
+
+    public static ForkchoiceResult withResult(
+        final Optional<BlockHeader> newFinalized, final Optional<BlockHeader> newHead) {
+      return new ForkchoiceResult(Optional.empty(), newFinalized, newHead, Optional.empty());
+    }
+
+    public Optional<String> getErrorMessage() {
+      return errorMessage;
+    }
+
+    public Optional<BlockHeader> getNewFinalized() {
+      return newFinalized;
+    }
+
+    public Optional<BlockHeader> getNewHead() {
+      return newHead;
+    }
+
+    public Optional<Hash> getLatestValid() {
+      return latestValid;
+    }
+
+    public boolean isFailed() {
+      return errorMessage.isPresent();
+    }
+
+    public boolean isSuccessful() {
+      return newHead.isPresent() || newFinalized.isPresent();
+    }
+
+    public boolean isUnknown() {
+      return errorMessage.isEmpty() && newFinalized.isEmpty();
+    }
+  }
 }

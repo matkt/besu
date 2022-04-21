@@ -36,8 +36,8 @@ import java.util.TreeSet;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Holds the current set of pending transactions with the ability to iterate them based on priority
@@ -47,14 +47,13 @@ import org.apache.logging.log4j.Logger;
  */
 public class BaseFeePendingTransactionsSorter extends AbstractPendingTransactionsSorter {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(BaseFeePendingTransactionsSorter.class);
 
   private Optional<Wei> baseFee;
 
   public BaseFeePendingTransactionsSorter(
       final int maxTransactionRetentionHours,
       final int maxPendingTransactions,
-      final int maxPooledTransactionHashes,
       final Clock clock,
       final MetricsSystem metricsSystem,
       final Supplier<BlockHeader> chainHeadHeaderSupplier,
@@ -62,7 +61,6 @@ public class BaseFeePendingTransactionsSorter extends AbstractPendingTransaction
     super(
         maxTransactionRetentionHours,
         maxPendingTransactions,
-        maxPooledTransactionHashes,
         clock,
         metricsSystem,
         chainHeadHeaderSupplier,
@@ -84,7 +82,7 @@ public class BaseFeePendingTransactionsSorter extends AbstractPendingTransaction
                           .getMaxPriorityFeePerGas()
                           // safe to .get() here because only 1559 txs can be in the static range
                           .get()
-                          .getValue()
+                          .getAsBigInteger()
                           .longValue())
               .thenComparing(TransactionInfo::getSequence)
               .reversed());
@@ -97,7 +95,7 @@ public class BaseFeePendingTransactionsSorter extends AbstractPendingTransaction
                       transactionInfo
                           .getTransaction()
                           .getMaxFeePerGas()
-                          .map(maxFeePerGas -> maxFeePerGas.getValue().longValue())
+                          .map(maxFeePerGas -> maxFeePerGas.getAsBigInteger().longValue())
                           .orElse(transactionInfo.getGasPrice().toLong()))
               .thenComparing(TransactionInfo::getSequence)
               .reversed());
@@ -211,7 +209,6 @@ public class BaseFeePendingTransactionsSorter extends AbstractPendingTransaction
       }
       LOG.trace("Adding {} to pending transactions", transactionInfo);
       pendingTransactions.put(transactionInfo.getHash(), transactionInfo);
-      tryEvictTransactionHash(transactionInfo.getHash());
 
       if (pendingTransactions.size() > maxPendingTransactions) {
         final Stream.Builder<TransactionInfo> removalCandidates = Stream.builder();

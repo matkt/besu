@@ -14,8 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.permissioning;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -36,6 +36,8 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.data.EnodeURL;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -53,13 +55,6 @@ public class NodeSmartContractV2PermissioningControllerTest {
   private static final Bytes DESTINATION_ENODE_EXPECTED_PAYLOAD_IP =
       Bytes.fromHexString(
           "0x45a59e5b000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000009dd40000000000000000000000000000000000000000000000000000000000000080333534386338376239393230666631366161346264636630316338356632353131376132396165313537346437353962616434386363393436336438653966376333633164316539666230643238653733383938393531663930653032373134616262373730666436643232653930333731383832613435363538383030653900000000000000000000000000000000000000000000000000000000000000093132372e302e302e310000000000000000000000000000000000000000000000");
-
-  private static final Bytes SOURCE_ENODE_EXPECTED_PAYLOAD_DNS =
-      Bytes.fromHexString(
-          "0x45a59e5b00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000765f0000000000000000000000000000000000000000000000000000000000000080666362653966383332313834383762336330623530383738313933383830653663323563666438363730386330613062663063613931663063653633333734366138393266653234306166613562396138383062386263613438653861323237303465663933376664646132643763633633653464343165643162343137616500000000000000000000000000000000000000000000000000000000000000096c6f63616c686f73740000000000000000000000000000000000000000000000");
-  private static final Bytes DESTINATION_ENODE_EXPECTED_PAYLOAD_DNS =
-      Bytes.fromHexString(
-          "0x45a59e5b000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000009dd40000000000000000000000000000000000000000000000000000000000000080333534386338376239393230666631366161346264636630316338356632353131376132396165313537346437353962616434386363393436336438653966376333633164316539666230643238653733383938393531663930653032373134616262373730666436643232653930333731383832613435363538383030653900000000000000000000000000000000000000000000000000000000000000096c6f63616c686f73740000000000000000000000000000000000000000000000");
 
   private static final EnodeURL SOURCE_ENODE_IPV4 =
       EnodeURLImpl.fromString(
@@ -89,18 +84,16 @@ public class NodeSmartContractV2PermissioningControllerTest {
   }
 
   @Test
-  public void nonExpectedCallOutputThrowsIllegalState() {
-    final TransactionSimulatorResult txSimulatorResult =
+  public void nonExpectedCallOutputReturnsNotPermitted() {
+    final TransactionSimulatorResult nonExpectedTxSimulatorResult =
         transactionSimulatorResult(Bytes.random(10), ValidationResult.valid());
 
     when(transactionSimulator.processAtHead(eq(callParams(SOURCE_ENODE_EXPECTED_PAYLOAD_IP))))
-        .thenReturn(Optional.of(txSimulatorResult));
+        .thenReturn(Optional.of(nonExpectedTxSimulatorResult));
 
-    assertThatIllegalStateException()
-        .isThrownBy(
-            () ->
-                permissioningController.checkSmartContractRules(
-                    SOURCE_ENODE_IPV4, DESTINATION_ENODE_IPV4));
+    boolean isPermitted =
+        permissioningController.checkSmartContractRules(SOURCE_ENODE_IPV4, DESTINATION_ENODE_IPV4);
+    assertThat(isPermitted).isFalse();
   }
 
   @Test
@@ -169,7 +162,8 @@ public class NodeSmartContractV2PermissioningControllerTest {
   }
 
   @Test
-  public void expectedPayloadWhenCheckingPermissioningWithAlternateDNS() {
+  public void expectedPayloadWhenCheckingPermissioningWithAlternateDNS()
+      throws UnknownHostException {
     final TransactionSimulatorResult txSimulatorResultFalse =
         transactionSimulatorResult(
             NodeSmartContractV2PermissioningController.FALSE_RESPONSE, ValidationResult.valid());
@@ -183,9 +177,12 @@ public class NodeSmartContractV2PermissioningControllerTest {
     when(transactionSimulator.processAtHead(eq(callParams(DESTINATION_ENODE_EXPECTED_PAYLOAD_IP))))
         .thenReturn(Optional.of(txSimulatorResultFalse));
 
-    when(transactionSimulator.processAtHead(eq(callParams(SOURCE_ENODE_EXPECTED_PAYLOAD_DNS))))
+    var sourcePayload = sourceEnodeExpectedPayloadDns();
+    when(transactionSimulator.processAtHead(eq(callParams(Bytes.fromHexString(sourcePayload)))))
         .thenReturn(Optional.of(txSimulatorResultTrue));
-    when(transactionSimulator.processAtHead(eq(callParams(DESTINATION_ENODE_EXPECTED_PAYLOAD_DNS))))
+    var destinationPayload = destinationEnodeExpectedPayloadDns();
+    when(transactionSimulator.processAtHead(
+            eq(callParams(Bytes.fromHexString(destinationPayload)))))
         .thenReturn(Optional.of(txSimulatorResultTrue));
 
     boolean isPermitted =
@@ -205,5 +202,22 @@ public class NodeSmartContractV2PermissioningControllerTest {
         blockDataGenerator.transaction(),
         TransactionProcessingResult.successful(
             blockDataGenerator.logs(1, 1), 0L, 0L, output, validationResult));
+  }
+
+  // Note - don't use FunctionEncoder.makeFunction here otherwise we're not really testing anything!
+  private String sourceEnodeExpectedPayloadDns() throws UnknownHostException {
+    var hostname = InetAddress.getLocalHost().getHostName();
+    return "0x45a59e5b00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000765f0000000000000000000000000000000000000000000000000000000000000080666362653966383332313834383762336330623530383738313933383830653663323563666438363730386330613062663063613931663063653633333734366138393266653234306166613562396138383062386263613438653861323237303465663933376664646132643763633633653464343165643162343137616500000000000000000000000000000000000000000000000000000000000000"
+        + Bytes.of(hostname.length()).toUnprefixedHexString()
+        + Bytes.of(hostname.getBytes(UTF_8)).toUnprefixedHexString()
+        + "00".repeat(32 - hostname.length());
+  }
+
+  private String destinationEnodeExpectedPayloadDns() throws UnknownHostException {
+    var hostname = InetAddress.getLocalHost().getHostName();
+    return "0x45a59e5b000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000009dd40000000000000000000000000000000000000000000000000000000000000080333534386338376239393230666631366161346264636630316338356632353131376132396165313537346437353962616434386363393436336438653966376333633164316539666230643238653733383938393531663930653032373134616262373730666436643232653930333731383832613435363538383030653900000000000000000000000000000000000000000000000000000000000000"
+        + Bytes.of(hostname.length()).toUnprefixedHexString()
+        + Bytes.of(hostname.getBytes(UTF_8)).toUnprefixedHexString()
+        + "00".repeat(32 - hostname.length());
   }
 }

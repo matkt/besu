@@ -17,6 +17,7 @@ package org.hyperledger.besu.config;
 import static java.util.Collections.emptyMap;
 import static java.util.Objects.isNull;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 
 import java.math.BigInteger;
@@ -33,6 +34,7 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Streams;
 import org.apache.tuweni.units.bigints.UInt256;
 
 public class JsonGenesisConfigOptions implements GenesisConfigOptions {
@@ -272,8 +274,14 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
   }
 
   @Override
-  public OptionalLong getPreMergeForkBlockNumber() {
-    return getOptionalLong("premergeforkblock");
+  public OptionalLong getParisBlockNumber() {
+    var parisBlock = getOptionalLong("parisblock");
+    var preMergeAlias = getOptionalLong("premergeforkblock");
+    if (parisBlock.isPresent() && preMergeAlias.isPresent()) {
+      throw new RuntimeException(
+          "Found both paris and preMergeFork blocks.  Should have one or the other");
+    }
+    return Streams.concat(parisBlock.stream(), preMergeAlias.stream()).findFirst();
   }
 
   @Override
@@ -287,6 +295,16 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
   @Override
   public Optional<UInt256> getTerminalTotalDifficulty() {
     return getOptionalBigInteger("terminaltotaldifficulty").map(UInt256::valueOf);
+  }
+
+  @Override
+  public OptionalLong getTerminalBlockNumber() {
+    return getOptionalLong("terminalblocknumber");
+  }
+
+  @Override
+  public Optional<Hash> getTerminalBlockHash() {
+    return getOptionalHash("terminalblockhash");
   }
 
   @Override
@@ -337,6 +355,11 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
   @Override
   public OptionalLong getMagnetoBlockNumber() {
     return getOptionalLong("magnetoblock");
+  }
+
+  @Override
+  public OptionalLong getMystiqueBlockNumber() {
+    return getOptionalLong("mystiqueblock");
   }
 
   @Override
@@ -416,7 +439,9 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
     getBerlinBlockNumber().ifPresent(l -> builder.put("berlinBlock", l));
     getLondonBlockNumber().ifPresent(l -> builder.put("londonBlock", l));
     getArrowGlacierBlockNumber().ifPresent(l -> builder.put("arrowGlacierBlock", l));
-    getPreMergeForkBlockNumber().ifPresent(l -> builder.put("preMergeForkBlock", l));
+    getParisBlockNumber().ifPresent(l -> builder.put("parisBlock", l));
+    getTerminalBlockNumber().ifPresent(l -> builder.put("terminalBlockNumber", l));
+    getTerminalBlockHash().ifPresent(h -> builder.put("terminalBlockHash", h.toHexString()));
 
     // classic fork blocks
     getClassicForkBlock().ifPresent(l -> builder.put("classicForkBlock", l));
@@ -429,6 +454,7 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
     getPhoenixBlockNumber().ifPresent(l -> builder.put("phoenixBlock", l));
     getThanosBlockNumber().ifPresent(l -> builder.put("thanosBlock", l));
     getMagnetoBlockNumber().ifPresent(l -> builder.put("magnetoBlock", l));
+    getMystiqueBlockNumber().ifPresent(l -> builder.put("mystiqueBlock", l));
     getEcip1049BlockNumber().ifPresent(l -> builder.put("ecip1049Block", l));
 
     getContractSizeLimit().ifPresent(l -> builder.put("contractSizeLimit", l));
@@ -506,6 +532,15 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
     }
   }
 
+  private Optional<Hash> getOptionalHash(final String key) {
+    if (configOverrides.containsKey(key)) {
+      final String overrideHash = configOverrides.get(key);
+      return Optional.of(Hash.fromHexString(overrideHash));
+    } else {
+      return JsonUtil.getValueAsString(configRoot, key).map(s -> Hash.fromHexString(s));
+    }
+  }
+
   @Override
   public List<Long> getForks() {
     Stream<OptionalLong> forkBlockNumbers =
@@ -522,7 +557,8 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
             getBerlinBlockNumber(),
             getLondonBlockNumber(),
             getArrowGlacierBlockNumber(),
-            getPreMergeForkBlockNumber(),
+            getParisBlockNumber(),
+            getTerminalBlockNumber(),
             getEcip1015BlockNumber(),
             getDieHardBlockNumber(),
             getGothamBlockNumber(),
@@ -532,6 +568,7 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
             getPhoenixBlockNumber(),
             getThanosBlockNumber(),
             getMagnetoBlockNumber(),
+            getMystiqueBlockNumber(),
             getEcip1049BlockNumber());
     // when adding forks add an entry to ${REPO_ROOT}/config/src/test/resources/all_forks.json
 

@@ -33,11 +33,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Cluster implements AutoCloseable {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(Cluster.class);
 
   private final Map<String, RunnableNode> nodes = new HashMap<>();
   private final BesuNodeRunner besuNodeRunner;
@@ -152,10 +152,12 @@ public class Cluster implements AutoCloseable {
   private void startNode(final RunnableNode node, final boolean isBootNode) {
     node.getConfiguration().setBootnodes(isBootNode ? emptyList() : bootnodes);
 
-    node.getConfiguration()
-        .getGenesisConfigProvider()
-        .create(originalNodes)
-        .ifPresent(node.getConfiguration()::setGenesisConfig);
+    if (node.getConfiguration().getGenesisConfig().isEmpty()) {
+      node.getConfiguration()
+          .getGenesisConfigProvider()
+          .create(originalNodes)
+          .ifPresent(node.getConfiguration()::setGenesisConfig);
+    }
     runNodeStart(node);
   }
 
@@ -188,6 +190,9 @@ public class Cluster implements AutoCloseable {
   }
 
   public void verify(final Condition expected) {
+    if (nodes.size() == 0) {
+      throw new IllegalStateException("Attempt to verify an empty cluster");
+    }
     for (final Node node : nodes.values()) {
       expected.verify(node);
     }

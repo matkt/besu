@@ -25,28 +25,35 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import java.time.Instant;
 import java.util.function.Consumer;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FullImportBlockStep implements Consumer<Block> {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(FullImportBlockStep.class);
   private final ProtocolSchedule protocolSchedule;
   private final ProtocolContext protocolContext;
   private final EthContext ethContext;
   private long gasAccumulator = 0;
   private long lastReportMillis = 0;
+  private final SyncTerminationCondition fullSyncTerminationCondition;
 
   public FullImportBlockStep(
       final ProtocolSchedule protocolSchedule,
       final ProtocolContext protocolContext,
-      final EthContext ethContext) {
+      final EthContext ethContext,
+      final SyncTerminationCondition syncTerminationCondition) {
     this.protocolSchedule = protocolSchedule;
     this.protocolContext = protocolContext;
     this.ethContext = ethContext;
+    this.fullSyncTerminationCondition = syncTerminationCondition;
   }
 
   @Override
   public void accept(final Block block) {
+    if (fullSyncTerminationCondition.shouldStopDownload()) {
+      LOG.debug("Not importing another block, because terminal condition was reached.");
+      return;
+    }
     final long blockNumber = block.getHeader().getNumber();
     final String blockHash = block.getHash().toHexString();
     final BlockImporter importer =
@@ -59,7 +66,7 @@ public class FullImportBlockStep implements Consumer<Block> {
     if (ethContext != null && ethContext.getEthPeers().peerCount() >= 0) {
       peerCount = ethContext.getEthPeers().peerCount();
     }
-    if (blockNumber % 200 == 0) {
+    if (blockNumber % 200 == 0 || LOG.isTraceEnabled()) {
       final long nowMilli = Instant.now().toEpochMilli();
       final long deltaMilli = nowMilli - lastReportMillis;
       final String mgps =

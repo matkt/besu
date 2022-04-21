@@ -27,9 +27,7 @@ import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.transaction.TransactionInvalidReason;
 import org.hyperledger.besu.ethereum.worldstate.DefaultMutablePrivateWorldStateUpdater;
 import org.hyperledger.besu.evm.Code;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.account.Account;
-import org.hyperledger.besu.evm.account.AccountState;
 import org.hyperledger.besu.evm.account.EvmAccount;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -44,13 +42,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PrivateTransactionProcessor {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(PrivateTransactionProcessor.class);
 
   private final GasCalculator gasCalculator;
 
@@ -126,7 +124,7 @@ public class PrivateTransactionProcessor {
               .messageFrameStack(messageFrameStack)
               .maxStackSize(maxStackSize)
               .worldUpdater(mutablePrivateWorldStateUpdater)
-              .initialGas(Gas.MAX_VALUE)
+              .initialGas(Long.MAX_VALUE)
               .originator(senderAddress)
               .gasPrice(transaction.getGasPrice())
               .sender(senderAddress)
@@ -146,18 +144,21 @@ public class PrivateTransactionProcessor {
 
         LOG.debug(
             "Calculated contract address {} from sender {} with nonce {} and privacy group {}",
-            privateContractAddress.toString(),
+            privateContractAddress,
             senderAddress,
             previousNonce,
-            privacyGroupId.toString());
+            privacyGroupId);
 
+        final Bytes initCodeBytes = transaction.getPayload();
         initialFrame =
             commonMessageFrameBuilder
                 .type(MessageFrame.Type.CONTRACT_CREATION)
                 .address(privateContractAddress)
                 .contract(privateContractAddress)
                 .inputData(Bytes.EMPTY)
-                .code(new Code(transaction.getPayload(), Hash.EMPTY))
+                .code(
+                    contractCreationProcessor.getCodeFromEVM(
+                        Hash.hash(initCodeBytes), initCodeBytes))
                 .build();
       } else {
         final Address to = transaction.getTo().get();
@@ -170,9 +171,9 @@ public class PrivateTransactionProcessor {
                 .contract(to)
                 .inputData(transaction.getPayload())
                 .code(
-                    new Code(
-                        maybeContract.map(AccountState::getCode).orElse(Bytes.EMPTY),
-                        maybeContract.map(AccountState::getCodeHash).orElse(Hash.EMPTY)))
+                    maybeContract
+                        .map(c -> messageCallProcessor.getCodeFromEVM(c.getCodeHash(), c.getCode()))
+                        .orElse(Code.EMPTY_CODE))
                 .build();
       }
 
@@ -229,13 +230,12 @@ public class PrivateTransactionProcessor {
   }
 
   @SuppressWarnings("unused")
-  private Gas refunded(final Transaction transaction, final Gas gasRemaining, final Gas gasRefund) {
+  private long refunded(
+      final Transaction transaction, final long gasRemaining, final long gasRefund) {
     // Integer truncation takes care of the the floor calculation needed after the divide.
-    final Gas maxRefundAllowance =
-        Gas.of(transaction.getGasLimit())
-            .minus(gasRemaining)
-            .dividedBy(gasCalculator.getMaxRefundQuotient());
-    final Gas refundAllowance = maxRefundAllowance.min(gasRefund);
-    return gasRemaining.plus(refundAllowance);
+    final long maxRefundAllowance =
+        (transaction.getGasLimit() - gasRemaining) / gasCalculator.getMaxRefundQuotient();
+    final long refundAllowance = Math.min(maxRefundAllowance, gasRefund);
+    return gasRemaining + refundAllowance;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright ConsenSys AG.
+ * Copyright Hyperledger Besu Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.core.LogWithMetadata;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -35,6 +36,13 @@ public interface Blockchain {
    * @return The head of the blockchain.
    */
   ChainHead getChainHead();
+
+  /**
+   * Return the last finalized block hash if present.
+   *
+   * @return The hash of the last finalized block
+   */
+  Optional<Hash> getFinalized();
 
   /**
    * Return the block number of the head of the canonical chain.
@@ -230,4 +238,22 @@ public interface Blockchain {
    * @return {@code true} if the observer was removed; otherwise {@code false}
    */
   boolean removeChainReorgObserver(long observerId);
+
+  /**
+   * Gets the current block choice rule. When presented with two block headers indicate which chain
+   * is preferred. greater than zero: the first chain is preferred, less than zero: the second chain
+   * is preferred, or zero: no preference.
+   *
+   * @return The preferred block header
+   */
+  Comparator<BlockHeader> getBlockChoiceRule();
+
+  /**
+   * Sets the current fork choice rule. When presented with two block headers indicate which chain
+   * is more preferred. greater than zero: the first chain is more preferred, less than zero: the
+   * second chain is more preferred, or zero: no preference.
+   *
+   * @param blockChoiceRule The new fork choice rule.
+   */
+  void setBlockChoiceRule(Comparator<BlockHeader> blockChoiceRule);
 }

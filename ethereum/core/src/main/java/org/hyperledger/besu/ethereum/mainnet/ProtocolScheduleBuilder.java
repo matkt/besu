@@ -28,8 +28,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ProtocolScheduleBuilder {
 
@@ -61,7 +61,7 @@ public class ProtocolScheduleBuilder {
     }
   }
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ProtocolScheduleBuilder.class);
   private final GenesisConfigOptions config;
   private final ProtocolSpecAdapters protocolSpecAdapters;
   private final Optional<BigInteger> defaultChainId;
@@ -235,9 +235,7 @@ public class ProtocolScheduleBuilder {
                 create(
                     config.getArrowGlacierBlockNumber(),
                     specFactory.arrowGlacierDefinition(config)),
-                create(
-                    config.getPreMergeForkBlockNumber(),
-                    specFactory.preMergeForkDefinition(config)),
+                create(config.getParisBlockNumber(), specFactory.parisDefinition(config)),
                 // Classic Milestones
                 create(config.getEcip1015BlockNumber(), specFactory.tangerineWhistleDefinition()),
                 create(config.getDieHardBlockNumber(), specFactory.dieHardDefinition()),
@@ -250,6 +248,7 @@ public class ProtocolScheduleBuilder {
                 create(config.getPhoenixBlockNumber(), specFactory.phoenixDefinition()),
                 create(config.getThanosBlockNumber(), specFactory.thanosDefinition()),
                 create(config.getMagnetoBlockNumber(), specFactory.magnetoDefinition()),
+                create(config.getMystiqueBlockNumber(), specFactory.mystiqueDefinition()),
                 create(config.getEcip1049BlockNumber(), specFactory.ecip1049Definition()))
             .stream()
             .filter(Optional::isPresent)
@@ -346,6 +345,7 @@ public class ProtocolScheduleBuilder {
     lastForkBlock = validateForkOrder("Phoenix", config.getPhoenixBlockNumber(), lastForkBlock);
     lastForkBlock = validateForkOrder("Thanos", config.getThanosBlockNumber(), lastForkBlock);
     lastForkBlock = validateForkOrder("Magneto", config.getMagnetoBlockNumber(), lastForkBlock);
+    lastForkBlock = validateForkOrder("Mystique", config.getMystiqueBlockNumber(), lastForkBlock);
     assert (lastForkBlock >= 0);
   }
 }

@@ -45,6 +45,7 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.Di
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.nat.NatMethod;
 import org.hyperledger.besu.nat.NatService;
+import org.hyperledger.besu.nat.core.NatManager;
 import org.hyperledger.besu.nat.core.domain.NatServiceType;
 import org.hyperledger.besu.nat.core.domain.NetworkProtocol;
 import org.hyperledger.besu.nat.upnp.UpnpNatManager;
@@ -67,18 +68,19 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.vertx.core.Vertx;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.devp2p.EthereumNodeRecord;
 import org.apache.tuweni.discovery.DNSDaemon;
 import org.apache.tuweni.discovery.DNSDaemonListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The peer network service (defunct PeerNetworkingService) is the entrypoint to the peer-to-peer
@@ -122,7 +124,7 @@ import org.apache.tuweni.discovery.DNSDaemonListener;
  */
 public class DefaultP2PNetwork implements P2PNetwork {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(DefaultP2PNetwork.class);
 
   private final ScheduledExecutorService peerConnectionScheduler =
       Executors.newSingleThreadScheduledExecutor();
@@ -175,7 +177,7 @@ public class DefaultP2PNetwork implements P2PNetwork {
       final PeerPermissions peerPermissions,
       final NatService natService,
       final MaintainedPeers maintainedPeers,
-      final PeerReputationManager reputationManager) {
+      final PeerDenylistManager reputationManager) {
     this.localNode = localNode;
     this.peerDiscoveryAgent = peerDiscoveryAgent;
     this.rlpxAgent = rlpxAgent;
@@ -236,15 +238,17 @@ public class DefaultP2PNetwork implements P2PNetwork {
                     : configuredDiscoveryPort)
             .join();
 
-    natService.ifNatEnvironment(
-        NatMethod.UPNP,
+    final Consumer<? super NatManager> natAction =
         natManager -> {
-          UpnpNatManager upnpNatManager = (UpnpNatManager) natManager;
+          final UpnpNatManager upnpNatManager = (UpnpNatManager) natManager;
           upnpNatManager.requestPortForward(
               discoveryPort, NetworkProtocol.UDP, NatServiceType.DISCOVERY);
           upnpNatManager.requestPortForward(
               listeningPort, NetworkProtocol.TCP, NatServiceType.RLPX);
-        });
+        };
+
+    natService.ifNatEnvironment(NatMethod.UPNP, natAction);
+    natService.ifNatEnvironment(NatMethod.UPNPP2PONLY, natAction);
 
     setLocalNode(address, listeningPort, discoveryPort);
 
@@ -298,7 +302,7 @@ public class DefaultP2PNetwork implements P2PNetwork {
   }
 
   @Override
-  public boolean addMaintainConnectionPeer(final Peer peer) {
+  public boolean addMaintainedConnectionPeer(final Peer peer) {
     if (localNode.isReady()
         && localNode.getPeer() != null
         && localNode.getPeer().getEnodeURL() != null
@@ -328,16 +332,16 @@ public class DefaultP2PNetwork implements P2PNetwork {
   @VisibleForTesting
   DNSDaemonListener createDaemonListener() {
     return (seq, records) -> {
-      List<DiscoveryPeer> peers = new ArrayList<>();
-      for (EthereumNodeRecord enr : records) {
-        EnodeURL enodeURL =
+      final List<DiscoveryPeer> peers = new ArrayList<>();
+      for (final EthereumNodeRecord enr : records) {
+        final EnodeURL enodeURL =
             EnodeURLImpl.builder()
                 .ipAddress(enr.ip())
                 .nodeId(enr.publicKey().bytes())
                 .discoveryPort(Optional.ofNullable(enr.udp()))
                 .listeningPort(Optional.ofNullable(enr.tcp()))
                 .build();
-        DiscoveryPeer peer = DiscoveryPeer.fromEnode(enodeURL);
+        final DiscoveryPeer peer = DiscoveryPeer.fromEnode(enodeURL);
         peers.add(peer);
         rlpxAgent.connect(peer);
       }
@@ -375,7 +379,7 @@ public class DefaultP2PNetwork implements P2PNetwork {
 
   @Override
   public Stream<DiscoveryPeer> streamDiscoveredPeers() {
-    List<DiscoveryPeer> peers = dnsPeers.get();
+    final List<DiscoveryPeer> peers = dnsPeers.get();
     if (peers != null) {
       Collections.shuffle(peers);
       return Stream.concat(peerDiscoveryAgent.streamDiscoveredPeers(), peers.stream());
@@ -493,7 +497,7 @@ public class DefaultP2PNetwork implements P2PNetwork {
       // Set up permissions
       // Fold peer reputation into permissions
       final PeerPermissionsDenylist misbehavingPeers = PeerPermissionsDenylist.create(500);
-      final PeerReputationManager reputationManager = new PeerReputationManager(misbehavingPeers);
+      final PeerDenylistManager reputationManager = new PeerDenylistManager(misbehavingPeers);
       peerPermissions = PeerPermissions.combine(peerPermissions, misbehavingPeers);
 
       final MutableLocalNode localNode =

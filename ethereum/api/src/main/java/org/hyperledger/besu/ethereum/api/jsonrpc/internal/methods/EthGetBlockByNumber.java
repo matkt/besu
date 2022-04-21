@@ -28,14 +28,14 @@ import org.hyperledger.besu.ethereum.core.Synchronizer;
 import java.util.function.Supplier;
 
 import com.google.common.base.Suppliers;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class EthGetBlockByNumber extends AbstractBlockParameterMethod {
 
   private final BlockResultFactory blockResult;
   private final boolean includeCoinbase;
-  private static final Logger LOGGER = LogManager.getLogger();
+  private static final Logger LOGGER = LoggerFactory.getLogger(EthGetBlockByNumber.class);
   private final Synchronizer synchronizer;
 
   public EthGetBlockByNumber(
@@ -79,14 +79,17 @@ public class EthGetBlockByNumber extends AbstractBlockParameterMethod {
   @Override
   protected Object latestResult(final JsonRpcRequestContext request) {
 
-    final long headBlockNumber = blockchainQueries.get().headBlockNumber();
-    Blockchain chain = blockchainQueries.get().getBlockchain();
+    final long headBlockNumber = blockchainQueriesSupplier.get().headBlockNumber();
+    Blockchain chain = blockchainQueriesSupplier.get().getBlockchain();
     BlockHeader headHeader = chain.getBlockHeader(headBlockNumber).orElse(null);
 
     Hash block = headHeader.getHash();
     Hash stateRoot = headHeader.getStateRoot();
 
-    if (blockchainQueries.get().getWorldStateArchive().isWorldStateAvailable(stateRoot, block)) {
+    if (blockchainQueriesSupplier
+        .get()
+        .getWorldStateArchive()
+        .isWorldStateAvailable(stateRoot, block)) {
       if (this.synchronizer.getSyncStatus().isEmpty()) { // we are already in sync
         return resultByBlockNumber(request, headBlockNumber);
       } else { // out of sync, return highest pulled block
@@ -97,7 +100,8 @@ public class EthGetBlockByNumber extends AbstractBlockParameterMethod {
 
     LOGGER.trace("no world state available for block {} returning genesis", headBlockNumber);
     return resultByBlockNumber(
-        request, blockchainQueries.get().getBlockchain().getGenesisBlock().getHeader().getNumber());
+        request,
+        blockchainQueriesSupplier.get().getBlockchain().getGenesisBlock().getHeader().getNumber());
   }
 
   private BlockResult transactionComplete(final long blockNumber) {

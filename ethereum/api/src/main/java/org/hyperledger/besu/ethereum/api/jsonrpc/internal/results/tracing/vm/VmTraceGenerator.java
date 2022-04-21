@@ -19,7 +19,6 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.tracing.Trace;
 import org.hyperledger.besu.ethereum.debug.TraceFrame;
 import org.hyperledger.besu.evm.Code;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 
 import java.util.ArrayDeque;
@@ -117,7 +116,8 @@ public class VmTraceGenerator {
       final TraceFrame frame, final VmOperation op, final VmOperationExecutionReport report) {
     // add the operation representation to the list of traces
     final Optional<ExceptionalHaltReason> exceptionalHaltReason = frame.getExceptionalHaltReason();
-    if (exceptionalHaltReason.isPresent()
+    if (frame.getDepth() > 0
+        && exceptionalHaltReason.isPresent()
         && exceptionalHaltReason.get() == ExceptionalHaltReason.INSUFFICIENT_GAS) {
       op.setVmOperationExecutionReport(null);
     } else {
@@ -150,7 +150,7 @@ public class VmTraceGenerator {
         findLastFrameInCall(currentTraceFrame, currentIndex)
             .ifPresent(
                 lastFrameInCall -> {
-                  report.setUsed(lastFrameInCall.getGasRemaining().toLong());
+                  report.setUsed(lastFrameInCall.getGasRemaining());
                   lastFrameInCall
                       .getStack()
                       .filter(stack -> stack.length > 0)
@@ -167,21 +167,32 @@ public class VmTraceGenerator {
 
         if (currentTraceFrame.getMaybeCode().map(Code::getSize).orElse(0) > 0) {
           if (nextTraceFrame.map(TraceFrame::getDepth).orElse(0) > currentTraceFrame.getDepth()) {
-            op.setCost(currentTraceFrame.getGasRemainingPostExecution().toLong() + op.getCost());
+            op.setCost(currentTraceFrame.getGasRemainingPostExecution() + op.getCost());
             final VmTrace newSubTrace = new VmTrace();
             parentTraces.addLast(newSubTrace);
             op.setSub(newSubTrace);
+          } else if (currentTraceFrame.getDepth() == 0) {
+            op.setCost(
+                currentTraceFrame.getGasRemaining()
+                    - currentTraceFrame.getGasRemainingPostExecution());
+            currentTraceFrame
+                .getMaybeCode()
+                .ifPresent(
+                    code ->
+                        op.setSub(
+                            new VmTrace(
+                                currentTraceFrame.getMaybeCode().get().getBytes().toHexString())));
           } else {
             op.setCost(op.getCost());
             op.setSub(null);
           }
         } else {
           if (currentTraceFrame.getPrecompiledGasCost().isPresent()) {
-            op.setCost(op.getCost() + currentTraceFrame.getPrecompiledGasCost().get().toLong());
-          } else if (currentOperation.equals("STATICCALL")
+            op.setCost(op.getCost() + currentTraceFrame.getPrecompiledGasCost().orElse(0L));
+          } else if ((currentOperation.equals("STATICCALL") || currentOperation.equals("CALL"))
               && nextTraceFrame.map(TraceFrame::getDepth).orElse(0)
                   > currentTraceFrame.getDepth()) {
-            op.setCost(currentTraceFrame.getGasRemainingPostExecution().toLong() + op.getCost());
+            op.setCost(currentTraceFrame.getGasRemainingPostExecution() + op.getCost());
           }
           op.setSub(new VmTrace());
         }
@@ -201,7 +212,7 @@ public class VmTraceGenerator {
   private VmOperation buildVmOperation() {
     final VmOperation op = new VmOperation();
     // set gas cost and program counter
-    op.setCost(currentTraceFrame.getGasCost().orElse(Gas.ZERO).toLong());
+    op.setCost(currentTraceFrame.getGasCost().orElse(0L));
     op.setPc(currentTraceFrame.getPc());
     // op.setOperation(currentOperation);
     return op;
@@ -211,8 +222,7 @@ public class VmTraceGenerator {
     final VmOperationExecutionReport report = new VmOperationExecutionReport();
     // set gas remaining
     report.setUsed(
-        currentTraceFrame.getGasRemaining().toLong()
-            - currentTraceFrame.getGasCost().orElse(Gas.ZERO).toLong());
+        currentTraceFrame.getGasRemaining() - (currentTraceFrame.getGasCost().orElse(0L)));
     return report;
   }
 
@@ -276,7 +286,7 @@ public class VmTraceGenerator {
     // set smart contract code
     if (currentTrace != null && "0x".equals(currentTrace.getCode())) {
       currentTrace.setCode(
-          currentTraceFrame.getMaybeCode().orElse(new Code()).getBytes().toHexString());
+          currentTraceFrame.getMaybeCode().orElse(Code.EMPTY_CODE).getBytes().toHexString());
     }
   }
 

@@ -23,7 +23,10 @@ import org.hyperledger.besu.cli.DefaultCommandValues;
 import org.hyperledger.besu.cli.options.stable.NodePrivateKeyFileOption;
 import org.hyperledger.besu.cli.subcommands.PublicKeySubCommand.AddressSubCommand;
 import org.hyperledger.besu.cli.subcommands.PublicKeySubCommand.ExportSubCommand;
+import org.hyperledger.besu.cli.util.VersionProvider;
 import org.hyperledger.besu.crypto.KeyPair;
+import org.hyperledger.besu.crypto.SignatureAlgorithmFactory;
+import org.hyperledger.besu.crypto.SignatureAlgorithmType;
 import org.hyperledger.besu.ethereum.core.Util;
 
 import java.io.BufferedWriter;
@@ -34,8 +37,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Function;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -49,9 +52,10 @@ import picocli.CommandLine.Spec;
     name = COMMAND_NAME,
     description = "This command provides node public key related actions.",
     mixinStandardHelpOptions = true,
+    versionProvider = VersionProvider.class,
     subcommands = {ExportSubCommand.class, AddressSubCommand.class})
 public class PublicKeySubCommand implements Runnable {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(PublicKeySubCommand.class);
 
   public static final String COMMAND_NAME = "public-key";
 
@@ -85,7 +89,8 @@ public class PublicKeySubCommand implements Runnable {
   @Command(
       name = "export",
       description = "This command outputs the node public key. Default output is standard output.",
-      mixinStandardHelpOptions = true)
+      mixinStandardHelpOptions = true,
+      versionProvider = VersionProvider.class)
   static class ExportSubCommand extends KeyPairSubcommand implements Runnable {
 
     @Option(
@@ -97,6 +102,7 @@ public class PublicKeySubCommand implements Runnable {
 
     @Override
     public void run() {
+      configureEcCurve(ecCurve, parentCommand.spec.commandLine());
       run(publicKeyExportFile, keyPair -> keyPair.getPublicKey().toString());
     }
   }
@@ -114,7 +120,8 @@ public class PublicKeySubCommand implements Runnable {
       description =
           "This command outputs the node's account address. "
               + "Default output is standard output.",
-      mixinStandardHelpOptions = true)
+      mixinStandardHelpOptions = true,
+      versionProvider = VersionProvider.class)
   static class AddressSubCommand extends KeyPairSubcommand implements Runnable {
 
     @Option(
@@ -126,6 +133,7 @@ public class PublicKeySubCommand implements Runnable {
 
     @Override
     public void run() {
+      configureEcCurve(ecCurve, parentCommand.spec.commandLine());
       run(addressExportFile, keyPair -> Util.publicKeyToAddress(keyPair.getPublicKey()).toString());
     }
   }
@@ -134,9 +142,19 @@ public class PublicKeySubCommand implements Runnable {
 
     @SuppressWarnings("unused")
     @ParentCommand
-    private PublicKeySubCommand parentCommand; // Picocli injects reference to parent command
+    protected PublicKeySubCommand parentCommand; // Picocli injects reference to parent command
 
     @Mixin private final NodePrivateKeyFileOption nodePrivateKeyFileOption = null;
+
+    @Option(
+        names = "--ec-curve",
+        paramLabel = "<NAME>",
+        description =
+            "Elliptic curve to use when creating a new key (default: "
+                + SignatureAlgorithmType.DEFAULT_EC_CURVE_NAME
+                + ")",
+        arity = "0..1")
+    protected String ecCurve = null;
 
     @Spec private final CommandSpec spec = null;
 
@@ -170,6 +188,16 @@ public class PublicKeySubCommand implements Runnable {
         }
       } else {
         parentCommand.out.println(output);
+      }
+    }
+
+    protected static void configureEcCurve(final String ecCurve, final CommandLine commandLine) {
+      if (ecCurve != null) {
+        try {
+          SignatureAlgorithmFactory.setInstance(SignatureAlgorithmType.create(ecCurve));
+        } catch (IllegalArgumentException e) {
+          throw new CommandLine.ParameterException(commandLine, e.getMessage(), e);
+        }
       }
     }
   }

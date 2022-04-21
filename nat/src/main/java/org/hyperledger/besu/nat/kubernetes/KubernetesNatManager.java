@@ -32,22 +32,22 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
-import io.kubernetes.client.ApiClient;
-import io.kubernetes.client.Configuration;
-import io.kubernetes.client.apis.CoreV1Api;
-import io.kubernetes.client.models.V1Service;
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.Configuration;
+import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Service;
 import io.kubernetes.client.util.ClientBuilder;
 import io.kubernetes.client.util.KubeConfig;
 import io.kubernetes.client.util.authenticators.GCPAuthenticator;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This class describes the behaviour of the Kubernetes NAT manager. Kubernetes Nat manager add
  * support for Kubernetes’s NAT implementation when Besu is being run from a Kubernetes cluster
  */
 public class KubernetesNatManager extends AbstractNatManager {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(KubernetesNatManager.class);
 
   public static final String DEFAULT_BESU_SERVICE_NAME_FILTER = "besu";
 
@@ -78,7 +78,8 @@ public class KubernetesNatManager extends AbstractNatManager {
       // invokes the CoreV1Api client
       final V1Service service =
           api
-              .listServiceForAllNamespaces(null, null, null, null, null, null, null, null, null)
+              .listServiceForAllNamespaces(
+                  null, null, null, null, null, null, null, null, null, null)
               .getItems()
               .stream()
               .filter(

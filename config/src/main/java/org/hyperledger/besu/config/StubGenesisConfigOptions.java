@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.config;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 
 import java.math.BigInteger;
@@ -41,7 +42,9 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
   private OptionalLong berlinBlockNumber = OptionalLong.empty();
   private OptionalLong londonBlockNumber = OptionalLong.empty();
   private OptionalLong arrowGlacierBlockNumber = OptionalLong.empty();
-  private OptionalLong preMergeForkBlockNumber = OptionalLong.empty();
+  private OptionalLong parisBlockNumber = OptionalLong.empty();
+  private OptionalLong terminalBlockNumber = OptionalLong.empty();
+  private Optional<Hash> terminalBlockHash = Optional.empty();
   private Optional<UInt256> terminalTotalDifficulty = Optional.empty();
 
   private Optional<Wei> baseFeePerGas = Optional.empty();
@@ -55,6 +58,7 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
   private OptionalLong phoenixBlockNumber = OptionalLong.empty();
   private OptionalLong thanosBlockNumber = OptionalLong.empty();
   private OptionalLong magnetoBlockNumber = OptionalLong.empty();
+  private OptionalLong mystiqueBlockNumber = OptionalLong.empty();
   private OptionalLong ecip1049BlockNumber = OptionalLong.empty();
   private Optional<BigInteger> chainId = Optional.empty();
   private OptionalInt contractSizeLimit = OptionalInt.empty();
@@ -197,8 +201,8 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
   }
 
   @Override
-  public OptionalLong getPreMergeForkBlockNumber() {
-    return preMergeForkBlockNumber;
+  public OptionalLong getParisBlockNumber() {
+    return parisBlockNumber;
   }
 
   @Override
@@ -209,6 +213,16 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
   @Override
   public Optional<UInt256> getTerminalTotalDifficulty() {
     return terminalTotalDifficulty;
+  }
+
+  @Override
+  public OptionalLong getTerminalBlockNumber() {
+    return terminalBlockNumber;
+  }
+
+  @Override
+  public Optional<Hash> getTerminalBlockHash() {
+    return terminalBlockHash;
   }
 
   @Override
@@ -262,6 +276,11 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
   }
 
   @Override
+  public OptionalLong getMystiqueBlockNumber() {
+    return mystiqueBlockNumber;
+  }
+
+  @Override
   public OptionalLong getEcip1049BlockNumber() {
     return ecip1049BlockNumber;
   }
@@ -312,7 +331,9 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
     getBerlinBlockNumber().ifPresent(l -> builder.put("berlinBlock", l));
     getLondonBlockNumber().ifPresent(l -> builder.put("londonBlock", l));
     getArrowGlacierBlockNumber().ifPresent(l -> builder.put("arrowGlacierBlock", l));
-    getPreMergeForkBlockNumber().ifPresent(l -> builder.put("preMergeForkBlock", l));
+    getParisBlockNumber().ifPresent(l -> builder.put("parisBlock", l));
+    getTerminalBlockNumber().ifPresent(l -> builder.put("terminalBlockNumber", l));
+    getTerminalBlockHash().ifPresent(h -> builder.put("terminalBlockHash", h));
     // classic fork blocks
     getClassicForkBlock().ifPresent(l -> builder.put("classicForkBlock", l));
     getEcip1015BlockNumber().ifPresent(l -> builder.put("ecip1015Block", l));
@@ -324,6 +345,7 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
     getPhoenixBlockNumber().ifPresent(l -> builder.put("phoenixBlock", l));
     getThanosBlockNumber().ifPresent(l -> builder.put("thanosBlock", l));
     getMagnetoBlockNumber().ifPresent(l -> builder.put("magnetoBlock", l));
+    getMystiqueBlockNumber().ifPresent(l -> builder.put("mystiqueBlock", l));
     getEcip1049BlockNumber().ifPresent(l -> builder.put("ecip1049Block", l));
 
     getContractSizeLimit().ifPresent(l -> builder.put("contractSizeLimit", l));
@@ -438,14 +460,24 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
     return this;
   }
 
-  public StubGenesisConfigOptions preMergeForkBlock(final long blockNumber) {
-    preMergeForkBlockNumber = OptionalLong.of(blockNumber);
+  public StubGenesisConfigOptions parisBlock(final long blockNumber) {
+    parisBlockNumber = OptionalLong.of(blockNumber);
     return this;
   }
 
   public StubGenesisConfigOptions terminalTotalDifficulty(
       final UInt256 updatedTerminalTotalDifficulty) {
     terminalTotalDifficulty = Optional.of(updatedTerminalTotalDifficulty);
+    return this;
+  }
+
+  public StubGenesisConfigOptions terminalBlockNumber(final long blockNumber) {
+    terminalBlockNumber = OptionalLong.of(blockNumber);
+    return this;
+  }
+
+  public StubGenesisConfigOptions terminalBlockHash(final Hash blockHash) {
+    terminalBlockHash = Optional.of(blockHash);
     return this;
   }
 
@@ -501,6 +533,11 @@ public class StubGenesisConfigOptions implements GenesisConfigOptions {
 
   public StubGenesisConfigOptions magneto(final long blockNumber) {
     magnetoBlockNumber = OptionalLong.of(blockNumber);
+    return this;
+  }
+
+  public StubGenesisConfigOptions mystique(final long blockNumber) {
+    mystiqueBlockNumber = OptionalLong.of(blockNumber);
     return this;
   }
 

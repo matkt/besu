@@ -23,7 +23,7 @@ import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloader;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
-import org.hyperledger.besu.services.tasks.CachingTaskCollection;
+import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 
 import java.time.Clock;
 import java.util.Optional;
@@ -32,19 +32,19 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FastWorldStateDownloader implements WorldStateDownloader {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(FastWorldStateDownloader.class);
 
   private final long minMillisBeforeStalling;
   private final Clock clock;
   private final MetricsSystem metricsSystem;
 
   private final EthContext ethContext;
-  private final CachingTaskCollection<NodeDataRequest> taskCollection;
+  private final InMemoryTasksPriorityQueues<NodeDataRequest> taskCollection;
   private final int hashCountPerRequest;
   private final int maxOutstandingRequests;
   private final int maxNodeRequestsWithoutProgress;
@@ -57,7 +57,7 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
   public FastWorldStateDownloader(
       final EthContext ethContext,
       final WorldStateStorage worldStateStorage,
-      final CachingTaskCollection<NodeDataRequest> taskCollection,
+      final InMemoryTasksPriorityQueues<NodeDataRequest> taskCollection,
       final int hashCountPerRequest,
       final int maxOutstandingRequests,
       final int maxNodeRequestsWithoutProgress,
@@ -107,6 +107,15 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
         return failed;
       }
 
+      Optional<BlockHeader> checkNull =
+          Optional.ofNullable(fastSyncState.getPivotBlockHeader().get());
+      if (checkNull.isEmpty()) {
+        LOG.error("Pivot Block not present");
+        final CompletableFuture<Void> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new NullPointerException("Pivot Block not present"));
+        return failed;
+      }
+
       final BlockHeader header = fastSyncState.getPivotBlockHeader().get();
       final Hash stateRoot = header.getStateRoot();
       if (worldStateStorage.isWorldStateAvailable(stateRoot, header.getHash())) {
@@ -125,7 +134,11 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
 
       final FastWorldDownloadState newDownloadState =
           new FastWorldDownloadState(
-              taskCollection, maxNodeRequestsWithoutProgress, minMillisBeforeStalling, clock);
+              worldStateStorage,
+              taskCollection,
+              maxNodeRequestsWithoutProgress,
+              minMillisBeforeStalling,
+              clock);
       this.downloadState.set(newDownloadState);
 
       if (!newDownloadState.downloadWasResumed()) {
@@ -134,8 +147,7 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
             NodeDataRequest.createAccountDataRequest(stateRoot, Optional.of(Bytes.EMPTY)));
       }
 
-      maybeCompleteTask =
-          Optional.of(new CompleteTaskStep(worldStateStorage, metricsSystem, taskCollection::size));
+      maybeCompleteTask = Optional.of(new CompleteTaskStep(metricsSystem, taskCollection::size));
       final FastWorldStateDownloadProcess downloadProcess =
           FastWorldStateDownloadProcess.builder()
               .hashCountPerRequest(hashCountPerRequest)

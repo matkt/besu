@@ -16,7 +16,6 @@ package org.hyperledger.besu.ethereum.eth.sync.fastsync.worldstate;
 
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
-import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.metrics.RunnableCounter;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -25,22 +24,20 @@ import org.hyperledger.besu.services.tasks.Task;
 
 import java.util.function.LongSupplier;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CompleteTaskStep {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(CompleteTaskStep.class);
   private static final int DISPLAY_PROGRESS_STEP = 100000;
-  private final WorldStateStorage worldStateStorage;
   private final RunnableCounter completedRequestsCounter;
   private final Counter retriedRequestsCounter;
   private final LongSupplier worldStatePendingRequestsCurrentSupplier;
+  private long lastLogAt = System.currentTimeMillis();
 
   public CompleteTaskStep(
-      final WorldStateStorage worldStateStorage,
       final MetricsSystem metricsSystem,
       final LongSupplier worldStatePendingRequestsCurrentSupplier) {
-    this.worldStateStorage = worldStateStorage;
     this.worldStatePendingRequestsCurrentSupplier = worldStatePendingRequestsCurrentSupplier;
     completedRequestsCounter =
         new RunnableCounter(
@@ -62,10 +59,9 @@ public class CompleteTaskStep {
       final WorldDownloadState<NodeDataRequest> downloadState,
       final Task<NodeDataRequest> task) {
     if (task.getData().getData() != null) {
-      enqueueChildren(task, header, downloadState);
       completedRequestsCounter.inc();
       task.markCompleted();
-      downloadState.checkCompletion(worldStateStorage, header);
+      downloadState.checkCompletion(header);
     } else {
       retriedRequestsCounter.inc();
       task.markFailed();
@@ -76,10 +72,14 @@ public class CompleteTaskStep {
   }
 
   private void displayWorldStateSyncProgress() {
-    LOG.info(
-        "Downloaded {} world state nodes. At least {} nodes remaining.",
-        getCompletedRequests(),
-        worldStatePendingRequestsCurrentSupplier.getAsLong());
+    final long now = System.currentTimeMillis();
+    if (now - lastLogAt > 10 * 1000L) {
+      LOG.info(
+          "Downloaded {} world state nodes. At least {} nodes remaining.",
+          getCompletedRequests(),
+          worldStatePendingRequestsCurrentSupplier.getAsLong());
+      lastLogAt = now;
+    }
   }
 
   long getCompletedRequests() {
@@ -88,20 +88,5 @@ public class CompleteTaskStep {
 
   long getPendingRequests() {
     return worldStatePendingRequestsCurrentSupplier.getAsLong();
-  }
-
-  private void enqueueChildren(
-      final Task<NodeDataRequest> task,
-      final BlockHeader blockHeader,
-      final WorldDownloadState<NodeDataRequest> downloadState) {
-    final NodeDataRequest request = task.getData();
-    // Only queue rootnode children if we started from scratch
-    if (!downloadState.downloadWasResumed() || !isRootState(blockHeader, request)) {
-      downloadState.enqueueRequests(request.getChildRequests(worldStateStorage));
-    }
-  }
-
-  private boolean isRootState(final BlockHeader blockHeader, final NodeDataRequest request) {
-    return request.getHash().equals(blockHeader.getStateRoot());
   }
 }

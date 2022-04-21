@@ -31,15 +31,17 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.pki.cms.CmsCreator;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PkiQbftBlockCreator implements BlockCreator {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(PkiQbftBlockCreator.class);
 
   private final BlockCreator blockCreator;
   private final PkiQbftExtraDataCodec pkiQbftExtraDataCodec;
@@ -82,6 +84,17 @@ public class PkiQbftBlockCreator implements BlockCreator {
       final List<Transaction> transactions, final List<BlockHeader> ommers, final long timestamp) {
     final Block block = blockCreator.createBlock(transactions, ommers, timestamp);
     return replaceCmsInBlock(block);
+  }
+
+  @Override
+  public Block createBlock(
+      final Optional<List<Transaction>> maybeTransactions,
+      final Optional<List<BlockHeader>> maybeOmmers,
+      final long timestamp) {
+    return createBlock(
+        maybeTransactions.orElse(Collections.emptyList()),
+        maybeOmmers.orElse(Collections.emptyList()),
+        timestamp);
   }
 
   private Block replaceCmsInBlock(final Block block) {

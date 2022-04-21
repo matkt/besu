@@ -96,7 +96,6 @@ public class PoWBlockCreatorTest {
         new BaseFeePendingTransactionsSorter(
             TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
             1,
-            5,
             TestClock.fixed(),
             metricsSystem,
             executionContextTestFixture.getProtocolContext().getBlockchain()::getChainHeadHeader,
@@ -158,7 +157,6 @@ public class PoWBlockCreatorTest {
         new BaseFeePendingTransactionsSorter(
             TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
             1,
-            5,
             TestClock.fixed(),
             metricsSystem,
             executionContextTestFixture.getProtocolContext().getBlockchain()::getChainHeadHeader,
@@ -215,7 +213,6 @@ public class PoWBlockCreatorTest {
         new BaseFeePendingTransactionsSorter(
             TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
             1,
-            5,
             TestClock.fixed(),
             metricsSystem,
             executionContextTestFixture.getProtocolContext().getBlockchain()::getChainHeadHeader,
@@ -249,7 +246,7 @@ public class PoWBlockCreatorTest {
             .buildProcessableBlockHeader();
 
     blockCreator.rewardBeneficiary(
-        mutableWorldState, header, Collections.emptyList(), Wei.ZERO, false);
+        mutableWorldState, header, Collections.emptyList(), BLOCK_1_COINBASE, Wei.ZERO, false);
 
     assertThat(mutableWorldState.get(BLOCK_1_COINBASE)).isNotNull();
     assertThat(mutableWorldState.get(BLOCK_1_COINBASE).getBalance()).isEqualTo(Wei.ZERO);
@@ -288,7 +285,6 @@ public class PoWBlockCreatorTest {
         new BaseFeePendingTransactionsSorter(
             TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
             1,
-            5,
             TestClock.fixed(),
             metricsSystem,
             executionContextTestFixture.getProtocolContext().getBlockchain()::getChainHeadHeader,
@@ -322,7 +318,7 @@ public class PoWBlockCreatorTest {
             .buildProcessableBlockHeader();
 
     blockCreator.rewardBeneficiary(
-        mutableWorldState, header, Collections.emptyList(), Wei.ZERO, true);
+        mutableWorldState, header, Collections.emptyList(), BLOCK_1_COINBASE, Wei.ZERO, true);
 
     assertThat(mutableWorldState.get(BLOCK_1_COINBASE)).isNull();
   }

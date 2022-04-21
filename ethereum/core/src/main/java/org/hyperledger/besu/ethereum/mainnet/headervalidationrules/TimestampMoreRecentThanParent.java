@@ -16,16 +16,17 @@ package org.hyperledger.besu.ethereum.mainnet.headervalidationrules;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import org.hyperledger.besu.config.experimental.MergeConfigOptions;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.DetachedBlockHeaderValidationRule;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Responsible for ensuring the timestamp of a block is newer than its parent. */
 public class TimestampMoreRecentThanParent implements DetachedBlockHeaderValidationRule {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(TimestampMoreRecentThanParent.class);
   private final long minimumSecondsSinceParent;
 
   public TimestampMoreRecentThanParent(final long minimumSecondsSinceParent) {
@@ -35,6 +36,9 @@ public class TimestampMoreRecentThanParent implements DetachedBlockHeaderValidat
 
   @Override
   public boolean validate(final BlockHeader header, final BlockHeader parent) {
+    if (MergeConfigOptions.isMergeEnabled()) {
+      return true;
+    }
     return validateTimestamp(header.getTimestamp(), parent.getTimestamp());
   }
 

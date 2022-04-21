@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -42,6 +43,14 @@ public interface MerklePatriciaTrie<K, V> {
   Optional<V> get(K key);
 
   /**
+   * Returns an {@code Optional} of value mapped to the given path if it exists; otherwise empty.
+   *
+   * @param path The path for the value.
+   * @return an {@code Optional} of value mapped to the given path if it exists; otherwise empty
+   */
+  Optional<V> getPath(final K path);
+
+  /**
    * Returns value and ordered proof-related nodes mapped to the hash if it exists; otherwise empty.
    *
    * @param key The key for the value.
@@ -59,11 +68,28 @@ public interface MerklePatriciaTrie<K, V> {
   void put(K key, V value);
 
   /**
+   * Updates the value mapped to the specified key, creating the mapping if one does not already
+   * exist.
+   *
+   * @param key The key that corresponds to the value to be updated.
+   * @param putVisitor custom visitor for the update
+   */
+  void put(K key, PutVisitor<V> putVisitor);
+
+  /**
    * Deletes the value mapped to the specified key, if such a value exists (Optional operation).
    *
    * @param key The key of the value to be deleted.
    */
   void remove(K key);
+
+  /**
+   * Deletes the node mapped to the specified path, if such a node exists (Optional operation).
+   *
+   * @param path of the node to be deleted.
+   * @param removeVisitor custom visitor for the deletion
+   */
+  void removePath(K path, RemoveVisitor<V> removeVisitor);
 
   /**
    * Returns the KECCAK256 hash of the root node of the trie.
@@ -80,6 +106,14 @@ public interface MerklePatriciaTrie<K, V> {
   void commit(NodeUpdater nodeUpdater);
 
   /**
+   * Commits any pending changes to the underlying storage.
+   *
+   * @param nodeUpdater used to store the node values
+   * @param commitVisitor custom visitor for the commit
+   */
+  void commit(NodeUpdater nodeUpdater, CommitVisitor<V> commitVisitor);
+
+  /**
    * Retrieve up to {@code limit} storage entries beginning from the first entry with hash equal to
    * or greater than {@code startKeyHash}.
    *
@@ -88,6 +122,14 @@ public interface MerklePatriciaTrie<K, V> {
    * @return the requested storage entries as a map of key hash to value.
    */
   Map<Bytes32, V> entriesFrom(Bytes32 startKeyHash, int limit);
+
+  /**
+   * Retrieve entries using a custom collector
+   *
+   * @param handler a custom trie collector.
+   * @return the requested storage entries as a map of key hash to value.
+   */
+  Map<Bytes32, V> entriesFrom(final Function<Node<V>, Map<Bytes32, V>> handler);
 
   void visitAll(Consumer<Node<V>> nodeConsumer);
 

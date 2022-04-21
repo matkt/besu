@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.mainnet.headervalidationrules;
 
 import static java.lang.Boolean.FALSE;
 
+import org.hyperledger.besu.config.experimental.MergeConfigOptions;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.DetachedBlockHeaderValidationRule;
@@ -28,13 +29,13 @@ import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import java.math.BigInteger;
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class ProofOfWorkValidationRule implements DetachedBlockHeaderValidationRule {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ProofOfWorkValidationRule.class);
 
   private static final BigInteger ETHASH_TARGET_UPPER_BOUND = BigInteger.valueOf(2).pow(256);
 
@@ -58,6 +59,7 @@ public final class ProofOfWorkValidationRule implements DetachedBlockHeaderValid
 
   @Override
   public boolean validate(final BlockHeader header, final BlockHeader parent) {
+
     if (imlementsBaseFeeMarket()) {
       if (header.getBaseFee().isEmpty()) {
         LOG.info("Invalid block header: missing mandatory base fee.");
@@ -66,6 +68,12 @@ public final class ProofOfWorkValidationRule implements DetachedBlockHeaderValid
     } else if (header.getBaseFee().isPresent()) {
       LOG.info("Invalid block header: presence of basefee in a non-eip1559 block");
       return false;
+    }
+
+    // TODO: remove this rule bypass, use post-merge headervalidation rules
+    // https://github.com/hyperledger/besu/issues/2898
+    if (MergeConfigOptions.isMergeEnabled()) {
+      return true;
     }
 
     final Hash headerHash = hashHeader(header);

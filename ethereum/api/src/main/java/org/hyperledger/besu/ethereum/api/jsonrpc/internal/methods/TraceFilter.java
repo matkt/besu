@@ -37,12 +37,12 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TraceFilter extends TraceBlock {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(TraceFilter.class);
 
   public TraceFilter(
       final Supplier<BlockTracer> blockTracerSupplier,
@@ -63,6 +63,7 @@ public class TraceFilter extends TraceBlock {
 
     final long fromBlock = resolveBlockNumber(filterParameter.getFromBlock());
     final long toBlock = resolveBlockNumber(filterParameter.getToBlock());
+    LOG.trace("Received RPC rpcName={} fromBlock={} toBlock={}", getName(), fromBlock, toBlock);
 
     final ObjectMapper mapper = new ObjectMapper();
     final ArrayNodeWrapper resultArrayNode =
@@ -71,7 +72,7 @@ public class TraceFilter extends TraceBlock {
     long currentBlockNumber = fromBlock;
     while (currentBlockNumber <= toBlock && !resultArrayNode.isFull()) {
       Optional<Block> blockByNumber =
-          blockchainQueries.get().getBlockchain().getBlockByNumber(currentBlockNumber);
+          blockchainQueriesSupplier.get().getBlockchain().getBlockByNumber(currentBlockNumber);
       blockByNumber.ifPresent(
           block -> resultArrayNode.addAll(traceBlock(block, Optional.of(filterParameter))));
       currentBlockNumber++;
@@ -150,7 +151,7 @@ public class TraceFilter extends TraceBlock {
     if (param.getNumber().isPresent()) {
       return param.getNumber().get();
     } else if (param.isLatest()) {
-      return blockchainQueries.get().headBlockNumber();
+      return blockchainQueriesSupplier.get().headBlockNumber();
     } else {
       throw new IllegalStateException("Unknown block parameter type.");
     }

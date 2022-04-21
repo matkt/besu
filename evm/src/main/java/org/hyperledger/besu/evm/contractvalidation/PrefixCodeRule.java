@@ -14,29 +14,29 @@
  */
 package org.hyperledger.besu.evm.contractvalidation;
 
+import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.util.Optional;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PrefixCodeRule implements ContractValidationRule {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(PrefixCodeRule.class);
 
-  private final byte FORMAT_RESERVED = (byte) 0xEF;
+  private static final byte FORMAT_RESERVED = (byte) 0xEF;
 
   @Override
   // As per https://eips.ethereum.org/EIPS/eip-3541
-  public boolean validate(final MessageFrame frame) {
-    if (!frame.getOutputData().isEmpty()) {
-      if (frame.getOutputData().get(0) == FORMAT_RESERVED) {
-        LOG.trace("Contract creation error: code cannot start with {}", FORMAT_RESERVED);
-        return false;
-      } else {
-        return true;
-      }
+  public Optional<ExceptionalHaltReason> validate(final MessageFrame frame) {
+    if (!frame.getOutputData().isEmpty() && frame.getOutputData().get(0) == FORMAT_RESERVED) {
+      LOG.trace("Contract creation error: code cannot start with {}", FORMAT_RESERVED);
+      return Optional.of(ExceptionalHaltReason.INVALID_CODE);
+    } else {
+      return Optional.empty();
     }
-    return true;
   }
 
   public static ContractValidationRule of() {

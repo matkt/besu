@@ -27,7 +27,6 @@ import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.MainnetEVMs;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -88,7 +87,7 @@ public class CreateOperationTest {
             .sender(Address.fromHexString(SENDER))
             .value(Wei.ZERO)
             .apparentValue(Wei.ZERO)
-            .code(new Code(SIMPLE_CREATE, Hash.hash(SIMPLE_CREATE)))
+            .code(Code.createLegacyCode(SIMPLE_CREATE, Hash.hash(SIMPLE_CREATE)))
             .depth(1)
             .completer(__ -> {})
             .address(Address.fromHexString(SENDER))
@@ -98,7 +97,7 @@ public class CreateOperationTest {
             .messageFrameStack(messageFrameStack)
             .miningBeneficiary(Address.ZERO)
             .originator(Address.ZERO)
-            .initialGas(Gas.of(100000))
+            .initialGas(100000L)
             .worldUpdater(worldUpdater)
             .build();
     messageFrame.pushStackItem(memoryLength);

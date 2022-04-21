@@ -23,12 +23,12 @@ import org.hyperledger.besu.ethereum.p2p.peers.EnodeURLImpl;
 import org.hyperledger.besu.ethereum.p2p.peers.Peer;
 import org.hyperledger.besu.plugin.data.EnodeURL;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AdminAddPeer extends AdminModifyPeer {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(AdminAddPeer.class);
 
   public AdminAddPeer(final P2PNetwork peerNetwork) {
     super(peerNetwork);
@@ -44,7 +44,7 @@ public class AdminAddPeer extends AdminModifyPeer {
     LOG.debug("Adding ({}) to peers", enode);
     final EnodeURL enodeURL = EnodeURLImpl.fromString(enode);
     final Peer peer = DefaultPeer.fromEnodeURL(enodeURL);
-    final boolean addedToNetwork = peerNetwork.addMaintainConnectionPeer(peer);
+    final boolean addedToNetwork = peerNetwork.addMaintainedConnectionPeer(peer);
     return new JsonRpcSuccessResponse(id, addedToNetwork);
   }
 }

@@ -92,12 +92,12 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Suppliers;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class QbftBesuControllerBuilder extends BftBesuControllerBuilder {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(QbftBesuControllerBuilder.class);
   private BftEventQueue bftEventQueue;
   private QbftConfigOptions qbftConfig;
   private ForksSchedule<QbftConfigOptions> qbftForksSchedule;
@@ -176,19 +176,19 @@ public class QbftBesuControllerBuilder extends BftBesuControllerBuilder {
       final SyncState syncState,
       final EthProtocolManager ethProtocolManager) {
     final MutableBlockchain blockchain = protocolContext.getBlockchain();
-    final BftExecutors bftExecutors = BftExecutors.create(metricsSystem);
+    final BftExecutors bftExecutors =
+        BftExecutors.create(metricsSystem, BftExecutors.ConsensusType.QBFT);
 
     final Address localAddress = Util.publicKeyToAddress(nodeKey.getPublicKey());
-    final BftBlockCreatorFactory blockCreatorFactory =
+    final BftBlockCreatorFactory<?> blockCreatorFactory =
         new QbftBlockCreatorFactory(
             transactionPool.getPendingTransactions(),
             protocolContext,
             protocolSchedule,
+            qbftForksSchedule,
             miningParameters,
             localAddress,
-            qbftConfig.getMiningBeneficiary().map(Address::fromHexString).orElse(localAddress),
-            bftExtraDataCodec().get(),
-            qbftForksSchedule);
+            bftExtraDataCodec().get());
 
     final ValidatorProvider validatorProvider =
         protocolContext.getConsensusContext(BftContext.class).getValidatorProvider();

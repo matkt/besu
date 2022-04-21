@@ -34,6 +34,8 @@ task testJar(type: Jar) {
 }
 
 dependencies {
+  api 'org.slf4j:slf4j-api'
+
   annotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess'
   implementation project(':config')
   implementation project(':datatypes')
@@ -47,6 +49,7 @@ dependencies {
   implementation project(':services:kvstore')
   implementation project(':services:pipeline')
   implementation project(':services:tasks')
+  implementation project(':util')
 
   implementation 'com.google.guava:guava'
   implementation 'io.vertx:vertx-core'
@@ -68,11 +71,14 @@ dependencies {
   testImplementation project(path: ':metrics:core', configuration: 'testSupportArtifacts')
   testImplementation project(':testutil')
 
+  testImplementation 'com.fasterxml.jackson.core:jackson-databind'
   testImplementation 'junit:junit'
   testImplementation 'org.assertj:assertj-core'
   testImplementation 'org.awaitility:awaitility'
+  testImplementation 'org.junit.jupiter:junit-jupiter'
   testImplementation 'org.mockito:mockito-core'
-  testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+
+  testRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
 
   testSupportImplementation 'junit:junit'
   testSupportImplementation 'org.mockito:mockito-core'

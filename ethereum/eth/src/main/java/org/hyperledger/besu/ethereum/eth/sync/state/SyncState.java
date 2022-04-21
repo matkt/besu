@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloadStatu
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
 import org.hyperledger.besu.plugin.data.SyncStatus;
 import org.hyperledger.besu.plugin.services.BesuEvents.SyncStatusListener;
+import org.hyperledger.besu.plugin.services.BesuEvents.TTDReachedListener;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.util.Map;
@@ -42,10 +43,12 @@ public class SyncState {
   private final AtomicLong inSyncSubscriberId = new AtomicLong();
   private final Map<Long, InSyncTracker> inSyncTrackers = new ConcurrentHashMap<>();
   private final Subscribers<SyncStatusListener> syncStatusListeners = Subscribers.create();
+  private final Subscribers<TTDReachedListener> ttdReachedListeners = Subscribers.create();
   private volatile long chainHeightListenerId;
   private volatile Optional<SyncTarget> syncTarget = Optional.empty();
   private Optional<WorldStateDownloadStatus> worldStateDownloadStatus = Optional.empty();
   private Optional<Long> newPeerListenerId;
+  private Optional<Boolean> reachedTerminalDifficulty = Optional.empty();
 
   public SyncState(final Blockchain blockchain, final EthPeers ethPeers) {
     this.blockchain = blockchain;
@@ -108,8 +111,16 @@ public class SyncState {
     return syncStatusListeners.subscribe(listener);
   }
 
+  public long subscribeTTDReached(final TTDReachedListener listener) {
+    return ttdReachedListeners.subscribe(listener);
+  }
+
   public boolean unsubscribeSyncStatus(final long listenerId) {
     return syncStatusListeners.unsubscribe(listenerId);
+  }
+
+  public boolean unsubscribeTTDReached(final long listenerId) {
+    return ttdReachedListeners.unsubscribe(listenerId);
   }
 
   public Optional<SyncStatus> syncStatus() {
@@ -138,14 +149,26 @@ public class SyncState {
         getLocalChainHead(), getSyncTargetChainHead(), getBestPeerChainHead(), syncTolerance);
   }
 
+  public void setReachedTerminalDifficulty(final boolean stoppedAtTerminalDifficulty) {
+    // TODO: this is an inexpensive way to stop sync when we reach TTD,
+    //      we should revisit when merge sync is better defined
+    this.reachedTerminalDifficulty = Optional.of(stoppedAtTerminalDifficulty);
+    ttdReachedListeners.forEach(listener -> listener.onTTDReached(stoppedAtTerminalDifficulty));
+  }
+
+  public Optional<Boolean> hasReachedTerminalDifficulty() {
+    return reachedTerminalDifficulty;
+  }
+
   private boolean isInSync(
       final ChainHead localChain,
       final Optional<ChainHeadEstimate> syncTargetChain,
       final Optional<ChainHeadEstimate> bestPeerChain,
       final long syncTolerance) {
-    // Sync target may be temporarily empty while we switch sync targets during a sync, so
-    // check both the sync target and our best peer to determine if we're in sync or not
-    return isInSync(localChain, syncTargetChain, syncTolerance)
+    return reachedTerminalDifficulty.orElse(true)
+        // Sync target may be temporarily empty while we switch sync targets during a sync, so
+        // check both the sync target and our best peer to determine if we're in sync or not
+        && isInSync(localChain, syncTargetChain, syncTolerance)
         && isInSync(localChain, bestPeerChain, syncTolerance);
   }
 
@@ -217,6 +240,10 @@ public class SyncState {
   private void addEstimatedHeightListener(final SyncTarget target) {
     chainHeightListenerId =
         target.addPeerChainEstimatedHeightListener(estimatedHeight -> checkInSync());
+  }
+
+  public long getLocalChainHeight() {
+    return blockchain.getChainHeadBlockNumber();
   }
 
   public long bestChainHeight() {

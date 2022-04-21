@@ -30,24 +30,29 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class GetPooledTransactionsFromPeerTask extends AbstractPeerRequestTask<List<Transaction>> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG =
+      LoggerFactory.getLogger(GetPooledTransactionsFromPeerTask.class);
 
   private final List<Hash> hashes;
 
   private GetPooledTransactionsFromPeerTask(
       final EthContext ethContext, final List<Hash> hashes, final MetricsSystem metricsSystem) {
     super(ethContext, EthPV65.GET_POOLED_TRANSACTIONS, metricsSystem);
-    this.hashes = new ArrayList<>(hashes);
+    this.hashes = List.copyOf(hashes);
   }
 
   public static GetPooledTransactionsFromPeerTask forHashes(
       final EthContext ethContext, final List<Hash> hashes, final MetricsSystem metricsSystem) {
     return new GetPooledTransactionsFromPeerTask(ethContext, hashes, metricsSystem);
+  }
+
+  public List<Hash> getTransactionHashes() {
+    return hashes;
   }
 
   @Override

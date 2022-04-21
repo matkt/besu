@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.api.handlers.HandlerFactory;
 import org.hyperledger.besu.ethereum.api.handlers.TimeoutOptions;
 import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.AuthenticationService;
 import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.AuthenticationUtils;
+import org.hyperledger.besu.ethereum.api.jsonrpc.authentication.DefaultAuthenticationService;
 import org.hyperledger.besu.ethereum.api.jsonrpc.context.ContextKey;
 import org.hyperledger.besu.ethereum.api.jsonrpc.health.HealthService;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequest;
@@ -63,7 +64,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
-import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonGenerator.Feature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
@@ -106,12 +107,12 @@ import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.CorsHandler;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class JsonRpcHttpService {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(JsonRpcHttpService.class);
 
   private static final String SPAN_CONTEXT = "span_context";
   private static final InetSocketAddress EMPTY_SOCKET_ADDRESS = new InetSocketAddress("0.0.0.0", 0);
@@ -121,7 +122,8 @@ public class JsonRpcHttpService {
       new ObjectMapper()
           .registerModule(new Jdk8Module()) // Handle JDK8 Optionals (de)serialization
           .writerWithDefaultPrettyPrinter()
-          .without(JsonGenerator.Feature.FLUSH_PASSED_TO_STREAM);
+          .without(Feature.FLUSH_PASSED_TO_STREAM)
+          .with(Feature.AUTO_CLOSE_TARGET);
   private static final String EMPTY_RESPONSE = "";
 
   private static final TextMapPropagator traceFormats =
@@ -191,12 +193,12 @@ public class JsonRpcHttpService {
         metricsSystem,
         natService,
         methods,
-        AuthenticationService.create(vertx, config),
+        DefaultAuthenticationService.create(vertx, config),
         livenessService,
         readinessService);
   }
 
-  private JsonRpcHttpService(
+  public JsonRpcHttpService(
       final Vertx vertx,
       final Path dataDir,
       final JsonRpcConfiguration config,
@@ -362,7 +364,7 @@ public class JsonRpcHttpService {
           .route("/login")
           .method(HttpMethod.POST)
           .produces(APPLICATION_JSON)
-          .handler(AuthenticationService::handleDisabledLogin);
+          .handler(DefaultAuthenticationService::handleDisabledLogin);
     }
     return router;
   }
@@ -563,7 +565,8 @@ public class JsonRpcHttpService {
   private void handleJsonRPCRequest(final RoutingContext routingContext) {
     // first check token if authentication is required
     final String token = getAuthToken(routingContext);
-    if (authenticationService.isPresent() && token == null) {
+    // we check the no auth api methods actually match what's in the request later on
+    if (authenticationService.isPresent() && token == null && config.getNoAuthRpcApis().isEmpty()) {
       // no auth token when auth required
       handleJsonRpcUnauthorizedError(routingContext, null, JsonRpcError.UNAUTHORIZED);
     } else {
@@ -574,22 +577,31 @@ public class JsonRpcHttpService {
           final JsonObject requestBodyJsonObject =
               ContextKey.REQUEST_BODY_AS_JSON_OBJECT.extractFrom(
                   routingContext, () -> new JsonObject(json));
-          AuthenticationUtils.getUser(
-              authenticationService,
-              token,
-              user -> handleJsonSingleRequest(routingContext, requestBodyJsonObject, user));
+          if (authenticationService.isPresent()) {
+            authenticationService
+                .get()
+                .authenticate(
+                    token,
+                    user -> handleJsonSingleRequest(routingContext, requestBodyJsonObject, user));
+          } else {
+            handleJsonSingleRequest(routingContext, requestBodyJsonObject, Optional.empty());
+          }
+
         } else {
           final JsonArray array = new JsonArray(json);
           if (array.size() < 1) {
             handleJsonRpcError(routingContext, null, INVALID_REQUEST);
             return;
           }
-          AuthenticationUtils.getUser(
-              authenticationService,
-              token,
-              user -> handleJsonBatchRequest(routingContext, array, user));
+          if (authenticationService.isPresent()) {
+            authenticationService
+                .get()
+                .authenticate(token, user -> handleJsonBatchRequest(routingContext, array, user));
+          } else {
+            handleJsonBatchRequest(routingContext, array, Optional.empty());
+          }
         }
-      } catch (final DecodeException ex) {
+      } catch (final DecodeException | NullPointerException ex) {
         handleJsonRpcError(routingContext, null, JsonRpcError.PARSE_ERROR);
       }
     }
@@ -626,7 +638,10 @@ public class JsonRpcHttpService {
               response.end(EMPTY_RESPONSE);
             } else {
               try {
-                JSON_OBJECT_WRITER.writeValue(new JsonResponseStreamer(response), jsonRpcResponse);
+                // underlying output stream lifecycle is managed by the json object writer
+                JSON_OBJECT_WRITER.writeValue(
+                    new JsonResponseStreamer(response, routingContext.request().remoteAddress()),
+                    jsonRpcResponse);
               } catch (IOException ex) {
                 LOG.error("Error streaming JSON-RPC response", ex);
               }
@@ -695,7 +710,10 @@ public class JsonRpcHttpService {
                       .toArray(JsonRpcResponse[]::new);
 
               try {
-                JSON_OBJECT_WRITER.writeValue(new JsonResponseStreamer(response), completed);
+                // underlying output stream lifecycle is managed by the json object writer
+                JSON_OBJECT_WRITER.writeValue(
+                    new JsonResponseStreamer(response, routingContext.request().remoteAddress()),
+                    completed);
               } catch (IOException ex) {
                 LOG.error("Error streaming JSON-RPC response", ex);
               }
@@ -737,7 +755,11 @@ public class JsonRpcHttpService {
 
       final JsonRpcMethod method = rpcMethods.get(requestBody.getMethod());
 
-      if (AuthenticationUtils.isPermitted(authenticationService, user, method)) {
+      if (!authenticationService.isPresent()
+          || (authenticationService.isPresent()
+              && authenticationService
+                  .get()
+                  .isPermitted(user, method, config.getNoAuthRpcApis()))) {
         // Generate response
         try (final OperationTimer.TimingContext ignored =
             requestTimer.labels(requestBody.getMethod()).startTimer()) {
@@ -748,7 +770,7 @@ public class JsonRpcHttpService {
           return method.response(
               new JsonRpcRequestContext(requestBody, () -> !ctx.response().closed()));
         } catch (final InvalidJsonRpcParameters e) {
-          LOG.debug("Invalid Params", e);
+          LOG.debug("Invalid Params for method: {}", method.getName(), e);
           span.setStatus(StatusCode.ERROR, "Invalid Params");
           return errorResponse(id, JsonRpcError.INVALID_PARAMS);
         } catch (final MultiTenancyValidationException e) {
@@ -770,7 +792,7 @@ public class JsonRpcHttpService {
 
   private Optional<JsonRpcError> validateMethodAvailability(final JsonRpcRequest request) {
     final String name = request.getMethod();
-    LOG.debug("JSON-RPC request -> {}", name);
+    LOG.debug("JSON-RPC request -> {} {}", name, request.getParams());
 
     final JsonRpcMethod method = rpcMethods.get(name);
 
@@ -819,7 +841,7 @@ public class JsonRpcHttpService {
       return "";
     }
     if (config.getCorsAllowedDomains().contains("*")) {
-      return "*";
+      return ".*";
     } else {
       final StringJoiner stringJoiner = new StringJoiner("|");
       config.getCorsAllowedDomains().stream().filter(s -> !s.isEmpty()).forEach(stringJoiner::add);

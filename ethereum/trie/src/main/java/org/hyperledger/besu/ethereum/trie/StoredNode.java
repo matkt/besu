@@ -48,6 +48,17 @@ class StoredNode<V> implements Node<V> {
   }
 
   @Override
+  public boolean isHealNeeded() {
+    return false;
+  }
+
+  @Override
+  public void markHealNeeded() {
+    throw new IllegalStateException(
+        "A stored node cannot be healed since it's loaded from storage");
+  }
+
+  @Override
   public Node<V> accept(final PathNodeVisitor<V> visitor, final Bytes path) {
     final Node<V> node = load();
     return node.accept(visitor, path);
@@ -123,7 +134,9 @@ class StoredNode<V> implements Node<V> {
                           "Unable to load trie node value for hash "
                               + hash
                               + " location "
-                              + location));
+                              + location,
+                          hash,
+                          location));
     }
 
     return loaded;

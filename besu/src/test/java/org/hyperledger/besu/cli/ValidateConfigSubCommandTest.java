@@ -17,6 +17,8 @@ package org.hyperledger.besu.cli;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.BesuInfo;
+
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -24,8 +26,11 @@ import java.nio.file.Path;
 
 import com.google.common.io.Resources;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.junit.MockitoJUnitRunner;
 import picocli.CommandLine.Model.CommandSpec;
 
+@RunWith(MockitoJUnitRunner.class)
 public class ValidateConfigSubCommandTest extends CommandTestAbstract {
 
   private static final String EXPECTED_PUBLIC_KEY_USAGE =
@@ -54,6 +59,13 @@ public class ValidateConfigSubCommandTest extends CommandTestAbstract {
   public void callingValidateConfigSubCommandHelpMustDisplayUsage() {
     parseCommand(VALIDATE_CONFIG_SUBCOMMAND_NAME, "--help");
     assertThat(commandOutput.toString(UTF_8)).startsWith(EXPECTED_PUBLIC_KEY_USAGE);
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void callingValidateConfigSubCommandVersionMustDisplayVersion() {
+    parseCommand(VALIDATE_CONFIG_SUBCOMMAND_NAME, "--version");
+    assertThat(commandOutput.toString(UTF_8)).isEqualToIgnoringWhitespace(BesuInfo.version());
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
   }
 

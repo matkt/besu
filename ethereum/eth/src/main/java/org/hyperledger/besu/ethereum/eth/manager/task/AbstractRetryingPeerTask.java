@@ -29,8 +29,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A task that will retry a fixed number of times before completing the associated CompletableFuture
@@ -41,7 +41,7 @@ import org.apache.logging.log4j.Logger;
  */
 public abstract class AbstractRetryingPeerTask<T> extends AbstractEthTask<T> {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(AbstractRetryingPeerTask.class);
   private final EthContext ethContext;
   private final int maxRetries;
   private final Predicate<T> isEmptyResponse;
@@ -71,6 +71,10 @@ public abstract class AbstractRetryingPeerTask<T> extends AbstractEthTask<T> {
     assignedPeer = Optional.of(peer);
   }
 
+  public Optional<EthPeer> getAssignedPeer() {
+    return assignedPeer;
+  }
+
   @Override
   protected void executeTask() {
     if (result.isDone()) {
@@ -89,7 +93,7 @@ public abstract class AbstractRetryingPeerTask<T> extends AbstractEthTask<T> {
               if (error != null) {
                 handleTaskError(error);
               } else {
-                // If we get a partial success reset the retry counter.
+                // If we get a partial success, reset the retry counter.
                 if (!isEmptyResponse.test(peerResult)) {
                   retryCount = 0;
                 }
@@ -109,7 +113,9 @@ public abstract class AbstractRetryingPeerTask<T> extends AbstractEthTask<T> {
     }
 
     if (cause instanceof NoAvailablePeersException) {
-      LOG.info("No peers available, waiting for peers: {}", ethContext.getEthPeers().peerCount());
+      LOG.info(
+          "No useful peer found, checking remaining current peers for usefulness: {}",
+          ethContext.getEthPeers().peerCount());
       // Wait for new peer to connect
       final WaitForPeerTask waitTask = WaitForPeerTask.create(ethContext, metricsSystem);
       executeSubTask(

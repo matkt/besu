@@ -34,9 +34,7 @@ import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.ethereum.worldstate.GoQuorumMutablePrivateWorldStateUpdater;
 import org.hyperledger.besu.evm.AccessListEntry;
 import org.hyperledger.besu.evm.Code;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.account.Account;
-import org.hyperledger.besu.evm.account.AccountState;
 import org.hyperledger.besu.evm.account.EvmAccount;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -56,14 +54,14 @@ import java.util.Set;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimap;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MainnetTransactionProcessor {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(MainnetTransactionProcessor.class);
 
   protected final GasCalculator gasCalculator;
 
@@ -269,7 +267,7 @@ public class MainnetTransactionProcessor {
       // compare against a sender account (because the transaction may not
       // be signed correctly to extract the sender).
       if (!validationResult.isValid()) {
-        LOG.warn("Invalid transaction: {}", validationResult.getErrorMessage());
+        LOG.debug("Invalid transaction: {}", validationResult.getErrorMessage());
         return TransactionProcessingResult.invalid(validationResult);
       }
 
@@ -303,27 +301,26 @@ public class MainnetTransactionProcessor {
           previousBalance,
           sender.getBalance());
 
-      List<AccessListEntry> accessListEntries = transaction.getAccessList().orElse(List.of());
+      final List<AccessListEntry> accessListEntries = transaction.getAccessList().orElse(List.of());
       // we need to keep a separate hash set of addresses in case they specify no storage.
       // No-storage is a common pattern, especially for Externally Owned Accounts
-      Set<Address> addressList = new HashSet<>();
-      Multimap<Address, Bytes32> storageList = HashMultimap.create();
+      final Set<Address> addressList = new HashSet<>();
+      final Multimap<Address, Bytes32> storageList = HashMultimap.create();
       int accessListStorageCount = 0;
-      for (var entry : accessListEntries) {
-        Address address = entry.getAddress();
+      for (final var entry : accessListEntries) {
+        final Address address = entry.getAddress();
         addressList.add(address);
-        List<Bytes32> storageKeys = entry.getStorageKeys();
+        final List<Bytes32> storageKeys = entry.getStorageKeys();
         storageList.putAll(address, storageKeys);
         accessListStorageCount += storageKeys.size();
       }
 
-      final Gas intrinsicGas =
+      final long intrinsicGas =
           gasCalculator.transactionIntrinsicGasCost(
               transaction.getPayload(), transaction.isContractCreation());
-      final Gas accessListGas =
+      final long accessListGas =
           gasCalculator.accessListGasCost(accessListEntries.size(), accessListStorageCount);
-      final Gas gasAvailable =
-          Gas.of(transaction.getGasLimit()).minus(intrinsicGas).minus(accessListGas);
+      final long gasAvailable = transaction.getGasLimit() - intrinsicGas - accessListGas;
       LOG.trace(
           "Gas available for execution {} = {} - {} (limit - intrinsic)",
           gasAvailable,
@@ -366,13 +363,16 @@ public class MainnetTransactionProcessor {
         final Address contractAddress =
             Address.contractAddress(senderAddress, senderMutableAccount.getNonce() - 1L);
 
+        final Bytes initCodeBytes = transaction.getPayload();
         initialFrame =
             commonMessageFrameBuilder
                 .type(MessageFrame.Type.CONTRACT_CREATION)
                 .address(contractAddress)
                 .contract(contractAddress)
                 .inputData(Bytes.EMPTY)
-                .code(new Code(transaction.getPayload(), Hash.EMPTY))
+                .code(
+                    contractCreationProcessor.getCodeFromEVM(
+                        Hash.hash(initCodeBytes), initCodeBytes))
                 .build();
       } else {
         @SuppressWarnings("OptionalGetWithoutIsPresent") // isContractCall tests isPresent
@@ -385,9 +385,9 @@ public class MainnetTransactionProcessor {
                 .contract(to)
                 .inputData(transaction.getPayload())
                 .code(
-                    new Code(
-                        maybeContract.map(AccountState::getCode).orElse(Bytes.EMPTY),
-                        maybeContract.map(AccountState::getCodeHash).orElse(Hash.EMPTY)))
+                    maybeContract
+                        .map(c -> messageCallProcessor.getCodeFromEVM(c.getCodeHash(), c.getCode()))
+                        .orElse(Code.EMPTY_CODE))
                 .build();
       }
 
@@ -404,32 +404,31 @@ public class MainnetTransactionProcessor {
       if (LOG.isTraceEnabled()) {
         LOG.trace(
             "Gas used by transaction: {}, by message call/contract creation: {}",
-            () -> Gas.of(transaction.getGasLimit()).minus(initialFrame.getRemainingGas()),
-            () -> gasAvailable.minus(initialFrame.getRemainingGas()));
+            transaction.getGasLimit() - initialFrame.getRemainingGas(),
+            gasAvailable - initialFrame.getRemainingGas());
       }
 
       // Refund the sender by what we should and pay the miner fee (note that we're doing them one
       // after the other so that if it is the same account somehow, we end up with the right result)
-      final Gas selfDestructRefund =
-          gasCalculator.getSelfDestructRefundAmount().times(initialFrame.getSelfDestructs().size());
-      final Gas refundGas = initialFrame.getGasRefund().plus(selfDestructRefund);
-      final Gas refunded = refunded(transaction, initialFrame.getRemainingGas(), refundGas);
-      final Wei refundedWei = refunded.priceFor(transactionGasPrice);
+      final long selfDestructRefund =
+          gasCalculator.getSelfDestructRefundAmount() * initialFrame.getSelfDestructs().size();
+      final long refundGas = initialFrame.getGasRefund() + selfDestructRefund;
+      final long refunded = refunded(transaction, initialFrame.getRemainingGas(), refundGas);
+      final Wei refundedWei = transactionGasPrice.multiply(refunded);
       senderMutableAccount.incrementBalance(refundedWei);
 
-      final Gas gasUsedByTransaction =
-          Gas.of(transaction.getGasLimit()).minus(initialFrame.getRemainingGas());
+      final long gasUsedByTransaction = transaction.getGasLimit() - initialFrame.getRemainingGas();
 
       if (!worldState.getClass().equals(GoQuorumMutablePrivateWorldStateUpdater.class)) {
         // if this is not a private GoQuorum transaction we have to update the coinbase
         final var coinbase = worldState.getOrCreate(miningBeneficiary).getMutable();
-        final Gas coinbaseFee = Gas.of(transaction.getGasLimit()).minus(refunded);
+        final long coinbaseFee = transaction.getGasLimit() - refunded;
         if (blockHeader.getBaseFee().isPresent()) {
           final Wei baseFee = blockHeader.getBaseFee().get();
           if (transactionGasPrice.compareTo(baseFee) < 0) {
             return TransactionProcessingResult.failed(
-                gasUsedByTransaction.toLong(),
-                refunded.toLong(),
+                gasUsedByTransaction,
+                refunded,
                 ValidationResult.invalid(
                     TransactionInvalidReason.TRANSACTION_PRICE_TOO_LOW,
                     "transaction price must be greater than base fee"),
@@ -455,16 +454,13 @@ public class MainnetTransactionProcessor {
       if (initialFrame.getState() == MessageFrame.State.COMPLETED_SUCCESS) {
         return TransactionProcessingResult.successful(
             initialFrame.getLogs(),
-            gasUsedByTransaction.toLong(),
-            refunded.toLong(),
+            gasUsedByTransaction,
+            refunded,
             initialFrame.getOutputData(),
             validationResult);
       } else {
         return TransactionProcessingResult.failed(
-            gasUsedByTransaction.toLong(),
-            refunded.toLong(),
-            validationResult,
-            initialFrame.getRevertReason());
+            gasUsedByTransaction, refunded, validationResult, initialFrame.getRevertReason());
       }
     } catch (final RuntimeException re) {
       LOG.error("Critical Exception Processing Transaction", re);
@@ -500,14 +496,12 @@ public class MainnetTransactionProcessor {
     }
   }
 
-  protected Gas refunded(
-      final Transaction transaction, final Gas gasRemaining, final Gas gasRefund) {
+  protected long refunded(
+      final Transaction transaction, final long gasRemaining, final long gasRefund) {
     // Integer truncation takes care of the the floor calculation needed after the divide.
-    final Gas maxRefundAllowance =
-        Gas.of(transaction.getGasLimit())
-            .minus(gasRemaining)
-            .dividedBy(gasCalculator.getMaxRefundQuotient());
-    final Gas refundAllowance = maxRefundAllowance.min(gasRefund);
-    return gasRemaining.plus(refundAllowance);
+    final long maxRefundAllowance =
+        (transaction.getGasLimit() - gasRemaining) / gasCalculator.getMaxRefundQuotient();
+    final long refundAllowance = Math.min(maxRefundAllowance, gasRefund);
+    return gasRemaining + refundAllowance;
   }
 }

@@ -44,15 +44,15 @@ import java.util.Optional;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.Lists;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** An operation submitted by an external actor to be applied to the system. */
 public class PrivateTransaction implements org.hyperledger.besu.plugin.data.PrivateTransaction {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(PrivateTransaction.class);
 
   // Used for transactions that are not tied to a specific chain
   // (i.e. does not have a chain id associated with it).
@@ -99,11 +99,6 @@ public class PrivateTransaction implements org.hyperledger.besu.plugin.data.Priv
 
   // Caches the transaction sender.
   protected volatile Address sender;
-
-  // Caches the hash used to uniquely identify the transaction.
-  // This field will be removed in 1.5.0
-  @Deprecated(since = "1.4.3")
-  protected volatile Hash hash;
 
   private static final Supplier<SignatureAlgorithm> SIGNATURE_ALGORITHM =
       Suppliers.memoize(SignatureAlgorithmFactory::getInstance);
@@ -506,23 +501,6 @@ public class PrivateTransaction implements org.hyperledger.besu.plugin.data.Priv
       v = recId.add(REPLAY_PROTECTED_V_BASE).add(TWO.multiply(chainId.get()));
     }
     return v;
-  }
-
-  /**
-   * Returns the transaction hash.
-   *
-   * @deprecated All private transactions should be identified by their corresponding PMT hash.
-   * @return the transaction hash
-   */
-  // This field will be removed in 1.5.0
-  @Deprecated(since = "1.4.3")
-  @Override
-  public Hash getHash() {
-    if (hash == null) {
-      final Bytes rlp = serialize(this).encoded();
-      hash = Hash.hash(rlp);
-    }
-    return hash;
   }
 
   /**

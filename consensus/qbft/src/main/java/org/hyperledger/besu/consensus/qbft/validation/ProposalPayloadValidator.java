@@ -26,7 +26,6 @@ import org.hyperledger.besu.consensus.qbft.pki.PkiQbftExtraDataCodec;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockValidator;
-import org.hyperledger.besu.ethereum.BlockValidator.BlockProcessingOutputs;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
@@ -35,14 +34,14 @@ import org.hyperledger.besu.pki.cms.CmsValidator;
 import java.util.Optional;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ProposalPayloadValidator {
 
   private static final String ERROR_PREFIX = "Invalid Proposal Payload";
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ProposalPayloadValidator.class);
   private final Address expectedProposer;
   private final ConsensusRoundIdentifier targetRound;
   private final BlockValidator blockValidator;
@@ -119,12 +118,15 @@ public class ProposalPayloadValidator {
   }
 
   private boolean validateBlock(final Block block) {
-    final Optional<BlockProcessingOutputs> validationResult =
+    final var validationResult =
         blockValidator.validateAndProcessBlock(
             protocolContext, block, HeaderValidationMode.LIGHT, HeaderValidationMode.FULL);
 
-    if (validationResult.isEmpty()) {
-      LOG.info("{}: block did not pass validation.", ERROR_PREFIX);
+    if (validationResult.blockProcessingOutputs.isEmpty()) {
+      LOG.info(
+          "{}: block did not pass validation. Reason {}",
+          ERROR_PREFIX,
+          validationResult.errorMessage);
       return false;
     }
 

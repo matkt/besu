@@ -34,15 +34,16 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
+import org.hyperledger.besu.ethereum.vm.DebugOperationTracer;
 import org.hyperledger.besu.ethereum.worldstate.GoQuorumMutablePrivateAndPublicWorldStateUpdater;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
 import java.math.BigInteger;
 import java.util.Optional;
+import javax.annotation.Nonnull;
 
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
@@ -142,14 +143,31 @@ public class TransactionSimulator {
     if (header == null) {
       return Optional.empty();
     }
-    final MutableWorldState publicWorldState =
-        worldStateArchive.getMutable(header.getStateRoot(), header.getHash(), false).orElse(null);
 
-    if (publicWorldState == null) {
+    WorldUpdater updater;
+    try {
+      updater = getWorldUpdater(header);
+    } catch (final IllegalArgumentException e) {
       return Optional.empty();
     }
-    final WorldUpdater updater = getEffectiveWorldStateUpdater(header, publicWorldState);
 
+    // in order to trace the state diff we need to make sure that
+    // the world updater always has a parent
+    if (operationTracer instanceof DebugOperationTracer) {
+      updater = updater.parentUpdater().isPresent() ? updater : updater.updater();
+    }
+
+    return processWithWorldUpdater(
+        callParams, transactionValidationParams, operationTracer, header, updater);
+  }
+
+  @Nonnull
+  public Optional<TransactionSimulatorResult> processWithWorldUpdater(
+      final CallParameter callParams,
+      final TransactionValidationParams transactionValidationParams,
+      final OperationTracer operationTracer,
+      final BlockHeader header,
+      final WorldUpdater updater) {
     final ProtocolSpec protocolSpec = protocolSchedule.getByBlockNumber(header.getNumber());
 
     final Address senderAddress =
@@ -157,28 +175,17 @@ public class TransactionSimulator {
 
     BlockHeader blockHeaderToProcess = header;
 
-    final Wei gasPrice;
-    final Wei maxFeePerGas;
-    final Wei maxPriorityFeePerGas;
-    if (transactionValidationParams.isAllowExceedingBalance()) {
-      if (header.getBaseFee().isPresent()) {
-        blockHeaderToProcess =
-            BlockHeaderBuilder.fromHeader(header)
-                .baseFee(Wei.ZERO)
-                .blockHeaderFunctions(protocolSpec.getBlockHeaderFunctions())
-                .buildBlockHeader();
-      }
-      gasPrice = Wei.ZERO;
-      maxFeePerGas = Wei.ZERO;
-      maxPriorityFeePerGas = Wei.ZERO;
-    } else {
-      gasPrice = callParams.getGasPrice() != null ? callParams.getGasPrice() : Wei.ZERO;
-      maxFeePerGas = callParams.getMaxFeePerGas().orElse(gasPrice);
-      maxPriorityFeePerGas = callParams.getMaxPriorityFeePerGas().orElse(gasPrice);
+    if (transactionValidationParams.isAllowExceedingBalance() && header.getBaseFee().isPresent()) {
+      blockHeaderToProcess =
+          BlockHeaderBuilder.fromHeader(header)
+              .baseFee(Wei.ZERO)
+              .blockHeaderFunctions(protocolSpec.getBlockHeaderFunctions())
+              .buildBlockHeader();
     }
 
-    final Account sender = publicWorldState.get(senderAddress);
+    final Account sender = updater.get(senderAddress);
     final long nonce = sender != null ? sender.getNonce() : 0L;
+
     final long gasLimit =
         callParams.getGasLimit() >= 0
             ? callParams.getGasLimit()
@@ -191,33 +198,21 @@ public class TransactionSimulator {
             .getByBlockNumber(blockHeaderToProcess.getNumber())
             .getTransactionProcessor();
 
-    final Transaction.Builder transactionBuilder =
-        Transaction.builder()
-            .nonce(nonce)
-            .gasLimit(gasLimit)
-            .to(callParams.getTo())
-            .sender(senderAddress)
-            .value(value)
-            .payload(payload)
-            .signature(FAKE_SIGNATURE);
-
-    if (header.getBaseFee().isEmpty()) {
-      transactionBuilder.gasPrice(gasPrice);
-    } else if (protocolSchedule.getChainId().isPresent()) {
-      transactionBuilder.maxFeePerGas(maxFeePerGas).maxPriorityFeePerGas(maxPriorityFeePerGas);
-    } else {
+    final Optional<Transaction> maybeTransaction =
+        buildTransaction(
+            callParams,
+            transactionValidationParams,
+            header,
+            senderAddress,
+            nonce,
+            gasLimit,
+            value,
+            payload);
+    if (maybeTransaction.isEmpty()) {
       return Optional.empty();
     }
 
-    transactionBuilder.guessType();
-    if (transactionBuilder.getTransactionType().requiresChainId()) {
-      transactionBuilder.chainId(
-          protocolSchedule
-              .getChainId()
-              .orElse(BigInteger.ONE)); // needed to make some transactions valid
-    }
-    final Transaction transaction = transactionBuilder.build();
-
+    final Transaction transaction = maybeTransaction.get();
     final TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             blockchain,
@@ -240,14 +235,14 @@ public class TransactionSimulator {
         transactionProcessor.getTransactionValidator().getGoQuorumCompatibilityMode();
 
     if (goQuorumCompatibilityMode && value.isZero()) {
-      Gas privateGasEstimateAndState =
+      final long privateGasEstimateAndState =
           protocolSpec.getGasCalculator().getMaximumTransactionCost(64);
-      if (privateGasEstimateAndState.toLong() > result.getEstimateGasUsedByTransaction()) {
+      if (privateGasEstimateAndState > result.getEstimateGasUsedByTransaction()) {
         // modify the result to have the larger estimate
-        TransactionProcessingResult resultPmt =
+        final TransactionProcessingResult resultPmt =
             TransactionProcessingResult.successful(
                 result.getLogs(),
-                privateGasEstimateAndState.toLong(),
+                privateGasEstimateAndState,
                 result.getGasRemaining(),
                 result.getOutput(),
                 result.getValidationResult());
@@ -256,6 +251,68 @@ public class TransactionSimulator {
     }
 
     return Optional.of(new TransactionSimulatorResult(transaction, result));
+  }
+
+  private Optional<Transaction> buildTransaction(
+      final CallParameter callParams,
+      final TransactionValidationParams transactionValidationParams,
+      final BlockHeader header,
+      final Address senderAddress,
+      final long nonce,
+      final long gasLimit,
+      final Wei value,
+      final Bytes payload) {
+    final Transaction.Builder transactionBuilder =
+        Transaction.builder()
+            .nonce(nonce)
+            .gasLimit(gasLimit)
+            .to(callParams.getTo())
+            .sender(senderAddress)
+            .value(value)
+            .payload(payload)
+            .signature(FAKE_SIGNATURE);
+
+    final Wei gasPrice;
+    final Wei maxFeePerGas;
+    final Wei maxPriorityFeePerGas;
+    if (transactionValidationParams.isAllowExceedingBalance()) {
+      gasPrice = Wei.ZERO;
+      maxFeePerGas = Wei.ZERO;
+      maxPriorityFeePerGas = Wei.ZERO;
+    } else {
+      gasPrice = callParams.getGasPrice() != null ? callParams.getGasPrice() : Wei.ZERO;
+      maxFeePerGas = callParams.getMaxFeePerGas().orElse(gasPrice);
+      maxPriorityFeePerGas = callParams.getMaxPriorityFeePerGas().orElse(gasPrice);
+    }
+    if (header.getBaseFee().isEmpty()) {
+      transactionBuilder.gasPrice(gasPrice);
+    } else if (protocolSchedule.getChainId().isPresent()) {
+      transactionBuilder.maxFeePerGas(maxFeePerGas).maxPriorityFeePerGas(maxPriorityFeePerGas);
+    } else {
+      return Optional.empty();
+    }
+
+    transactionBuilder.guessType();
+    if (transactionBuilder.getTransactionType().requiresChainId()) {
+      transactionBuilder.chainId(
+          protocolSchedule
+              .getChainId()
+              .orElse(BigInteger.ONE)); // needed to make some transactions valid
+    }
+    final Transaction transaction = transactionBuilder.build();
+    return Optional.ofNullable(transaction);
+  }
+
+  public WorldUpdater getWorldUpdater(final BlockHeader header) {
+    final MutableWorldState publicWorldState =
+        worldStateArchive.getMutable(header.getStateRoot(), header.getHash(), false).orElse(null);
+
+    if (publicWorldState == null) {
+      throw new IllegalArgumentException(
+          "Public world state not available for block " + header.getNumber());
+    }
+
+    return getEffectiveWorldStateUpdater(header, publicWorldState);
   }
 
   // return combined private/public world state updater if GoQuorum mode, otherwise the public state
@@ -271,6 +328,7 @@ public class TransactionSimulator {
       return new GoQuorumMutablePrivateAndPublicWorldStateUpdater(
           publicWorldState.updater(), privateWorldState.updater());
     }
+
     return publicWorldState.updater();
   }
 

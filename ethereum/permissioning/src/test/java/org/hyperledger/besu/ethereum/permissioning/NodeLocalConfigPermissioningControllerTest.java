@@ -38,6 +38,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -350,6 +351,9 @@ public class NodeLocalConfigPermissioningControllerTest {
     when(permissioningConfig.isNodeAllowlistEnabled()).thenReturn(true);
     when(permissioningConfig.getNodeAllowlist())
         .thenReturn(Arrays.asList(EnodeURLImpl.fromString(expectedEnodeURL)));
+    when(permissioningConfig.getEnodeDnsConfiguration())
+        .thenReturn(EnodeDnsConfiguration.dnsDisabled());
+
     controller =
         new NodeLocalConfigPermissioningController(
             permissioningConfig, bootnodesList, selfEnode.getNodeId(), metricsSystem);
@@ -378,7 +382,8 @@ public class NodeLocalConfigPermissioningControllerTest {
 
     assertThat(thrown)
         .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Unable to read permissioning TOML config file");
+        .hasRootCauseMessage(
+            "Unable to read permissioning TOML config file : foo Configuration file does not exist: foo");
 
     assertThat(controller.getNodesAllowlist()).containsExactly(expectedEnodeURI);
   }
@@ -470,6 +475,9 @@ public class NodeLocalConfigPermissioningControllerTest {
     when(permissioningConfig.isNodeAllowlistEnabled()).thenReturn(true);
     when(permissioningConfig.getNodeAllowlist())
         .thenReturn(Arrays.asList(EnodeURLImpl.fromString(enode1)));
+    when(permissioningConfig.getEnodeDnsConfiguration())
+        .thenReturn(EnodeDnsConfiguration.dnsDisabled());
+
     controller =
         new NodeLocalConfigPermissioningController(
             permissioningConfig, bootnodesList, selfEnode.getNodeId(), metricsSystem);
@@ -494,6 +502,9 @@ public class NodeLocalConfigPermissioningControllerTest {
     when(permissioningConfig.isNodeAllowlistEnabled()).thenReturn(true);
     when(permissioningConfig.getNodeAllowlist())
         .thenReturn(Arrays.asList(EnodeURLImpl.fromString(enode1)));
+    when(permissioningConfig.getEnodeDnsConfiguration())
+        .thenReturn(EnodeDnsConfiguration.dnsDisabled());
+
     controller =
         new NodeLocalConfigPermissioningController(
             permissioningConfig, bootnodesList, selfEnode.getNodeId(), metricsSystem);
@@ -547,7 +558,11 @@ public class NodeLocalConfigPermissioningControllerTest {
         new NodeLocalConfigPermissioningController(
             permissioningConfig, bootnodesList, selfEnode.getNodeId(), metricsSystem);
     assertThat(controller.getNodesAllowlist()).hasSize(1);
-    assertThat(controller.getNodesAllowlist()).contains(enodeDns);
+    assertThat(controller.getNodesAllowlist())
+        .contains(
+            "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@"
+                + InetAddress.getLocalHost().getHostName()
+                + ":4567");
   }
 
   private Path createPermissionsFileWithNode(final String node) throws IOException {

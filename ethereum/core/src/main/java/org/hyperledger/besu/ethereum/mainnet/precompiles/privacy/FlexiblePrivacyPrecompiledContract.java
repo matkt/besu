@@ -51,15 +51,17 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import javax.annotation.Nonnull;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContract {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG =
+      LoggerFactory.getLogger(FlexiblePrivacyPrecompiledContract.class);
 
   private final Subscribers<PrivateTransactionObserver> privateTransactionEventObservers =
       Subscribers.create();
@@ -97,11 +99,16 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
     return privateTransactionEventObservers.unsubscribe(observerId);
   }
 
+  @Nonnull
   @Override
-  public Bytes compute(final Bytes input, final MessageFrame messageFrame) {
-
+  public PrecompileContractResult computePrecompile(
+      final Bytes input, @Nonnull final MessageFrame messageFrame) {
     if (skipContractExecution(messageFrame)) {
-      return Bytes.EMPTY;
+      return NO_RESULT;
+    }
+    if (input == null || (input.size() != 32 && input.size() != 64)) {
+      LOG.error("Can not fetch private transaction payload with key of invalid length {}", input);
+      return NO_RESULT;
     }
 
     final Hash pmtHash = messageFrame.getContextVariable(KEY_TRANSACTION_HASH);
@@ -113,7 +120,7 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
       receiveResponse = getReceiveResponse(key);
     } catch (final EnclaveClientException e) {
       LOG.debug("Can not fetch private transaction payload with key {}", key, e);
-      return Bytes.EMPTY;
+      return NO_RESULT;
     }
 
     final BytesValueRLPInput bytesValueRLPInput =
@@ -126,12 +133,12 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
 
     final Bytes privateFrom = privateTransaction.getPrivateFrom();
     if (!privateFromMatchesSenderKey(privateFrom, receiveResponse.getSenderKey())) {
-      return Bytes.EMPTY;
+      return NO_RESULT;
     }
 
     final Optional<Bytes> maybeGroupId = privateTransaction.getPrivacyGroupId();
     if (maybeGroupId.isEmpty()) {
-      return Bytes.EMPTY;
+      return NO_RESULT;
     }
 
     final Bytes32 privacyGroupId = Bytes32.wrap(maybeGroupId.get());
@@ -167,7 +174,7 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
         disposablePrivateState,
         privateWorldStateUpdater,
         privateFrom)) {
-      return Bytes.EMPTY;
+      return NO_RESULT;
     }
 
     final TransactionProcessingResult result =
@@ -182,7 +189,7 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
 
       privateMetadataUpdater.putTransactionReceipt(pmtHash, new PrivateTransactionReceipt(result));
 
-      return Bytes.EMPTY;
+      return NO_RESULT;
     }
 
     sendParticipantRemovedEvent(privateTransaction);
@@ -196,7 +203,8 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
           pmtHash, privacyGroupId, disposablePrivateState, privateMetadataUpdater, result);
     }
 
-    return result.getOutput();
+    return new PrecompileContractResult(
+        result.getOutput(), true, MessageFrame.State.CODE_EXECUTING, Optional.empty());
   }
 
   private void sendParticipantRemovedEvent(final PrivateTransaction privateTransaction) {
@@ -242,7 +250,7 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
       return false;
     }
 
-    if (isContractLocked && !isTargettingFlexiblePrivacyProxy(privateTransaction)) {
+    if (isContractLocked && !isTargetingFlexiblePrivacyProxy(privateTransaction)) {
       LOG.debug(
           "Privacy Group {} is locked while trying to execute transaction with commitment {}",
           privacyGroupId.toHexString(),
@@ -304,13 +312,13 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
     return input.slice(4).toBase64String();
   }
 
-  private boolean isTargettingFlexiblePrivacyProxy(final PrivateTransaction privateTransaction) {
+  private boolean isTargetingFlexiblePrivacyProxy(final PrivateTransaction privateTransaction) {
     return privateTransaction.getTo().isPresent()
         && privateTransaction.getTo().get().equals(FLEXIBLE_PRIVACY_PROXY);
   }
 
   private boolean isAddingParticipant(final PrivateTransaction privateTransaction) {
-    return isTargettingFlexiblePrivacyProxy(privateTransaction)
+    return isTargetingFlexiblePrivacyProxy(privateTransaction)
         && privateTransaction
             .getPayload()
             .toHexString()
@@ -318,7 +326,7 @@ public class FlexiblePrivacyPrecompiledContract extends PrivacyPrecompiledContra
   }
 
   private boolean isRemovingParticipant(final PrivateTransaction privateTransaction) {
-    return isTargettingFlexiblePrivacyProxy(privateTransaction)
+    return isTargetingFlexiblePrivacyProxy(privateTransaction)
         && privateTransaction
             .getPayload()
             .toHexString()

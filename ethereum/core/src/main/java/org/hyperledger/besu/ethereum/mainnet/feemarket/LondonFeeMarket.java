@@ -23,16 +23,16 @@ import org.hyperledger.besu.ethereum.core.feemarket.TransactionPriceCalculator;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.units.bigints.UInt256s;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class LondonFeeMarket implements BaseFeeMarket {
   static final Wei DEFAULT_BASEFEE_INITIAL_VALUE =
       GenesisConfigFile.BASEFEE_AT_GENESIS_DEFAULT_VALUE;
   static final long DEFAULT_BASEFEE_MAX_CHANGE_DENOMINATOR = 8L;
   static final long DEFAULT_SLACK_COEFFICIENT = 2L;
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(LondonFeeMarket.class);
 
   private final Wei baseFeeInitialValue;
   private final long londonForkBlockNumber;
@@ -77,6 +77,17 @@ public class LondonFeeMarket implements BaseFeeMarket {
         baseFee.map(bf -> new BaseFee(this, bf).getMinNextValue());
 
     return this.getTransactionPriceCalculator().price(transaction, minBaseFeeInNextBlock);
+  }
+
+  @Override
+  public boolean satisfiesFloorTxCost(final Transaction txn) {
+    // London fee market arithmetic never allows for a base fee below 7 wei
+    // ensure effective baseFee is at least 7 wei
+    return txn.getGasPrice()
+        .map(Optional::of)
+        .orElse(txn.getMaxFeePerGas())
+        .filter(fee -> fee.greaterOrEqualThan(Wei.of(7L)))
+        .isPresent();
   }
 
   @Override

@@ -162,9 +162,8 @@ public class MainnetProtocolSpecFactory {
         evmConfiguration);
   }
 
-  public ProtocolSpecBuilder preMergeForkDefinition(
-      final GenesisConfigOptions genesisConfigOptions) {
-    return MainnetProtocolSpecs.preMergeForkDefinition(
+  public ProtocolSpecBuilder parisDefinition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.parisDefinition(
         chainId,
         contractSizeLimit,
         evmStackSize,
@@ -248,6 +247,17 @@ public class MainnetProtocolSpecFactory {
 
   public ProtocolSpecBuilder magnetoDefinition() {
     return ClassicProtocolSpecs.magnetoDefinition(
+        chainId,
+        contractSizeLimit,
+        evmStackSize,
+        isRevertReasonEnabled,
+        ecip1017EraRounds,
+        quorumCompatibilityMode,
+        evmConfiguration);
+  }
+
+  public ProtocolSpecBuilder mystiqueDefinition() {
+    return ClassicProtocolSpecs.mystiqueDefinition(
         chainId,
         contractSizeLimit,
         evmStackSize,

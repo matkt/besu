@@ -48,12 +48,12 @@ import io.vertx.core.Vertx;
 import io.vertx.core.datagram.DatagramPacket;
 import io.vertx.core.datagram.DatagramSocket;
 import io.vertx.core.datagram.DatagramSocketOptions;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class VertxPeerDiscoveryAgent extends PeerDiscoveryAgent {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(VertxPeerDiscoveryAgent.class);
 
   private final Vertx vertx;
   /* The vert.x UDP socket. */
@@ -106,7 +106,7 @@ public class VertxPeerDiscoveryAgent extends PeerDiscoveryAgent {
 
   @Override
   protected CompletableFuture<InetSocketAddress> listenForConnections() {
-    CompletableFuture<InetSocketAddress> future = new CompletableFuture<>();
+    final CompletableFuture<InetSocketAddress> future = new CompletableFuture<>();
     vertx
         .createDatagramSocket(new DatagramSocketOptions().setIpV6(NetworkUtility.isIPv6Available()))
         .listen(
@@ -148,7 +148,7 @@ public class VertxPeerDiscoveryAgent extends PeerDiscoveryAgent {
     socket.exceptionHandler(this::handleException);
     socket.handler(this::handlePacket);
 
-    InetSocketAddress address =
+    final InetSocketAddress address =
         new InetSocketAddress(socket.localAddress().host(), socket.localAddress().port());
     addressFuture.complete(address);
   }
@@ -156,18 +156,23 @@ public class VertxPeerDiscoveryAgent extends PeerDiscoveryAgent {
   @Override
   protected CompletableFuture<Void> sendOutgoingPacket(
       final DiscoveryPeer peer, final Packet packet) {
-    CompletableFuture<Void> result = new CompletableFuture<>();
-    socket.send(
-        packet.encode(),
-        peer.getEndpoint().getUdpPort(),
-        peer.getEnodeURL().getIpAsString(),
-        ar -> {
-          if (ar.failed()) {
-            result.completeExceptionally(ar.cause());
-          } else {
-            result.complete(null);
-          }
-        });
+    final CompletableFuture<Void> result = new CompletableFuture<>();
+    if (socket == null) {
+      result.completeExceptionally(
+          new RuntimeException("Discovery socket already closed, because Besu is closing down"));
+    } else {
+      socket.send(
+          packet.encode(),
+          peer.getEndpoint().getUdpPort(),
+          peer.getEnodeURL().getIpAsString(),
+          ar -> {
+            if (ar.failed()) {
+              result.completeExceptionally(ar.cause());
+            } else {
+              result.complete(null);
+            }
+          });
+    }
     return result;
   }
 

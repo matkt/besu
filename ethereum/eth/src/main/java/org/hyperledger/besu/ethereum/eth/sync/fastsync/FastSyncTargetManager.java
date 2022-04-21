@@ -26,18 +26,20 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.tasks.RetryingGetHeaderFromPeerByNumberTask;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 class FastSyncTargetManager extends SyncTargetManager {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(FastSyncTargetManager.class);
 
+  private final WorldStateStorage worldStateStorage;
   private final ProtocolSchedule protocolSchedule;
   private final ProtocolContext protocolContext;
   private final EthContext ethContext;
@@ -46,12 +48,14 @@ class FastSyncTargetManager extends SyncTargetManager {
 
   public FastSyncTargetManager(
       final SynchronizerConfiguration config,
+      final WorldStateStorage worldStateStorage,
       final ProtocolSchedule protocolSchedule,
       final ProtocolContext protocolContext,
       final EthContext ethContext,
       final MetricsSystem metricsSystem,
       final FastSyncState fastSyncState) {
     super(config, protocolSchedule, protocolContext, ethContext, metricsSystem);
+    this.worldStateStorage = worldStateStorage;
     this.protocolSchedule = protocolSchedule;
     this.protocolContext = protocolContext;
     this.ethContext = ethContext;
@@ -64,7 +68,9 @@ class FastSyncTargetManager extends SyncTargetManager {
     final BlockHeader pivotBlockHeader = fastSyncState.getPivotBlockHeader().get();
     final Optional<EthPeer> maybeBestPeer = ethContext.getEthPeers().bestPeerWithHeightEstimate();
     if (!maybeBestPeer.isPresent()) {
-      LOG.info("No sync target, waiting for peers: {}", ethContext.getEthPeers().peerCount());
+      LOG.info(
+          "No sync target, checking current peers for usefulness: {}",
+          ethContext.getEthPeers().peerCount());
       return completedFuture(Optional.empty());
     } else {
       final EthPeer bestPeer = maybeBestPeer.get();
@@ -122,6 +128,8 @@ class FastSyncTargetManager extends SyncTargetManager {
   @Override
   public boolean shouldContinueDownloading() {
     final BlockHeader pivotBlockHeader = fastSyncState.getPivotBlockHeader().get();
-    return !protocolContext.getBlockchain().getChainHeadHash().equals(pivotBlockHeader.getHash());
+    return !protocolContext.getBlockchain().getChainHeadHash().equals(pivotBlockHeader.getHash())
+        || !worldStateStorage.isWorldStateAvailable(
+            pivotBlockHeader.getStateRoot(), pivotBlockHeader.getBlockHash());
   }
 }

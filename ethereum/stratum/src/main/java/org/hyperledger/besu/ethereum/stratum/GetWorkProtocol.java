@@ -14,7 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.stratum;
 
-import static org.apache.logging.log4j.LogManager.getLogger;
+import static org.hyperledger.besu.util.Slf4jLambdaHelper.debugLambda;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
@@ -31,12 +31,13 @@ import java.util.function.Function;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.logging.log4j.Logger;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Protocol using JSON-RPC HTTP methods to provide getWork/submitWork methods. */
 public class GetWorkProtocol implements StratumProtocol {
-  private static final Logger LOG = getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(GetWorkProtocol.class);
   private static final ObjectMapper mapper = new ObjectMapper();
   private static final String CRLF = "\r\n";
 
@@ -157,6 +158,7 @@ public class GetWorkProtocol implements StratumProtocol {
 
   @Override
   public void setCurrentWorkTask(final PoWSolverInputs input) {
+    debugLambda(LOG, "setting current stratum work task {}", input::toString);
     currentInput = input;
     final byte[] dagSeed =
         DirectAcyclicGraphSeed.dagSeed(currentInput.getBlockNumber(), epochCalculator);

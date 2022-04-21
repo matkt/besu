@@ -22,19 +22,18 @@ import org.hyperledger.besu.consensus.ibft.messagewrappers.Prepare;
 import org.hyperledger.besu.consensus.ibft.messagewrappers.Proposal;
 import org.hyperledger.besu.consensus.ibft.payload.RoundChangeCertificate;
 import org.hyperledger.besu.ethereum.BlockValidator;
-import org.hyperledger.besu.ethereum.BlockValidator.BlockProcessingOutputs;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MessageValidator {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(MessageValidator.class);
 
   private final SignedDataValidator signedDataValidator;
   private final ProposalBlockConsistencyValidator proposalConsistencyValidator;
@@ -78,12 +77,14 @@ public class MessageValidator {
   }
 
   private boolean validateBlock(final Block block) {
-    final Optional<BlockProcessingOutputs> validationResult =
+    final var validationResult =
         blockValidator.validateAndProcessBlock(
             protocolContext, block, HeaderValidationMode.LIGHT, HeaderValidationMode.FULL);
 
-    if (!validationResult.isPresent()) {
-      LOG.info("Invalid Proposal message, block did not pass validation.");
+    if (validationResult.blockProcessingOutputs.isEmpty()) {
+      LOG.info(
+          "Invalid Proposal message, block did not pass validation. Reason {}",
+          validationResult.errorMessage);
       return false;
     }
 

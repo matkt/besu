@@ -20,10 +20,10 @@ import net.ltgt.gradle.errorprone.CheckSeverity
 import java.text.SimpleDateFormat
 
 plugins {
-  id 'com.diffplug.spotless' version '5.14.2'
-  id 'com.github.ben-manes.versions' version '0.39.0'
+  id 'com.diffplug.spotless' version '5.16.0'
+  id 'com.github.ben-manes.versions' version '0.42.0'
   id 'com.github.hierynomus.license' version '0.16.1-fix'
-  id 'com.jfrog.artifactory' version '4.25.3'
+  id 'com.jfrog.artifactory' version '4.27.1'
   id 'io.spring.dependency-management' version '1.0.11.RELEASE'
   id 'me.champeau.jmh' version '0.6.6' apply false
   id 'net.ltgt.errorprone' version '2.0.2'
@@ -130,7 +130,7 @@ allprojects {
     java {
       // This path needs to be relative to each project
       target '**/*.java'
-      targetExclude '**/reference-test/resources/**/*.java'
+      targetExclude '**/src/reference-test/**', '**/src/main/generated/**', '**/src/test/generated/**', '**/src/jmh/generated/**'
       removeUnusedImports()
       googleJavaFormat('1.10.0')
       importOrder 'org.hyperledger', 'java', ''
@@ -258,6 +258,7 @@ allprojects {
         systemProperty name, System.getProperty(name)
       }
     }
+    useJUnitPlatform {}
   }
 
   javadoc {
@@ -457,7 +458,7 @@ subprojects {
       duplicateClassesStrategy = DuplicatesStrategy.WARN
     }
 
-    dependencies { jmh 'org.apache.logging.log4j:log4j-api' }
+    dependencies { jmh 'org.slf4j:slf4j-api' }
   }
 }
 
@@ -695,7 +696,6 @@ task testDocker {
 }
 
 task acceptanceTestsQuorum {
-  dependsOn distDocker
   /**
    * Tags Description
    *

@@ -96,7 +96,6 @@ public class CliqueMinerExecutorTest {
             new GasPricePendingTransactionsSorter(
                 TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
                 1,
-                5,
                 TestClock.fixed(),
                 metricsSystem,
                 CliqueMinerExecutorTest::mockBlockHeader,
@@ -106,7 +105,7 @@ public class CliqueMinerExecutorTest {
                 .coinbase(AddressHelpers.ofValue(1))
                 .minTransactionGasPrice(Wei.ZERO)
                 .extraData(vanityData)
-                .enabled(false)
+                .miningEnabled(false)
                 .build(),
             mock(CliqueBlockScheduler.class),
             new EpochManager(EPOCH_LENGTH));
@@ -141,7 +140,6 @@ public class CliqueMinerExecutorTest {
             new GasPricePendingTransactionsSorter(
                 TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
                 1,
-                5,
                 TestClock.fixed(),
                 metricsSystem,
                 CliqueMinerExecutorTest::mockBlockHeader,
@@ -151,7 +149,7 @@ public class CliqueMinerExecutorTest {
                 .coinbase(AddressHelpers.ofValue(1))
                 .minTransactionGasPrice(Wei.ZERO)
                 .extraData(vanityData)
-                .enabled(false)
+                .miningEnabled(false)
                 .build(),
             mock(CliqueBlockScheduler.class),
             new EpochManager(EPOCH_LENGTH));
@@ -186,7 +184,6 @@ public class CliqueMinerExecutorTest {
             new GasPricePendingTransactionsSorter(
                 TransactionPoolConfiguration.DEFAULT_TX_RETENTION_HOURS,
                 1,
-                5,
                 TestClock.fixed(),
                 metricsSystem,
                 CliqueMinerExecutorTest::mockBlockHeader,
@@ -196,7 +193,7 @@ public class CliqueMinerExecutorTest {
                 .coinbase(AddressHelpers.ofValue(1))
                 .minTransactionGasPrice(Wei.ZERO)
                 .extraData(initialVanityData)
-                .enabled(false)
+                .miningEnabled(false)
                 .build(),
             mock(CliqueBlockScheduler.class),
             new EpochManager(EPOCH_LENGTH));

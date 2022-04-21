@@ -25,27 +25,21 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import io.vertx.core.Vertx;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class ExecutionEngineJsonRpcMethod implements JsonRpcMethod {
-  public enum ExecutionStatus {
+  public enum EngineStatus {
     VALID,
     INVALID,
-    SYNCING;
-  }
-
-  public enum ForkChoiceStatus {
-    SUCCESS,
-    SYNCING;
-
-    public boolean equalsIgnoreCase(final String status) {
-      return name().equalsIgnoreCase(status);
-    }
+    SYNCING,
+    ACCEPTED,
+    INVALID_BLOCK_HASH,
+    INVALID_TERMINAL_BLOCK;
   }
 
   private final Vertx syncVertx;
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(ExecutionEngineJsonRpcMethod.class);
   protected final MergeContext mergeContext;
   protected final ProtocolContext protocolContext;
 
@@ -73,7 +67,9 @@ public abstract class ExecutionEngineJsonRpcMethod implements JsonRpcMethod {
             cf.complete(
                 resp.otherwise(
                         t -> {
-                          LOG.debug("failed to exec consensus method {}", t, this.getName());
+                          LOG.debug(
+                              String.format("failed to exec consensus method %s", this.getName()),
+                              t);
                           return new JsonRpcErrorResponse(
                               request.getRequest().getId(), JsonRpcError.INVALID_REQUEST);
                         })

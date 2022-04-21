@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.config;
 
+import org.hyperledger.besu.datatypes.Address;
+
 import java.math.BigInteger;
 import java.util.Map;
 import java.util.Optional;
@@ -40,7 +42,7 @@ public class JsonBftConfigOptions implements BftConfigOptions {
 
   protected final ObjectNode bftConfigRoot;
 
-  JsonBftConfigOptions(final ObjectNode bftConfigRoot) {
+  public JsonBftConfigOptions(final ObjectNode bftConfigRoot) {
     this.bftConfigRoot = bftConfigRoot;
   }
 
@@ -51,7 +53,8 @@ public class JsonBftConfigOptions implements BftConfigOptions {
 
   @Override
   public int getBlockPeriodSeconds() {
-    return JsonUtil.getInt(bftConfigRoot, "blockperiodseconds", DEFAULT_BLOCK_PERIOD_SECONDS);
+    return JsonUtil.getPositiveInt(
+        bftConfigRoot, "blockperiodseconds", DEFAULT_BLOCK_PERIOD_SECONDS);
   }
 
   @Override
@@ -86,8 +89,16 @@ public class JsonBftConfigOptions implements BftConfigOptions {
   }
 
   @Override
-  public Optional<String> getMiningBeneficiary() {
-    return JsonUtil.getString(bftConfigRoot, "miningbeneficiary");
+  public Optional<Address> getMiningBeneficiary() {
+    try {
+      return JsonUtil.getString(bftConfigRoot, "miningbeneficiary")
+          .map(String::trim)
+          .filter(s -> !s.isBlank())
+          .map(Address::fromHexStringStrict);
+    } catch (final IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          "Mining beneficiary in config is not a valid ethereum address", e);
+    }
   }
 
   @Override

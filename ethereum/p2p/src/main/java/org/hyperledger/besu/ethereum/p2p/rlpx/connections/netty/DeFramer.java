@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.p2p.rlpx.connections.netty;
 
 import org.hyperledger.besu.ethereum.p2p.network.exceptions.BreachOfProtocolException;
 import org.hyperledger.besu.ethereum.p2p.network.exceptions.IncompatiblePeerException;
+import org.hyperledger.besu.ethereum.p2p.network.exceptions.PeerChannelClosedException;
 import org.hyperledger.besu.ethereum.p2p.network.exceptions.PeerDisconnectedException;
 import org.hyperledger.besu.ethereum.p2p.network.exceptions.UnexpectedPeerConnectionException;
 import org.hyperledger.besu.ethereum.p2p.peers.DefaultPeer;
@@ -52,12 +53,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.timeout.IdleStateHandler;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 final class DeFramer extends ByteToMessageDecoder {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(DeFramer.class);
 
   private final CompletableFuture<PeerConnection> connectFuture;
 
@@ -125,11 +126,17 @@ final class DeFramer extends ByteToMessageDecoder {
                 subProtocols,
                 localNode.getPeerInfo().getCapabilities(),
                 peerInfo.getCapabilities());
-        final Peer peer = expectedPeer.orElse(createPeer(peerInfo, ctx));
+        final Optional<Peer> peer = expectedPeer.or(() -> createPeer(peerInfo, ctx));
+        if (peer.isEmpty()) {
+          LOG.debug("Failed to create connection for peer {}", peerInfo);
+          connectFuture.completeExceptionally(new PeerChannelClosedException(peerInfo));
+          ctx.close();
+          return;
+        }
         final PeerConnection connection =
             new NettyPeerConnection(
                 ctx,
-                peer,
+                peer.get(),
                 peerInfo,
                 capabilityMultiplexer,
                 connectionEventDispatcher,
@@ -138,7 +145,7 @@ final class DeFramer extends ByteToMessageDecoder {
         // Check peer is who we expected
         if (expectedPeer.isPresent()
             && !Objects.equals(expectedPeer.get().getId(), peerInfo.getNodeId())) {
-          String unexpectedMsg =
+          final String unexpectedMsg =
               String.format(
                   "Expected id %s, but got %s", expectedPeer.get().getId(), peerInfo.getNodeId());
           connectFuture.completeExceptionally(new UnexpectedPeerConnectionException(unexpectedMsg));
@@ -166,7 +173,7 @@ final class DeFramer extends ByteToMessageDecoder {
                 new MessageFramer(capabilityMultiplexer, framer));
         connectFuture.complete(connection);
       } else if (message.getCode() == WireMessageCodes.DISCONNECT) {
-        DisconnectMessage disconnectMessage = DisconnectMessage.readFrom(message);
+        final DisconnectMessage disconnectMessage = DisconnectMessage.readFrom(message);
         LOG.debug(
             "Peer {} disconnected before sending HELLO.  Reason: {}",
             expectedPeer.map(Peer::getEnodeURLString).orElse("unknown"),
@@ -193,17 +200,21 @@ final class DeFramer extends ByteToMessageDecoder {
     }
   }
 
-  private Peer createPeer(final PeerInfo peerInfo, final ChannelHandlerContext ctx) {
+  private Optional<Peer> createPeer(final PeerInfo peerInfo, final ChannelHandlerContext ctx) {
     final InetSocketAddress remoteAddress = ((InetSocketAddress) ctx.channel().remoteAddress());
+    if (remoteAddress == null) {
+      return Optional.empty();
+    }
     int port = peerInfo.getPort();
-    return DefaultPeer.fromEnodeURL(
-        EnodeURLImpl.builder()
-            .nodeId(peerInfo.getNodeId())
-            .ipAddress(remoteAddress.getAddress())
-            .listeningPort(port)
-            // Discovery information is unknown, so disable it
-            .disableDiscovery()
-            .build());
+    return Optional.of(
+        DefaultPeer.fromEnodeURL(
+            EnodeURLImpl.builder()
+                .nodeId(peerInfo.getNodeId())
+                .ipAddress(remoteAddress.getAddress())
+                .listeningPort(port)
+                // Discovery information is unknown, so disable it
+                .disableDiscovery()
+                .build()));
   }
 
   @Override

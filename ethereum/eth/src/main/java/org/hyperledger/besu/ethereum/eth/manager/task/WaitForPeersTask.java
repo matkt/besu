@@ -18,12 +18,12 @@ import org.hyperledger.besu.ethereum.eth.manager.EthContext;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Waits for some number of peers to connect. */
 public class WaitForPeersTask extends AbstractEthTask<Void> {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(WaitForPeersTask.class);
 
   private final int targetPeerCount;
   private final EthContext ethContext;
@@ -51,7 +51,7 @@ public class WaitForPeersTask extends AbstractEthTask<Void> {
     }
 
     LOG.info(
-        "Waiting for {} peers to connect. {} peers currently connected.",
+        "Waiting for {} total peers to connect. {} peers currently connected.",
         targetPeerCount,
         ethPeers.peerCount());
     // Listen for peer connections and complete task when we hit our target
@@ -60,11 +60,14 @@ public class WaitForPeersTask extends AbstractEthTask<Void> {
             (peer) -> {
               final int peerCount = ethPeers.peerCount();
               if (peerCount >= targetPeerCount) {
-                LOG.info("Finished waiting for {} peers to connect.", targetPeerCount);
+                LOG.info("Complete: {} peers connected.", targetPeerCount);
                 // We hit our target
                 result.complete(null);
               } else {
-                LOG.info("Waiting for {} peers to connect.", targetPeerCount - peerCount);
+                LOG.info(
+                    "Waiting for {} total peers to connect. {} peers currently connected.",
+                    targetPeerCount,
+                    peerCount);
               }
             });
   }

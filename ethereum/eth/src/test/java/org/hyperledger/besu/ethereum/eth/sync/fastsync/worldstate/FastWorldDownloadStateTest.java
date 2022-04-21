@@ -31,8 +31,7 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageFormat;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
-import org.hyperledger.besu.services.tasks.CachingTaskCollection;
-import org.hyperledger.besu.services.tasks.InMemoryTaskQueue;
+import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 import org.hyperledger.besu.testutil.TestClock;
 
 import java.util.Arrays;
@@ -60,17 +59,15 @@ public class FastWorldDownloadStateTest {
 
   private final BlockHeader header =
       new BlockHeaderTestFixture().stateRoot(ROOT_NODE_HASH).buildHeader();
-  private final CachingTaskCollection<NodeDataRequest> pendingRequests =
-      new CachingTaskCollection<>(new InMemoryTaskQueue<>());
+  private final InMemoryTasksPriorityQueues<NodeDataRequest> pendingRequests =
+      new InMemoryTasksPriorityQueues<>();
   private final WorldStateDownloadProcess worldStateDownloadProcess =
       mock(WorldStateDownloadProcess.class);
 
   private final TestClock clock = new TestClock();
-  private final FastWorldDownloadState downloadState =
-      new FastWorldDownloadState(
-          pendingRequests, MAX_REQUESTS_WITHOUT_PROGRESS, MIN_MILLIS_BEFORE_STALLING, clock);
+  private FastWorldDownloadState downloadState;
 
-  private final CompletableFuture<Void> future = downloadState.getDownloadFuture();
+  private CompletableFuture<Void> future;
 
   @Parameterized.Parameters
   public static Collection<Object[]> data() {
@@ -85,19 +82,27 @@ public class FastWorldDownloadStateTest {
 
   @Before
   public void setUp() {
-    downloadState.setRootNodeData(ROOT_NODE_DATA);
-    assertThat(downloadState.isDownloading()).isTrue();
     if (storageFormat == DataStorageFormat.BONSAI) {
       worldStateStorage =
           new BonsaiWorldStateKeyValueStorage(new InMemoryKeyValueStorageProvider());
     } else {
       worldStateStorage = new WorldStateKeyValueStorage(new InMemoryKeyValueStorage());
     }
+    downloadState =
+        new FastWorldDownloadState(
+            worldStateStorage,
+            pendingRequests,
+            MAX_REQUESTS_WITHOUT_PROGRESS,
+            MIN_MILLIS_BEFORE_STALLING,
+            clock);
+    assertThat(downloadState.isDownloading()).isTrue();
+    downloadState.setRootNodeData(ROOT_NODE_DATA);
+    future = downloadState.getDownloadFuture();
   }
 
   @Test
   public void shouldCompleteReturnedFutureWhenNoPendingTasksRemain() {
-    downloadState.checkCompletion(worldStateStorage, header);
+    downloadState.checkCompletion(header);
 
     assertThat(future).isCompleted();
     assertThat(downloadState.isDownloading()).isFalse();
@@ -111,7 +116,7 @@ public class FastWorldDownloadStateTest {
                 assertThat(worldStateStorage.getAccountStateTrieNode(Bytes.EMPTY, ROOT_NODE_HASH))
                     .contains(ROOT_NODE_DATA));
 
-    downloadState.checkCompletion(worldStateStorage, header);
+    downloadState.checkCompletion(header);
 
     assertThat(future).isCompleted();
     assertThat(postFutureChecks).isCompleted();
@@ -122,7 +127,7 @@ public class FastWorldDownloadStateTest {
     pendingRequests.add(
         NodeDataRequest.createAccountDataRequest(Hash.EMPTY_TRIE_HASH, Optional.empty()));
 
-    downloadState.checkCompletion(worldStateStorage, header);
+    downloadState.checkCompletion(header);
 
     assertThat(future).isNotDone();
     assertThat(worldStateStorage.getAccountStateTrieNode(Bytes.EMPTY, ROOT_NODE_HASH)).isEmpty();
@@ -209,7 +214,7 @@ public class FastWorldDownloadStateTest {
 
   @Test
   public void shouldNotAddRequestsAfterDownloadIsCompleted() {
-    downloadState.checkCompletion(worldStateStorage, header);
+    downloadState.checkCompletion(header);
 
     downloadState.enqueueRequests(
         Stream.of(

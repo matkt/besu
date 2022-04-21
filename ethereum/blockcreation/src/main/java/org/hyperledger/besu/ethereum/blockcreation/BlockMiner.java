@@ -25,13 +25,14 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import com.google.common.base.Stopwatch;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Responsible for creating a block, and importing it to the blockchain. This is specifically a
@@ -45,7 +46,7 @@ import org.apache.logging.log4j.Logger;
  */
 public class BlockMiner<M extends AbstractBlockCreator> implements Runnable {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(BlockMiner.class);
 
   protected final Function<BlockHeader, M> blockCreatorFactory;
   protected final M minerBlockCreator;
@@ -109,6 +110,18 @@ public class BlockMiner<M extends AbstractBlockCreator> implements Runnable {
     final BlockCreator blockCreator = this.blockCreatorFactory.apply(parentHeader);
     final long timestamp = scheduler.getNextTimestamp(parentHeader).getTimestampForHeader();
     return blockCreator.createBlock(transactions, ommers, timestamp);
+  }
+
+  /**
+   * Create a block with the given timestamp.
+   *
+   * @param parentHeader The header of the parent of the block to be produced
+   * @param timestamp unix timestamp of the new block.
+   * @return the newly created block.
+   */
+  public Block createBlock(final BlockHeader parentHeader, final long timestamp) {
+    final BlockCreator blockCreator = this.blockCreatorFactory.apply(parentHeader);
+    return blockCreator.createBlock(Optional.empty(), Optional.empty(), timestamp);
   }
 
   protected boolean mineBlock() throws InterruptedException {

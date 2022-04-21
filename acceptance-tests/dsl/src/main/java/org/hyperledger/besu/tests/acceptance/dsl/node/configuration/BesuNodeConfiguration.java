@@ -37,7 +37,9 @@ public class BesuNodeConfiguration {
   private final Optional<Path> dataPath;
   private final MiningParameters miningParameters;
   private final JsonRpcConfiguration jsonRpcConfiguration;
+  private final Optional<JsonRpcConfiguration> engineRpcConfiguration;
   private final WebSocketConfiguration webSocketConfiguration;
+  private final Optional<WebSocketConfiguration> engineWebSocketConfiguration;
   private final MetricsConfiguration metricsConfiguration;
   private final Optional<PermissioningConfiguration> permissioningConfiguration;
   private final Optional<String> keyFilePath;
@@ -61,13 +63,16 @@ public class BesuNodeConfiguration {
   private final NetworkName network;
   private final Optional<KeyPair> keyPair;
   private final Optional<PkiKeyStoreConfiguration> pkiKeyStoreConfiguration;
+  private final boolean strictTxReplayProtectionEnabled;
 
   BesuNodeConfiguration(
       final String name,
       final Optional<Path> dataPath,
       final MiningParameters miningParameters,
       final JsonRpcConfiguration jsonRpcConfiguration,
+      final Optional<JsonRpcConfiguration> engineRpcConfiguration,
       final WebSocketConfiguration webSocketConfiguration,
+      final Optional<WebSocketConfiguration> engineWebSocketConfiguration,
       final MetricsConfiguration metricsConfiguration,
       final Optional<PermissioningConfiguration> permissioningConfiguration,
       final Optional<String> keyFilePath,
@@ -90,11 +95,14 @@ public class BesuNodeConfiguration {
       final Optional<PrivacyParameters> privacyParameters,
       final List<String> runCommand,
       final Optional<KeyPair> keyPair,
-      final Optional<PkiKeyStoreConfiguration> pkiKeyStoreConfiguration) {
+      final Optional<PkiKeyStoreConfiguration> pkiKeyStoreConfiguration,
+      final boolean strictTxReplayProtectionEnabled) {
     this.name = name;
     this.miningParameters = miningParameters;
     this.jsonRpcConfiguration = jsonRpcConfiguration;
+    this.engineRpcConfiguration = engineRpcConfiguration;
     this.webSocketConfiguration = webSocketConfiguration;
+    this.engineWebSocketConfiguration = engineWebSocketConfiguration;
     this.metricsConfiguration = metricsConfiguration;
     this.permissioningConfiguration = permissioningConfiguration;
     this.keyFilePath = keyFilePath;
@@ -119,6 +127,7 @@ public class BesuNodeConfiguration {
     this.runCommand = runCommand;
     this.keyPair = keyPair;
     this.pkiKeyStoreConfiguration = pkiKeyStoreConfiguration;
+    this.strictTxReplayProtectionEnabled = strictTxReplayProtectionEnabled;
   }
 
   public String getName() {
@@ -133,8 +142,16 @@ public class BesuNodeConfiguration {
     return jsonRpcConfiguration;
   }
 
+  public Optional<JsonRpcConfiguration> getEngineRpcConfiguration() {
+    return engineRpcConfiguration;
+  }
+
   public WebSocketConfiguration getWebSocketConfiguration() {
     return webSocketConfiguration;
+  }
+
+  public Optional<WebSocketConfiguration> getEngineWebSocketConfiguration() {
+    return engineWebSocketConfiguration;
   }
 
   public MetricsConfiguration getMetricsConfiguration() {
@@ -231,5 +248,9 @@ public class BesuNodeConfiguration {
 
   public Optional<PkiKeyStoreConfiguration> getPkiKeyStoreConfiguration() {
     return pkiKeyStoreConfiguration;
+  }
+
+  public boolean isStrictTxReplayProtectionEnabled() {
+    return strictTxReplayProtectionEnabled;
   }
 }

@@ -30,13 +30,13 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
-import org.hyperledger.besu.evm.Gas;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.log.LogsBloomFilter;
 import org.hyperledger.besu.evm.precompile.PrecompileContractRegistry;
 import org.hyperledger.besu.evm.processor.MessageCallProcessor;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.evm.tracing.StandardJsonTracer;
+import org.hyperledger.besu.util.Log4j2ConfiguratorUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -51,10 +51,9 @@ import java.util.Optional;
 import com.google.common.base.Stopwatch;
 import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.core.config.Configurator;
 import org.apache.tuweni.bytes.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -75,7 +74,7 @@ import picocli.CommandLine.Option;
     subcommands = {StateTestSubCommand.class})
 public class EvmToolCommand implements Runnable {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(EvmToolCommand.class);
 
   @Option(
       names = {"--code"},
@@ -87,7 +86,7 @@ public class EvmToolCommand implements Runnable {
       names = {"--gas"},
       description = "Amount of gas for this invocation.",
       paramLabel = "<int>")
-  private final Gas gas = Gas.of(10_000_000_000L);
+  private final Long gas = 10_000_000_000L;
 
   @Option(
       names = {"--price"},
@@ -161,7 +160,6 @@ public class EvmToolCommand implements Runnable {
     // add sub commands here
     commandLine.registerConverter(Address.class, Address::fromHexString);
     commandLine.registerConverter(Bytes.class, Bytes::fromHexString);
-    commandLine.registerConverter(Gas.class, (arg) -> Gas.of(Long.parseUnsignedLong(arg)));
     commandLine.registerConverter(Wei.class, (arg) -> Wei.of(Long.parseUnsignedLong(arg)));
 
     commandLine.parseWithHandlers(resultHandler, exceptionHandler, args);
@@ -203,15 +201,17 @@ public class EvmToolCommand implements Runnable {
               .blockHeaderFunctions(new MainnetBlockHeaderFunctions())
               .buildBlockHeader();
 
-      Configurator.setAllLevels("", repeat == 0 ? Level.INFO : Level.OFF);
+      Log4j2ConfiguratorUtil.setAllLevels("", repeat == 0 ? Level.INFO : Level.OFF);
       int repeat = this.repeat;
-      Configurator.setLevel(
+      Log4j2ConfiguratorUtil.setLevel(
           "org.hyperledger.besu.ethereum.mainnet.ProtocolScheduleBuilder", Level.OFF);
       final ProtocolSpec protocolSpec = component.getProtocolSpec().apply(0);
-      Configurator.setLevel("org.hyperledger.besu.ethereum.mainnet.ProtocolScheduleBuilder", null);
+      Log4j2ConfiguratorUtil.setLevel(
+          "org.hyperledger.besu.ethereum.mainnet.ProtocolScheduleBuilder", null);
       final PrecompileContractRegistry precompileContractRegistry =
           protocolSpec.getPrecompileContractRegistry();
       final EVM evm = protocolSpec.getEvm();
+      Code code = evm.getCode(Hash.hash(codeHexString), codeHexString);
       final Stopwatch stopwatch = Stopwatch.createUnstarted();
       long lastTime = 0;
       do {
@@ -241,7 +241,7 @@ public class EvmToolCommand implements Runnable {
                 .inputData(callData)
                 .value(ethValue)
                 .apparentValue(ethValue)
-                .code(new Code(codeHexString, Hash.hash(codeHexString)))
+                .code(code)
                 .blockValues(blockHeader)
                 .depth(0)
                 .completer(c -> {})
@@ -284,28 +284,24 @@ public class EvmToolCommand implements Runnable {
                     sender,
                     Optional.empty());
 
-            final Gas intrinsicGasCost =
+            final long intrinsicGasCost =
                 protocolSpec
                     .getGasCalculator()
                     .transactionIntrinsicGasCost(tx.getPayload(), tx.isContractCreation());
-            final Gas accessListCost =
+            final long accessListCost =
                 tx.getAccessList()
                     .map(list -> protocolSpec.getGasCalculator().accessListGasCost(list))
-                    .orElse(Gas.ZERO);
-            final Gas evmGas = gas.minus(messageFrame.getRemainingGas());
+                    .orElse(0L);
+            final long evmGas = gas - messageFrame.getRemainingGas();
             out.println();
             out.println(
                 new JsonObject()
-                    .put("gasUser", evmGas.asUInt256().toShortHexString())
+                    .put("gasUser", "0x" + Long.toHexString(evmGas))
                     .put("timens", lastTime)
                     .put("time", lastTime / 1000)
                     .put(
                         "gasTotal",
-                        evmGas
-                            .plus(intrinsicGasCost)
-                            .plus(accessListCost)
-                            .asUInt256()
-                            .toShortHexString()));
+                        "0x" + Long.toHexString(evmGas + intrinsicGasCost) + accessListCost));
           }
         }
         lastTime = stopwatch.elapsed().toNanos();
@@ -313,7 +309,7 @@ public class EvmToolCommand implements Runnable {
       } while (repeat-- > 0);
 
     } catch (final IOException e) {
-      LOG.fatal(e);
+      LOG.error("Unable to create Genesis module", e);
     }
   }
 }

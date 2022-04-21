@@ -23,16 +23,19 @@ import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.util.concurrent.CompletableFuture;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FullSyncDownloader {
 
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(FullSyncDownloader.class);
   private final ChainDownloader chainDownloader;
   private final SynchronizerConfiguration syncConfig;
   private final ProtocolContext protocolContext;
   private final SyncState syncState;
+  private final SyncTerminationCondition terminationCondition;
 
   public FullSyncDownloader(
       final SynchronizerConfiguration syncConfig,
@@ -40,19 +43,35 @@ public class FullSyncDownloader {
       final ProtocolContext protocolContext,
       final EthContext ethContext,
       final SyncState syncState,
-      final MetricsSystem metricsSystem) {
+      final MetricsSystem metricsSystem,
+      final SyncTerminationCondition terminationCondition) {
     this.syncConfig = syncConfig;
     this.protocolContext = protocolContext;
     this.syncState = syncState;
+    this.terminationCondition = terminationCondition;
 
     this.chainDownloader =
         FullSyncChainDownloader.create(
-            syncConfig, protocolSchedule, protocolContext, ethContext, syncState, metricsSystem);
+            syncConfig,
+            protocolSchedule,
+            protocolContext,
+            ethContext,
+            syncState,
+            metricsSystem,
+            terminationCondition);
   }
 
-  public void start() {
+  public CompletableFuture<Void> start() {
     LOG.info("Starting full sync.");
-    chainDownloader.start();
+    return chainDownloader
+        .start()
+        .thenApply(
+            unused -> {
+              if (terminationCondition.shouldStopDownload()) {
+                syncState.setReachedTerminalDifficulty(true);
+              }
+              return null;
+            });
   }
 
   public void stop() {

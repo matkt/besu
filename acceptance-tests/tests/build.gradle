@@ -13,7 +13,7 @@
 
 plugins {
   id 'org.web3j' version '4.8.9'
-  id 'org.web3j.solidity' version '0.3.2'
+  id 'org.web3j.solidity' version '0.3.3'
 }
 
 web3j {
@@ -24,8 +24,6 @@ sourceSets.main.solidity.srcDirs = ["$projectDir/contracts"]
 
 solidity {
   resolvePackages = false
-  executable = "solc"
-  version = "0.8.10"
 }
 
 dependencies {
@@ -55,26 +53,30 @@ dependencies {
   testImplementation 'io.grpc:grpc-core'
   testImplementation 'io.grpc:grpc-netty'
   testImplementation 'io.grpc:grpc-stub'
+  testImplementation 'io.jaegertracing:jaeger-client'
+  testImplementation 'io.jaegertracing:jaeger-proto'
   testImplementation 'io.netty:netty-all'
+  testImplementation 'io.opentelemetry.proto:opentelemetry-proto'
   testImplementation 'io.opentelemetry:opentelemetry-api'
-  testImplementation 'io.opentelemetry:opentelemetry-proto'
+  testImplementation 'io.opentelemetry:opentelemetry-exporter-otlp'
   testImplementation 'io.opentelemetry:opentelemetry-sdk'
   testImplementation 'io.opentelemetry:opentelemetry-sdk-trace'
-  testImplementation 'io.opentelemetry:opentelemetry-exporter-otlp'
   testImplementation 'io.opentracing.contrib:opentracing-okhttp3'
   testImplementation 'io.opentracing:opentracing-api'
   testImplementation 'io.opentracing:opentracing-util'
-  testImplementation 'io.jaegertracing:jaeger-client'
+  testImplementation 'io.vertx:vertx-core'
   testImplementation 'junit:junit'
-  testImplementation 'net.consensys:orion'
   testImplementation 'org.apache.commons:commons-compress'
+  testImplementation 'org.apache.logging.log4j:log4j-core'
   testImplementation 'org.apache.tuweni:tuweni-crypto'
   testImplementation 'org.assertj:assertj-core'
   testImplementation 'org.awaitility:awaitility'
+  testImplementation 'org.junit.jupiter:junit-jupiter'
+  testImplementation 'org.testcontainers:testcontainers'
   testImplementation 'org.web3j:abi'
   testImplementation 'org.web3j:besu'
 
-  testImplementation 'org.testcontainers:testcontainers'
+  testRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
 }
 
 test.enabled = false

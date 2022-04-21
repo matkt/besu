@@ -19,6 +19,7 @@ import org.hyperledger.besu.config.GenesisConfigFile;
 import org.hyperledger.besu.config.GenesisConfigOptions;
 import org.hyperledger.besu.config.PowAlgorithm;
 import org.hyperledger.besu.config.QbftConfigOptions;
+import org.hyperledger.besu.config.experimental.MergeConfigOptions;
 import org.hyperledger.besu.crypto.NodeKey;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.JsonRpcMethod;
@@ -41,11 +42,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BesuController implements java.io.Closeable {
-  private static final Logger LOG = LogManager.getLogger();
+  private static final Logger LOG = LoggerFactory.getLogger(BesuController.class);
 
   public static final String DATABASE_PATH = "database";
   public static final String CACHE_PATH = "caches";
@@ -210,7 +211,15 @@ public class BesuController implements java.io.Closeable {
       } else {
         throw new IllegalArgumentException("Unknown consensus mechanism defined");
       }
-      return builder.genesisConfigFile(genesisConfig);
+
+      // use merge config if experimental merge flag is enabled:
+      if (MergeConfigOptions.isMergeEnabled()) {
+        // TODO this should be changed to vanilla MergeBesuControllerBuilder and the Transition*
+        // series of classes removed after we successfully transition to PoS
+        // https://github.com/hyperledger/besu/issues/2897
+        return new TransitionBesuControllerBuilder(builder, new MergeBesuControllerBuilder())
+            .genesisConfigFile(genesisConfig);
+      } else return builder.genesisConfigFile(genesisConfig);
     }
 
     private BesuControllerBuilder createConsensusScheduleBesuControllerBuilder(
