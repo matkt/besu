@@ -45,7 +45,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Before;
 import org.junit.Test;
 
 public class FastSyncDownloaderTest {
@@ -68,8 +67,8 @@ public class FastSyncDownloaderTest {
 
   private final Path fastSyncDataDirectory = null;
 
-  private final FastSyncDownloader<NodeDataRequest> downloader =
-      new FastSyncDownloader<>(
+  private final FastSyncDownloader downloader =
+      new FastSyncDownloader(
           fastSyncActions,
           worldStateStorage,
           worldStateDownloader,
@@ -77,11 +76,6 @@ public class FastSyncDownloaderTest {
           taskCollection,
           fastSyncDataDirectory,
           FastSyncState.EMPTY_SYNC_STATE);
-
-  @Before
-  public void setup() {
-    when(worldStateStorage.isWorldStateAvailable(any(), any())).thenReturn(true);
-  }
 
   @Test
   public void shouldCompleteFastSyncSuccessfully() {
@@ -128,8 +122,8 @@ public class FastSyncDownloaderTest {
             any(FastSyncActions.class), eq(new FastSyncState(pivotBlockHeader))))
         .thenReturn(completedFuture(null));
 
-    final FastSyncDownloader<NodeDataRequest> resumedDownloader =
-        new FastSyncDownloader<>(
+    final FastSyncDownloader resumedDownloader =
+        new FastSyncDownloader(
             fastSyncActions,
             worldStateStorage,
             worldStateDownloader,

@@ -64,27 +64,26 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
     return new AccountRangeDataRequest(rootHash, accountHash, startStorageRange, endStorageRange);
   }
 
-  public static StorageRangeDataRequest createStorageRangeDataRequest(
-      final Hash rootHash,
+  public StorageRangeDataRequest createStorageRangeDataRequest(
       final Bytes32 accountHash,
       final Bytes32 storageRoot,
       final Bytes32 startKeyHash,
       final Bytes32 endKeyHash) {
     return new StorageRangeDataRequest(
-        rootHash, accountHash, storageRoot, startKeyHash, endKeyHash);
+        getRootHash(), accountHash, storageRoot, startKeyHash, endKeyHash);
   }
 
   public static AccountTrieNodeDataRequest createAccountTrieNodeDataRequest(
-      final Hash hash, final Bytes location, final HashSet<Bytes> inconsistentAccounts) {
-    return new AccountTrieNodeDataRequest(hash, hash, location, inconsistentAccounts);
+      final Hash hash, final Bytes location, final HashSet<Bytes> accountHeals) {
+    return new AccountTrieNodeDataRequest(hash, hash, location, accountHeals);
   }
 
   public static AccountTrieNodeDataRequest createAccountTrieNodeDataRequest(
       final Hash hash,
       final Hash rootHash,
       final Bytes location,
-      final HashSet<Bytes> inconsistentAccounts) {
-    return new AccountTrieNodeDataRequest(hash, rootHash, location, inconsistentAccounts);
+      final HashSet<Bytes> accountHeals) {
+    return new AccountTrieNodeDataRequest(hash, rootHash, location, accountHeals);
   }
 
   public static StorageTrieNodeDataRequest createStorageTrieNodeDataRequest(
@@ -92,9 +91,8 @@ public abstract class SnapDataRequest implements TasksPriorityProvider {
     return new StorageTrieNodeDataRequest(hash, accountHash, rootHash, location);
   }
 
-  public static BytecodeRequest createBytecodeRequest(
-      final Bytes32 accountHash, final Hash rootHash, final Bytes32 codeHash) {
-    return new BytecodeRequest(rootHash, accountHash, codeHash);
+  public BytecodeRequest createBytecodeRequest(final Bytes32 accountHash, final Bytes32 codeHash) {
+    return new BytecodeRequest(getRootHash(), accountHash, codeHash);
   }
 
   public int persist(

@@ -19,29 +19,18 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.function.Function;
 
 public class BatchingReadPipe<T> implements ReadPipe<List<T>> {
 
   private final ReadPipe<T> input;
   private final int maximumBatchSize;
   private final Counter batchCounter;
-  private final Function<List<T>, Integer> stopBatchCondition;
 
   public BatchingReadPipe(
       final ReadPipe<T> input, final int maximumBatchSize, final Counter batchCounter) {
-    this(input, maximumBatchSize, batchCounter, ts -> maximumBatchSize - ts.size());
-  }
-
-  public BatchingReadPipe(
-      final ReadPipe<T> input,
-      final int maximumBatchSize,
-      final Counter batchCounter,
-      final Function<List<T>, Integer> batchEndCondition) {
     this.input = input;
     this.maximumBatchSize = maximumBatchSize;
     this.batchCounter = batchCounter;
-    this.stopBatchCondition = batchEndCondition;
   }
 
   @Override
@@ -64,15 +53,7 @@ public class BatchingReadPipe<T> implements ReadPipe<List<T>> {
     }
     final List<T> batch = new ArrayList<>();
     batch.add(firstItem);
-    Integer remainingData = stopBatchCondition.apply(batch);
-    while (remainingData > 0
-        && (batch.size() + remainingData) <= maximumBatchSize
-        && input.hasMore()) {
-      if (input.drainTo(batch, remainingData) == 0) {
-        break;
-      }
-      remainingData = stopBatchCondition.apply(batch);
-    }
+    input.drainTo(batch, maximumBatchSize - 1);
     batchCounter.inc();
     return batch;
   }
@@ -80,15 +61,7 @@ public class BatchingReadPipe<T> implements ReadPipe<List<T>> {
   @Override
   public List<T> poll() {
     final List<T> batch = new ArrayList<>();
-    Integer remainingData = stopBatchCondition.apply(batch);
-    while (remainingData > 0
-        && (batch.size() + remainingData) <= maximumBatchSize
-        && input.hasMore()) {
-      if (input.drainTo(batch, remainingData) == 0) {
-        break;
-      }
-      remainingData = stopBatchCondition.apply(batch);
-    }
+    input.drainTo(batch, maximumBatchSize);
     if (batch.isEmpty()) {
       // Poll has to return null if the pipe is empty
       return null;
@@ -98,12 +71,10 @@ public class BatchingReadPipe<T> implements ReadPipe<List<T>> {
   }
 
   @Override
-  public int drainTo(final Collection<List<T>> output, final int maxElements) {
+  public void drainTo(final Collection<List<T>> output, final int maxElements) {
     final List<T> nextBatch = poll();
     if (nextBatch != null) {
       output.add(nextBatch);
-      return nextBatch.size();
     }
-    return 0;
   }
 }

@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.eth.sync.fastsync;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode.LIGHT_SKIP_DETACHED;
 import static org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason.TOO_MANY_PEERS;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -37,7 +36,6 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageFormat;
-import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.util.Arrays;
@@ -56,7 +54,6 @@ import org.junit.runners.Parameterized.Parameters;
 public class FastSyncChainDownloaderTest {
 
   private final FastSyncValidationPolicy validationPolicy = mock(FastSyncValidationPolicy.class);
-  private final WorldStateStorage worldStateStorage = mock(WorldStateStorage.class);
 
   protected ProtocolSchedule protocolSchedule;
   protected EthProtocolManager ethProtocolManager;
@@ -82,7 +79,6 @@ public class FastSyncChainDownloaderTest {
   @Before
   public void setup() {
     when(validationPolicy.getValidationModeForNextBlock()).thenReturn(LIGHT_SKIP_DETACHED);
-    when(worldStateStorage.isWorldStateAvailable(any(), any())).thenReturn(true);
     final BlockchainSetupUtil localBlockchainSetup = BlockchainSetupUtil.forTesting(storageFormat);
     localBlockchain = localBlockchainSetup.getBlockchain();
     otherBlockchainSetup = BlockchainSetupUtil.forTesting(storageFormat);
@@ -107,7 +103,6 @@ public class FastSyncChainDownloaderTest {
       final SynchronizerConfiguration syncConfig, final long pivotBlockNumber) {
     return FastSyncChainDownloader.create(
         syncConfig,
-        worldStateStorage,
         protocolSchedule,
         protocolContext,
         ethContext,

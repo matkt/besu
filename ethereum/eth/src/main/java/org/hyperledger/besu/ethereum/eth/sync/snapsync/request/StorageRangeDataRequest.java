@@ -39,7 +39,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
-import com.google.common.annotations.VisibleForTesting;
 import kotlin.collections.ArrayDeque;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -160,8 +159,7 @@ public class StorageRangeDataRequest extends SnapDataRequest {
                   .forEach(
                       (key, value) -> {
                         final StorageRangeDataRequest storageRangeDataRequest =
-                            createStorageRangeDataRequest(
-                                getRootHash(), accountHash, storageRoot, key, value);
+                            createStorageRangeDataRequest(accountHash, storageRoot, key, value);
                         storageRangeDataRequest.addStackTrie(Optional.of(stackTrie));
                         childRequests.add(storageRangeDataRequest);
                       });
@@ -178,11 +176,19 @@ public class StorageRangeDataRequest extends SnapDataRequest {
 
   private int findNbRanges() {
     if (startKeyHash.equals(MIN_RANGE) && endKeyHash.equals(MAX_RANGE)) {
-      return MAX_RANGE
-          .toUnsignedBigInteger()
-          .divide(
-              slots.lastKey().toUnsignedBigInteger().subtract(startKeyHash.toUnsignedBigInteger()))
-          .intValue();
+      final int nbRangesNeeded =
+          MAX_RANGE
+              .toUnsignedBigInteger()
+              .divide(
+                  slots
+                      .lastKey()
+                      .toUnsignedBigInteger()
+                      .subtract(startKeyHash.toUnsignedBigInteger()))
+              .intValue();
+      if (nbRangesNeeded >= MAX_CHILD) {
+        return MAX_CHILD;
+      }
+      return nbRangesNeeded;
     }
     return 1;
   }
@@ -193,10 +199,6 @@ public class StorageRangeDataRequest extends SnapDataRequest {
 
   public Bytes32 getStorageRoot() {
     return storageRoot;
-  }
-
-  public TreeMap<Bytes32, Bytes> getSlots() {
-    return slots;
   }
 
   public Bytes32 getStartKeyHash() {
@@ -215,15 +217,10 @@ public class StorageRangeDataRequest extends SnapDataRequest {
     this.slots = slots;
   }
 
-  @VisibleForTesting
-  public void setProofValid(final boolean proofValid) {
-    isProofValid = proofValid;
-  }
-
   public void addStackTrie(final Optional<StackTrie> maybeStackTrie) {
     stackTrie =
         maybeStackTrie
             .filter(StackTrie::addSegment)
-            .orElse(new StackTrie(Hash.wrap(getStorageRoot()), 1, 3, startKeyHash));
+            .orElse(new StackTrie(getRootHash(), 1, 3, startKeyHash));
   }
 }

@@ -51,13 +51,12 @@ public class TrieGenerator {
           (location, hash, value) ->
               updater.putAccountStorageTrieNode(
                   accountHash.get(accountIndex), location, hash, value));
-      final Bytes code = Bytes32.leftPad(Bytes.of(i + 10));
-      final Hash codeHash = Hash.hash(code);
+      final Hash codeHash = Hash.hash(Bytes32.leftPad(Bytes.of(i + 10)));
       final StateTrieAccountValue accountValue =
           new StateTrieAccountValue(1L, Wei.of(2L), Hash.wrap(storageTrie.getRootHash()), codeHash);
       accountStateTrie.put(accountHash.get(i), RLP.encode(accountValue::writeTo));
       accountStateTrie.commit(updater::putAccountStateTrieNode);
-      updater.putCode(codeHash, code);
+
       // Persist updates
       updater.commit();
     }
