@@ -23,27 +23,23 @@ import java.util.AbstractMap;
 import java.util.Map;
 import java.util.Optional;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 
 public abstract class AbstractSnapMessageData extends AbstractMessageData {
 
-  @VisibleForTesting
-  public static final BigInteger SIZE_REQUEST = BigInteger.valueOf(524288); // 512 * 1024
-
-  private Optional<Hash> rootHash;
+  private Optional<Hash> overrideStateRoot;
 
   public AbstractSnapMessageData(final Bytes data) {
     super(data);
-    rootHash = Optional.empty();
+    overrideStateRoot = Optional.empty();
   }
 
-  public Optional<Hash> getRootHash() {
-    return rootHash;
+  public Optional<Hash> getOverrideStateRoot() {
+    return overrideStateRoot;
   }
 
-  public void setRootHash(final Optional<Hash> rootHash) {
-    this.rootHash = rootHash;
+  public void setOverrideStateRoot(final Optional<Hash> overrideStateRoot) {
+    this.overrideStateRoot = overrideStateRoot;
   }
 
   @Override

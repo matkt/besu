@@ -22,7 +22,6 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 
 import java.math.BigInteger;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
@@ -34,10 +33,6 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.immutables.value.Value;
 
 public final class AccountRangeMessage extends AbstractSnapMessageData {
-
-  public AccountRangeMessage(final Bytes data) {
-    super(data);
-  }
 
   public static AccountRangeMessage readFrom(final MessageData message) {
     if (message instanceof AccountRangeMessage) {
@@ -52,14 +47,14 @@ public final class AccountRangeMessage extends AbstractSnapMessageData {
   }
 
   public static AccountRangeMessage create(
-      final Map<Bytes32, Bytes> accounts, final List<Bytes> proof) {
+      final Map<Bytes32, Bytes> accounts, final ArrayDeque<Bytes> proof) {
     return create(Optional.empty(), accounts, proof);
   }
 
   public static AccountRangeMessage create(
       final Optional<BigInteger> requestId,
       final Map<Bytes32, Bytes> accounts,
-      final List<Bytes> proof) {
+      final ArrayDeque<Bytes> proof) {
     final BytesValueRLPOutput tmp = new BytesValueRLPOutput();
     tmp.startList();
     requestId.ifPresent(tmp::writeBigIntegerScalar);
@@ -74,6 +69,10 @@ public final class AccountRangeMessage extends AbstractSnapMessageData {
     tmp.writeList(proof, (bytes, rlpOutput) -> rlpOutput.writeBytes(bytes));
     tmp.endList();
     return new AccountRangeMessage(tmp.encoded());
+  }
+
+  public AccountRangeMessage(final Bytes data) {
+    super(data);
   }
 
   @Override

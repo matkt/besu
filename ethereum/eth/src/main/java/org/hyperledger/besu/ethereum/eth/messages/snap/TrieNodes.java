@@ -27,36 +27,35 @@ import java.util.Optional;
 import kotlin.collections.ArrayDeque;
 import org.apache.tuweni.bytes.Bytes;
 
-public final class TrieNodesMessage extends AbstractSnapMessageData {
+public final class TrieNodes extends AbstractSnapMessageData {
 
-  public TrieNodesMessage(final Bytes data) {
-    super(data);
-  }
-
-  public static TrieNodesMessage readFrom(final MessageData message) {
-    if (message instanceof TrieNodesMessage) {
-      return (TrieNodesMessage) message;
+  public static TrieNodes readFrom(final MessageData message) {
+    if (message instanceof TrieNodes) {
+      return (TrieNodes) message;
     }
     final int code = message.getCode();
     if (code != SnapV1.TRIE_NODES) {
       throw new IllegalArgumentException(
           String.format("Message has code %d and thus is not a TrieNodes.", code));
     }
-    return new TrieNodesMessage(message.getData());
+    return new TrieNodes(message.getData());
   }
 
-  public static TrieNodesMessage create(final List<Bytes> nodes) {
+  public static TrieNodes create(final List<Bytes> nodes) {
     return create(Optional.empty(), nodes);
   }
 
-  public static TrieNodesMessage create(
-      final Optional<BigInteger> requestId, final List<Bytes> nodes) {
+  public static TrieNodes create(final Optional<BigInteger> requestId, final List<Bytes> nodes) {
     final BytesValueRLPOutput tmp = new BytesValueRLPOutput();
     tmp.startList();
     requestId.ifPresent(tmp::writeBigIntegerScalar);
     tmp.writeList(nodes, (node, rlpOutput) -> rlpOutput.writeBytes(node));
     tmp.endList();
-    return new TrieNodesMessage(tmp.encoded());
+    return new TrieNodes(tmp.encoded());
+  }
+
+  public TrieNodes(final Bytes data) {
+    super(data);
   }
 
   @Override

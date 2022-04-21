@@ -30,10 +30,6 @@ import org.immutables.value.Value;
 
 public final class ByteCodesMessage extends AbstractSnapMessageData {
 
-  public ByteCodesMessage(final Bytes data) {
-    super(data);
-  }
-
   public static ByteCodesMessage readFrom(final MessageData message) {
     if (message instanceof ByteCodesMessage) {
       return (ByteCodesMessage) message;
@@ -58,6 +54,10 @@ public final class ByteCodesMessage extends AbstractSnapMessageData {
     tmp.writeList(codes, (code, rlpOutput) -> rlpOutput.writeBytes(code));
     tmp.endList();
     return new ByteCodesMessage(tmp.encoded());
+  }
+
+  public ByteCodesMessage(final Bytes data) {
+    super(data);
   }
 
   @Override
