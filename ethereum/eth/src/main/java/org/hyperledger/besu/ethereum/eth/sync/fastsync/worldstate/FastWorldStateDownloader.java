@@ -134,11 +134,7 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
 
       final FastWorldDownloadState newDownloadState =
           new FastWorldDownloadState(
-              worldStateStorage,
-              taskCollection,
-              maxNodeRequestsWithoutProgress,
-              minMillisBeforeStalling,
-              clock);
+              taskCollection, maxNodeRequestsWithoutProgress, minMillisBeforeStalling, clock);
       this.downloadState.set(newDownloadState);
 
       if (!newDownloadState.downloadWasResumed()) {
@@ -147,7 +143,8 @@ public class FastWorldStateDownloader implements WorldStateDownloader {
             NodeDataRequest.createAccountDataRequest(stateRoot, Optional.of(Bytes.EMPTY)));
       }
 
-      maybeCompleteTask = Optional.of(new CompleteTaskStep(metricsSystem, taskCollection::size));
+      maybeCompleteTask =
+          Optional.of(new CompleteTaskStep(worldStateStorage, metricsSystem, taskCollection::size));
       final FastWorldStateDownloadProcess downloadProcess =
           FastWorldStateDownloadProcess.builder()
               .hashCountPerRequest(hashCountPerRequest)

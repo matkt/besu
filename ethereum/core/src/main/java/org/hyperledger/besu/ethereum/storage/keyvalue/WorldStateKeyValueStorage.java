@@ -98,11 +98,6 @@ public class WorldStateKeyValueStorage implements WorldStateStorage {
   }
 
   @Override
-  public void clearFlatDatabase() {
-    // nothing to do for forest
-  }
-
-  @Override
   public Updater updater() {
     return new Updater(lock, keyValueStorage.startTransaction(), nodeAddedListeners);
   }

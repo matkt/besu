@@ -150,12 +150,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
   }
 
   @Override
-  public void clearFlatDatabase() {
-    accountStorage.clear();
-    storageStorage.clear();
-  }
-
-  @Override
   public Updater updater() {
     return new Updater(
         accountStorage.startTransaction(),

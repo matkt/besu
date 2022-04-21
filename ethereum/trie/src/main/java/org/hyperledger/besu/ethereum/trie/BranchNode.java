@@ -46,7 +46,6 @@ class BranchNode<V> implements Node<V> {
   private WeakReference<Bytes> rlp;
   private SoftReference<Bytes32> hash;
   private boolean dirty = false;
-  private boolean needHeal = false;
 
   BranchNode(
       final Bytes location,
@@ -258,15 +257,5 @@ class BranchNode<V> implements Node<V> {
   @Override
   public void markDirty() {
     dirty = true;
-  }
-
-  @Override
-  public boolean isHealNeeded() {
-    return needHeal;
-  }
-
-  @Override
-  public void markHealNeeded() {
-    this.needHeal = true;
   }
 }

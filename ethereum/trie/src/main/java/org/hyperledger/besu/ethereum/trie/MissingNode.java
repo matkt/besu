@@ -42,11 +42,6 @@ public class MissingNode<V> extends NullNode<V> {
   }
 
   @Override
-  public boolean isHealNeeded() {
-    return true;
-  }
-
-  @Override
   public Optional<Bytes> getLocation() {
     return Optional.ofNullable(location);
   }
