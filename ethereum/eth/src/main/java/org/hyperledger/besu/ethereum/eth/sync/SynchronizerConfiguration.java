@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.eth.sync;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 import org.hyperledger.besu.services.tasks.CachingTaskCollection;
 
 import java.util.concurrent.TimeUnit;
@@ -57,9 +56,6 @@ public class SynchronizerConfiguration {
   private final int worldStateMaxRequestsWithoutProgress;
   private final int worldStateTaskCacheSize;
 
-  // Snapsync
-  private final SnapSyncConfiguration snapSyncConfiguration;
-
   // Block propagation config
   private final Range<Long> blockPropagationRange;
 
@@ -87,7 +83,6 @@ public class SynchronizerConfiguration {
       final int worldStateMaxRequestsWithoutProgress,
       final long worldStateMinMillisBeforeStalling,
       final int worldStateTaskCacheSize,
-      final SnapSyncConfiguration snapSyncConfiguration,
       final Range<Long> blockPropagationRange,
       final SyncMode syncMode,
       final long downloaderChangeTargetThresholdByHeight,
@@ -107,7 +102,6 @@ public class SynchronizerConfiguration {
     this.worldStateMaxRequestsWithoutProgress = worldStateMaxRequestsWithoutProgress;
     this.worldStateMinMillisBeforeStalling = worldStateMinMillisBeforeStalling;
     this.worldStateTaskCacheSize = worldStateTaskCacheSize;
-    this.snapSyncConfiguration = snapSyncConfiguration;
     this.blockPropagationRange = blockPropagationRange;
     this.syncMode = syncMode;
     this.downloaderChangeTargetThresholdByHeight = downloaderChangeTargetThresholdByHeight;
@@ -132,15 +126,6 @@ public class SynchronizerConfiguration {
    */
   public SyncMode getSyncMode() {
     return syncMode;
-  }
-
-  /**
-   * All the configuration related to snapsync
-   *
-   * @return snapsync configuration
-   */
-  public SnapSyncConfiguration getSnapSyncConfiguration() {
-    return snapSyncConfiguration;
   }
 
   /**
@@ -246,7 +231,6 @@ public class SynchronizerConfiguration {
     private int downloaderHeaderRequestSize = DEFAULT_DOWNLOADER_HEADER_REQUEST_SIZE;
     private int downloaderCheckpointTimeoutsPermitted =
         DEFAULT_DOWNLOADER_CHECKPOINT_TIMEOUTS_PERMITTED;
-    private SnapSyncConfiguration snapSyncConfiguration = SnapSyncConfiguration.getDefault();
     private int downloaderChainSegmentSize = DEFAULT_DOWNLOADER_CHAIN_SEGMENT_SIZE;
     private int downloaderParallelism = DEFAULT_DOWNLOADER_PARALLELISM;
     private int transactionsParallelism = DEFAULT_TRANSACTIONS_PARALLELISM;
@@ -267,11 +251,6 @@ public class SynchronizerConfiguration {
 
     public Builder fastSyncFullValidationRate(final float rate) {
       this.fastSyncFullValidationRate = rate;
-      return this;
-    }
-
-    public Builder snapSyncConfiguration(final SnapSyncConfiguration snapSyncConfiguration) {
-      this.snapSyncConfiguration = snapSyncConfiguration;
       return this;
     }
 
@@ -381,7 +360,6 @@ public class SynchronizerConfiguration {
           worldStateMaxRequestsWithoutProgress,
           worldStateMinMillisBeforeStalling,
           worldStateTaskCacheSize,
-          snapSyncConfiguration,
           blockPropagationRange,
           syncMode,
           downloaderChangeTargetThresholdByHeight,
