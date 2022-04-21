@@ -51,13 +51,15 @@ public class StorageRangeDataRequest extends SnapDataRequest {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageRangeDataRequest.class);
 
-  private final Hash accountHash;
+  private final Bytes32 accountHash;
   private final Bytes32 storageRoot;
   private final Bytes32 startKeyHash;
   private final Bytes32 endKeyHash;
 
   private StackTrie stackTrie;
-  private Optional<Boolean> isProofValid;
+  private TreeMap<Bytes32, Bytes> slots;
+  private ArrayDeque<Bytes> proofs;
+  private boolean isProofValid;
 
   protected StorageRangeDataRequest(
       final Hash rootHash,
@@ -66,11 +68,12 @@ public class StorageRangeDataRequest extends SnapDataRequest {
       final Bytes32 startKeyHash,
       final Bytes32 endKeyHash) {
     super(STORAGE_RANGE, rootHash);
-    this.accountHash = Hash.wrap(accountHash);
+    this.accountHash = accountHash;
     this.storageRoot = storageRoot;
     this.startKeyHash = startKeyHash;
     this.endKeyHash = endKeyHash;
-    this.isProofValid = Optional.empty();
+    this.proofs = new ArrayDeque<>();
+    this.slots = new TreeMap<>();
     addStackTrie(Optional.empty());
     LOG.trace(
         "create get storage range data request for account {} with root hash={} from {} to {}",
@@ -87,18 +90,23 @@ public class StorageRangeDataRequest extends SnapDataRequest {
       final WorldDownloadState<SnapDataRequest> downloadState,
       final SnapSyncState snapSyncState) {
 
+    if (isProofValid) {
+      stackTrie.addKeys(slots);
+      stackTrie.addProofs(proofs);
+    }
+
     // search incomplete nodes in the range
     final AtomicInteger nbNodesSaved = new AtomicInteger();
     final AtomicReference<Updater> updaterTmp = new AtomicReference<>(worldStateStorage.updater());
     final NodeUpdater nodeUpdater =
         (location, hash, value) -> {
-          updaterTmp.get().putAccountStorageTrieNode(accountHash, location, hash, value);
+          // create small batch in order to commit small amount of nodes at the same time
+          updaterTmp.get().putAccountStorageTrieNode(Hash.wrap(accountHash), location, hash, value);
           if (nbNodesSaved.getAndIncrement() % 1000 == 0) {
             updaterTmp.get().commit();
             updaterTmp.set(worldStateStorage.updater());
           }
         };
-
     stackTrie.commit(nodeUpdater);
 
     updaterTmp.get().commit();
@@ -106,28 +114,26 @@ public class StorageRangeDataRequest extends SnapDataRequest {
     return nbNodesSaved.get();
   }
 
-  public void addResponse(
+  @Override
+  public boolean checkProof(
       final WorldDownloadState<SnapDataRequest> downloadState,
       final WorldStateProofProvider worldStateProofProvider,
-      final TreeMap<Bytes32, Bytes> slots,
-      final ArrayDeque<Bytes> proofs) {
-    if (!slots.isEmpty() || !proofs.isEmpty()) {
-      if (!worldStateProofProvider.isValidRangeProof(
-          startKeyHash, endKeyHash, storageRoot, proofs, slots)) {
-        downloadState.enqueueRequest(
-            createAccountDataRequest(
-                getRootHash(), Hash.wrap(accountHash), startKeyHash, endKeyHash));
-        isProofValid = Optional.of(false);
-      } else {
-        stackTrie.addElement(startKeyHash, proofs, slots);
-        isProofValid = Optional.of(true);
-      }
+      final SnapSyncState snapSyncState) {
+    if (!worldStateProofProvider.isValidRangeProof(
+        startKeyHash, endKeyHash, storageRoot, proofs, slots)) {
+      downloadState.enqueueRequest(
+          createAccountDataRequest(
+              getRootHash(), Hash.wrap(accountHash), startKeyHash, endKeyHash));
+      isProofValid = false;
+    } else {
+      isProofValid = true;
     }
+    return isProofValid;
   }
 
   @Override
-  public boolean isResponseReceived() {
-    return isProofValid.isPresent();
+  public boolean isValid() {
+    return !slots.isEmpty() || !proofs.isEmpty();
   }
 
   @Override
@@ -142,16 +148,14 @@ public class StorageRangeDataRequest extends SnapDataRequest {
       final SnapSyncState snapSyncState) {
     final List<SnapDataRequest> childRequests = new ArrayList<>();
 
-    if (!isProofValid.orElse(false)) {
+    if (!isProofValid) {
       return Stream.empty();
     }
 
-    final StackTrie.TaskElement taskElement = stackTrie.getElement(startKeyHash);
-
-    findNewBeginElementInRange(storageRoot, taskElement.proofs(), taskElement.keys(), endKeyHash)
+    findNewBeginElementInRange(storageRoot, proofs, slots, endKeyHash)
         .ifPresent(
             missingRightElement -> {
-              final int nbRanges = findNbRanges(taskElement.keys());
+              final int nbRanges = findNbRanges();
               RangeManager.generateRanges(missingRightElement, endKeyHash, nbRanges)
                   .forEach(
                       (key, value) -> {
@@ -172,7 +176,7 @@ public class StorageRangeDataRequest extends SnapDataRequest {
     return childRequests.stream();
   }
 
-  private int findNbRanges(final TreeMap<Bytes32, Bytes> slots) {
+  private int findNbRanges() {
     if (startKeyHash.equals(MIN_RANGE) && endKeyHash.equals(MAX_RANGE)) {
       return MAX_RANGE
           .toUnsignedBigInteger()
@@ -192,7 +196,7 @@ public class StorageRangeDataRequest extends SnapDataRequest {
   }
 
   public TreeMap<Bytes32, Bytes> getSlots() {
-    return stackTrie.getElement(startKeyHash).keys();
+    return slots;
   }
 
   public Bytes32 getStartKeyHash() {
@@ -203,9 +207,17 @@ public class StorageRangeDataRequest extends SnapDataRequest {
     return endKeyHash;
   }
 
+  public void setProofs(final ArrayDeque<Bytes> proofs) {
+    this.proofs = proofs;
+  }
+
+  public void setSlots(final TreeMap<Bytes32, Bytes> slots) {
+    this.slots = slots;
+  }
+
   @VisibleForTesting
-  public void setProofValid(final boolean isProofValid) {
-    this.isProofValid = Optional.of(isProofValid);
+  public void setProofValid(final boolean proofValid) {
+    isProofValid = proofValid;
   }
 
   public void addStackTrie(final Optional<StackTrie> maybeStackTrie) {

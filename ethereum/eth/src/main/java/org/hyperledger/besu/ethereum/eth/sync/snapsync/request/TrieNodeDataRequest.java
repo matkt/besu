@@ -21,6 +21,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapWorldDownloadState;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
+import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.TrieNodeDecoder;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
@@ -57,7 +58,7 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
       final WorldStateStorage.Updater updater,
       final WorldDownloadState<SnapDataRequest> downloadState,
       final SnapSyncState snapSyncState) {
-    if (isExpired(snapSyncState) || pendingChildren.get() > 0) {
+    if (!isValid() || isExpired(snapSyncState) || pendingChildren.get() > 0) {
       // we do nothing. Our last child will eventually persist us.
       return 0;
     }
@@ -80,7 +81,7 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
       final SnapWorldDownloadState downloadState,
       final WorldStateStorage worldStateStorage,
       final SnapSyncState snapSyncState) {
-    if (!isResponseReceived()) {
+    if (!isValid()) {
       // If this node hasn't been downloaded yet, we can't return any child data
       return Stream.empty();
     }
@@ -108,12 +109,20 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
         .peek(request -> request.registerParent(this));
   }
 
+  @Override
+  public boolean checkProof(
+      final WorldDownloadState<SnapDataRequest> downloadState,
+      final WorldStateProofProvider worldStateProofProvider,
+      final SnapSyncState snapSyncState) {
+    return true;
+  }
+
   public boolean isRoot() {
     return possibleParent.isEmpty();
   }
 
   @Override
-  public boolean isResponseReceived() {
+  public boolean isValid() {
     return !data.isEmpty() && Hash.hash(data).equals(getNodeHash());
   }
 

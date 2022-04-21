@@ -76,8 +76,8 @@ public class StackTrieTest {
         worldStateProofProvider.getAccountProofRelatedNodes(
             Hash.wrap(accountStateTrie.getRootHash()), accounts.lastKey()));
 
-    stackTrie.addElement(Bytes32.random(), proofs, accounts);
-
+    stackTrie.addKeys(accounts);
+    stackTrie.addProofs(proofs);
     final WorldStateStorage.Updater updater = recreatedWorldStateStorage.updater();
     stackTrie.commit(updater::putAccountStateTrieNode);
     updater.commit();
@@ -129,8 +129,8 @@ public class StackTrieTest {
           worldStateProofProvider.getAccountProofRelatedNodes(
               Hash.wrap(accountStateTrie.getRootHash()), accounts.lastKey()));
 
-      stackTrie.addElement(Bytes32.random(), proofs, accounts);
-
+      stackTrie.addKeys(accounts);
+      stackTrie.addProofs(proofs);
       final WorldStateStorage.Updater updater = recreatedWorldStateStorage.updater();
       stackTrie.commit(updater::putAccountStateTrieNode);
       updater.commit();

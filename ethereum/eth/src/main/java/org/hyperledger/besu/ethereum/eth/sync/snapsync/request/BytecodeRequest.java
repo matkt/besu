@@ -21,6 +21,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapWorldDownloadState;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
+import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
 
@@ -66,7 +67,15 @@ public class BytecodeRequest extends SnapDataRequest {
   }
 
   @Override
-  public boolean isResponseReceived() {
+  public boolean checkProof(
+      final WorldDownloadState<SnapDataRequest> downloadState,
+      final WorldStateProofProvider worldStateProofProvider,
+      final SnapSyncState snapSyncState) {
+    return true;
+  }
+
+  @Override
+  public boolean isValid() {
     return !code.isEmpty();
   }
 

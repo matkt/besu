@@ -30,6 +30,7 @@ import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloader;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 
@@ -87,7 +88,7 @@ public class SnapDownloaderFactory extends FastDownloaderFactory {
     worldStateStorage.clear();
 
     final InMemoryTasksPriorityQueues<SnapDataRequest> snapTaskCollection =
-        createSnapWorldStateDownloaderTaskCollection();
+        createSnapWorldStateDownloaderTaskCollection(metricsSystem);
     final WorldStateDownloader snapWorldStateDownloader =
         new SnapWorldStateDownloader(
             ethContext,
@@ -120,7 +121,15 @@ public class SnapDownloaderFactory extends FastDownloaderFactory {
   }
 
   private static InMemoryTasksPriorityQueues<SnapDataRequest>
-      createSnapWorldStateDownloaderTaskCollection() {
-    return new InMemoryTasksPriorityQueues<>();
+      createSnapWorldStateDownloaderTaskCollection(final MetricsSystem metricsSystem) {
+    final InMemoryTasksPriorityQueues<SnapDataRequest> taskCollection =
+        new InMemoryTasksPriorityQueues<>();
+
+    metricsSystem.createLongGauge(
+        BesuMetricCategory.SYNCHRONIZER,
+        "snap_world_state_pending_requests_current",
+        "Number of pending requests for snap sync world state download",
+        taskCollection::size);
+    return taskCollection;
   }
 }

@@ -42,7 +42,7 @@ public class CompleteTaskStep {
 
   public synchronized void markAsCompleteOrFailed(
       final SnapWorldDownloadState downloadState, final Task<SnapDataRequest> task) {
-    if (task.getData().isResponseReceived()
+    if (task.getData().isValid()
         || (task.getData() instanceof TrieNodeDataRequest
             && task.getData().isExpired(snapSyncState))) {
       completedRequestsCounter.inc();

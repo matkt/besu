@@ -500,13 +500,14 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
         blockchain, worldStateArchive, protocolSchedule, consensusContextFactory);
   }
 
+  @SuppressWarnings("unused")
   private Optional<SnapProtocolManager> createSnapProtocolManager(
       final List<PeerValidator> peerValidators,
       final EthPeers ethPeers,
       final EthMessages snapMessages,
       final WorldStateArchive worldStateArchive) {
-    return Optional.of(
-        new SnapProtocolManager(peerValidators, ethPeers, snapMessages, worldStateArchive));
+    // TODO implement method when flag will be available
+    return Optional.empty();
   }
 
   private WorldStateArchive createWorldStateArchive(

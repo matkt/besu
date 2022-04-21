@@ -21,7 +21,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.AccountRangeDataR
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.BytecodeRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.SnapDataRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.StorageRangeDataRequest;
-import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.RangeStorageEntriesCollector;
@@ -42,13 +41,8 @@ import org.apache.tuweni.bytes.Bytes32;
 public class TaskGenerator {
 
   public static List<Task<SnapDataRequest>> createAccountRequest(final boolean withData) {
-
     final WorldStateStorage worldStateStorage =
         new InMemoryKeyValueStorageProvider().createWorldStateStorage(DataStorageFormat.FOREST);
-
-    final WorldStateProofProvider worldStateProofProvider =
-        new WorldStateProofProvider(worldStateStorage);
-
     final MerklePatriciaTrie<Bytes32, Bytes> trie =
         TrieGenerator.generateTrie(worldStateStorage, 1);
     final RangeStorageEntriesCollector collector =
@@ -68,7 +62,8 @@ public class TaskGenerator {
         SnapDataRequest.createAccountRangeDataRequest(
             rootHash, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
     if (withData) {
-      accountRangeDataRequest.addResponse(worldStateProofProvider, accounts, new ArrayDeque<>());
+      accountRangeDataRequest.setAccounts(accounts);
+      accountRangeDataRequest.setProofs(new ArrayDeque<>());
     }
 
     final StateTrieAccountValue stateTrieAccountValue =
@@ -77,7 +72,6 @@ public class TaskGenerator {
 
     final StorageRangeDataRequest storageRangeDataRequest =
         createStorageRangeDataRequest(
-            worldStateProofProvider,
             worldStateStorage,
             rootHash,
             accountHash,
@@ -98,7 +92,6 @@ public class TaskGenerator {
   }
 
   private static StorageRangeDataRequest createStorageRangeDataRequest(
-      final WorldStateProofProvider worldStateProofProvider,
       final WorldStateStorage worldStateStorage,
       final Hash rootHash,
       final Hash accountHash,
@@ -129,7 +122,8 @@ public class TaskGenerator {
             rootHash, accountHash, storageRoot, RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
     if (withData) {
       request.setProofValid(true);
-      request.addResponse(null, worldStateProofProvider, slots, new ArrayDeque<>());
+      request.setSlots(slots);
+      request.setProofs(new ArrayDeque<>());
     }
     return request;
   }
