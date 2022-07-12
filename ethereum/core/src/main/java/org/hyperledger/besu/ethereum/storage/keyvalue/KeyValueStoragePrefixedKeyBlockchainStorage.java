@@ -139,12 +139,24 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
 
     @Override
     public void putBlockHeader(final Hash blockHash, final BlockHeader blockHeader) {
-      set(BLOCK_HEADER_PREFIX, blockHash, blockHeader.getRlp());
+      Bytes b;
+      if(blockHeader.getRlp().isPresent()){
+        b = blockHeader.getRlp().get();
+      } else {
+        b = RLP.encode(blockHeader::writeTo);
+      }
+      set(BLOCK_HEADER_PREFIX, blockHash, b);
     }
 
     @Override
     public void putBlockBody(final Hash blockHash, final BlockBody blockBody) {
-      set(BLOCK_BODY_PREFIX, blockHash, RLP.encode(blockBody::writeTo));
+      Bytes b;
+      if(blockBody.getRlp().isPresent()){
+        b = blockBody.getRlp().get();
+      } else {
+        b = RLP.encode(blockBody::writeTo);
+      }
+      set(BLOCK_BODY_PREFIX, blockHash, b);
     }
 
     @Override

@@ -14,10 +14,16 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
+import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.evm.log.LogsBloomFilter;
+
+import java.util.Optional;
 
 /** A mined Ethereum block header. */
 public class LightBlockHeader extends BlockHeader {
@@ -26,48 +32,59 @@ public class LightBlockHeader extends BlockHeader {
 
   protected Bytes rlp;
 
-  public LightBlockHeader(
-      final Hash parentHash,
-      final Hash hash,
-      final Difficulty difficulty,
-      final long number,
-      final Bytes rlp) {
-    super(
-        parentHash,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        difficulty,
-        number,
-        -1,
-        -1,
-        -1,
-        null,
-        null,
-        null,
-        -1,
-        null);
+  public LightBlockHeader(final Hash parentHash,
+                          final Hash ommersHash,
+                          final Hash hash,
+                          final Address coinbase,
+                          final Hash stateRoot,
+                          final Hash transactionsRoot,
+                          final Hash receiptsRoot,
+                          final LogsBloomFilter logsBloom,
+                          final Difficulty difficulty,
+                          final long number,
+                          final long gasLimit,
+                          final long gasUsed,
+                          final long timestamp,
+                          final Bytes32 mixHashOrPrevRandao,
+                          final long nonce,
+                          final Wei baseFee,
+                          final Bytes rlp) {
+    super(parentHash,
+            ommersHash,
+            coinbase,
+            stateRoot,transactionsRoot,receiptsRoot,logsBloom,difficulty,number,gasLimit,gasUsed,timestamp,null, baseFee, mixHashOrPrevRandao, nonce, null);
     this.rlp = rlp;
     this.hash = hash;
   }
 
   public static LightBlockHeader readFrom(final RLPInput input) {
-    Bytes raw = input.raw();
-    input.reset();
-    input.enterList();
-    final Hash parentHash = Hash.wrap(input.readBytes32());
-    input.skipNext();
-    input.skipNext();
-    input.skipNext();
-    input.skipNext();
-    input.skipNext();
-    final Difficulty difficulty = Difficulty.of(input.readUInt256Scalar());
-    final long number = input.readLongScalar();
-    input.leaveList();
-    return new LightBlockHeader(parentHash, Hash.hash(raw), difficulty, number, raw);
+    try {
+      Bytes raw = input.raw();
+      input.reset();
+      input.enterList();
+      final Hash parentHash = Hash.wrap(input.readBytes32());
+      final Hash ommersHash = Hash.wrap(input.readBytes32());
+      final Address coinbase = Address.readFrom(input);
+      final Hash stateRoot = Hash.wrap(input.readBytes32());
+      final Hash transactionsRoot = Hash.wrap(input.readBytes32());
+      final Hash receiptsRoot = Hash.wrap(input.readBytes32());
+      final LogsBloomFilter logsBloom = LogsBloomFilter.readFrom(input);
+      final Difficulty difficulty = Difficulty.of(input.readUInt256Scalar());
+      final long number = input.readLongScalar();
+      final long gasLimit = input.readLongScalar();
+      final long gasUsed = input.readLongScalar();
+      final long timestamp = input.readLongScalar();
+      input.skipNext();
+      final Bytes32 mixHashOrPrevRandao = input.readBytes32();
+      final long nonce = input.readLong();
+      final Wei baseFee = !input.isEndOfCurrentList() ? Wei.of(input.readUInt256Scalar()) : null;
+      input.leaveListLenient();
+      return new LightBlockHeader(parentHash, ommersHash, Hash.hash(raw), coinbase, stateRoot, transactionsRoot, receiptsRoot, logsBloom, difficulty, number,
+              gasLimit, gasUsed, timestamp, mixHashOrPrevRandao, nonce, baseFee, raw);
+    }catch (Exception e){
+      e.printStackTrace();
+      throw e;
+    }
   }
 
   @Override
@@ -76,7 +93,7 @@ public class LightBlockHeader extends BlockHeader {
   }
 
   @Override
-  public Bytes getRlp() {
-    return rlp;
+  public Optional<Bytes> getRlp() {
+    return Optional.of(rlp);
   }
 }

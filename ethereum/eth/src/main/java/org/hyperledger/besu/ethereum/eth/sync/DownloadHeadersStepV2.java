@@ -72,7 +72,7 @@ public class DownloadHeadersStepV2
   private CompletableFuture<List<BlockHeader>> downloadHeaders(
       final CheckpointRange checkpointRange) {
     if (checkpointRange.hasEnd()) {
-      LOG.debug(
+      LOG.info(
           "Downloading headers for range {} to {}",
           checkpointRange.getStart().getNumber(),
           checkpointRange.getEnd().getNumber());
@@ -90,7 +90,7 @@ public class DownloadHeadersStepV2
               metricsSystem)
           .run();
     } else {
-      LOG.debug("Downloading headers starting from {}", checkpointRange.getStart().getNumber());
+      LOG.info("Downloading headers starting from {}", checkpointRange.getStart().getNumber());
       return GetHeadersFromPeerByHashTaskV2.startingAtHash(
               ethContext,
               checkpointRange.getStart().getHash(),

@@ -336,7 +336,7 @@ public class BlockHeader extends SealableBlockHeader
     return getNumber() + " (" + getHash() + ")";
   }
 
-  public Bytes getRlp() {
-    throw new RuntimeException();
+  public Optional<Bytes> getRlp() {
+    return Optional.empty();
   }
 }

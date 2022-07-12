@@ -14,12 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
 
@@ -76,6 +79,10 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
     return body;
   }
 
+  public Optional<Bytes> getRlp() {
+    return Optional.empty();
+  }
+
   @Override
   public boolean equals(final Object obj) {
     if (obj == this) {
@@ -100,5 +107,13 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
     sb.append("transactions=").append(transactions).append(", ");
     sb.append("ommers=").append(ommers);
     return sb.append("}").toString();
+  }
+
+  public Optional<Bytes32> getTransactionRoot(){
+    return Optional.empty();
+  }
+
+  public Optional<Bytes32> getOmmersHash(){
+    return Optional.empty();
   }
 }

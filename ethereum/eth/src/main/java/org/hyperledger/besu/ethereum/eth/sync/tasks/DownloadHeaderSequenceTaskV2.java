@@ -195,12 +195,11 @@ public class DownloadHeaderSequenceTaskV2 extends AbstractRetryingPeerTask<List<
               child =
                   (headerIndex == segmentLength - 1) ? referenceHeader : headers[headerIndex + 1];
             }
-
             if (!validateHeader(child, header)) {
               // Invalid headers - disconnect from peer
 
               headersResult.getPeer().disconnect(DisconnectReason.BREACH_OF_PROTOCOL);
-              LOG.debug(
+              LOG.info(
                   "Received invalid headers from peer, disconnecting from: {}",
                   headersResult.getPeer());
               future.completeExceptionally(

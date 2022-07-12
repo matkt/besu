@@ -277,17 +277,16 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @Override
   public synchronized void appendBlock(final Block block, final List<TransactionReceipt> receipts) {
-    checkArgument(
-        block.getBody().getTransactions().size() == receipts.size(),
-        "Supplied receipts do not match block transactions.");
-    if (blockIsAlreadyTracked(block)) {
+    //checkArgument(
+      //  block.getBody().getTransactions().size() == receipts.size(),
+        //"Supplied receipts do not match block transactions.");
+    /*if (blockIsAlreadyTracked(block)) {
       return;
-    }
-    checkArgument(blockIsConnected(block), "Attempt to append non-connected block.");
+    }*/
+    //checkArgument(blockIsConnected(block), "Attempt to append non-connected block.");
 
-    final BlockAddedEvent blockAddedEvent =
-        appendBlockHelper(new BlockWithReceipts(block, receipts));
-    blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
+    appendBlockHelper(new BlockWithReceipts(block, receipts));
+    //blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
   }
 
   private BlockAddedEvent appendBlockHelper(final BlockWithReceipts blockWithReceipts) {
@@ -589,20 +588,6 @@ public class DefaultBlockchain implements MutableBlockchain {
                 + "--genesis-file or supply a testnet/mainnet option with --network.");
       }
     }
-  }
-
-  private boolean blockIsAlreadyTracked(final Block block) {
-    if (block.getHeader().getParentHash().equals(chainHeader.getHash())) {
-      // If this block builds on our chain head it would have a higher TD and be the chain head
-      // but since it isn't we mustn't have imported it yet.
-      // Saves a db read for the most common case
-      return false;
-    }
-    return blockchainStorage.getBlockHeader(block.getHash()).isPresent();
-  }
-
-  private boolean blockIsConnected(final Block block) {
-    return blockchainStorage.getBlockHeader(block.getHeader().getParentHash()).isPresent();
   }
 
   private void addAddedLogsWithMetadata(

@@ -63,6 +63,16 @@ public final class BodyValidation {
     return Hash.wrap(trie.getRootHash());
   }
 
+  public static Hash transactionsRootRlp(final List<Bytes> transactions) {
+    final MerklePatriciaTrie<Bytes, Bytes> trie = trie();
+
+    IntStream.range(0, transactions.size())
+            .forEach(
+                    i -> trie.put(indexKey(i),transactions.get(i)));
+
+    return Hash.wrap(trie.getRootHash());
+  }
+
   /**
    * Generates the receipt root for a list of receipts
    *

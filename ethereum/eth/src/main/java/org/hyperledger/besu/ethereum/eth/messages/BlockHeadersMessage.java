@@ -28,6 +28,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 
 public final class BlockHeadersMessage extends AbstractMessageData {
 
@@ -74,6 +76,6 @@ public final class BlockHeadersMessage extends AbstractMessageData {
   }
 
   public List<LightBlockHeader> getLightHeaders() {
-    return new BytesValueRLPInput(data, false).readList(LightBlockHeader::readFrom);
+    return new BytesValueRLPInput(data, false).readList(rlpInput -> LightBlockHeader.readFrom(rlpInput.readAsRlp()));
   }
 }

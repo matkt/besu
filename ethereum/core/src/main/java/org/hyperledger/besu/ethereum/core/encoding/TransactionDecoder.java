@@ -162,16 +162,16 @@ public class TransactionDecoder {
                       accessListEntryRLPInput.leaveList();
                       return accessListEntry;
                     }));
-    final byte recId = (byte) rlpInput.readIntScalar();
+   rlpInput.skipNext();
     final Transaction transaction =
         preSignatureTransactionBuilder
-            .signature(
+            /*.signature(
                 SIGNATURE_ALGORITHM
                     .get()
                     .createSignature(
                         rlpInput.readUInt256Scalar().toUnsignedBigInteger(),
                         rlpInput.readUInt256Scalar().toUnsignedBigInteger(),
-                        recId))
+                        recId))*/
             .build();
     rlpInput.leaveList();
     return transaction;
@@ -202,16 +202,16 @@ public class TransactionDecoder {
                       accessListEntryRLPInput.leaveList();
                       return accessListEntry;
                     }));
-    final byte recId = (byte) input.readIntScalar();
+   input.skipNext();
     final Transaction transaction =
         builder
-            .signature(
+            /*.signature(
                 SIGNATURE_ALGORITHM
                     .get()
                     .createSignature(
                         input.readUInt256Scalar().toUnsignedBigInteger(),
                         input.readUInt256Scalar().toUnsignedBigInteger(),
-                        recId))
+                        recId))*/
             .build();
     input.leaveList();
     return transaction;

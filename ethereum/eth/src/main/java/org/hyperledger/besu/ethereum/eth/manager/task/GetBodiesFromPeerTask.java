@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.eth.manager.task;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
@@ -106,20 +107,20 @@ public class GetBodiesFromPeerTask extends AbstractPeerRequestTask<List<Block>> 
     final List<BlockBody> bodies = bodiesMessage.bodies(protocolSchedule);
     if (bodies.size() == 0) {
       // Message contains no data - nothing to do
-      LOG.debug("Message contains no data. Peer: {}", peer);
+      LOG.info("Message contains no data. Peer: {}", peer);
       return Optional.empty();
     } else if (bodies.size() > headers.size()) {
       // Message doesn't match our request - nothing to do
-      LOG.debug("Message doesn't match our request. Peer: {}", peer);
+      LOG.info("Message doesn't match our request. Peer: {}", peer);
       return Optional.empty();
     }
 
     final List<Block> blocks = new ArrayList<>();
     for (final BlockBody body : bodies) {
-      final List<BlockHeader> headers = bodyToHeaders.get(new BodyIdentifier(body));
+      final List<BlockHeader> headers = bodyToHeaders.get(BodyIdentifier.createBodyIdentifier(body));
       if (headers == null) {
         // This message contains unrelated bodies - exit
-        LOG.debug("This message contains unrelated bodies. Peer: {}", peer);
+        LOG.info("This message contains unrelated bodies. Peer: {}", peer);
         return Optional.empty();
       }
       headers.forEach(h -> blocks.add(new Block(h, body)));
@@ -136,6 +137,14 @@ public class GetBodiesFromPeerTask extends AbstractPeerRequestTask<List<Block>> 
     public BodyIdentifier(final Bytes32 transactionsRoot, final Bytes32 ommersHash) {
       this.transactionsRoot = transactionsRoot;
       this.ommersHash = ommersHash;
+    }
+
+    public static BodyIdentifier createBodyIdentifier(final BlockBody body) {
+      if(body.getTransactionRoot().isPresent() &&  body.getOmmersHash().isPresent()){
+        return new BodyIdentifier(body.getTransactionRoot().get(), body.getOmmersHash().get());
+      }else{
+        return new BodyIdentifier(body);
+      }
     }
 
     public BodyIdentifier(final BlockBody body) {
