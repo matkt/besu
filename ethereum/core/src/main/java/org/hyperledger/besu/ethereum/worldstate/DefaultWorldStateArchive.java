@@ -55,8 +55,8 @@ public class DefaultWorldStateArchive implements WorldStateArchive {
   }
 
   @Override
-  public Optional<MutableWorldState> getMutableSnapshot(Hash blockHash) {
-    //TODO check how to manage that with forest
+  public Optional<MutableWorldState> getMutableSnapshot(final Hash blockHash) {
+    // TODO check how to manage that with forest
     return Optional.empty();
   }
 

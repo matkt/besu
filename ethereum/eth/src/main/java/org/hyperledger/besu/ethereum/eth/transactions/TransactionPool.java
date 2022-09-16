@@ -277,7 +277,7 @@ public class TransactionPool implements BlockAddedObserver {
 
     return protocolContext
         .getWorldStateArchive()
-        .getMutable(chainHeadBlockHeader.getStateRoot(), chainHeadBlockHeader.getHash(), false)
+        .getMutableSnapshot(chainHeadBlockHeader.getHash())
         .map(
             worldState -> {
               try {
