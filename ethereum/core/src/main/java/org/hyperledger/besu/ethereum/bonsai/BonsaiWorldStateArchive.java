@@ -98,6 +98,7 @@ public class BonsaiWorldStateArchive implements WorldStateArchive {
         || worldStateStorage.isWorldStateAvailable(rootHash, blockHash);
   }
 
+  @Override
   public Optional<MutableWorldState> getMutableSnapshot(final Hash blockHash) {
     return rollMutableStateToBlockHash(
         BonsaiSnapshotWorldState.create(this, worldStateStorage), blockHash);
