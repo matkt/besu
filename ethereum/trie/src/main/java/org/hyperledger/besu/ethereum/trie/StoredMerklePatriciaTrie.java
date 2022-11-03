@@ -125,6 +125,11 @@ public class StoredMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
     return root.accept(getVisitor, path).getValue();
   }
 
+  public Node<V> getNodeForPath(final K path) {
+    checkNotNull(path);
+    return root.accept(getVisitor, path);
+  }
+
   @Override
   public Proof<V> getValueWithProof(final K key) {
     checkNotNull(key);
@@ -140,6 +145,18 @@ public class StoredMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
     checkNotNull(key);
     checkNotNull(value);
     this.root = root.accept(new PutVisitor<>(nodeFactory, value), bytesToPath(key));
+  }
+
+  public void putWithPath(final K key, final Node<V> node) {
+    checkNotNull(key);
+    checkNotNull(node);
+    this.root = root.accept(new PutVisitor<>(nodeFactory, node), key);
+  }
+
+  public void putWithPath(final K key, final V value) {
+    checkNotNull(key);
+    checkNotNull(value);
+    this.root = root.accept(new PutVisitor<>(nodeFactory, value), key);
   }
 
   @Override
@@ -229,6 +246,10 @@ public class StoredMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
   @Override
   public Bytes32 getRootHash() {
     return root.getHash();
+  }
+
+  public Node<V> getRoot() {
+    return root;
   }
 
   @Override

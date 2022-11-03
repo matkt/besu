@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLP;
@@ -31,6 +32,8 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 public class TrieGenerator {
 
+  public static List<Hash> accountHash = new ArrayList<>();
+
   public static MerklePatriciaTrie<Bytes32, Bytes> generateTrie(
       final WorldStateStorage worldStateStorage, final int nbAccounts) {
     final List<Hash> accountHash = new ArrayList<>();
@@ -41,6 +44,46 @@ public class TrieGenerator {
       final WorldStateStorage.Updater updater = worldStateStorage.updater();
 
       accountHash.add(Hash.wrap(Bytes32.leftPad(Bytes.of(i + 1))));
+      final MerklePatriciaTrie<Bytes32, Bytes> storageTrie =
+          emptyStorageTrie(worldStateStorage, accountHash.get(i));
+      writeStorageValue(storageTrie, UInt256.ONE, UInt256.valueOf(2L));
+      writeStorageValue(storageTrie, UInt256.valueOf(2L), UInt256.valueOf(4L));
+      writeStorageValue(storageTrie, UInt256.valueOf(3L), UInt256.valueOf(6L));
+      int accountIndex = i;
+      storageTrie.commit(
+          (location, hash, value) ->
+              updater.putAccountStorageTrieNode(
+                  accountHash.get(accountIndex), location, hash, value));
+      final Bytes code = Bytes32.leftPad(Bytes.of(i + 10));
+      final Hash codeHash = Hash.hash(code);
+      final StateTrieAccountValue accountValue =
+          new StateTrieAccountValue(1L, Wei.of(2L), Hash.wrap(storageTrie.getRootHash()), codeHash);
+      accountStateTrie.put(accountHash.get(i), RLP.encode(accountValue::writeTo));
+      accountStateTrie.commit(updater::putAccountStateTrieNode);
+      updater.putCode(codeHash, code);
+      // Persist updates
+      updater.commit();
+    }
+    return accountStateTrie;
+  }
+
+  public static StoredMerklePatriciaTrie<Bytes, Bytes> generateTrie2(
+      final WorldStateStorage worldStateStorage, final int nbAccounts) {
+    accountHash = new ArrayList<>();
+    final StoredMerklePatriciaTrie<Bytes, Bytes> accountStateTrie =
+        new StoredMerklePatriciaTrie<>(worldStateStorage::getAccountStateTrieNode, b -> b, b -> b);
+    // Add some storage values
+    for (int i = 0; i < nbAccounts; i++) {
+      final WorldStateStorage.Updater updater = worldStateStorage.updater();
+      if (i == 0) {
+        accountHash.add(
+            Hash.hash(Address.fromHexString("0xe308bd1ac5fda103967359b2712dd89deffb7973")));
+      } else if (i == 1) {
+        accountHash.add(
+            Hash.hash(Address.fromHexString("0xe408bd1ac5fda103967359b2712dd89deffb7973")));
+      } else {
+        accountHash.add(Hash.wrap(Bytes32.random()));
+      }
       final MerklePatriciaTrie<Bytes32, Bytes> storageTrie =
           emptyStorageTrie(worldStateStorage, accountHash.get(i));
       writeStorageValue(storageTrie, UInt256.ONE, UInt256.valueOf(2L));

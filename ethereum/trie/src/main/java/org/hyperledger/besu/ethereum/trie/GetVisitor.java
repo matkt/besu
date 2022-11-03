@@ -36,7 +36,10 @@ class GetVisitor<V> implements PathNodeVisitor<V> {
 
   @Override
   public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
-    assert path.size() > 0 : "Visiting path doesn't end with a non-matching terminator";
+    if (path.size() == 0) {
+      return branchNode;
+    }
+    // assert path.size() > 0 : "Visiting path doesn't end with a non-matching terminator";
 
     final byte childIndex = path.get(0);
     if (childIndex == CompactEncoding.LEAF_TERMINATOR) {

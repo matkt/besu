@@ -14,34 +14,20 @@
  */
 package org.hyperledger.besu.ethereum.trie;
 
-import java.util.Optional;
-
 import org.apache.tuweni.bytes.Bytes;
 
-public class PutVisitor<V> implements PathNodeVisitor<V> {
+public class PutNodeVisitor<V> implements PathNodeVisitor<V> {
   private final NodeFactory<V> nodeFactory;
-  private final Optional<V> value;
-  private final Optional<Node<V>> node;
+  private final V value;
 
-  public PutVisitor(final NodeFactory<V> nodeFactory, final V value) {
+  public PutNodeVisitor(final NodeFactory<V> nodeFactory, final V value) {
     this.nodeFactory = nodeFactory;
-    this.value = Optional.of(value);
-    this.node = Optional.empty();
-  }
-
-  public PutVisitor(final NodeFactory<V> nodeFactory, final Node<V> node) {
-    this.nodeFactory = nodeFactory;
-    this.value = node.getValue();
-    this.node = Optional.of(node);
+    this.value = value;
   }
 
   @Override
   public Node<V> visit(final ExtensionNode<V> extensionNode, final Bytes path) {
-    if (node.isPresent()) {
-      if (extensionNode.getLocation().equals(node.get().getLocation())) {
-        return node.get();
-      }
-    }
+
     System.out.println("visit exension " + extensionNode + " " + path);
     final Bytes extensionPath = extensionNode.getPath();
     final int commonPathLength = extensionPath.commonPrefixLength(path);
@@ -61,7 +47,7 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
     final byte extensionIndex = extensionPath.get(commonPathLength);
     final Node<V> updatedExtension =
         extensionNode.replacePath(extensionPath.slice(commonPathLength + 1));
-    final Node<V> leaf = nodeFactory.createLeaf(leafPath, value.orElseThrow());
+    final Node<V> leaf = nodeFactory.createLeaf(leafPath, value);
     final Node<V> branch =
         nodeFactory.createBranch(leafIndex, leaf, extensionIndex, updatedExtension);
 
@@ -74,35 +60,64 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
 
   @Override
   public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
-    if (node.isPresent()) {
-      if (branchNode.getLocation().equals(node.get().getLocation())) {
-        return node.get();
-      }
-    }
-    assert path.size() > 0 : "Visiting path doesn't end with a non-matching terminator";
+    // assert path.size() > 0 : "Visiting path doesn't end with a non-matching terminator";
 
+    System.out.println(
+        "visit branch "
+            + " "
+            + path
+            + " "
+            + branchNode.getRlp()
+            + " "
+            + branchNode.getValue()
+            + " "
+            + branchNode.getLocation()
+            + " "
+            + branchNode.getHash());
+
+    if (path.size() == 0) {
+      Node<V> vNode = branchNode.replaceValue(value);
+      System.out.println(
+          "visit branch after" + " " + path + " " + vNode.getRlp() + " " + vNode.getLocation());
+      return vNode;
+    }
     final byte childIndex = path.get(0);
     if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
-      return branchNode.replaceValue(value.orElseThrow());
+      return branchNode.replaceValue(value);
     }
 
     final Node<V> updatedChild = branchNode.child(childIndex).accept(this, path.slice(1));
-    return branchNode.replaceChild(childIndex, updatedChild);
+    Node<V> vNode = branchNode.replaceChild(childIndex, updatedChild);
+    System.out.println(
+        "visit branch after"
+            + " "
+            + path
+            + " "
+            + vNode.getRlp()
+            + " "
+            + vNode.getLocation()
+            + " "
+            + vNode.getHash());
+    return vNode;
   }
 
   @Override
   public Node<V> visit(final LeafNode<V> leafNode, final Bytes path) {
-    if (node.isPresent()) {
-      if (leafNode.getLocation().equals(node.get().getLocation())) {
-        return node.get();
-      }
-    }
+    System.out.println(
+        "visit leaf "
+            + path
+            + " "
+            + leafNode.getRlp()
+            + " "
+            + leafNode.getLocation()
+            + " "
+            + leafNode.getHash());
     final Bytes leafPath = leafNode.getPath();
     final int commonPathLength = leafPath.commonPrefixLength(path);
 
     // Check if the current leaf node should be replaced
     if (commonPathLength == leafPath.size() && commonPathLength == path.size()) {
-      return nodeFactory.createLeaf(leafPath, value.orElseThrow());
+      return nodeFactory.createLeaf(leafPath, value);
     }
 
     assert commonPathLength < leafPath.size() && commonPathLength < path.size()
@@ -116,7 +131,7 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
     final byte updatedLeafIndex = leafPath.get(commonPathLength);
 
     final Node<V> updatedLeaf = leafNode.replacePath(leafPath.slice(commonPathLength + 1));
-    final Node<V> leaf = nodeFactory.createLeaf(newLeafPath, value.orElseThrow());
+    final Node<V> leaf = nodeFactory.createLeaf(newLeafPath, value);
     final Node<V> branch =
         nodeFactory.createBranch(updatedLeafIndex, updatedLeaf, newLeafIndex, leaf);
     if (commonPathLength > 0) {
@@ -128,11 +143,16 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
 
   @Override
   public Node<V> visit(final NullNode<V> nullNode, final Bytes path) {
-    if (node.isPresent()) {
-      if (nullNode.getLocation().equals(node.get().getLocation())) {
-        return node.get();
-      }
-    }
-    return nodeFactory.createLeaf(path, value.orElseThrow());
+
+    System.out.println(
+        "visit null "
+            + path
+            + " "
+            + nullNode.getRlp()
+            + " "
+            + nullNode.getLocation()
+            + " "
+            + nullNode.getHash());
+    return nodeFactory.createLeaf(path, value);
   }
 }

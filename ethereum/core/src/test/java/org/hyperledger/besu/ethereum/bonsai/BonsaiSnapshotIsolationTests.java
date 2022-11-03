@@ -36,19 +36,28 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.SealableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionTestFixture;
+import org.hyperledger.besu.ethereum.core.TrieGenerator;
 import org.hyperledger.besu.ethereum.eth.transactions.ImmutableTransactionPoolConfiguration;
 import org.hyperledger.besu.ethereum.eth.transactions.sorter.AbstractPendingTransactionsSorter;
 import org.hyperledger.besu.ethereum.eth.transactions.sorter.GasPricePendingTransactionsSorter;
 import org.hyperledger.besu.ethereum.mainnet.MainnetProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.MiningBeneficiaryCalculator;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProviderBuilder;
+import org.hyperledger.besu.ethereum.trie.CompactEncoding;
+import org.hyperledger.besu.ethereum.trie.Node;
+import org.hyperledger.besu.ethereum.trie.RemoveVisitor;
+import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
+import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBKeyValueStorageFactory;
@@ -59,6 +68,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -68,6 +78,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import kotlin.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.Before;
@@ -77,6 +88,7 @@ import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.mockito.junit.MockitoJUnitRunner;
 
+@SuppressWarnings("unused")
 @RunWith(MockitoJUnitRunner.class)
 public class BonsaiSnapshotIsolationTests {
 
@@ -116,6 +128,136 @@ public class BonsaiSnapshotIsolationTests {
     genesisState.writeStateTo(ws);
     ws.persist(blockchain.getChainHeadHeader());
     protocolContext = new ProtocolContext(blockchain, archive, null);
+  }
+
+  @Test
+  public void testBonsaiInMemoryCalculateRootHash() {
+
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
+        new BonsaiWorldStateKeyValueStorage(new InMemoryKeyValueStorageProvider());
+    StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
+        TrieGenerator.generateTrie2(worldStateKeyValueStorage, 122);
+
+    final Bytes32 initialRootHash = accountTrie.getRootHash();
+
+    Address address1 = Address.fromHexString("0xe308bd1ac5fda103967359b2712dd89deffb7973");
+    Optional<Bytes> bytes1 = accountTrie.get(Hash.hash(address1));
+    StateTrieAccountValue acc1 = StateTrieAccountValue.readFrom(RLP.input(bytes1.orElseThrow()));
+
+    Address address2 = Address.fromHexString("0xe408bd1ac5fda103967359b2712dd89deffb7973");
+    Optional<Bytes> bytes2 = accountTrie.get(Hash.hash(address2));
+    StateTrieAccountValue acc2 = StateTrieAccountValue.readFrom(RLP.input(bytes2.orElseThrow()));
+
+    StateTrieAccountValue acc1Updated =
+        new StateTrieAccountValue(
+            acc1.getNonce(), Wei.ONE, acc1.getStorageRoot(), acc1.getCodeHash());
+    StateTrieAccountValue acc2Updated =
+        new StateTrieAccountValue(10L, Wei.ONE, acc2.getStorageRoot(), acc2.getCodeHash());
+
+    List<Pair<Address, BonsaiValue<BonsaiAccount>>> updatedAccounts = new ArrayList<>();
+    updatedAccounts.add(
+        new Pair<>(
+            address1,
+            new BonsaiValue<>(
+                new BonsaiAccount(((BonsaiWorldView) archive.getMutable()), address1, acc1, false),
+                new BonsaiAccount(
+                    ((BonsaiWorldView) archive.getMutable()), address1, acc1Updated, false))));
+    updatedAccounts.add(
+        new Pair<>(
+            address2,
+            new BonsaiValue<>(
+                new BonsaiAccount(((BonsaiWorldView) archive.getMutable()), address2, acc2, false),
+                null)));
+
+    BonsaiInMemoryCalculateRootHashTask task =
+        new BonsaiInMemoryCalculateRootHashTask(
+            accountTrie, Bytes.EMPTY, updatedAccounts, worldStateKeyValueStorage);
+    StoredMerklePatriciaTrie<Bytes, Bytes> computedTrie = task.compute();
+
+    final StoredMerklePatriciaTrie<Bytes, Bytes> accountStateTrieV2 =
+        new StoredMerklePatriciaTrie<>(
+            worldStateKeyValueStorage::getAccountStateTrieNode, initialRootHash, b -> b, b -> b);
+    accountStateTrieV2.put(Hash.hash(address1), RLP.encode(acc1Updated::writeTo));
+    accountStateTrieV2.remove(Hash.hash(address2));
+
+    assertThat(accountStateTrieV2.getRootHash()).isEqualTo(accountTrie.getRootHash());
+  }
+
+  @Test
+  public void name() {
+
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
+        new BonsaiWorldStateKeyValueStorage(new InMemoryKeyValueStorageProvider());
+    StoredMerklePatriciaTrie<Bytes, Bytes> acccountTrie =
+        TrieGenerator.generateTrie2(worldStateKeyValueStorage, 122);
+
+    final Bytes32 initialRootHash = acccountTrie.getRootHash();
+
+    acccountTrie.visitAll(
+        bytesNode -> {
+          System.out.println(bytesNode.getLocation() + " " + bytesNode.getRlp());
+        });
+    Node<Bytes> nodeForPath = acccountTrie.getNodeForPath(Bytes.of(0x00, 0x01));
+    Bytes32 rootHash = Hash.hash(nodeForPath.getRlp());
+    System.out.println("test " + acccountTrie.getNodeForPath(Bytes.of(0x00, 0x01)).getRlp());
+
+    final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
+        new StoredMerklePatriciaTrie<>(
+            worldStateKeyValueStorage::getAccountStateTrieNode,
+            rootHash,
+            Bytes.of(0x00, 0x01),
+            Function.identity(),
+            Function.identity());
+
+    // Optional<Bytes> bytes =
+    // acccountTrie.get(Hash.fromHexString("0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53"));
+    // StateTrieAccountValue a = StateTrieAccountValue.readFrom(RLP.input(bytes.orElseThrow()));
+
+    subAccountTrie.removePath(
+        CompactEncoding.bytesToPath(
+                Bytes.fromHexString(
+                    "0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53"))
+            .slice(2),
+        new RemoveVisitor<>());
+
+    System.out.println(
+        "subAccountTrie root hash before  "
+            + subAccountTrie.getRootHash()
+            + " "
+            + CompactEncoding.bytesToPath(
+                    Bytes.fromHexString(
+                        "0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53"))
+                .slice(2));
+    // Bytes accountUpdated = RLP.encode(new StateTrieAccountValue(a.getNonce(), Wei.ONE,
+    // a.getStorageRoot(), a.getCodeHash())::writeTo);
+    // subAccountTrie.putWithPath(CompactEncoding.bytesToPath(Bytes.fromHexString("0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53")).slice(2),
+    //      accountUpdated);
+
+    System.out.println("subAccountTrie root hash after " + subAccountTrie.getRootHash());
+
+    System.out.println("accountTrie root hash before " + acccountTrie.getRootHash());
+
+    StoredNodeFactory<Bytes> objectStoredNodeFactory =
+        new StoredNodeFactory<>(
+            worldStateKeyValueStorage::getAccountStateTrieNode,
+            Function.identity(),
+            Function.identity());
+    Node<Bytes> decode =
+        objectStoredNodeFactory.decode(Bytes.of(0x00, 0x01), subAccountTrie.getRoot().getRlp());
+    System.out.println("root location " + subAccountTrie.getRoot().getLocation());
+    acccountTrie.putWithPath(Bytes.of(0x00, 0x01), decode);
+    System.out.println("accountTrie root hash after " + acccountTrie.getRootHash());
+
+    final StoredMerklePatriciaTrie<Bytes, Bytes> accountStateTrieV2 =
+        new StoredMerklePatriciaTrie<>(
+            worldStateKeyValueStorage::getAccountStateTrieNode, initialRootHash, b -> b, b -> b);
+
+    System.out.println("accountTrieV2 root hash before " + accountStateTrieV2.getRootHash());
+
+    accountStateTrieV2.remove(
+        Hash.fromHexString("0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53"));
+    // accountStateTrieV2.put(Hash.fromHexString("0x01627e70eaa2e196bc10ae228b124ef24c5c6735735223ddd74b75b9caa76b53"), accountUpdated);
+    System.out.println("accountTrieV2 root hash after " + accountStateTrieV2.getRootHash());
   }
 
   @Test
