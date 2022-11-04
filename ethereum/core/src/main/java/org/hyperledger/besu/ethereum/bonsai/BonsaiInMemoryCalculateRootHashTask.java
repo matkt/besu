@@ -93,7 +93,7 @@ public class BonsaiInMemoryCalculateRootHashTask
               new StoredMerklePatriciaTrie<>(
                   (loc, hash) -> worldStateKeyValueStorage.getAccountStateTrieNode(Bytes.concatenate(rootLocation,loc), hash),
                   rootHash,
-                  rootLocation,
+                  Bytes.EMPTY,
                   Function.identity(),
                   Function.identity());
           tasks.add(
