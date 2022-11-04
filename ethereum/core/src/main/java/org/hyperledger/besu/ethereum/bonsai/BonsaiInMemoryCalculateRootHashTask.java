@@ -91,7 +91,7 @@ public class BonsaiInMemoryCalculateRootHashTask
             System.out.println("create sub trie "+ rootLocation);
           final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
               new StoredMerklePatriciaTrie<>(
-                  worldStateKeyValueStorage::getAccountStateTrieNode,
+                  (loc, hash) -> worldStateKeyValueStorage.getAccountStateTrieNode(Bytes.concatenate(location,loc), hash),
                   rootHash,
                   rootLocation,
                   Function.identity(),
