@@ -18,7 +18,6 @@ import java.util.function.Function;
 
 import kotlin.Pair;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 
 public class BonsaiInMemoryCalculateRootHashTask
     extends RecursiveTask<StoredMerklePatriciaTrie<Bytes, Bytes>> {
@@ -82,12 +81,10 @@ public class BonsaiInMemoryCalculateRootHashTask
         (key, value) -> {
           final Bytes rootLocation = Bytes.concatenate(location, key);
           final Node<Bytes> nodeForPath = trie.getNodeForPath(rootLocation);
-          final Bytes32 rootHash = Hash.hash(nodeForPath.getRlp());
           final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
               new StoredMerklePatriciaTrie<>(
                   worldStateKeyValueStorage::getAccountStateTrieNode,
-                  rootHash,
-                  rootLocation,
+                  nodeForPath,
                   Function.identity(),
                   Function.identity());
           tasks.add(

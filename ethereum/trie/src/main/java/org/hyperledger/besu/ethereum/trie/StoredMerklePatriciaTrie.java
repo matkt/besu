@@ -81,6 +81,15 @@ public class StoredMerklePatriciaTrie<K extends Bytes, V> implements MerklePatri
             : new StoredNode<>(nodeFactory, rootLocation, rootHash);
   }
 
+  public StoredMerklePatriciaTrie(
+      final NodeLoader nodeLoader,
+      final Node<V> root,
+      final Function<V, Bytes> valueSerializer,
+      final Function<Bytes, V> valueDeserializer) {
+    this.nodeFactory = new StoredNodeFactory<>(nodeLoader, valueSerializer, valueDeserializer);
+    this.root = root;
+  }
+
   /**
    * Create a trie.
    *
