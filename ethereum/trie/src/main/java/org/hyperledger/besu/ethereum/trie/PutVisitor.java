@@ -74,14 +74,14 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
   @Override
   public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
     if (node.isPresent()) {
-      System.out.println("visit branch "+path+" "+node.get().getLocation()+" "+branchNode.getLocation());
+      //System.out.println("visit branch "+path+" "+node.get().getLocation()+" "+branchNode.getLocation());
       if (branchNode.getLocation().equals(node.get().getLocation())) {
         return node.get();
       }
     }
     assert path.size() > 0 : "Visiting path doesn't end with a non-matching terminator";
 
-    System.out.println("visit branch "+path+" "+" "+branchNode.getLocation());
+    //System.out.println("visit branch "+path+" "+" "+branchNode.getLocation());
     final byte childIndex = path.get(0);
     if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
       return branchNode.replaceValue(value.orElseThrow());

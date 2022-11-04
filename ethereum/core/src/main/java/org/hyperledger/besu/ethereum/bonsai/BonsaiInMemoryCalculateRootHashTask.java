@@ -67,7 +67,7 @@ public class BonsaiInMemoryCalculateRootHashTask
               subTask -> {
                   System.out.println("putWithPath"+subTask.location);
                   trie.putWithPath(
-                      subTask.location,
+                      subTask.location.slice(location.size()),
                       nodeFactory.decode(subTask.location, subTask.trie.getRoot().getRlp()));
               });
     }
@@ -103,4 +103,3 @@ public class BonsaiInMemoryCalculateRootHashTask
     return tasks;
   }
 }
-:wq
