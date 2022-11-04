@@ -87,13 +87,11 @@ public class BonsaiInMemoryCalculateRootHashTask
         (key, value) -> {
           final Bytes rootLocation = Bytes.concatenate(location, key);
           final Node<Bytes> nodeForPath = trie.getNodeForPath(rootLocation);
-          final Bytes32 rootHash = Hash.hash(nodeForPath.getRlp());
             System.out.println("create sub trie "+ rootLocation);
           final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
               new StoredMerklePatriciaTrie<>(
                   (loc, hash) -> worldStateKeyValueStorage.getAccountStateTrieNode(Bytes.concatenate(location,loc), hash),
-                  rootHash,
-                  rootLocation,
+                      nodeForPath,
                   Function.identity(),
                   Function.identity());
           tasks.add(
