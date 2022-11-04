@@ -45,10 +45,13 @@ public class BonsaiInMemoryCalculateRootHashTask
     if (updatedAccounts.size() == 1) {
       final Pair<Address, BonsaiValue<BonsaiAccount>> firstAccount = updatedAccounts.get(0);
       final Bytes path = CompactEncoding.bytesToPath(Hash.hash(firstAccount.getFirst()));
+        System.out.println("path "+path);
       final BonsaiAccount bonsaiAccount = firstAccount.getSecond().getUpdated();
       if (bonsaiAccount == null) {
-        trie.removePath(path.slice(location.size()), new RemoveVisitor<>());
+          System.out.println("bonsai account removePath"+(path.slice(location.size())));
+          trie.removePath(path.slice(location.size()), new RemoveVisitor<>());
       } else {
+          System.out.println("bonsai account putWithPath"+(path.slice(location.size())));
         trie.putWithPath(path.slice(location.size()), bonsaiAccount.serializeAccount());
       }
     } else {
@@ -61,10 +64,12 @@ public class BonsaiInMemoryCalculateRootHashTask
       // execute all the tasks and wait for the results
       ForkJoinTask.invokeAll(tasks)
           .forEach(
-              subTask ->
+              subTask -> {
+                  System.out.println("putWithPath"+subTask.location);
                   trie.putWithPath(
                       subTask.location,
-                      nodeFactory.decode(subTask.location, subTask.trie.getRoot().getRlp())));
+                      nodeFactory.decode(subTask.location, subTask.trie.getRoot().getRlp()));
+              });
     }
     return trie;
   }
@@ -83,6 +88,7 @@ public class BonsaiInMemoryCalculateRootHashTask
           final Bytes rootLocation = Bytes.concatenate(location, key);
           final Node<Bytes> nodeForPath = trie.getNodeForPath(rootLocation);
           final Bytes32 rootHash = Hash.hash(nodeForPath.getRlp());
+            System.out.println("create sub trie "+ rootLocation);
           final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
               new StoredMerklePatriciaTrie<>(
                   worldStateKeyValueStorage::getAccountStateTrieNode,
@@ -97,3 +103,4 @@ public class BonsaiInMemoryCalculateRootHashTask
     return tasks;
   }
 }
+:wq
