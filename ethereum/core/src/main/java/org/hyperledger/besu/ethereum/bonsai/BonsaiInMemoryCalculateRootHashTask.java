@@ -45,13 +45,10 @@ public class BonsaiInMemoryCalculateRootHashTask
     if (updatedAccounts.size() == 1) {
       final Pair<Address, BonsaiValue<BonsaiAccount>> firstAccount = updatedAccounts.get(0);
       final Bytes path = CompactEncoding.bytesToPath(Hash.hash(firstAccount.getFirst()));
-        System.out.println("path "+path);
       final BonsaiAccount bonsaiAccount = firstAccount.getSecond().getUpdated();
       if (bonsaiAccount == null) {
-          System.out.println("bonsai account removePath"+(path.slice(location.size())));
           trie.removePath(path.slice(location.size()), new RemoveVisitor<>());
       } else {
-          System.out.println("bonsai account putWithPath"+(path.slice(location.size())));
         trie.putWithPath(path.slice(location.size()), bonsaiAccount.serializeAccount());
       }
     } else {
@@ -65,7 +62,6 @@ public class BonsaiInMemoryCalculateRootHashTask
       ForkJoinTask.invokeAll(tasks)
           .forEach(
               subTask -> {
-                  System.out.println("putWithPath"+subTask.location);
                   trie.putWithPath(
                       subTask.location.slice(location.size()),
                       nodeFactory.decode(subTask.location, subTask.trie.getRoot().getRlp()));
@@ -87,7 +83,6 @@ public class BonsaiInMemoryCalculateRootHashTask
         (key, value) -> {
           final Bytes rootLocation = Bytes.concatenate(location, key);
           final Node<Bytes> nodeForPath = trie.getNodeForPath(key);
-            System.out.println("create sub trie "+ rootLocation);
           final StoredMerklePatriciaTrie<Bytes, Bytes> subAccountTrie =
               new StoredMerklePatriciaTrie<>(
                   (loc, hash) -> worldStateKeyValueStorage.getAccountStateTrieNode(Bytes.concatenate(rootLocation,loc), hash),
