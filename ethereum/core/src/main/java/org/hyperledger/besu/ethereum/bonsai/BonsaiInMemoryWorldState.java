@@ -21,9 +21,12 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
 
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import kotlin.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -71,27 +74,13 @@ public class BonsaiInMemoryWorldState extends BonsaiPersistedWorldState {
             Function.identity(),
             Function.identity());
 
-    // for manicured tries and composting, collect branches here (not implemented)
-
-    // now add the accounts
-    for (final Map.Entry<Address, BonsaiValue<BonsaiAccount>> accountUpdate :
-        worldStateUpdater.getAccountsToUpdate().entrySet()) {
-      final Bytes accountKey = accountUpdate.getKey();
-      final BonsaiValue<BonsaiAccount> bonsaiValue = accountUpdate.getValue();
-      final BonsaiAccount updatedAccount = bonsaiValue.getUpdated();
-      if (updatedAccount == null) {
-        final Hash addressHash = Hash.hash(accountKey);
-        accountTrie.remove(addressHash);
-      } else {
-        final Hash addressHash = updatedAccount.getAddressHash();
-        final Bytes accountValue = updatedAccount.serializeAccount();
-        accountTrie.put(addressHash, accountValue);
-      }
-    }
-
-    // TODO write to a cache and then generate a layer update from that and the
-    // DB tx updates.  Right now it is just DB updates.
-    return Hash.wrap(accountTrie.getRootHash());
+    final List<Pair<Address, BonsaiValue<BonsaiAccount>>> pairs =
+        worldStateUpdater.getAccountsToUpdate().entrySet().stream()
+            .map(entry -> new Pair<>(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
+    final BonsaiInMemoryCalculateRootHashTask bonsaiInMemoryCalculateRootHashTask =
+        new BonsaiInMemoryCalculateRootHashTask(accountTrie, Bytes.EMPTY, pairs, worldStateStorage);
+    return Hash.wrap(bonsaiInMemoryCalculateRootHashTask.compute().getRootHash());
   }
 
   private void updateAccountStorage(
