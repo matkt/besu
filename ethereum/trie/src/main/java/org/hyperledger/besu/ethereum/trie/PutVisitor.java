@@ -42,7 +42,6 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
         return node.get();
       }
     }
-    System.out.println("visit exension " + extensionNode + " " + path);
     final Bytes extensionPath = extensionNode.getPath();
     final int commonPathLength = extensionPath.commonPrefixLength(path);
     assert commonPathLength < path.size()
