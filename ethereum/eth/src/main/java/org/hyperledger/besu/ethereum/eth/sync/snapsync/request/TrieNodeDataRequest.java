@@ -84,6 +84,9 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
       return Stream.empty();
     }
 
+    //remove deprecated data if needed
+    pruneNode(worldStateStorage);
+
     final List<Node<Bytes>> nodes = TrieNodeDecoder.decodeNodes(location, data);
     return nodes.stream()
         .filter(bytesNode -> !(bytesNode instanceof NullNode))
@@ -170,6 +173,8 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
   public Stream<SnapDataRequest> getRootStorageRequests(final WorldStateStorage worldStateStorage) {
     return Stream.empty();
   }
+
+  public abstract void pruneNode(WorldStateStorage worldStateStorage);
 
   protected abstract Stream<SnapDataRequest> getRequestsFromTrieNodeValue(
       final WorldStateStorage worldStateStorage,

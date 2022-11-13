@@ -14,12 +14,17 @@
  */
 package org.hyperledger.besu.ethereum.bonsai;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.tuweni.bytes.MutableBytes;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.CompactEncoding;
 import org.hyperledger.besu.ethereum.trie.MerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.PeerTrieNodeFinder;
@@ -28,8 +33,11 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -98,17 +106,18 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
   public Optional<Bytes> getAccount(final Hash accountHash) {
     Optional<Bytes> response = accountStorage.get(accountHash.toArrayUnsafe()).map(Bytes::wrap);
-    if (response.isEmpty()) {
-      // after a snapsync/fastsync we only have the trie branches.
-      final Optional<Bytes> worldStateRootHash = getWorldStateRootHash();
-      if (worldStateRootHash.isPresent()) {
-        response =
-            new StoredMerklePatriciaTrie<>(
-                    new StoredNodeFactory<>(
-                        this::getAccountStateTrieNode, Function.identity(), Function.identity()),
-                    Bytes32.wrap(worldStateRootHash.get()))
-                .get(accountHash);
-      }
+    final Optional<Bytes> worldStateRootHash = getWorldStateRootHash();
+    Optional<Bytes> response2 = Optional.empty();
+    if (worldStateRootHash.isPresent()) {
+      response2 =
+              new StoredMerklePatriciaTrie<>(
+                      new StoredNodeFactory<>(
+                              this::getAccountStateTrieNode, Function.identity(), Function.identity()),
+                      Bytes32.wrap(worldStateRootHash.get()))
+                      .get(accountHash);
+    }
+    if(!response.equals(response2)){
+      System.out.println("dismatch "+response+" "+response2+" "+accountHash+" "+response.map(Hash::hash).orElse(Hash.EMPTY)+" "+response2.map(Hash::hash).orElse(Hash.EMPTY));
     }
     return response;
   }
@@ -124,7 +133,10 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     if (nodeHash.equals(MerklePatriciaTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerklePatriciaTrie.EMPTY_TRIE_NODE);
     } else {
-      return trieBranchStorage.get(location.toArrayUnsafe()).map(Bytes::wrap).filter(b -> Hash.hash(b).equals(nodeHash));
+      return trieBranchStorage
+          .get(location.toArrayUnsafe())
+          .map(Bytes::wrap)
+          .filter(b -> Hash.hash(b).equals(nodeHash));
     }
   }
 
@@ -135,8 +147,9 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
       return Optional.of(MerklePatriciaTrie.EMPTY_TRIE_NODE);
     } else {
       return trieBranchStorage
-              .get(Bytes.concatenate(accountHash, location).toArrayUnsafe())
-              .map(Bytes::wrap).filter(b -> Hash.hash(b).equals(nodeHash));
+          .get(Bytes.concatenate(accountHash, location).toArrayUnsafe())
+          .map(Bytes::wrap)
+          .filter(b -> Hash.hash(b).equals(nodeHash));
     }
   }
 
@@ -161,24 +174,27 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
         storageStorage
             .get(Bytes.concatenate(accountHash, slotHash).toArrayUnsafe())
             .map(Bytes::wrap);
-    if (response.isEmpty()) {
-      // after a snapsync/fastsync we only have the trie branches.
-      final Optional<Bytes> account = getAccount(accountHash);
-      final Optional<Bytes> worldStateRootHash = getWorldStateRootHash();
-      if (account.isPresent() && worldStateRootHash.isPresent()) {
-        final StateTrieAccountValue accountValue =
-            StateTrieAccountValue.readFrom(
-                org.hyperledger.besu.ethereum.rlp.RLP.input(account.get()));
-        response =
-            new StoredMerklePatriciaTrie<>(
-                    new StoredNodeFactory<>(
-                        (location, hash) -> getAccountStorageTrieNode(accountHash, location, hash),
-                        Function.identity(),
-                        Function.identity()),
-                    accountValue.getStorageRoot())
-                .get(slotHash)
-                .map(bytes -> Bytes32.leftPad(RLP.decodeValue(bytes)));
-      }
+    Optional<Bytes> response2 = Optional.empty();
+    // after a snapsync/fastsync we only have the trie branches.
+    final Optional<Bytes> account = getAccount(accountHash);
+    final Optional<Bytes> worldStateRootHash = getWorldStateRootHash();
+    if (account.isPresent() && worldStateRootHash.isPresent()) {
+      final StateTrieAccountValue accountValue =
+              StateTrieAccountValue.readFrom(
+                      org.hyperledger.besu.ethereum.rlp.RLP.input(account.get()));
+      response2 =
+              new StoredMerklePatriciaTrie<>(
+                      new StoredNodeFactory<>(
+                              (location, hash) -> getAccountStorageTrieNode(accountHash, location, hash),
+                              Function.identity(),
+                              Function.identity()),
+                      accountValue.getStorageRoot())
+                      .get(slotHash)
+                      .map(bytes -> Bytes32.leftPad(RLP.decodeValue(bytes)));
+
+    }
+    if(!response.equals(response2)){
+      System.out.println("dismatch "+response+" "+response2+" "+accountHash+" "+slotHash+" "+response.map(Hash::hash).orElse(Hash.EMPTY)+" "+response2.map(Hash::hash).orElse(Hash.EMPTY));
     }
     return response;
   }
@@ -211,6 +227,63 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
   public void clearFlatDatabase() {
     accountStorage.clear();
     storageStorage.clear();
+  }
+
+  public void clearAccountFlatDatabaseInRange(final Bytes location) {
+    final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
+    KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
+    accountStorage
+            .getInRange(range.getLeft(), range.getRight())
+            .forEach(
+                    (bytes32, bytes) -> {
+                      keyValueStorageTransaction.remove(bytes32.toArrayUnsafe());
+                    });
+    keyValueStorageTransaction.commit();
+    accountStorage.getInRange(range.getLeft(), range.getRight());
+  }
+
+  public void clearStorageFlatDatabaseInRange(final Bytes accountHash, final Bytes location) {
+    final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
+    final AtomicInteger eltRemoved = new AtomicInteger();
+    final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
+            new AtomicReference<>(storageStorage.startTransaction());
+    storageStorage
+            .getInRange(range.getLeft(), range.getRight())
+            .forEach(
+                    (bytes32, bytes) -> {
+                      nodeUpdaterTmp.get().remove(bytes32.toArrayUnsafe());
+                      if (eltRemoved.getAndIncrement() % 100 == 0) {
+                        nodeUpdaterTmp.get().commit();
+                        nodeUpdaterTmp.set(storageStorage.startTransaction());
+                      }
+                    });
+    nodeUpdaterTmp.get().commit();
+  }
+
+  public static Pair<Bytes, Bytes> generateRangeFromLocation(
+          final Bytes prefix, final Bytes location) {
+
+    int size = Bytes32.SIZE*2;
+
+    final MutableBytes mutableBytes = MutableBytes.create(size+1);
+    mutableBytes.fill((byte)0x00);
+    mutableBytes.set(0, location);
+    mutableBytes.set(size, (byte) 0x10);
+
+    final Bytes left = Bytes.concatenate(prefix,CompactEncoding.pathToBytes(mutableBytes));
+
+    mutableBytes.fill((byte)0x0f);
+    mutableBytes.set(0, location);
+    mutableBytes.set(size, (byte) 0x10);
+
+    final Bytes right = Bytes.concatenate(prefix,CompactEncoding.pathToBytes(mutableBytes));
+
+    return Pair.of(left,right);
+  }
+
+
+  public static void main(final String[] args) {
+    System.out.println(generateRangeFromLocation(Bytes.EMPTY, Bytes.fromHexString("0x05020e02060806")));
   }
 
   @Override

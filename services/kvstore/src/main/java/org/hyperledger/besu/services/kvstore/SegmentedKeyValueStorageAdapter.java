@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.services.kvstore;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -24,10 +23,13 @@ import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.tuweni.bytes.Bytes;
 
 public class SegmentedKeyValueStorageAdapter<S> implements SnappableKeyValueStorage {
 
@@ -77,6 +79,11 @@ public class SegmentedKeyValueStorageAdapter<S> implements SnappableKeyValueStor
   @Override
   public Set<byte[]> getAllValuesFromKeysThat(final Predicate<byte[]> returnCondition) {
     return storage.getAllValuesFromKeysThat(segmentHandle, returnCondition);
+  }
+
+  @Override
+  public TreeMap<Bytes, Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+    return storage.getInRange(startKeyHash, endKeyHash, segmentHandle);
   }
 
   @Override

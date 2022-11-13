@@ -17,7 +17,6 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static java.util.Objects.requireNonNullElse;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
@@ -37,12 +36,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableMap;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.ColumnFamilyDescriptor;
@@ -268,6 +269,30 @@ public class RocksDBColumnarKeyValueStorage
         .filter(pair -> returnCondition.test(pair.getKey()))
         .map(Pair::getValue)
         .collect(toUnmodifiableSet());
+  }
+
+  @Override
+  public TreeMap<Bytes, Bytes> getInRange(
+      final Bytes startKeyHash,
+      final Bytes endKeyHash,
+      final RocksDbSegmentIdentifier segmentHandle) {
+    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
+    rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
+    RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
+    TreeMap<Bytes, Bytes> res = new TreeMap<>();
+    while (rocksDbKeyIterator.hasNext()) {
+      Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
+      Bytes key = Bytes.wrap(entry.getKey());
+      if (key.compareTo(startKeyHash) >= 0) {
+        if (key.compareTo(endKeyHash) <= 0) {
+          System.out.println("found next " + key + " " + startKeyHash + " " + endKeyHash);
+          res.put(key, Bytes.wrap(entry.getValue()));
+        } else {
+          return res;
+        }
+      }
+    }
+    return res;
   }
 
   @Override

@@ -20,10 +20,12 @@ import org.hyperledger.besu.plugin.services.exception.StorageException;
 import java.io.Closeable;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.tuweni.bytes.Bytes;
 
 /**
  * Responsible for storing values against keys.
@@ -100,6 +102,10 @@ public interface KeyValueStorage extends Closeable {
   Set<byte[]> getAllKeysThat(Predicate<byte[]> returnCondition);
 
   Set<byte[]> getAllValuesFromKeysThat(final Predicate<byte[]> returnCondition);
+
+  default TreeMap<Bytes, Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+    throw new UnsupportedOperationException("test");
+  }
 
   /**
    * Begins a fresh transaction, for sequencing operations for later atomic execution.

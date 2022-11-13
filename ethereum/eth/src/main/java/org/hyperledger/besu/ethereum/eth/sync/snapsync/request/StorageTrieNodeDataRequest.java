@@ -30,6 +30,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.cleanStorageNode;
+
 public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
 
   final Hash accountHash;
@@ -46,8 +48,6 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
       final Updater updater,
       final SnapWorldDownloadState downloadState,
       final SnapSyncState snapSyncState) {
-    NodeDeletionProcessor deletion = new NodeDeletionProcessor(worldStateStorage, updater);
-    deletion.startFromStorageNode(accountHash, getLocation(), getNodeHash(), data);
     updater.putAccountStorageTrieNode(getAccountHash(), getLocation(), getNodeHash(), data);
     return 1;
   }
@@ -64,6 +64,13 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
   }
 
   @Override
+  public void pruneNode(final WorldStateStorage worldStateStorage) {
+    if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
+      cleanStorageNode((BonsaiWorldStateKeyValueStorage) worldStateStorage, accountHash, getLocation(), data);
+    }
+  }
+
+  @Override
   protected Stream<SnapDataRequest> getRequestsFromTrieNodeValue(
       final WorldStateStorage worldStateStorage,
       final Bytes location,
@@ -71,9 +78,9 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
       final Bytes value) {
     if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
       ((BonsaiWorldStateKeyValueStorage.Updater) worldStateStorage.updater())
-          .putStorageValueBySlotHash(
-              accountHash, getSlotHash(location, path), Bytes32.leftPad(RLP.decodeValue(value)))
-          .commit();
+              .putStorageValueBySlotHash(
+                      accountHash, getSlotHash(location, path), Bytes32.leftPad(RLP.decodeValue(value)))
+              .commit();
     }
     return Stream.empty();
   }

@@ -35,6 +35,8 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.cleanAccountNode;
+
 public class AccountTrieNodeDataRequest extends TrieNodeDataRequest {
 
   private final HashSet<Bytes> inconsistentAccounts;
@@ -57,8 +59,6 @@ public class AccountTrieNodeDataRequest extends TrieNodeDataRequest {
     if (isRoot()) {
       downloadState.setRootNodeData(data);
     }
-    NodeDeletionProcessor deletion = new NodeDeletionProcessor(worldStateStorage, updater);
-    deletion.startFromAccountNode(getLocation(), getNodeHash(), data);
 
     updater.putAccountStateTrieNode(getLocation(), getNodeHash(), data);
     return 1;
@@ -119,6 +119,13 @@ public class AccountTrieNodeDataRequest extends TrieNodeDataRequest {
               });
     }
     return requests.stream();
+  }
+
+  @Override
+  public void pruneNode(final WorldStateStorage worldStateStorage) {
+    if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
+      cleanAccountNode((BonsaiWorldStateKeyValueStorage) worldStateStorage, getLocation(), data);
+    }
   }
 
   @Override

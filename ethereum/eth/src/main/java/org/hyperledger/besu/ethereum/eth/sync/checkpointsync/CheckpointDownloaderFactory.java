@@ -77,7 +77,9 @@ public class CheckpointDownloaderFactory extends SnapDownloaderFactory {
 
     ensureDirectoryExists(fastSyncDataDirectory.toFile());
 
-    final FastSyncState fastSyncState =
+    worldStateStorage.clear();
+
+    /*final FastSyncState fastSyncState =
         fastSyncStateStorage.loadState(ScheduleBasedBlockHeaderFunctions.create(protocolSchedule));
     if (fastSyncState.getPivotBlockHeader().isEmpty()
         && protocolContext.getBlockchain().getChainHeadBlockNumber()
@@ -85,7 +87,7 @@ public class CheckpointDownloaderFactory extends SnapDownloaderFactory {
       LOG.info(
           "Checkpoint sync was requested, but cannot be enabled because the local blockchain is not empty.");
       return Optional.empty();
-    }
+    }*/
 
     final FastSyncActions fastSyncActions;
     if (syncState.getCheckpoint().isEmpty()) {

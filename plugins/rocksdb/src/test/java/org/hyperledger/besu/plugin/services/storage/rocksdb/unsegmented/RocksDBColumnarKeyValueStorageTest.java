@@ -16,7 +16,6 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.unsegmented;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.hyperledger.besu.kvstore.AbstractKeyValueStorageTest;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
@@ -35,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;

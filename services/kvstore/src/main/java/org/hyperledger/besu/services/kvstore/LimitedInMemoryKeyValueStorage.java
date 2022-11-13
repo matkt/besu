@@ -16,7 +16,6 @@ package org.hyperledger.besu.services.kvstore;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
@@ -35,6 +34,7 @@ import java.util.stream.Stream;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableSet;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 
 /**
@@ -102,8 +102,7 @@ public class LimitedInMemoryKeyValueStorage implements KeyValueStorage {
     lock.lock();
     try {
       return ImmutableSet.copyOf(storage.asMap().entrySet()).stream()
-          .map(
-              bytesEntry -> Pair.of(bytesEntry.getKey().toArrayUnsafe(), bytesEntry.getValue()));
+          .map(bytesEntry -> Pair.of(bytesEntry.getKey().toArrayUnsafe(), bytesEntry.getValue()));
     } finally {
       lock.unlock();
     }
@@ -115,8 +114,7 @@ public class LimitedInMemoryKeyValueStorage implements KeyValueStorage {
     lock.lock();
     try {
       return ImmutableSet.copyOf(storage.asMap().entrySet()).stream()
-              .map(
-                      bytesEntry -> bytesEntry.getKey().toArrayUnsafe());
+          .map(bytesEntry -> bytesEntry.getKey().toArrayUnsafe());
     } finally {
       lock.unlock();
     }
