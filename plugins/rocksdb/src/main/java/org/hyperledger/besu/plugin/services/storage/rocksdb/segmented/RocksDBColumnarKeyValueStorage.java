@@ -291,6 +291,8 @@ public class RocksDBColumnarKeyValueStorage
         }
       }
     }
+    rocksIterator.close();
+    rocksIterator.close();
     return res;
   }
 

@@ -33,6 +33,7 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -250,13 +251,13 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location,final Bytes data) {
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
-            .keySet().forEach(
-                    key -> {
+            .forEach(
+                    (key, value)-> {
                       System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
                       keyValueStorageTransaction.remove(key.toArrayUnsafe());
                     });
@@ -271,8 +272,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
-            .keySet().forEach(
-                    key -> {
+            .forEach(
+                    (key,value) -> {
                         System.out.println("found with method "+index+" to remove accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location);
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
