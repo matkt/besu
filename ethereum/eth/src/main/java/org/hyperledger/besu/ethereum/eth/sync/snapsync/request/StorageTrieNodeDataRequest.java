@@ -19,18 +19,20 @@ import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapWorldDownloadState;
 import org.hyperledger.besu.ethereum.trie.CompactEncoding;
+import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage.Updater;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.cleanStorageNode;
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.deletePotentialOldChildren;
 
 public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
 
@@ -58,6 +60,9 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
         getAccountHash(), getLocation(), getNodeHash());
   }
 
+  public static void main(final String[] args) {
+    System.out.println(new StoredNodeFactory<>((location, hash) -> Optional.empty(), Function.identity(), Function.identity()).decode(Bytes.EMPTY, Bytes.fromHexString("0xe213a0d5e48c53daa403881a9aeb52829ecc61042148eda3ed3fad8c1b4b97e9b86760")));
+  }
   @Override
   protected SnapDataRequest createChildNodeDataRequest(final Hash childHash, final Bytes location) {
     return createStorageTrieNodeDataRequest(childHash, getAccountHash(), getRootHash(), location);
@@ -66,7 +71,7 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
   @Override
   public void pruneNode(final WorldStateStorage worldStateStorage) {
     if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
-      cleanStorageNode((BonsaiWorldStateKeyValueStorage) worldStateStorage, accountHash, getLocation(), data);
+      deletePotentialOldChildren((BonsaiWorldStateKeyValueStorage) worldStateStorage, this);
     }
   }
 

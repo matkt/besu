@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.CompactEncoding;
 import org.hyperledger.besu.ethereum.trie.MerklePatriciaTrie;
-import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.PeerTrieNodeFinder;
@@ -33,7 +32,6 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -229,37 +227,70 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final Bytes location) {
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Bytes data) {
+    clearAccountFlatDatabaseInRange(index, location, Optional.empty(), data);
+  }
+
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Optional<Bytes> maybeExcludeLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
-            .forEach(
-                    (bytes32, bytes) -> {
-                      keyValueStorageTransaction.remove(bytes32.toArrayUnsafe());
+            .keySet().forEach(
+                    key -> {
+                      final boolean shouldExclude = maybeExcludeLocation
+                              .map(exclude -> exclude.commonPrefixLength(CompactEncoding.bytesToPath(key))==exclude.size())
+                              .orElse(false);
+                      System.out.println("found with method "+index+" to check "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
+                      if(!shouldExclude){
+                        System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
+                        keyValueStorageTransaction.remove(key.toArrayUnsafe());
+                      }
                     });
     keyValueStorageTransaction.commit();
-    accountStorage.getInRange(range.getLeft(), range.getRight());
   }
 
-  public void clearStorageFlatDatabaseInRange(final Bytes accountHash, final Bytes location) {
+  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final Bytes data) {
+    clearStorageFlatDatabaseInRange(index, accountHash, location, Optional.empty(), data);
+  }
+
+  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final Optional<Bytes> maybeExcludeLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(storageStorage.startTransaction());
+
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
-            .forEach(
-                    (bytes32, bytes) -> {
-                      nodeUpdaterTmp.get().remove(bytes32.toArrayUnsafe());
-                      if (eltRemoved.getAndIncrement() % 100 == 0) {
-                        nodeUpdaterTmp.get().commit();
-                        nodeUpdaterTmp.set(storageStorage.startTransaction());
+            .keySet().forEach(
+                    key -> {
+                      final boolean shouldExclude = maybeExcludeLocation
+                              .map(exclude -> exclude.commonPrefixLength(CompactEncoding.bytesToPath(key))==exclude.size())
+                              .orElse(false);
+                      System.out.println("found with method "+index+" to check accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
+                      if(!shouldExclude){
+                        System.out.println("found with method "+index+" to remove accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
+                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                        if (eltRemoved.getAndIncrement() % 100 == 0) {
+                          nodeUpdaterTmp.get().commit();
+                          nodeUpdaterTmp.set(storageStorage.startTransaction());
+                        }
                       }
+
                     });
     nodeUpdaterTmp.get().commit();
   }
 
+  public static Bytes bytesToPath(final Bytes bytes) {
+    final MutableBytes path = MutableBytes.create(bytes.size() * 2 );
+    int j = 0;
+    for (int i = 0; i < bytes.size(); i += 1, j += 2) {
+      final byte b = bytes.get(i);
+      path.set(j, (byte) ((b >>> 4) & 0x0f));
+      path.set(j + 1, (byte) (b & 0x0f));
+    }
+    return path;
+  }
   public static Pair<Bytes, Bytes> generateRangeFromLocation(
           final Bytes prefix, final Bytes location) {
 
@@ -279,11 +310,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     final Bytes right = Bytes.concatenate(prefix,CompactEncoding.pathToBytes(mutableBytes));
 
     return Pair.of(left,right);
-  }
-
-
-  public static void main(final String[] args) {
-    System.out.println(generateRangeFromLocation(Bytes.EMPTY, Bytes.fromHexString("0x05020e02060806")));
   }
 
   @Override

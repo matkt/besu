@@ -285,7 +285,6 @@ public class RocksDBColumnarKeyValueStorage
       Bytes key = Bytes.wrap(entry.getKey());
       if (key.compareTo(startKeyHash) >= 0) {
         if (key.compareTo(endKeyHash) <= 0) {
-          System.out.println("found next " + key + " " + startKeyHash + " " + endKeyHash);
           res.put(key, Bytes.wrap(entry.getValue()));
         } else {
           return res;

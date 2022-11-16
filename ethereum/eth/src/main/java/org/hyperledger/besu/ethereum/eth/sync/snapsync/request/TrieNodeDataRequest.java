@@ -85,7 +85,9 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
     }
 
     //remove deprecated data if needed
-    pruneNode(worldStateStorage);
+    if(!isExpired(snapSyncState) && isRequiresPersisting()) {
+      pruneNode(worldStateStorage);
+    }
 
     final List<Node<Bytes>> nodes = TrieNodeDecoder.decodeNodes(location, data);
     return nodes.stream()
