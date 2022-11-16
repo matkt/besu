@@ -251,20 +251,24 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Bytes data) {
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
                     (key, value)-> {
-                      System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
-                      keyValueStorageTransaction.remove(key.toArrayUnsafe());
+                      final Bytes filteredLocation = CompactEncoding.bytesToPath(key);
+                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
+                      if(!shouldExclude) {
+                        System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
+                        keyValueStorageTransaction.remove(key.toArrayUnsafe());
+                      }
                     });
     keyValueStorageTransaction.commit();
   }
 
-  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location,final Bytes data) {
+  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
@@ -274,14 +278,22 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
                     (key,value) -> {
-                        System.out.println("found with method "+index+" to remove accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location);
+                      final Bytes filteredLocation = CompactEncoding.bytesToPath(key).slice(accountHash.size() * 2);
+                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
+                      if(!shouldExclude) {
+                        System.out.println("found with method " + index + " to remove accountHash " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(storageStorage.startTransaction());
                         }
+                      }
                     });
     nodeUpdaterTmp.get().commit();
+  }
+
+  public static void main(final String[] args) {
+    System.out.println(Bytes.fromHexString("0x01020304050607").slice(4));
   }
 
   public static Pair<Bytes, Bytes> generateRangeFromLocation(
