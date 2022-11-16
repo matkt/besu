@@ -251,7 +251,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, List<Bytes> excludedLocation, final Bytes data) {
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
