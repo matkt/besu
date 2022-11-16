@@ -257,7 +257,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key, value)-> {
+                    (key)-> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
@@ -277,7 +277,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key,value) -> {
+                    (key) -> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key).slice(accountHash.size() * 2);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {

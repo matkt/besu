@@ -18,6 +18,7 @@ import org.hyperledger.besu.plugin.Unstable;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.io.Closeable;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -103,7 +104,7 @@ public interface KeyValueStorage extends Closeable {
 
   Set<byte[]> getAllValuesFromKeysThat(final Predicate<byte[]> returnCondition);
 
-  default TreeMap<Bytes, Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+  default List<Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
     throw new UnsupportedOperationException("test");
   }
 

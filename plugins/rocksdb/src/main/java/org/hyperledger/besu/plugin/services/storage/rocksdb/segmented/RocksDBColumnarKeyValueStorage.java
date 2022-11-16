@@ -274,7 +274,7 @@ public class RocksDBColumnarKeyValueStorage
   }
 
   @Override
-  public TreeMap<Bytes, Bytes> getInRange(
+  public List<Bytes> getInRange(
       final Bytes startKeyHash,
       final Bytes endKeyHash,
       final RocksDbSegmentIdentifier segmentHandle) {
@@ -283,26 +283,25 @@ public class RocksDBColumnarKeyValueStorage
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
     rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
-    TreeMap<Bytes, Bytes> res = new TreeMap<>();
-    double i = 0;
+    List<Bytes> res = new ArrayList<>();
+    /*double i = 0;
     while (rocksDbKeyIterator.hasNext()) {
-      Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
-      Bytes key = Bytes.wrap(entry.getKey());
+      Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
       i +=1;
       if(i>1000){
         System.out.println("idndex i "+i);
       }
       if (key.compareTo(startKeyHash) >= 0) {
         if (key.compareTo(endKeyHash) <= 0) {
-          res.put(key, Bytes.wrap(entry.getValue()));
+          res.add(key);
         } else {
           return res;
         }
       }
-    }
+    }*/
     rocksDbKeyIterator.close();
     rocksIterator.close();
-    return new TreeMap<>();
+    return res;
   }
 
   @Override
