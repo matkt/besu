@@ -54,6 +54,7 @@ import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
 import org.rocksdb.LRUCache;
 import org.rocksdb.OptimisticTransactionDB;
+import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
@@ -276,7 +277,9 @@ public class RocksDBColumnarKeyValueStorage
       final Bytes startKeyHash,
       final Bytes endKeyHash,
       final RocksDbSegmentIdentifier segmentHandle) {
-    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
+    ReadOptions readOptions = new ReadOptions();
+    readOptions.setFillCache(false);
+    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
     rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     TreeMap<Bytes, Bytes> res = new TreeMap<>();
@@ -292,7 +295,6 @@ public class RocksDBColumnarKeyValueStorage
       }
     }
     rocksDbKeyIterator.close();
-    rocksIterator.close();
     return res;
   }
 
