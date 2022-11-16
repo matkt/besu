@@ -270,7 +270,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
   public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
-    final AtomicInteger eltRemoved = new AtomicInteger();
+    //final AtomicInteger eltRemoved = new AtomicInteger();
     //final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
       //      new AtomicReference<>(storageStorage.startTransaction());
 
