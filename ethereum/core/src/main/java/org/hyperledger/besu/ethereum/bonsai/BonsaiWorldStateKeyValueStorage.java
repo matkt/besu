@@ -253,7 +253,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
   public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
-    KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
+    //KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
@@ -262,17 +262,17 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
                         System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
-                        keyValueStorageTransaction.remove(key.toArrayUnsafe());
+                        //keyValueStorageTransaction.remove(key.toArrayUnsafe());
                       }
                     });
-    keyValueStorageTransaction.commit();
+    //keyValueStorageTransaction.commit();
   }
 
   public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
-    final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
-            new AtomicReference<>(storageStorage.startTransaction());
+    //final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
+      //      new AtomicReference<>(storageStorage.startTransaction());
 
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
@@ -282,14 +282,14 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
                         System.out.println("found with method " + index + " to remove accountHash " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
-                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                        /*nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(storageStorage.startTransaction());
-                        }
+                        }*/
                       }
                     });
-    nodeUpdaterTmp.get().commit();
+    //nodeUpdaterTmp.get().commit();
   }
 
   public static void main(final String[] args) {
