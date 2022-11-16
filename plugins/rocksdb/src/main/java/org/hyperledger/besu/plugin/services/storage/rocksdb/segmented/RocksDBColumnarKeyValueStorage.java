@@ -30,6 +30,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionTransitionValidatorDecorator;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -282,10 +283,15 @@ public class RocksDBColumnarKeyValueStorage
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
     rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
-    /*TreeMap<Bytes, Bytes> res = new TreeMap<>();
+    TreeMap<Bytes, Bytes> res = new TreeMap<>();
+    double i = 0;
     while (rocksDbKeyIterator.hasNext()) {
       Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
       Bytes key = Bytes.wrap(entry.getKey());
+      i +=1;
+      if(i<1000){
+        System.out.println("idndex i "+i);
+      }
       if (key.compareTo(startKeyHash) >= 0) {
         if (key.compareTo(endKeyHash) <= 0) {
           res.put(key, Bytes.wrap(entry.getValue()));
@@ -293,7 +299,7 @@ public class RocksDBColumnarKeyValueStorage
           return res;
         }
       }
-    }*/
+    }
     rocksDbKeyIterator.close();
     rocksIterator.close();
     return new TreeMap<>();
