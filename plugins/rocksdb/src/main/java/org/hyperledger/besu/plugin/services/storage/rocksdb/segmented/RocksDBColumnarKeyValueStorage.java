@@ -280,9 +280,9 @@ public class RocksDBColumnarKeyValueStorage
     ReadOptions readOptions = new ReadOptions();
     readOptions.setFillCache(false);
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
-    /*rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
+    rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
-    TreeMap<Bytes, Bytes> res = new TreeMap<>();
+    /*TreeMap<Bytes, Bytes> res = new TreeMap<>();
     while (rocksDbKeyIterator.hasNext()) {
       Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
       Bytes key = Bytes.wrap(entry.getKey());
@@ -294,6 +294,7 @@ public class RocksDBColumnarKeyValueStorage
         }
       }
     }*/
+    rocksDbKeyIterator.close();
     rocksIterator.close();
     return new TreeMap<>();
   }
