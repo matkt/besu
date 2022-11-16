@@ -95,6 +95,29 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     this.trieBranchStorage = trieBranchStorage;
     this.trieLogStorage = trieLogStorage;
     this.maybeFallbackNodeFinder = fallbackNodeFinder;
+
+    final Hash accountHash = Hash.wrap(Bytes32.fromHexString("0x47682af25e2a65349e9c6d27f5fce2b26718611ef8b7de9ad8cfaacc4f5b2ae0"));
+    final Optional<Bytes> account = getAccount(accountHash);
+    final Optional<Bytes> worldStateRootHash = getWorldStateRootHash();
+    if (account.isPresent() && worldStateRootHash.isPresent()) {
+      final StateTrieAccountValue accountValue =
+              StateTrieAccountValue.readFrom(
+                      org.hyperledger.besu.ethereum.rlp.RLP.input(account.get()));
+      Optional<Bytes> res =
+              new StoredMerklePatriciaTrie<>(
+                      new StoredNodeFactory<>(
+                              (location, hash) -> {
+                                Optional<Bytes> node  = getAccountStorageTrieNode(accountHash, location, hash);
+                                System.out.println("node "+accountHash+" "+location+" "+hash+" "+node.orElse(Bytes.EMPTY));
+                                return node;
+                              },
+                              Function.identity(),
+                              Function.identity()),
+                      accountValue.getStorageRoot())
+                      .get(Bytes.fromHexString("0x1b6847dc741a1b0cd08d278845f9d819d87b734759afb55fe2de5cb82a9ae672"))
+                      .map(bytes -> Bytes32.leftPad(RLP.decodeValue(bytes)));
+      System.out.println("resultat "+res.orElse(Bytes.EMPTY));
+    }
   }
 
   @Override
@@ -227,34 +250,20 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Bytes data) {
-    clearAccountFlatDatabaseInRange(index, location, Optional.empty(), data);
-  }
-
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final Optional<Bytes> maybeExcludeLocation, final Bytes data) {
+  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location,final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .keySet().forEach(
                     key -> {
-                      final boolean shouldExclude = maybeExcludeLocation
-                              .map(exclude -> exclude.commonPrefixLength(CompactEncoding.bytesToPath(key))==exclude.size())
-                              .orElse(false);
-                      System.out.println("found with method "+index+" to check "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
-                      if(!shouldExclude){
-                        System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
-                        keyValueStorageTransaction.remove(key.toArrayUnsafe());
-                      }
+                      System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
+                      keyValueStorageTransaction.remove(key.toArrayUnsafe());
                     });
     keyValueStorageTransaction.commit();
   }
 
-  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final Bytes data) {
-    clearStorageFlatDatabaseInRange(index, accountHash, location, Optional.empty(), data);
-  }
-
-  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final Optional<Bytes> maybeExcludeLocation, final Bytes data) {
+  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location,final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
@@ -264,33 +273,16 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
             .getInRange(range.getLeft(), range.getRight())
             .keySet().forEach(
                     key -> {
-                      final boolean shouldExclude = maybeExcludeLocation
-                              .map(exclude -> exclude.commonPrefixLength(CompactEncoding.bytesToPath(key))==exclude.size())
-                              .orElse(false);
-                      System.out.println("found with method "+index+" to check accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
-                      if(!shouldExclude){
-                        System.out.println("found with method "+index+" to remove accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" "+maybeExcludeLocation.orElse(Bytes.EMPTY)+" "+maybeExcludeLocation);
+                        System.out.println("found with method "+index+" to remove accountHash "+accountHash+" "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location);
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(storageStorage.startTransaction());
                         }
-                      }
-
                     });
     nodeUpdaterTmp.get().commit();
   }
 
-  public static Bytes bytesToPath(final Bytes bytes) {
-    final MutableBytes path = MutableBytes.create(bytes.size() * 2 );
-    int j = 0;
-    for (int i = 0; i < bytes.size(); i += 1, j += 2) {
-      final byte b = bytes.get(i);
-      path.set(j, (byte) ((b >>> 4) & 0x0f));
-      path.set(j + 1, (byte) (b & 0x0f));
-    }
-    return path;
-  }
   public static Pair<Bytes, Bytes> generateRangeFromLocation(
           final Bytes prefix, final Bytes location) {
 
