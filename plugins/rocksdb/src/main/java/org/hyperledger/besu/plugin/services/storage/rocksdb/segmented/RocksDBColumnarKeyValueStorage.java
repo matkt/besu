@@ -289,7 +289,7 @@ public class RocksDBColumnarKeyValueStorage
       Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
       Bytes key = Bytes.wrap(entry.getKey());
       i +=1;
-      if(i<1000){
+      if(i>1000){
         System.out.println("idndex i "+i);
       }
       if (key.compareTo(startKeyHash) >= 0) {
