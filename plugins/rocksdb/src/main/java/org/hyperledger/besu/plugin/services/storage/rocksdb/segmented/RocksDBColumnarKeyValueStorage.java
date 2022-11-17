@@ -308,6 +308,7 @@ public class RocksDBColumnarKeyValueStorage
       while (rocksDbKeyIterator.hasNext()) {
         final Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
         if(key.commonPrefixLength(prefix)==prefix.size()) {
+          System.out.println("key found "+key+" "+prefix);
           res.add(key);
         } else {
           return res;
