@@ -83,8 +83,13 @@ public class SegmentedKeyValueStorageAdapter<S> implements SnappableKeyValueStor
   }
 
   @Override
-  public List<Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+  public TreeMap<Bytes,Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
     return storage.getInRange(startKeyHash, endKeyHash, segmentHandle);
+  }
+
+  @Override
+  public TreeMap<Bytes,Bytes> getByPrefix(final Bytes prefix) {
+    return storage.getByPrefix(prefix, segmentHandle);
   }
 
   @Override

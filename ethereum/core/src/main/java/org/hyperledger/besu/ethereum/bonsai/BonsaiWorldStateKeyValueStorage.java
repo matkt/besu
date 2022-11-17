@@ -33,6 +33,7 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -253,47 +254,79 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
 
   public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
-    //KeyValueStorageTransaction keyValueStorageTransaction = accountStorage.startTransaction();
+    final AtomicInteger eltRemoved = new AtomicInteger();
+    final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
+            new AtomicReference<>(accountStorage.startTransaction());
+
+    clearTrieNodeDatabaseInRange(11, Bytes.EMPTY, location, excludedLocation, data);
+
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key)-> {
+                    (key, value)-> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
                         System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
-                        //keyValueStorageTransaction.remove(key.toArrayUnsafe());
+                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                        clearStorageFlatDatabaseInRange(10, key, Bytes.EMPTY, new ArrayList<>(), data);
+                        if (eltRemoved.getAndIncrement() % 100 == 0) {
+                          nodeUpdaterTmp.get().commit();
+                          nodeUpdaterTmp.set(accountStorage.startTransaction());
+                        }
                       }
                     });
-    //keyValueStorageTransaction.commit();
+    nodeUpdaterTmp.get().commit();
   }
 
   public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
-    //final AtomicInteger eltRemoved = new AtomicInteger();
-    //final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
-      //      new AtomicReference<>(storageStorage.startTransaction());
+    final AtomicInteger eltRemoved = new AtomicInteger();
+    final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
+           new AtomicReference<>(storageStorage.startTransaction());
+
+    clearTrieNodeDatabaseInRange(11, accountHash, location, excludedLocation, data);
 
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key) -> {
+                    (key, value) -> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key).slice(accountHash.size() * 2);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
                         System.out.println("found with method " + index + " to remove accountHash " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
-                        /*nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(storageStorage.startTransaction());
-                        }*/
+                        }
                       }
                     });
-    //nodeUpdaterTmp.get().commit();
+    nodeUpdaterTmp.get().commit();
   }
 
-  public static void main(final String[] args) {
-    System.out.println(Bytes.fromHexString("0x01020304050607").slice(4));
+  public void clearTrieNodeDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+    final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
+    final AtomicInteger eltRemoved = new AtomicInteger();
+    final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
+            new AtomicReference<>(trieBranchStorage.startTransaction());
+
+    trieBranchStorage
+            .getByPrefix(Bytes.concatenate(accountHash,location))
+            .forEach(
+                    (key, value) -> {
+                      final Bytes filteredLocation = key.slice(accountHash.size());
+                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
+                      if(!shouldExclude) {
+                        System.out.println("found with method " + index + " to remove trie node " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
+                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                        if (eltRemoved.getAndIncrement() % 100 == 0) {
+                          nodeUpdaterTmp.get().commit();
+                          nodeUpdaterTmp.set(trieBranchStorage.startTransaction());
+                        }
+                      }
+                    });
+    nodeUpdaterTmp.get().commit();
   }
 
   public static Pair<Bytes, Bytes> generateRangeFromLocation(

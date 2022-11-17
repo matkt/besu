@@ -104,7 +104,11 @@ public interface KeyValueStorage extends Closeable {
 
   Set<byte[]> getAllValuesFromKeysThat(final Predicate<byte[]> returnCondition);
 
-  default List<Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+  default TreeMap<Bytes,Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+    throw new UnsupportedOperationException("test");
+  }
+
+  default TreeMap<Bytes,Bytes> getByPrefix(final Bytes prefix) {
     throw new UnsupportedOperationException("test");
   }
 

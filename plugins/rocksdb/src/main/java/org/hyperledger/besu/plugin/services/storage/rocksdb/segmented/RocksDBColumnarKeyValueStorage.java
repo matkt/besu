@@ -274,36 +274,59 @@ public class RocksDBColumnarKeyValueStorage
   }
 
   @Override
-  public List<Bytes> getInRange(
+  public TreeMap<Bytes,Bytes> getInRange(
       final Bytes startKeyHash,
       final Bytes endKeyHash,
       final RocksDbSegmentIdentifier segmentHandle) {
-    ReadOptions readOptions = new ReadOptions();
-    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
+    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
     rocksIterator.seek(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
-    List<Bytes> res = new ArrayList<>();
-
-    while (rocksDbKeyIterator.hasNext()) {
-      Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
-      if (key.compareTo(startKeyHash) >= 0) {
-        if (key.compareTo(endKeyHash) <= 0) {
-          res.add(key);
-        } else {
-          rocksDbKeyIterator.close();
-          rocksIterator.close();
-          return res;
+    try {
+      final TreeMap<Bytes,Bytes> res = new TreeMap<>();
+      while (rocksDbKeyIterator.hasNext()) {
+        final Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
+        final Bytes key = Bytes.wrap(entry.getKey());
+        if (key.compareTo(startKeyHash) >= 0) {
+          if (key.compareTo(endKeyHash) <= 0) {
+            res.put(key, Bytes.wrap(entry.getValue()));
+          } else {
+            return res;
+          }
         }
       }
+      return res;
+    }finally {
+      rocksDbKeyIterator.close();
+      rocksIterator.close();
     }
-    rocksDbKeyIterator.close();
-    rocksIterator.close();
-    return res;
   }
 
   @Override
-  public void clear(final RocksDbSegmentIdentifier segmentHandle) {
+  public TreeMap<Bytes, Bytes> getByPrefix(final Bytes prefix, final RocksDbSegmentIdentifier segmentHandle) {
+    final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
+    rocksIterator.seek(prefix.toArrayUnsafe());
+    RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
+    try {
+      final TreeMap<Bytes,Bytes> res = new TreeMap<>();
+      while (rocksDbKeyIterator.hasNext()) {
+        final Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
+        final Bytes key = Bytes.wrap(entry.getKey());
+        if(key.commonPrefixLength(prefix)==prefix.size()) {
+          res.put(key, Bytes.wrap(entry.getValue()));
+        } else {
+          return res;
+        }
+      }
+      return res;
+    }finally {
+      rocksDbKeyIterator.close();
+      rocksIterator.close();
+    }
+  }
 
+
+  @Override
+  public void clear(final RocksDbSegmentIdentifier segmentHandle) {
     columnHandlesByName.values().stream()
         .filter(e -> e.equals(segmentHandle))
         .findAny()
