@@ -30,7 +30,6 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionTransitionValidatorDecorator;
 
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +54,6 @@ import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
 import org.rocksdb.LRUCache;
 import org.rocksdb.OptimisticTransactionDB;
-import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
@@ -274,21 +272,20 @@ public class RocksDBColumnarKeyValueStorage
   }
 
   @Override
-  public TreeMap<Bytes,Bytes> getInRange(
-      final Bytes startKeyHash,
-      final Bytes endKeyHash,
-      final RocksDbSegmentIdentifier segmentHandle) {
+  public List<Bytes> getInRange(
+          final Bytes startKeyHash,
+          final Bytes endKeyHash,
+          final RocksDbSegmentIdentifier segmentHandle) {
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
     rocksIterator.seek(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     try {
-      final TreeMap<Bytes,Bytes> res = new TreeMap<>();
+      final List<Bytes> res = new ArrayList<>();
       while (rocksDbKeyIterator.hasNext()) {
-        final Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
-        final Bytes key = Bytes.wrap(entry.getKey());
+        final Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
         if (key.compareTo(startKeyHash) >= 0) {
           if (key.compareTo(endKeyHash) <= 0) {
-            res.put(key, Bytes.wrap(entry.getValue()));
+            res.add(key);
           } else {
             return res;
           }
@@ -302,17 +299,16 @@ public class RocksDBColumnarKeyValueStorage
   }
 
   @Override
-  public TreeMap<Bytes, Bytes> getByPrefix(final Bytes prefix, final RocksDbSegmentIdentifier segmentHandle) {
+  public List<Bytes> getByPrefix(final Bytes prefix, final RocksDbSegmentIdentifier segmentHandle) {
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
     rocksIterator.seek(prefix.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     try {
-      final TreeMap<Bytes,Bytes> res = new TreeMap<>();
+      final List<Bytes> res = new ArrayList<>();
       while (rocksDbKeyIterator.hasNext()) {
-        final Map.Entry<byte[], byte[]> entry = rocksDbKeyIterator.next();
-        final Bytes key = Bytes.wrap(entry.getKey());
+        final Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
         if(key.commonPrefixLength(prefix)==prefix.size()) {
-          res.put(key, Bytes.wrap(entry.getValue()));
+          res.add(key);
         } else {
           return res;
         }

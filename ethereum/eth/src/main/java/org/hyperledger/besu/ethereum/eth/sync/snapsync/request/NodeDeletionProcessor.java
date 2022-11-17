@@ -17,8 +17,6 @@
 
 package org.hyperledger.besu.ethereum.eth.sync.snapsync.request;
 
-import org.apache.commons.lang3.tuple.Pair;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.BranchNode;
 import org.hyperledger.besu.ethereum.trie.CompactEncoding;
@@ -30,12 +28,8 @@ import org.hyperledger.besu.ethereum.trie.TrieNodeDecoder;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
@@ -51,12 +45,12 @@ public class NodeDeletionProcessor {
         final Bytes encodedPathToExclude = Bytes.concatenate(location, newNode.getPath());
         if(location.size()<encodedPathToExclude.size()){
           final List<Bytes> excludedLocation = List.of(Bytes.concatenate(location,Bytes.of(encodedPathToExclude.get(location.size()))));
-          worldStateStorage.clearAccountFlatDatabaseInRange(1, location,excludedLocation, accountTrieNodeDataRequest.data);
+          worldStateStorage.pruneAccountState(1, location,excludedLocation, accountTrieNodeDataRequest.data);
         }
       } else if(newNode instanceof ExtensionNode){
         ((ExtensionNode<Bytes>) newNode).getChild().getLocation().ifPresent(subLocation ->{
           final List<Bytes> excludedLocation = List.of(subLocation);
-          worldStateStorage.clearAccountFlatDatabaseInRange(2, location, excludedLocation, accountTrieNodeDataRequest.data);
+          worldStateStorage.pruneAccountState(2, location, excludedLocation, accountTrieNodeDataRequest.data);
         });
       } else if(newNode instanceof BranchNode) {
         final List<Node<Bytes>> children = newNode.getChildren();
@@ -66,7 +60,7 @@ public class NodeDeletionProcessor {
             excludedLocation.add(Bytes.concatenate(location,Bytes.of(i)));
           }
         }
-        worldStateStorage.clearAccountFlatDatabaseInRange(3, location,excludedLocation, accountTrieNodeDataRequest.data);
+        worldStateStorage.pruneAccountState(3, location,excludedLocation, accountTrieNodeDataRequest.data);
       }
     });
   }
@@ -81,12 +75,12 @@ public class NodeDeletionProcessor {
         final Bytes encodedPathToExclude = Bytes.concatenate(location, newNode.getPath());
         if (location.size() < encodedPathToExclude.size()) {
           final List<Bytes> excludedLocation = List.of(Bytes.concatenate(location, Bytes.of(encodedPathToExclude.get(location.size()))));
-          worldStateStorage.clearStorageFlatDatabaseInRange(1, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
+          worldStateStorage.pruneStorageState(1, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
         }
       } else if (newNode instanceof ExtensionNode) {
         ((ExtensionNode<Bytes>) newNode).getChild().getLocation().ifPresent(subLocation -> {
           final List<Bytes> excludedLocation = List.of(subLocation);
-          worldStateStorage.clearStorageFlatDatabaseInRange(2, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
+          worldStateStorage.pruneStorageState(2, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
         });
       } else if (newNode instanceof BranchNode) {
         final List<Node<Bytes>> children = newNode.getChildren();
@@ -96,7 +90,7 @@ public class NodeDeletionProcessor {
             excludedLocation.add(Bytes.concatenate(location, Bytes.of(i)));
           }
         }
-        worldStateStorage.clearStorageFlatDatabaseInRange(3, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
+        worldStateStorage.pruneStorageState(3, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
       }
     });
   }

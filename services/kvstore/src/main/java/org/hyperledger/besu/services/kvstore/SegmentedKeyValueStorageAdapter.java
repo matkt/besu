@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -83,12 +82,12 @@ public class SegmentedKeyValueStorageAdapter<S> implements SnappableKeyValueStor
   }
 
   @Override
-  public TreeMap<Bytes,Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
+  public List<Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash) {
     return storage.getInRange(startKeyHash, endKeyHash, segmentHandle);
   }
 
   @Override
-  public TreeMap<Bytes,Bytes> getByPrefix(final Bytes prefix) {
+  public List<Bytes> getByPrefix(final Bytes prefix) {
     return storage.getByPrefix(prefix, segmentHandle);
   }
 

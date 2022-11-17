@@ -252,24 +252,24 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void clearAccountFlatDatabaseInRange(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+  public void pruneAccountState(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(accountStorage.startTransaction());
 
-    clearTrieNodeDatabaseInRange(11, Bytes.EMPTY, location, excludedLocation, data);
+    pruneTrieNode(11, Bytes.EMPTY, location, excludedLocation, data);
 
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key, value)-> {
+                    (key)-> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
                         System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
-                        clearStorageFlatDatabaseInRange(10, key, Bytes.EMPTY, new ArrayList<>(), data);
+                        pruneStorageState(10, key, Bytes.EMPTY, new ArrayList<>(), data);
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(accountStorage.startTransaction());
@@ -279,18 +279,18 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     nodeUpdaterTmp.get().commit();
   }
 
-  public void clearStorageFlatDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+  public void pruneStorageState(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
-           new AtomicReference<>(storageStorage.startTransaction());
+            new AtomicReference<>(storageStorage.startTransaction());
 
-    clearTrieNodeDatabaseInRange(11, accountHash, location, excludedLocation, data);
+    pruneTrieNode(11, accountHash, location, excludedLocation, data);
 
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
-                    (key, value) -> {
+                    (key) -> {
                       final Bytes filteredLocation = CompactEncoding.bytesToPath(key).slice(accountHash.size() * 2);
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
@@ -305,8 +305,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     nodeUpdaterTmp.get().commit();
   }
 
-  public void clearTrieNodeDatabaseInRange(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
-    final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
+  public void pruneTrieNode(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(trieBranchStorage.startTransaction());
@@ -314,11 +313,11 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     trieBranchStorage
             .getByPrefix(Bytes.concatenate(accountHash,location))
             .forEach(
-                    (key, value) -> {
+                    (key) -> {
                       final Bytes filteredLocation = key.slice(accountHash.size());
                       final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
                       if(!shouldExclude) {
-                        System.out.println("found with method " + index + " to remove trie node " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
+                        System.out.println("found with method " + index + " to remove trie node " + accountHash + " " + key + " from " + Bytes.concatenate(accountHash,location) + " for data " + data + " and location " + location);
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
