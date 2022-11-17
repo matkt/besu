@@ -279,18 +279,19 @@ public class RocksDBColumnarKeyValueStorage
       final Bytes endKeyHash,
       final RocksDbSegmentIdentifier segmentHandle) {
     ReadOptions readOptions = new ReadOptions();
-    readOptions.setFillCache(false);
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
     rocksIterator.seek(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     List<Bytes> res = new ArrayList<>();
-   
+
     while (rocksDbKeyIterator.hasNext()) {
       Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
       if (key.compareTo(startKeyHash) >= 0) {
         if (key.compareTo(endKeyHash) <= 0) {
           res.add(key);
         } else {
+          rocksDbKeyIterator.close();
+          rocksIterator.close();
           return res;
         }
       }
