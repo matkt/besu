@@ -284,7 +284,7 @@ public class RocksDBColumnarKeyValueStorage
     rocksIterator.seek(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     List<Bytes> res = new ArrayList<>();
-    double i = 0;
+   
     while (rocksDbKeyIterator.hasNext()) {
       Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
       if (key.compareTo(startKeyHash) >= 0) {
