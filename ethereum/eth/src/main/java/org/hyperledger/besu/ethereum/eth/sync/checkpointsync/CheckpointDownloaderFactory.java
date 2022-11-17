@@ -77,8 +77,8 @@ public class CheckpointDownloaderFactory extends SnapDownloaderFactory {
 
     ensureDirectoryExists(fastSyncDataDirectory.toFile());
 
-    //worldStateStorage.clear();
-    //snapContext.clear();
+    worldStateStorage.clear();
+    snapContext.clear();
 
     /*final FastSyncState fastSyncState =
         fastSyncStateStorage.loadState(ScheduleBasedBlockHeaderFunctions.create(protocolSchedule));
