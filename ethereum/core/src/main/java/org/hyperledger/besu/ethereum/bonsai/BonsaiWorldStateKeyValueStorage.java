@@ -269,7 +269,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
                       if(!shouldExclude) {
                         System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
                         nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
-                        pruneStorageState(10, key, Bytes.EMPTY, new ArrayList<>(), data);
+                        //pruneStorageState(10, key, Bytes.EMPTY, new ArrayList<>(), data);
                         if (eltRemoved.getAndIncrement() % 100 == 0) {
                           nodeUpdaterTmp.get().commit();
                           nodeUpdaterTmp.set(accountStorage.startTransaction());
