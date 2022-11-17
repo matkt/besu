@@ -172,7 +172,7 @@ public class SnapWorldStateDownloader implements WorldStateDownloader {
         ranges.forEach(
             (key, value) ->
                 newDownloadState.enqueueRequest(
-                    createAccountTrieNodeDataRequest(stateRoot, Bytes.EMPTY, new HashSet<>())));
+                                  createAccountRangeDataRequest(stateRoot, key, value)));
       }
 
       Optional<CompleteTaskStep> maybeCompleteTask =
