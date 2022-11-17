@@ -252,60 +252,52 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
     storageStorage.clear();
   }
 
-  public void pruneAccountState(final int index, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+  public void pruneAccountState(final int index, final Bytes location, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(Bytes.EMPTY, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(accountStorage.startTransaction());
 
-    pruneTrieNode(11, Bytes.EMPTY, location, excludedLocation, data);
+    pruneTrieNode(11, Bytes.EMPTY, location, data);
 
     accountStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
                     (key)-> {
-                      final Bytes filteredLocation = CompactEncoding.bytesToPath(key);
-                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
-                      if(!shouldExclude) {
-                        System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
-                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
-                        pruneStorageState(10, key, Bytes.EMPTY, new ArrayList<>(), data);
-                        if (eltRemoved.getAndIncrement() % 100 == 0) {
-                          nodeUpdaterTmp.get().commit();
-                          nodeUpdaterTmp.set(accountStorage.startTransaction());
-                        }
+                      System.out.println("found with method "+index+" to remove "+key+" from "+range.getLeft()+" to "+range.getRight()+" for data "+data+" and location "+location+" ");
+                      nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                      pruneStorageState(10, key, Bytes.EMPTY, data);
+                      if (eltRemoved.getAndIncrement() % 100 == 0) {
+                        nodeUpdaterTmp.get().commit();
+                        nodeUpdaterTmp.set(accountStorage.startTransaction());
                       }
                     });
     nodeUpdaterTmp.get().commit();
   }
 
-  public void pruneStorageState(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+  public void pruneStorageState(final int index, final Bytes accountHash, final Bytes location, final Bytes data) {
     final Pair<Bytes,Bytes> range = generateRangeFromLocation(accountHash, location);
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(storageStorage.startTransaction());
 
-    pruneTrieNode(11, accountHash, location, excludedLocation, data);
+    pruneTrieNode(11, accountHash, location, data);
 
     storageStorage
             .getInRange(range.getLeft(), range.getRight())
             .forEach(
                     (key) -> {
-                      final Bytes filteredLocation = CompactEncoding.bytesToPath(key).slice(accountHash.size() * 2);
-                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
-                      if(!shouldExclude) {
-                        System.out.println("found with method " + index + " to remove accountHash " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
-                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
-                        if (eltRemoved.getAndIncrement() % 100 == 0) {
-                          nodeUpdaterTmp.get().commit();
-                          nodeUpdaterTmp.set(storageStorage.startTransaction());
-                        }
+                      System.out.println("found with method " + index + " to remove accountHash " + accountHash + " " + key + " from " + range.getLeft() + " to " + range.getRight() + " for data " + data + " and location " + location);
+                      nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                      if (eltRemoved.getAndIncrement() % 100 == 0) {
+                        nodeUpdaterTmp.get().commit();
+                        nodeUpdaterTmp.set(storageStorage.startTransaction());
                       }
                     });
     nodeUpdaterTmp.get().commit();
   }
 
-  public void pruneTrieNode(final int index, final Bytes accountHash, final Bytes location, final List<Bytes> excludedLocation, final Bytes data) {
+  public void pruneTrieNode(final int index, final Bytes accountHash, final Bytes location, final Bytes data) {
     final AtomicInteger eltRemoved = new AtomicInteger();
     final AtomicReference<KeyValueStorageTransaction> nodeUpdaterTmp =
             new AtomicReference<>(trieBranchStorage.startTransaction());
@@ -314,15 +306,11 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage {
             .getByPrefix(Bytes.concatenate(accountHash,location))
             .forEach(
                     (key) -> {
-                      final Bytes filteredLocation = key.slice(accountHash.size());
-                      final boolean shouldExclude = excludedLocation.stream().anyMatch(bytes -> filteredLocation.commonPrefixLength(bytes) == bytes.size());
-                      if(!shouldExclude) {
-                        System.out.println("found with method " + index + " to remove trie node " + accountHash + " " + key + " from " + Bytes.concatenate(accountHash,location) + " for data " + data + " and location " + location);
-                        nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
-                        if (eltRemoved.getAndIncrement() % 100 == 0) {
-                          nodeUpdaterTmp.get().commit();
-                          nodeUpdaterTmp.set(trieBranchStorage.startTransaction());
-                        }
+                      System.out.println("found with method " + index + " to remove trie node " + accountHash + " " + key + " from " + Bytes.concatenate(accountHash,location) + " for data " + data + " and location " + location);
+                      nodeUpdaterTmp.get().remove(key.toArrayUnsafe());
+                      if (eltRemoved.getAndIncrement() % 100 == 0) {
+                        nodeUpdaterTmp.get().commit();
+                        nodeUpdaterTmp.set(trieBranchStorage.startTransaction());
                       }
                     });
     nodeUpdaterTmp.get().commit();

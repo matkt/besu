@@ -43,24 +43,26 @@ public class NodeDeletionProcessor {
     newNode.getLocation().ifPresent(location -> {
       if(newNode instanceof LeafNode){
         final Bytes encodedPathToExclude = Bytes.concatenate(location, newNode.getPath());
-        if(location.size()<encodedPathToExclude.size()){
-          final List<Bytes> excludedLocation = List.of(Bytes.concatenate(location,Bytes.of(encodedPathToExclude.get(location.size()))));
-          worldStateStorage.pruneAccountState(1, location,excludedLocation, accountTrieNodeDataRequest.data);
+        for (int i = 0; i < MAX_CHILDREN; i++) {
+          if(location.size()<encodedPathToExclude.size() && encodedPathToExclude.get(location.size())!=i){
+            worldStateStorage.pruneAccountState(1, Bytes.concatenate(location, Bytes.of(i)), accountTrieNodeDataRequest.data);
+          }
         }
       } else if(newNode instanceof ExtensionNode){
         ((ExtensionNode<Bytes>) newNode).getChild().getLocation().ifPresent(subLocation ->{
-          final List<Bytes> excludedLocation = List.of(subLocation);
-          worldStateStorage.pruneAccountState(2, location, excludedLocation, accountTrieNodeDataRequest.data);
+          for (int i = 0; i < MAX_CHILDREN; i++) {
+            if(subLocation.get(subLocation.size()-1)!=i){
+              worldStateStorage.pruneAccountState(2, Bytes.concatenate(location, Bytes.of(i)), accountTrieNodeDataRequest.data);
+            }
+          }
         });
       } else if(newNode instanceof BranchNode) {
         final List<Node<Bytes>> children = newNode.getChildren();
-        final List<Bytes> excludedLocation = new ArrayList<>();
         for (int i = 0; i < MAX_CHILDREN; i++) {
-          if (i < children.size() && !(children.get(i) instanceof NullNode)) {
-            excludedLocation.add(Bytes.concatenate(location,Bytes.of(i)));
+          if (i>=children.size() || children.get(i) instanceof NullNode) {
+            worldStateStorage.pruneAccountState(3, Bytes.concatenate(location,Bytes.of(i)), accountTrieNodeDataRequest.data);
           }
         }
-        worldStateStorage.pruneAccountState(3, location,excludedLocation, accountTrieNodeDataRequest.data);
       }
     });
   }
@@ -71,26 +73,28 @@ public class NodeDeletionProcessor {
 
     newNode.getLocation().ifPresent(location -> {
       final Bytes accountHash = storageTrieNodeDataRequest.getAccountHash();
-      if (newNode instanceof LeafNode) {
+      if(newNode instanceof LeafNode){
         final Bytes encodedPathToExclude = Bytes.concatenate(location, newNode.getPath());
-        if (location.size() < encodedPathToExclude.size()) {
-          final List<Bytes> excludedLocation = List.of(Bytes.concatenate(location, Bytes.of(encodedPathToExclude.get(location.size()))));
-          worldStateStorage.pruneStorageState(1, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
-        }
-      } else if (newNode instanceof ExtensionNode) {
-        ((ExtensionNode<Bytes>) newNode).getChild().getLocation().ifPresent(subLocation -> {
-          final List<Bytes> excludedLocation = List.of(subLocation);
-          worldStateStorage.pruneStorageState(2, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
-        });
-      } else if (newNode instanceof BranchNode) {
-        final List<Node<Bytes>> children = newNode.getChildren();
-        final List<Bytes> excludedLocation = new ArrayList<>();
         for (int i = 0; i < MAX_CHILDREN; i++) {
-          if (i < children.size() && !(children.get(i) instanceof NullNode)) {
-            excludedLocation.add(Bytes.concatenate(location, Bytes.of(i)));
+          if(location.size()<encodedPathToExclude.size() && encodedPathToExclude.get(location.size())!=i){
+            worldStateStorage.pruneStorageState(3, accountHash, Bytes.concatenate(location, Bytes.of(i)), storageTrieNodeDataRequest.data);
           }
         }
-        worldStateStorage.pruneStorageState(3, accountHash, location, excludedLocation, storageTrieNodeDataRequest.data);
+      } else if(newNode instanceof ExtensionNode){
+        ((ExtensionNode<Bytes>) newNode).getChild().getLocation().ifPresent(subLocation ->{
+          for (int i = 0; i < MAX_CHILDREN; i++) {
+            if(subLocation.get(subLocation.size()-1)!=i){
+              worldStateStorage.pruneStorageState(4, accountHash, Bytes.concatenate(location, Bytes.of(i)), storageTrieNodeDataRequest.data);
+            }
+          }
+        });
+      } else if(newNode instanceof BranchNode) {
+        final List<Node<Bytes>> children = newNode.getChildren();
+        for (int i = 0; i < MAX_CHILDREN; i++) {
+          if (i>=children.size() || children.get(i) instanceof NullNode) {
+            worldStateStorage.pruneStorageState(5, accountHash, Bytes.concatenate(location,Bytes.of(i)), storageTrieNodeDataRequest.data);
+          }
+        }
       }
     });
   }
