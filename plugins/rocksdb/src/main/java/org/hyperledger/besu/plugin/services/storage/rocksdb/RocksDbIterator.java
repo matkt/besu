@@ -72,7 +72,7 @@ public class RocksDbIterator implements Iterator<Pair<byte[], byte[]>>, AutoClos
 
   public byte[] nextKey() {
     assertOpen();
-    try {
+    /*try {
       rocksIterator.status();
     } catch (final RocksDBException e) {
       LOG.error(
@@ -81,7 +81,7 @@ public class RocksDbIterator implements Iterator<Pair<byte[], byte[]>>, AutoClos
     }
     if (!hasNext()) {
       throw new NoSuchElementException();
-    }
+    }*/
     final byte[] key = rocksIterator.key();
     rocksIterator.next();
     return key;

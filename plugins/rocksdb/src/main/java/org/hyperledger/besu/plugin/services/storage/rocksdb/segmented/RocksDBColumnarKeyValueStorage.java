@@ -281,16 +281,12 @@ public class RocksDBColumnarKeyValueStorage
     ReadOptions readOptions = new ReadOptions();
     readOptions.setFillCache(false);
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get(), readOptions);
-    rocksIterator.seekForPrev(startKeyHash.toArrayUnsafe());
+    rocksIterator.seek(startKeyHash.toArrayUnsafe());
     RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     List<Bytes> res = new ArrayList<>();
-    /*double i = 0;
+    double i = 0;
     while (rocksDbKeyIterator.hasNext()) {
       Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
-      i +=1;
-      if(i>1000){
-        System.out.println("idndex i "+i);
-      }
       if (key.compareTo(startKeyHash) >= 0) {
         if (key.compareTo(endKeyHash) <= 0) {
           res.add(key);
@@ -298,7 +294,7 @@ public class RocksDBColumnarKeyValueStorage
           return res;
         }
       }
-    }*/
+    }
     rocksDbKeyIterator.close();
     rocksIterator.close();
     return res;
