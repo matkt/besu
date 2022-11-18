@@ -84,8 +84,8 @@ public abstract class TrieNodeDataRequest extends SnapDataRequest implements Tas
       return Stream.empty();
     }
 
-    //remove deprecated data if needed
-    if(!isExpired(snapSyncState) && isRequiresPersisting()) {
+    // remove deprecated data if needed
+    if (!isExpired(snapSyncState) && isRequiresPersisting()) {
       pruneNode(worldStateStorage);
     }
 

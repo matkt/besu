@@ -36,7 +36,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -273,12 +272,12 @@ public class RocksDBColumnarKeyValueStorage
 
   @Override
   public List<Bytes> getInRange(
-          final Bytes startKeyHash,
-          final Bytes endKeyHash,
-          final RocksDbSegmentIdentifier segmentHandle) {
+      final Bytes startKeyHash,
+      final Bytes endKeyHash,
+      final RocksDbSegmentIdentifier segmentHandle) {
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
     rocksIterator.seek(startKeyHash.toArrayUnsafe());
-    RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
+    final RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     try {
       final List<Bytes> res = new ArrayList<>();
       while (rocksDbKeyIterator.hasNext()) {
@@ -292,7 +291,7 @@ public class RocksDBColumnarKeyValueStorage
         }
       }
       return res;
-    }finally {
+    } finally {
       rocksDbKeyIterator.close();
       rocksIterator.close();
     }
@@ -302,25 +301,23 @@ public class RocksDBColumnarKeyValueStorage
   public List<Bytes> getByPrefix(final Bytes prefix, final RocksDbSegmentIdentifier segmentHandle) {
     final RocksIterator rocksIterator = db.newIterator(segmentHandle.get());
     rocksIterator.seek(prefix.toArrayUnsafe());
-    RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
+    final RocksDbIterator rocksDbKeyIterator = RocksDbIterator.create(rocksIterator);
     try {
       final List<Bytes> res = new ArrayList<>();
       while (rocksDbKeyIterator.hasNext()) {
         final Bytes key = Bytes.wrap(rocksDbKeyIterator.nextKey());
-        if(key.commonPrefixLength(prefix)==prefix.size()) {
-          System.out.println("key found "+key+" "+prefix);
+        if (key.commonPrefixLength(prefix) == prefix.size()) {
           res.add(key);
         } else {
           return res;
         }
       }
       return res;
-    }finally {
+    } finally {
       rocksDbKeyIterator.close();
       rocksIterator.close();
     }
   }
-
 
   @Override
   public void clear(final RocksDbSegmentIdentifier segmentHandle) {

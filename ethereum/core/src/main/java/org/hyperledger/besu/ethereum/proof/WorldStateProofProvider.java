@@ -188,8 +188,4 @@ public class WorldStateProofProvider {
     // check if the generated root hash is valid
     return rootHash.equals(trie.getRootHash());
   }
-
-  public WorldStateStorage getWorldStateStorage() {
-    return worldStateStorage;
-  }
 }

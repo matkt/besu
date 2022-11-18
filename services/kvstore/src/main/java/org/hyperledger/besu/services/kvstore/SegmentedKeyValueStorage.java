@@ -81,13 +81,11 @@ public interface SegmentedKeyValueStorage<S> extends Closeable {
 
   Set<byte[]> getAllValuesFromKeysThat(final S segmentHandle, Predicate<byte[]> returnCondition);
 
-  List<Bytes> getInRange(
-          final Bytes startKeyHash, final Bytes endKeyHash, final S segmentHandle);
+  List<Bytes> getInRange(final Bytes startKeyHash, final Bytes endKeyHash, final S segmentHandle);
 
   List<Bytes> getByPrefix(Bytes prefix, S segmentHandle);
 
   void clear(S segmentHandle);
-
 
   /**
    * Represents a set of changes to be committed atomically. A single transaction is not

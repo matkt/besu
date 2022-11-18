@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snapsync.request;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.deletePotentialOldStorageEntries;
+
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncState;
@@ -31,8 +33,6 @@ import java.util.stream.Stream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
-
-import static org.hyperledger.besu.ethereum.eth.sync.snapsync.request.NodeDeletionProcessor.deletePotentialOldChildren;
 
 public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
 
@@ -61,8 +61,15 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
   }
 
   public static void main(final String[] args) {
-    System.out.println(new StoredNodeFactory<>((location, hash) -> Optional.empty(), Function.identity(), Function.identity()).decode(Bytes.EMPTY, Bytes.fromHexString("0xe213a0d5e48c53daa403881a9aeb52829ecc61042148eda3ed3fad8c1b4b97e9b86760")));
+    System.out.println(
+        new StoredNodeFactory<>(
+                (location, hash) -> Optional.empty(), Function.identity(), Function.identity())
+            .decode(
+                Bytes.EMPTY,
+                Bytes.fromHexString(
+                    "0xe213a0d5e48c53daa403881a9aeb52829ecc61042148eda3ed3fad8c1b4b97e9b86760")));
   }
+
   @Override
   protected SnapDataRequest createChildNodeDataRequest(final Hash childHash, final Bytes location) {
     return createStorageTrieNodeDataRequest(childHash, getAccountHash(), getRootHash(), location);
@@ -71,7 +78,7 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
   @Override
   public void pruneNode(final WorldStateStorage worldStateStorage) {
     if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
-      deletePotentialOldChildren((BonsaiWorldStateKeyValueStorage) worldStateStorage, this);
+      deletePotentialOldStorageEntries((BonsaiWorldStateKeyValueStorage) worldStateStorage, this);
     }
   }
 
@@ -83,9 +90,9 @@ public class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
       final Bytes value) {
     if (worldStateStorage instanceof BonsaiWorldStateKeyValueStorage) {
       ((BonsaiWorldStateKeyValueStorage.Updater) worldStateStorage.updater())
-              .putStorageValueBySlotHash(
-                      accountHash, getSlotHash(location, path), Bytes32.leftPad(RLP.decodeValue(value)))
-              .commit();
+          .putStorageValueBySlotHash(
+              accountHash, getSlotHash(location, path), Bytes32.leftPad(RLP.decodeValue(value)))
+          .commit();
     }
     return Stream.empty();
   }
