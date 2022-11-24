@@ -62,7 +62,7 @@ public class OptimizedMerkleTrieLoader {
     nodePaths.parallelStream()
         .forEach(
             key -> {
-              if (empty.stream()
+              if (new HashSet<>(empty).stream()
                   .noneMatch(emptyKey -> key.commonPrefixLength(emptyKey) == emptyKey.size())) {
                 worldStateKeyValueStorage
                     .trieBranchStorage
