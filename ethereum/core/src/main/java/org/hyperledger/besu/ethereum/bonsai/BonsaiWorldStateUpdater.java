@@ -746,7 +746,7 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
     }
 
     @Override
-    public V setValue(V value) {
+    public V setValue(final V value) {
       return value;
     }
 
