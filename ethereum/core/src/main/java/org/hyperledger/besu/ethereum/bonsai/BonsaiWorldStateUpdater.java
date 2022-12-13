@@ -284,15 +284,20 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
                 pendingStorageUpdates.clear();
               }
 
-              final TreeSet<Map.Entry<UInt256, UInt256>> entries =
+              final TreeSet<CustomEntry<UInt256, UInt256>> entries =
                   new TreeSet<>(Map.Entry.comparingByKey());
-              entries.addAll(updatedAccount.getUpdatedStorage().entrySet());
+
+              updatedAccount.getUpdatedStorage().entrySet().stream()
+                  .map(CustomEntry::new)
+                  .forEach(entries::add);
+
+              entries.parallelStream().forEach(CustomEntry::generateKeyHash);
 
               // parallel stream here may cause database corruption
               entries.forEach(
                   storageUpdate -> {
                     final UInt256 keyUInt = storageUpdate.getKey();
-                    final Hash slotHash = Hash.hash(keyUInt);
+                    final Hash slotHash = storageUpdate.getKeyHash().orElseThrow();
                     final UInt256 value = storageUpdate.getValue();
                     final BonsaiValue<UInt256> pendingValue = pendingStorageUpdates.get(slotHash);
                     if (pendingValue == null) {
@@ -715,6 +720,43 @@ public class BonsaiWorldStateUpdater extends AbstractWorldUpdater<BonsaiWorldVie
         && storageToUpdate.isEmpty()
         && storageToClear.isEmpty()
         && codeToUpdate.isEmpty());
+  }
+
+  public static class CustomEntry<K extends UInt256, V> implements Map.Entry<K, V> {
+
+    private final K key;
+    private final V value;
+
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    private Optional<Hash> keyHash = Optional.empty();
+
+    public CustomEntry(final Map.Entry<K, V> entry) {
+      this.key = entry.getKey();
+      this.value = entry.getValue();
+    }
+
+    @Override
+    public K getKey() {
+      return key;
+    }
+
+    @Override
+    public V getValue() {
+      return value;
+    }
+
+    @Override
+    public V setValue(V value) {
+      return value;
+    }
+
+    public void generateKeyHash() {
+      keyHash = Optional.of(Hash.hash(key));
+    }
+
+    public Optional<Hash> getKeyHash() {
+      return keyHash;
+    }
   }
 
   public static class AccountConsumingMap<T> extends ForwardingMap<Address, T> {
