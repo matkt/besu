@@ -4,14 +4,14 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 
-public class ZkStateTrieAccountValue<T extends Hash> extends StateTrieAccountValue {
+public class ZkStateTrieAccountValue extends StateTrieAccountValue {
 
-  private final T zkCodeHash;
-  private final T priorLeaf;
-  private final T nextLeaf;
-  private final T parentBranchNode;
+  private final MimcHash zkCodeHash;
+  private final MimcHash priorLeaf;
+  private final MimcHash nextLeaf;
+  private final MimcHash parentBranchNode;
 
-  public Hash getZkCodeHash() {
+  public MimcHash getZkCodeHash() {
     return zkCodeHash;
   }
 
@@ -22,12 +22,12 @@ public class ZkStateTrieAccountValue<T extends Hash> extends StateTrieAccountVal
   public ZkStateTrieAccountValue(
         final long nonce,
         final Wei balance,
-        final T storageRoot,
+        final MimcHash storageRoot,
         final Hash keccakCodeHash,
-        final T zkCodeHash,
-        final T priorLeaf,
-        final T nextLeaf,
-        final T parentBranchNode) {
+        final MimcHash zkCodeHash,
+        final MimcHash priorLeaf,
+        final MimcHash nextLeaf,
+        final MimcHash parentBranchNode) {
       super(nonce, balance, storageRoot, keccakCodeHash);
       this.zkCodeHash = zkCodeHash;
       this.nextLeaf = nextLeaf;
