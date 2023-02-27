@@ -47,7 +47,7 @@ public class Hash extends DelegatingBytes32 implements org.hyperledger.besu.plug
    */
   public static final Hash EMPTY = hash(Bytes.EMPTY);
 
-  private Hash(final Bytes32 bytes) {
+  protected Hash(final Bytes32 bytes) {
     super(bytes);
   }
 
