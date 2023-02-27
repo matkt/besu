@@ -2,12 +2,15 @@ package org.hyperledger.besu.ethereum.trie.zkevm;
 
 import org.hyperledger.besu.crypto.Hash;
 import org.hyperledger.besu.ethereum.trie.CommitVisitor;
+import org.hyperledger.besu.ethereum.trie.LeafNode;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
+import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 import org.hyperledger.besu.ethereum.trie.Proof;
+import org.hyperledger.besu.ethereum.trie.StoredNode;
 import org.hyperledger.besu.ethereum.trie.TrieIterator;
 import org.hyperledger.besu.ethereum.trie.patricia.RemoveVisitor;
 import org.hyperledger.besu.ethereum.trie.sparse.StoredSparseMerkleTrie;
@@ -25,15 +28,16 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 public class ZKTrie implements MerkleTrie<Bytes, Bytes> {
 
-  private static final Bytes NEXT_FREE_NODE_PATH = Bytes.of(0, 0);
+  private static final Bytes NEXT_FREE_NODE_PATH = Bytes.of(0);
+  private static final Bytes SUB_TRIE_ROOT_PATH = Bytes.of(1);
 
-  private static final Bytes SUB_TRIE_ROOT_PATH = Bytes.of(0, 1);
-
+  private final KeyIndexLoader keyIndexLoader;
   private final StoredSparseMerkleTrie<Bytes, Bytes> state;
 
   private Bytes nextFreeNode;
 
-  public ZKTrie(final NodeLoader nodeLoader) {
+  public ZKTrie(final KeyIndexLoader keyIndexLoader, final NodeLoader nodeLoader) {
+    this.keyIndexLoader = keyIndexLoader;
     this.state = new StoredSparseMerkleTrie<>(nodeLoader, b -> b, b -> b);
   }
 
@@ -45,9 +49,9 @@ public class ZKTrie implements MerkleTrie<Bytes, Bytes> {
     return nextFreeNode;
   }
 
-  private Bytes getNextFreeNodePath() {
+  private Bytes getNodePath(final Bytes nodeIndex) {
     return Bytes.fromHexString(
-        Long.toBinaryString(nextFreeNode.toLong())); // TODO implement something clean for that
+        Long.toBinaryString(nodeIndex.toLong())); // TODO implement something clean for that
   }
 
   @Override
@@ -82,26 +86,45 @@ public class ZKTrie implements MerkleTrie<Bytes, Bytes> {
 
   @Override
   public void put(final Bytes key, final Bytes value) {
-    state.putPath(Bytes.concatenate(SUB_TRIE_ROOT_PATH, getNextFreeNodePath()), value);
+    putPath(Bytes.concatenate(SUB_TRIE_ROOT_PATH, getNodePath(nextFreeNode)), value);
   }
 
   @Override
-  public void putPath(final Bytes key, final Bytes value) {}
+  public void putPath(final Bytes path, final Bytes value) {
+    state.putPath(path, value);
+  }
 
   @Override
-  public void put(final Bytes key, final PathNodeVisitor<Bytes> putVisitor) {}
+  public void put(final Bytes key, final PathNodeVisitor<Bytes> putVisitor) {
+    putPath(Bytes.concatenate(SUB_TRIE_ROOT_PATH, getNodePath(nextFreeNode)), putVisitor);
+  }
 
   @Override
-  public void remove(final Bytes key) {}
+  public void putPath(final Bytes path, final PathNodeVisitor<Bytes> putVisitor) {
+    state.putPath(path, putVisitor);
+  }
 
   @Override
-  public void removePath(final Bytes path, final RemoveVisitor<Bytes> removeVisitor) {}
+  public void remove(final Bytes key) {
+    keyIndexLoader.getKeyIndex(key).ifPresent(index -> {
+      state.putPath(getNodePath(index), Bytes.EMPTY); //TODO put 0 value leaf
+    });
+  }
 
   @Override
-  public void commit(final NodeUpdater nodeUpdater) {}
+  public void removePath(final Bytes path, final RemoveVisitor<Bytes> removeVisitor) {
+    state.putPath(path, Bytes.EMPTY); //TODO put 0 value leaf
+  }
 
   @Override
-  public void commit(final NodeUpdater nodeUpdater, final CommitVisitor<Bytes> commitVisitor) {}
+  public void commit(final NodeUpdater nodeUpdater) {
+    state.commit(nodeUpdater);
+  }
+
+  @Override
+  public void commit(final NodeUpdater nodeUpdater, final CommitVisitor<Bytes> commitVisitor) {
+    state.commit(nodeUpdater, commitVisitor);
+  }
 
   @Override
   public Map<Bytes32, Bytes> entriesFrom(final Bytes32 startKeyHash, final int limit) {

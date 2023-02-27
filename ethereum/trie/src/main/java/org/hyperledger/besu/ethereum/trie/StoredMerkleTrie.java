@@ -119,13 +119,19 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
   public void putPath(final K path, final V value) {
     checkNotNull(path);
     checkNotNull(value);
-    this.root = root.accept(getPutVisitor(value), path);
+    putPath(path, getPutVisitor(value));
   }
 
   @Override
   public void put(final K key, final PathNodeVisitor<V> putVisitor) {
     checkNotNull(key);
     this.root = root.accept(putVisitor, bytesToPath(key));
+  }
+
+  @Override
+  public void putPath(final K path, final PathNodeVisitor<V> putVisitor) {
+    checkNotNull(path);
+    this.root = root.accept(putVisitor, path);
   }
 
   @Override

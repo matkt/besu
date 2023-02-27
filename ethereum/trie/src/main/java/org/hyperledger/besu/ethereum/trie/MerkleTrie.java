@@ -78,6 +78,8 @@ public interface MerkleTrie<K, V> {
    */
   void put(K key, PathNodeVisitor<V> putVisitor);
 
+  void putPath(K path, PathNodeVisitor<V> putVisitor);
+
   /**
    * Deletes the value mapped to the specified key, if such a value exists (Optional operation).
    *
