@@ -16,18 +16,13 @@
 
 package org.hyperledger.besu.ethereum.zkevm;
 
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
-import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.account.EvmAccount;
@@ -37,15 +32,21 @@ import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
+
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 
 public class ZkAccount implements MutableAccount, EvmAccount {
-  private final BonsaiWorldView context;
+  private final ZkWorldView context;
   private final boolean mutable;
 
   private final Address address;
   private final Hash addressHash;
-  private Hash codeHash;
+  private Hash keccakCodeHash;
+  private Hash mimcCodeHash;
+
+  private long codeSize;
   private long nonce;
   private Wei balance;
   private Hash storageRoot;
@@ -54,13 +55,15 @@ public class ZkAccount implements MutableAccount, EvmAccount {
   private final Map<UInt256, UInt256> updatedStorage = new HashMap<>();
 
   ZkAccount(
-      final BonsaiWorldView context,
+      final ZkWorldView context,
       final Address address,
       final Hash addressHash,
       final long nonce,
       final Wei balance,
       final Hash storageRoot,
-      final Hash codeHash,
+      final Hash keccakCodeHash,
+      final Hash mimcCodeHash,
+      final long codeSize,
       final boolean mutable) {
     this.context = context;
     this.address = address;
@@ -68,53 +71,42 @@ public class ZkAccount implements MutableAccount, EvmAccount {
     this.nonce = nonce;
     this.balance = balance;
     this.storageRoot = storageRoot;
-    this.codeHash = codeHash;
-
+    this.keccakCodeHash = keccakCodeHash;
+    this.mimcCodeHash = mimcCodeHash;
+    this.codeSize = codeSize;
     this.mutable = mutable;
-  }
-
-  ZkAccount(
-      final BonsaiWorldView context,
-      final Address address,
-      final StateTrieAccountValue stateTrieAccount,
-      final boolean mutable) {
-    this(
-        context,
-        address,
-        Hash.hash(address),
-        stateTrieAccount.getNonce(),
-        stateTrieAccount.getBalance(),
-        stateTrieAccount.getStorageRoot(),
-        stateTrieAccount.getCodeHash(),
-        mutable);
   }
 
   ZkAccount(final ZkAccount toCopy) {
     this(toCopy, toCopy.context, false);
   }
 
-  ZkAccount(final ZkAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
+  ZkAccount(final ZkAccount toCopy, final ZkWorldView context, final boolean mutable) {
     this.context = context;
     this.address = toCopy.address;
     this.addressHash = toCopy.addressHash;
     this.nonce = toCopy.nonce;
     this.balance = toCopy.balance;
     this.storageRoot = toCopy.storageRoot;
-    this.codeHash = toCopy.codeHash;
+    this.keccakCodeHash = toCopy.keccakCodeHash;
+    this.mimcCodeHash = toCopy.mimcCodeHash;
+    this.codeSize = toCopy.codeSize;
     this.code = toCopy.code;
     updatedStorage.putAll(toCopy.updatedStorage);
 
     this.mutable = mutable;
   }
 
-  ZkAccount(final BonsaiWorldView context, final UpdateTrackingAccount<ZkAccount> tracked) {
+  ZkAccount(final ZkWorldView context, final UpdateTrackingAccount<ZkAccount> tracked) {
     this.context = context;
     this.address = tracked.getAddress();
     this.addressHash = tracked.getAddressHash();
     this.nonce = tracked.getNonce();
     this.balance = tracked.getBalance();
     this.storageRoot = Hash.EMPTY_TRIE_HASH;
-    this.codeHash = tracked.getCodeHash();
+    this.keccakCodeHash = tracked.getCodeHash();
+    this.mimcCodeHash = tracked.getWrappedAccount().mimcCodeHash;
+    this.codeSize = tracked.getWrappedAccount().codeSize;
     this.code = tracked.getCode();
     updatedStorage.putAll(tracked.getUpdatedStorage());
 
@@ -122,10 +114,7 @@ public class ZkAccount implements MutableAccount, EvmAccount {
   }
 
   static ZkAccount fromRLP(
-      final BonsaiWorldView context,
-      final Address address,
-      final Bytes encoded,
-      final boolean mutable)
+      final ZkWorldView context, final Address address, final Bytes encoded, final boolean mutable)
       throws RLPException {
     final RLPInput in = RLP.input(encoded);
     in.enterList();
@@ -133,12 +122,22 @@ public class ZkAccount implements MutableAccount, EvmAccount {
     final long nonce = in.readLongScalar();
     final Wei balance = Wei.of(in.readUInt256Scalar());
     final Hash storageRoot = Hash.wrap(in.readBytes32());
-    final Hash codeHash = Hash.wrap(in.readBytes32());
-
+    final Hash mimcCodeHash = Hash.wrap(in.readBytes32());
+    final Hash keccakCodeHash = Hash.wrap(in.readBytes32());
+    final long codeSize = in.readLong();
     in.leaveList();
 
     return new ZkAccount(
-        context, address, Hash.hash(address), nonce, balance, storageRoot, codeHash, mutable);
+        context,
+        address,
+        Hash.hash(address),
+        nonce,
+        balance,
+        storageRoot,
+        keccakCodeHash,
+        mimcCodeHash,
+        codeSize,
+        mutable);
   }
 
   @Override
@@ -180,7 +179,7 @@ public class ZkAccount implements MutableAccount, EvmAccount {
   @Override
   public Bytes getCode() {
     if (code == null) {
-      code = context.getCode(address, codeHash).orElse(Bytes.EMPTY);
+      code = context.getCode(address, keccakCodeHash).orElse(Bytes.EMPTY);
     }
     return code;
   }
@@ -192,15 +191,27 @@ public class ZkAccount implements MutableAccount, EvmAccount {
     }
     this.code = code;
     if (code == null || code.isEmpty()) {
-      this.codeHash = Hash.EMPTY;
+      this.keccakCodeHash = Hash.EMPTY;
+      this.mimcCodeHash = Hash.EMPTY; // TODO use mimc
+      this.codeSize = 0;
     } else {
-      this.codeHash = Hash.hash(code);
+      this.keccakCodeHash = Hash.hash(code);
+      this.mimcCodeHash = Hash.hash(code); // TODO use mimc
+      this.codeSize = code.size();
     }
   }
 
   @Override
   public Hash getCodeHash() {
-    return codeHash;
+    return keccakCodeHash;
+  }
+
+  public Hash getMimcCodeHash() {
+    return mimcCodeHash;
+  }
+
+  public long getCodeSize() {
+    return codeSize;
   }
 
   @Override
@@ -226,8 +237,9 @@ public class ZkAccount implements MutableAccount, EvmAccount {
     out.writeLongScalar(nonce);
     out.writeUInt256Scalar(balance);
     out.writeBytes(storageRoot);
-    out.writeBytes(codeHash);
-
+    out.writeBytes(mimcCodeHash);
+    out.writeBytes(keccakCodeHash);
+    out.writeLongScalar(codeSize);
     out.endList();
     return out.encoded();
   }
@@ -272,18 +284,27 @@ public class ZkAccount implements MutableAccount, EvmAccount {
 
   @Override
   public String toString() {
-    return "AccountState{"
-        + "address="
+    return "ZkAccount{"
+        + "context="
+        + context
+        + ", mutable="
+        + mutable
+        + ", address="
         + address
+        + ", addressHash="
+        + addressHash
+        + ", keccakCodeHash="
+        + keccakCodeHash
+        + ", mimcCodeHash="
+        + mimcCodeHash
+        + ", codeSize="
+        + codeSize
         + ", nonce="
         + nonce
         + ", balance="
         + balance
         + ", storageRoot="
         + storageRoot
-        + ", codeHash="
-        + codeHash
         + '}';
   }
-
 }

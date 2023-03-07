@@ -23,6 +23,7 @@ import java.util.Iterator;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 
 public class TrieIterator<V> implements PathNodeVisitor<V> {
 

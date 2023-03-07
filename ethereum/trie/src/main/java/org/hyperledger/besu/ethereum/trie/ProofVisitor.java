@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 
 public class ProofVisitor<V> extends GetVisitor<V> implements PathNodeVisitor<V> {
 

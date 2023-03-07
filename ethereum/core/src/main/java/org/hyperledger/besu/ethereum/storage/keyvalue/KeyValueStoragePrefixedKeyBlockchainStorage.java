@@ -60,6 +60,7 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
 
   public KeyValueStoragePrefixedKeyBlockchainStorage(
       final KeyValueStorage storage, final BlockHeaderFunctions blockHeaderFunctions) {
+    System.out.println("storage " + storage);
     this.storage = storage;
     this.blockHeaderFunctions = blockHeaderFunctions;
   }

@@ -14,12 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.trie.zkevm;
 
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-
+import java.math.BigInteger;
 import java.util.Optional;
+
+import org.apache.tuweni.bytes.Bytes;
 
 public interface KeyIndexLoader {
 
-  Optional<Bytes> getKeyIndex(Bytes key);
+  Optional<BigInteger> getKeyIndex(Bytes key);
 }

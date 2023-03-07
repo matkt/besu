@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.sparse;
 
 import org.hyperledger.besu.ethereum.trie.CompactEncoding;
-import org.hyperledger.besu.ethereum.trie.LeafNode;
+import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NullNode;
@@ -27,11 +27,8 @@ import org.apache.tuweni.bytes.Bytes;
 
 public class GetVisitor<V> implements PathNodeVisitor<V> {
 
-  private final Node<V> NULL_NODE_RESULT = NullNode.instance();
-
   @Override
   public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
-
     final byte childIndex = path.get(0);
     if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
       return branchNode;
@@ -42,16 +39,12 @@ public class GetVisitor<V> implements PathNodeVisitor<V> {
 
   @Override
   public Node<V> visit(final LeafNode<V> leafNode, final Bytes path) {
-    final Bytes leafPath = leafNode.getPath();
-    if (leafPath.commonPrefixLength(path) != leafPath.size()) {
-      return NULL_NODE_RESULT;
-    }
     return leafNode;
   }
 
   @Override
   public Node<V> visit(final NullNode<V> nullNode, final Bytes path) {
-    return NULL_NODE_RESULT;
+    return EmptyLeafNode.instance();
   }
 
   @Override

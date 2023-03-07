@@ -104,7 +104,7 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
     final ProofVisitor<V> proofVisitor = new ProofVisitor<>(root);
     final Optional<V> value = root.accept(proofVisitor, bytesToPath(key)).getValue();
     final List<Bytes> proof =
-        proofVisitor.getProof().stream().map(Node::getRlp).collect(Collectors.toList());
+        proofVisitor.getProof().stream().map(Node::getEncodedBytes).collect(Collectors.toList());
     return new Proof<>(value, proof);
   }
 
@@ -155,8 +155,8 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
   public void commit(final NodeUpdater nodeUpdater, final CommitVisitor<V> commitVisitor) {
     root.accept(Bytes.EMPTY, commitVisitor);
     // Make sure root node was stored
-    if (root.isDirty() && root.getRlpRef().size() < 32) {
-      nodeUpdater.store(Bytes.EMPTY, root.getHash(), root.getRlpRef());
+    if (root.isDirty() && root.getEncodedBytesRef().size() < 32) {
+      nodeUpdater.store(Bytes.EMPTY, root.getHash(), root.getEncodedBytesRef());
     }
     // Reset root so dirty nodes can be garbage collected
     final Bytes32 rootHash = root.getHash();

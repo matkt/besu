@@ -14,9 +14,14 @@
  */
 package org.hyperledger.besu.ethereum.trie.sparse;
 
+import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeFactory;
 
+import java.io.ByteArrayOutputStream;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -47,5 +52,25 @@ public class BranchNode<V> extends org.hyperledger.besu.ethereum.trie.patricia.B
   @Override
   public int maxChild() {
     return 2;
+  }
+
+  @Override
+  public Bytes getEncodedBytes() {
+    if (encodedBytes != null) {
+      final Bytes encoded = encodedBytes.get();
+      if (encoded != null) {
+        return encoded;
+      }
+    }
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    getChildren().forEach(vNode -> out.writeBytes(vNode.getHash().toArrayUnsafe()));
+    final Bytes encoded = Bytes.wrap(out.toByteArray());
+    encodedBytes = new WeakReference<>(encoded);
+    return encoded;
+  }
+
+  @Override
+  public boolean isReferencedByHash() {
+    return false;
   }
 }

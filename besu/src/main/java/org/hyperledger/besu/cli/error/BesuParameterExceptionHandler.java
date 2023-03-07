@@ -46,6 +46,8 @@ public class BesuParameterExceptionHandler implements CommandLine.IParameterExce
       err.println(ex.getMessage());
     }
 
+    ex.printStackTrace(System.out);
+
     CommandLine.UnmatchedArgumentException.printSuggestions(ex, err);
 
     // don't print full help, just the instructions required to get it

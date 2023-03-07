@@ -16,62 +16,52 @@
 
 package org.hyperledger.besu.ethereum.zkevm;
 
-import com.google.common.collect.ForwardingMap;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiPersistedWorldState;
-import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldView;
-import org.hyperledger.besu.ethereum.bonsai.TrieLogLayer;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
-import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.EvmAccount;
 import org.hyperledger.besu.evm.worldstate.AbstractWorldUpdater;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 import org.hyperledger.besu.evm.worldstate.WrappedEvmAccount;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
-public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAccount>
-    implements BonsaiWorldView {
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
+
+public class ZkEvmAccumulator extends AbstractWorldUpdater<ZkWorldView, ZkAccount>
+    implements ZkWorldView {
 
   private final Map<Address, ZkValue<ZkAccount>> accountsToUpdate = new ConcurrentHashMap<>();
   private final Map<Address, ZkValue<Bytes>> codeToUpdate = new ConcurrentHashMap<>();
   private final Set<Address> storageToClear = Collections.synchronizedSet(new HashSet<>());
-  private final Set<Bytes> emptySlot = Collections.synchronizedSet(new HashSet<>());
 
-  // storage sub mapped by _hashed_ key.  This is because in self_destruct calls we need to
-  // enumerate the old storage and delete it.  Those are trie stored by hashed key by spec and the
-  // alternative was to keep a giant pre-image cache of the entire trie.
   private final Map<Address, Map<Hash, ZkValue<UInt256>>> storageToUpdate =
       new ConcurrentHashMap<>();
 
-  ZkEvmAccumulator(
-      final BonsaiWorldView world) {
+  private final Set<Bytes> readZeroAccount = Collections.synchronizedSet(new HashSet<>());
+  private final Set<Bytes> readZeroSlot = Collections.synchronizedSet(new HashSet<>());
+
+  ZkEvmAccumulator(final ZkWorldView world) {
     super(world);
   }
 
   public ZkEvmAccumulator copy() {
-    final ZkEvmAccumulator copy =
-        new ZkEvmAccumulator(wrappedWorldView());
+    final ZkEvmAccumulator copy = new ZkEvmAccumulator(wrappedWorldView());
     copy.cloneFromUpdater(this);
     return copy;
   }
@@ -83,7 +73,8 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
     storageToUpdate.putAll(source.storageToUpdate);
     updatedAccounts.putAll(source.updatedAccounts);
     deletedAccounts.addAll(source.deletedAccounts);
-    emptySlot.addAll(source.emptySlot);
+    readZeroAccount.addAll(source.readZeroAccount);
+    readZeroSlot.addAll(source.readZeroSlot);
   }
 
   @Override
@@ -92,8 +83,7 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
   }
 
   @Override
-  protected UpdateTrackingAccount<ZkAccount> track(
-      final UpdateTrackingAccount<ZkAccount> account) {
+  protected UpdateTrackingAccount<ZkAccount> track(final UpdateTrackingAccount<ZkAccount> account) {
     return super.track(account);
   }
 
@@ -120,6 +110,8 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
             balance,
             Hash.EMPTY_TRIE_HASH,
             Hash.EMPTY,
+            Hash.EMPTY, // TODO put empty mimcHash,
+            0,
             true);
     zkValue.setUpdated(newAccount);
     return new WrappedEvmAccount(track(new UpdateTrackingAccount<>(newAccount)));
@@ -147,20 +139,20 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
   }
 
   protected ZkAccount loadAccount(
-      final Address address,
-      final Function<ZkValue<ZkAccount>, ZkAccount> bonsaiAccountFunction) {
+      final Address address, final Function<ZkValue<ZkAccount>, ZkAccount> bonsaiAccountFunction) {
     try {
       final ZkValue<ZkAccount> zkValue = accountsToUpdate.get(address);
       if (zkValue == null) {
-        final Account account = wrappedWorldView().get(address);
-        if (account instanceof ZkAccount) {
-          final ZkAccount mutableAccount =
-              new ZkAccount((ZkAccount) account, this, true);
-          accountsToUpdate.put(address, new ZkValue<>((ZkAccount) account, mutableAccount));
-          return mutableAccount;
-        } else {
-          return null;
+        if (!readZeroAccount.contains(address)) {
+          final Account account = wrappedWorldView().get(address);
+          if (account instanceof ZkAccount) {
+            final ZkAccount mutableAccount = new ZkAccount((ZkAccount) account, this, true);
+            accountsToUpdate.put(address, new ZkValue<>((ZkAccount) account, mutableAccount));
+            return mutableAccount;
+          }
+          readZeroAccount.add(address);
         }
+        return null;
       } else {
         return bonsaiAccountFunction.apply(zkValue);
       }
@@ -206,13 +198,12 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
                     .map(ZkAccount::getCodeHash)
                     .orElse(Hash.EMPTY))
             .ifPresent(
-                deletedCode ->
-                    codeToUpdate.put(deletedAddress, new ZkValue<>(deletedCode, null)));
+                deletedCode -> codeToUpdate.put(deletedAddress, new ZkValue<>(deletedCode, null)));
       }
 
       // mark all updated storage as to be cleared
       final Map<Hash, ZkValue<UInt256>> deletedStorageUpdates =
-              storageToUpdate.computeIfAbsent(deletedAddress, k -> new ConcurrentHashMap<>());
+          storageToUpdate.computeIfAbsent(deletedAddress, k -> new ConcurrentHashMap<>());
       final Iterator<Map.Entry<Hash, ZkValue<UInt256>>> iter =
           deletedStorageUpdates.entrySet().iterator();
       while (iter.hasNext()) {
@@ -250,15 +241,13 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
             tracked -> {
               final Address updatedAddress = tracked.getAddress();
               final ZkAccount updatedAccount;
-              final ZkValue<ZkAccount> updatedAccountValue =
-                  accountsToUpdate.get(updatedAddress);
+              final ZkValue<ZkAccount> updatedAccountValue = accountsToUpdate.get(updatedAddress);
               if (tracked.getWrappedAccount() == null) {
                 updatedAccount = new ZkAccount(this, tracked);
                 tracked.setWrappedAccount(updatedAccount);
                 if (updatedAccountValue == null) {
                   accountsToUpdate.put(updatedAddress, new ZkValue<>(null, updatedAccount));
-                  codeToUpdate.put(
-                      updatedAddress, new ZkValue<>(null, updatedAccount.getCode()));
+                  codeToUpdate.put(updatedAddress, new ZkValue<>(null, updatedAccount.getCode()));
                 } else {
                   updatedAccountValue.setUpdated(updatedAccount);
                 }
@@ -295,7 +284,7 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
               // This is especially to avoid unnecessary computation for withdrawals
               if (updatedAccount.getUpdatedStorage().isEmpty()) return;
               final Map<Hash, ZkValue<UInt256>> pendingStorageUpdates =
-                      storageToUpdate.computeIfAbsent(updatedAddress, __ -> new ConcurrentHashMap<>());
+                  storageToUpdate.computeIfAbsent(updatedAddress, __ -> new ConcurrentHashMap<>());
               if (tracked.getStorageWasCleared()) {
                 storageToClear.add(updatedAddress);
                 pendingStorageUpdates.clear();
@@ -315,8 +304,7 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
                     if (pendingValue == null) {
                       pendingStorageUpdates.put(
                           slotHash,
-                          new ZkValue<>(
-                              updatedAccount.getOriginalStorageValue(keyUInt), value));
+                          new ZkValue<>(updatedAccount.getOriginalStorageValue(keyUInt), value));
                     } else {
                       pendingValue.setUpdated(value);
                     }
@@ -350,12 +338,6 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
   }
 
   @Override
-  public Optional<Bytes> getStateTrieNode(final Bytes location) {
-    // updater doesn't track trie nodes.  Always a miss.
-    return Optional.empty();
-  }
-
-  @Override
   public UInt256 getStorageValue(final Address address, final UInt256 storageKey) {
     // TODO maybe log the read into the trie layer?
     final Hash slotHashBytes = Hash.hash(storageKey);
@@ -372,7 +354,7 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
       }
     }
     final Bytes slot = Bytes.concatenate(Hash.hash(address), slotHash);
-    if (emptySlot.contains(slot)) {
+    if (readZeroSlot.contains(slot)) {
       return Optional.empty();
     } else {
       try {
@@ -389,10 +371,10 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
         valueUInt.ifPresentOrElse(
             v ->
                 storageToUpdate
-                        .computeIfAbsent(address, key -> new ConcurrentHashMap<>())
+                    .computeIfAbsent(address, key -> new ConcurrentHashMap<>())
                     .put(slotHash, new ZkValue<>(v, v)),
             () -> {
-              emptySlot.add(Bytes.concatenate(Hash.hash(address), slotHash));
+              readZeroSlot.add(Bytes.concatenate(Hash.hash(address), slotHash));
             });
         return valueUInt;
       } catch (MerkleTrieException e) {
@@ -463,7 +445,7 @@ public class ZkEvmAccumulator extends AbstractWorldUpdater<BonsaiWorldView, ZkAc
     storageToUpdate.clear();
     codeToUpdate.clear();
     accountsToUpdate.clear();
-    emptySlot.clear();
+    readZeroSlot.clear();
     super.reset();
   }
 

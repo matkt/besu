@@ -46,7 +46,7 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBKeyValueStorageFactory.class);
   private static final int DEFAULT_VERSION = 1;
-  private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(0, 1, 2);
+  private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(0, 1, 2, 3);
   private static final String NAME = "rocksdb";
   private final RocksDBMetricsFactory rocksDBMetricsFactory;
 
@@ -170,6 +170,7 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
         }
       case 1:
       case 2:
+      case 3:
         {
           unsegmentedStorage = null;
           if (segmentedStorage == null) {

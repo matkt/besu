@@ -24,11 +24,11 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   PRIVATE_TRANSACTIONS(new byte[] {3}),
   PRIVATE_STATE(new byte[] {4}),
   PRUNING_STATE(new byte[] {5}, new int[] {0, 1}),
-  ACCOUNT_INFO_STATE(new byte[] {6}, new int[] {2}),
-  CODE_STORAGE(new byte[] {7}, new int[] {2}),
-  ACCOUNT_STORAGE_STORAGE(new byte[] {8}, new int[] {2}),
-  TRIE_BRANCH_STORAGE(new byte[] {9}, new int[] {2}),
-  TRIE_LOG_STORAGE(new byte[] {10}, new int[] {2}),
+  ACCOUNT_INFO_STATE(new byte[] {6}, new int[] {2, 3}),
+  CODE_STORAGE(new byte[] {7}, new int[] {2, 3}),
+  ACCOUNT_STORAGE_STORAGE(new byte[] {8}, new int[] {2, 3}),
+  TRIE_BRANCH_STORAGE(new byte[] {9}, new int[] {2, 3}),
+  TRIE_LOG_STORAGE(new byte[] {10}, new int[] {2, 3}),
   GOQUORUM_PRIVATE_WORLD_STATE(new byte[] {11}),
   GOQUORUM_PRIVATE_STORAGE(new byte[] {12}),
   BACKWARD_SYNC_HEADERS(new byte[] {13}),
@@ -42,7 +42,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   private final int[] versionList;
 
   KeyValueSegmentIdentifier(final byte[] id) {
-    this(id, new int[] {0, 1, 2});
+    this(id, new int[] {0, 1, 2, 3});
   }
 
   KeyValueSegmentIdentifier(final byte[] id, final int[] versionList) {

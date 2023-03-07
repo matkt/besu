@@ -88,6 +88,8 @@ import org.hyperledger.besu.ethereum.worldstate.PrunerConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStatePreimageStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+import org.hyperledger.besu.ethereum.zkevm.ZkWorldStateProvider;
+import org.hyperledger.besu.ethereum.zkevm.ZkWorldStateStorage;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -946,7 +948,8 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             Optional.of(dataStorageConfiguration.getBonsaiMaxLayersToLoad()),
             dataStorageConfiguration.useBonsaiSnapshots(),
             cachedMerkleTrieLoader);
-
+      case ZK_EVM:
+        return new ZkWorldStateProvider((ZkWorldStateStorage) worldStateStorage);
       case FOREST:
       default:
         final WorldStatePreimageStorage preimageStorage =

@@ -1,11 +1,13 @@
 package org.hyperledger.besu.ethereum.zkevm;
 
-import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Hash;
 
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.tuweni.units.bigints.UInt256;
+
+@SuppressWarnings("unused")
 public class ZkTrieLog {
 
   private final Map<Hash, ZkValue<ZkStateTrieAccountValue>> accountsChanged;

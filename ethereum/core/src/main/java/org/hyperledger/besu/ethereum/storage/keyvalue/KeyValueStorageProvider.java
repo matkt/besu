@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageFormat;
 import org.hyperledger.besu.ethereum.worldstate.WorldStatePreimageStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorage;
+import org.hyperledger.besu.ethereum.zkevm.ZkWorldStateStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
@@ -32,6 +33,8 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+
+import org.apache.commons.lang3.NotImplementedException;
 
 public class KeyValueStorageProvider implements StorageProvider {
 
@@ -78,11 +81,18 @@ public class KeyValueStorageProvider implements StorageProvider {
 
   @Override
   public WorldStateStorage createWorldStateStorage(final DataStorageFormat dataStorageFormat) {
-    if (dataStorageFormat.equals(DataStorageFormat.BONSAI)) {
-      return new BonsaiWorldStateKeyValueStorage(this);
-    } else {
-      return new WorldStateKeyValueStorage(
-          getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.WORLD_STATE));
+    switch (dataStorageFormat) {
+      case FOREST -> {
+        return new WorldStateKeyValueStorage(
+            getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.WORLD_STATE));
+      }
+      case BONSAI -> {
+        return new BonsaiWorldStateKeyValueStorage(this);
+      }
+      case ZK_EVM -> {
+        return new ZkWorldStateStorage(this);
+      }
+      default -> throw new NotImplementedException("invalid data storage format");
     }
   }
 

@@ -86,13 +86,6 @@ public class ZkValue<T> {
 
   @Override
   public String toString() {
-    return "ZkValue{"
-        + "prior="
-        + prior
-        + ", updated="
-        + updated
-        + ", cleared="
-        + cleared
-        + '}';
+    return "ZkValue{" + "prior=" + prior + ", updated=" + updated + ", cleared=" + cleared + '}';
   }
 }

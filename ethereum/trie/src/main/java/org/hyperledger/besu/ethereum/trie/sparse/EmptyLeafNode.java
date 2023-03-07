@@ -12,7 +12,14 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie;
+package org.hyperledger.besu.ethereum.trie.sparse;
+
+import org.hyperledger.besu.crypto.Hash;
+import org.hyperledger.besu.ethereum.trie.LocationNodeVisitor;
+import org.hyperledger.besu.ethereum.trie.Node;
+import org.hyperledger.besu.ethereum.trie.NodeVisitor;
+import org.hyperledger.besu.ethereum.trie.NullNode;
+import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 
 import java.util.Collections;
 import java.util.List;
@@ -21,14 +28,14 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-public class NullNode<V> implements Node<V> {
+public class EmptyLeafNode<V> extends NullNode<V> implements Node<V> {
   @SuppressWarnings("rawtypes")
-  private static final NullNode instance = new NullNode();
+  private static final EmptyLeafNode instance = new EmptyLeafNode();
 
-  protected NullNode() {}
+  protected EmptyLeafNode() {}
 
   @SuppressWarnings("unchecked")
-  public static <V> NullNode<V> instance() {
+  public static <V> EmptyLeafNode<V> instance() {
     return instance;
   }
 
@@ -64,17 +71,17 @@ public class NullNode<V> implements Node<V> {
 
   @Override
   public Bytes getEncodedBytes() {
-    return MerkleTrie.EMPTY_TRIE_NODE;
+    return Bytes32.ZERO;
   }
 
   @Override
   public Bytes getEncodedBytesRef() {
-    return MerkleTrie.EMPTY_TRIE_NODE;
+    return Bytes32.ZERO;
   }
 
   @Override
   public Bytes32 getHash() {
-    return MerkleTrie.EMPTY_TRIE_NODE_HASH;
+    return Hash.keccak256(getEncodedBytes()); // TODO use the valid algorithm
   }
 
   @Override
@@ -84,7 +91,7 @@ public class NullNode<V> implements Node<V> {
 
   @Override
   public String print() {
-    return "[NULL]";
+    return "[EMPTY LEAF]";
   }
 
   @Override
@@ -105,5 +112,10 @@ public class NullNode<V> implements Node<V> {
   @Override
   public void markHealNeeded() {
     // do nothing
+  }
+
+  @Override
+  public boolean isReferencedByHash() {
+    return false;
   }
 }

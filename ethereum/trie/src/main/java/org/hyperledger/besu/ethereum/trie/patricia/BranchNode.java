@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.trie.NodeFactory;
 import org.hyperledger.besu.ethereum.trie.NodeVisitor;
 import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
+import org.hyperledger.besu.ethereum.trie.sparse.EmptyLeafNode;
 
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
@@ -48,7 +49,7 @@ public class BranchNode<V> implements Node<V> {
   private final Optional<V> value;
   protected final NodeFactory<V> nodeFactory;
   private final Function<V, Bytes> valueSerializer;
-  private WeakReference<Bytes> rlp;
+  protected WeakReference<Bytes> encodedBytes;
   private SoftReference<Bytes32> hash;
   private boolean dirty = false;
   private boolean needHeal = false;
@@ -118,9 +119,9 @@ public class BranchNode<V> implements Node<V> {
   }
 
   @Override
-  public Bytes getRlp() {
-    if (rlp != null) {
-      final Bytes encoded = rlp.get();
+  public Bytes getEncodedBytes() {
+    if (encodedBytes != null) {
+      final Bytes encoded = encodedBytes.get();
       if (encoded != null) {
         return encoded;
       }
@@ -128,7 +129,7 @@ public class BranchNode<V> implements Node<V> {
     final BytesValueRLPOutput out = new BytesValueRLPOutput();
     out.startList();
     for (int i = 0; i < maxChild(); ++i) {
-      out.writeRaw(children.get(i).getRlpRef());
+      out.writeRaw(children.get(i).getEncodedBytesRef());
     }
     if (value.isPresent()) {
       out.writeBytes(valueSerializer.apply(value.get()));
@@ -137,16 +138,18 @@ public class BranchNode<V> implements Node<V> {
     }
     out.endList();
     final Bytes encoded = out.encoded();
-    rlp = new WeakReference<>(encoded);
+    encodedBytes = new WeakReference<>(encoded);
+    if (children.get(0) instanceof EmptyLeafNode<V>)
+      System.out.println("rlp " + encoded + " " + children.get(0).getEncodedBytesRef());
     return encoded;
   }
 
   @Override
-  public Bytes getRlpRef() {
+  public Bytes getEncodedBytesRef() {
     if (isReferencedByHash()) {
       return RLP.encodeOne(getHash());
     } else {
-      return getRlp();
+      return getEncodedBytes();
     }
   }
 
@@ -158,7 +161,7 @@ public class BranchNode<V> implements Node<V> {
         return hashed;
       }
     }
-    final Bytes32 hashed = keccak256(getRlp());
+    final Bytes32 hashed = keccak256(getEncodedBytes());
     hash = new SoftReference<>(hashed);
     return hashed;
   }
@@ -240,7 +243,7 @@ public class BranchNode<V> implements Node<V> {
   public String print() {
     final StringBuilder builder = new StringBuilder();
     builder.append("Branch:");
-    builder.append("\n\tRef: ").append(getRlpRef());
+    builder.append("\n\tRef: ").append(getEncodedBytesRef());
     for (int i = 0; i < maxChild(); i++) {
       final Node<V> child = child((byte) i);
       if (!Objects.equals(child, NullNode.instance())) {

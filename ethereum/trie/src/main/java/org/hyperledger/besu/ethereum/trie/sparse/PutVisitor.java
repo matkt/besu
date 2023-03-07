@@ -14,7 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.sparse;
 
-import org.hyperledger.besu.ethereum.trie.LeafNode;
+import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeFactory;
@@ -38,9 +38,7 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
   public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
     final byte childIndex = path.get(0);
     final Node<V> updatedChild = branchNode.child(childIndex).accept(this, path.slice(1));
-    Node<V> vNode = branchNode.replaceChild(childIndex, updatedChild);
-    System.out.println("put " + vNode.print() + " " + vNode.getHash());
-    return vNode;
+    return branchNode.replaceChild(childIndex, updatedChild);
   }
 
   @Override
@@ -48,7 +46,6 @@ public class PutVisitor<V> implements PathNodeVisitor<V> {
     final Bytes leafPath = leafNode.getPath();
     final int commonPathLength = leafPath.commonPrefixLength(path);
 
-    System.out.println(path + " " + leafPath);
     // Check if the current leaf node should be replaced
     if (commonPathLength == leafPath.size() && commonPathLength == path.size()) {
       return nodeFactory.createLeaf(leafPath, value);

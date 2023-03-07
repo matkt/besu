@@ -16,11 +16,7 @@ package org.hyperledger.besu.ethereum.trie.sparse;
 
 import static java.lang.String.format;
 
-import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.rlp.RLPException;
-import org.hyperledger.besu.ethereum.rlp.RLPInput;
-import org.hyperledger.besu.ethereum.trie.CompactEncoding;
-import org.hyperledger.besu.ethereum.trie.LeafNode;
+import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeFactory;
@@ -37,7 +33,9 @@ import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.plugin.data.Hash;
 
+@SuppressWarnings("unused")
 public class StoredNodeFactory<V> implements NodeFactory<V> {
 
   @SuppressWarnings("rawtypes")
@@ -109,9 +107,9 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
     return nodeLoader
         .getNode(location, hash)
         .map(
-            rlp -> {
+            encodedBytes -> {
               final Node<V> node =
-                  decode(location, rlp, () -> format("Invalid RLP value for hash %s", hash));
+                  decode(location, encodedBytes, () -> format("Invalid RLP value for hash %s", hash));
               // recalculating the node.hash() is expensive, so we only do this as an assertion
               assert (hash.equals(node.getHash()))
                   : "Node hash " + node.getHash() + " not equal to expected " + hash;
@@ -123,123 +121,49 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
     return decode(location, rlp, () -> String.format("Failed to decode value %s", rlp.toString()));
   }
 
-  private Node<V> decode(final Bytes location, final Bytes rlp, final Supplier<String> errMessage)
-      throws MerkleTrieException {
-    try {
-      return decode(location, RLP.input(rlp), errMessage);
-    } catch (final RLPException ex) {
-      throw new MerkleTrieException(errMessage.get(), ex);
-    }
-  }
 
   private Node<V> decode(
-      final Bytes location, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
-    final int nodesCount = nodeRLPs.enterList();
-    switch (nodesCount) {
-      case 1:
-        final NullNode<V> nullNode = decodeNull(nodeRLPs, errMessage);
-        nodeRLPs.leaveList();
-        return nullNode;
+      final Bytes location, final Bytes input, final Supplier<String> errMessage) {
 
-      case 2:
-        final Bytes encodedPath = nodeRLPs.readBytes();
-        final Bytes path;
-        try {
-          path = CompactEncoding.decode(encodedPath);
-        } catch (final IllegalArgumentException ex) {
-          throw new MerkleTrieException(errMessage.get() + ": invalid path " + encodedPath, ex);
-        }
+    int type = input.size()==Hash.SIZE*2?1:2; // a leaf will only be bigger (leaf opening) or smaller (zero leaf)
 
-        final LeafNode<V> leafNode = decodeLeaf(location, path, nodeRLPs, errMessage);
-        nodeRLPs.leaveList();
-        return leafNode;
-
-      case (NB_CHILD + 1):
-        final BranchNode<V> branchNode = decodeBranch(location, nodeRLPs, errMessage);
-        nodeRLPs.leaveList();
-        return branchNode;
-
-      default:
+    switch (type){
+      case 1 -> {
+        return decodeBranch(location, input, errMessage);
+      }
+      case 2 -> {
+        return decodeLeaf(location, input, errMessage);
+      }
+      default ->
         throw new MerkleTrieException(
-            errMessage.get() + format(": invalid list size %s", nodesCount));
+                errMessage.get() + format(": invalid node %s", type));
     }
   }
 
   @SuppressWarnings("unchecked")
   protected BranchNode<V> decodeBranch(
-      final Bytes location, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
+      final Bytes location, final Bytes input, final Supplier<String> errMessage) {
     final ArrayList<Node<V>> children = new ArrayList<>(NB_CHILD);
-    for (int i = 0; i < NB_CHILD; ++i) {
-      if (nodeRLPs.nextIsNull()) {
-        nodeRLPs.skipNext();
-        children.add(NULL_NODE);
-      } else if (nodeRLPs.nextIsList()) {
-        final Node<V> child =
-            decode(
-                location == null ? null : Bytes.concatenate(location, Bytes.of((byte) i)),
-                nodeRLPs,
-                errMessage);
-        children.add(child);
-      } else {
-        final Bytes32 childHash = nodeRLPs.readBytes32();
-        children.add(
-            new StoredNode<>(
-                this,
-                location == null ? null : Bytes.concatenate(location, Bytes.of((byte) i)),
-                childHash));
-      }
+    final int nbChilds = input.size()/Hash.SIZE;
+    for (int i = 0; i < nbChilds; i++) {
+      final Bytes32 childHash =  Bytes32.wrap(input.slice(0,Hash.SIZE));
+      children.add(
+              new StoredNode<>(
+                      this,
+                      location == null ? null : Bytes.concatenate(location, Bytes.of((byte) i)),
+                      childHash));
     }
-
-    final Optional<V> value;
-    if (nodeRLPs.nextIsNull()) {
-      nodeRLPs.skipNext();
-      value = Optional.empty();
-    } else {
-      value = Optional.of(decodeValue(nodeRLPs, errMessage));
-    }
-
-    return new BranchNode<>(location, children, value, this, valueSerializer);
+    return new BranchNode<>(location, children, Optional.empty(), this, valueSerializer);
   }
 
-  protected LeafNode<V> decodeLeaf(
+  protected Node<V> decodeLeaf(
       final Bytes location,
-      final Bytes path,
-      final RLPInput valueRlp,
+      final Bytes input,
       final Supplier<String> errMessage) {
-    if (valueRlp.nextIsNull()) {
-      throw new MerkleTrieException(errMessage.get() + ": leaf has null value");
+    if(input.equals(Bytes32.ZERO)){
+      return EmptyLeafNode.instance();
     }
-    final V value = decodeValue(valueRlp, errMessage);
-    return new LeafNode<>(location, path, value, this, valueSerializer);
+    throw new MerkleTrieException(errMessage.get() + ": leaf has null value");
   }
 
-  @SuppressWarnings("unchecked")
-  private NullNode<V> decodeNull(final RLPInput nodeRLPs, final Supplier<String> errMessage) {
-    if (!nodeRLPs.nextIsNull()) {
-      throw new MerkleTrieException(errMessage.get() + ": list size 1 but not null");
-    }
-    nodeRLPs.skipNext();
-    return NULL_NODE;
-  }
-
-  private V decodeValue(final RLPInput valueRlp, final Supplier<String> errMessage) {
-    final Bytes bytes;
-    try {
-      bytes = valueRlp.readBytes();
-    } catch (final RLPException ex) {
-      throw new MerkleTrieException(
-          errMessage.get() + ": failed decoding value rlp " + valueRlp, ex);
-    }
-    return deserializeValue(errMessage, bytes);
-  }
-
-  private V deserializeValue(final Supplier<String> errMessage, final Bytes bytes) {
-    final V value;
-    try {
-      value = valueDeserializer.apply(bytes);
-    } catch (final IllegalArgumentException ex) {
-      throw new MerkleTrieException(errMessage.get() + ": failed deserializing value " + bytes, ex);
-    }
-    return value;
-  }
 }

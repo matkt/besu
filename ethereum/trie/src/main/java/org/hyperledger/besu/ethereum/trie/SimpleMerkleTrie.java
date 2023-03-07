@@ -73,7 +73,7 @@ public abstract class SimpleMerkleTrie<K extends Bytes, V> implements MerkleTrie
     final ProofVisitor<V> proofVisitor = new ProofVisitor<>(root);
     final Optional<V> value = root.accept(proofVisitor, bytesToPath(key)).getValue();
     final List<Bytes> proof =
-        proofVisitor.getProof().stream().map(Node::getRlp).collect(Collectors.toList());
+        proofVisitor.getProof().stream().map(Node::getEncodedBytes).collect(Collectors.toList());
     return new Proof<>(value, proof);
   }
 
