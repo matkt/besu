@@ -493,7 +493,12 @@ public class MainnetTransactionProcessor {
     } catch (final MerkleTrieException re) {
       // need to throw to trigger the heal
       throw re;
-    } catch (final RuntimeException re) {
+    } catch (final IllegalStateException stateException) {
+      LOG.error("Illegal State Exception Processing Transaction {}", stateException.getMessage());
+      return TransactionProcessingResult.invalid(
+              ValidationResult.invalid(
+                      TransactionInvalidReason.INTERNAL_ERROR, "Internal Error in Besu - " + stateException));
+    }catch (final RuntimeException re) {
       LOG.error("Critical Exception Processing Transaction", re);
       return TransactionProcessingResult.invalid(
           ValidationResult.invalid(
