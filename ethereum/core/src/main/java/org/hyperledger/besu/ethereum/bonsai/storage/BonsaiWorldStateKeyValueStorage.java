@@ -450,11 +450,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage, AutoC
       // alert any subscribers we are closing:
       subscribers.forEach(BonsaiStorageSubscriber::onCloseStorage);
 
-      // close all of the SnappedKeyValueStorages:
-      accountStorage.close();
-      codeStorage.close();
-      storageStorage.close();
-      trieBranchStorage.close();
+      // no need to close SnappedKeyValueStorages for the persisted storage
 
       // set storage closed
       isClosed.set(true);
