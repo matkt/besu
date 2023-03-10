@@ -202,9 +202,9 @@ public class Runner implements AutoCloseable {
     waitForServiceToStop("Network", networkRunner::awaitStop);
     autoTransactionLogBloomCachingService.ifPresent(AutoTransactionLogBloomCachingService::stop);
     natService.stop();
+    besuController.close();
     vertx.close((res) -> vertxShutdownLatch.countDown());
     waitForServiceToStop("Vertx", vertxShutdownLatch::await);
-    besuController.close();
     shutdown.countDown();
   }
 
