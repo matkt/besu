@@ -7,6 +7,7 @@
 ### Additions and Improvements
 
 ### Bug Fixes
+- Persist backward sync status to support resuming across restarts [#5182](https://github.com/hyperledger/besu/pull/5182)
 
 ### Download Links
 
