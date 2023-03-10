@@ -54,7 +54,7 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
    * Instantiates a new RocksDb columnar key value snapshot.
    *
    * @param db      the db
-   * @param parent
+   * @param parent the parent storage
    * @param segment the segment
    * @param metrics the metrics
    */
