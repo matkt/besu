@@ -20,11 +20,12 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 
+import java.io.Closeable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-public interface BlockchainStorage {
+public interface BlockchainStorage extends Closeable {
 
   Optional<Hash> getChainHead();
 

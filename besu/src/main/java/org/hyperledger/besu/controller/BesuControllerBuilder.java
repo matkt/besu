@@ -659,6 +659,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
 
     final List<Closeable> closeables = new ArrayList<>();
     closeables.add(protocolContext.getWorldStateArchive());
+    closeables.add(blockchainStorage);
     closeables.add(storageProvider);
     if (privacyParameters.getPrivateStorageProvider() != null) {
       closeables.add(privacyParameters.getPrivateStorageProvider());

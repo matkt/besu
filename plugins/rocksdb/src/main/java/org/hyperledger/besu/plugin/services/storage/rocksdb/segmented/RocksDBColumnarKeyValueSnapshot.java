@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 /** The RocksDb columnar key value snapshot. */
 public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
 
-
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueSnapshot.class);
 
   /** The Db. */

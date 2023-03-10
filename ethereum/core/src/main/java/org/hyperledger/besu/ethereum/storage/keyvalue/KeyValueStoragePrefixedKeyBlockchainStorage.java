@@ -26,17 +26,24 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.Lists;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainStorage {
+
+
+  private static final Logger LOG = LoggerFactory.getLogger(KeyValueStoragePrefixedKeyBlockchainStorage.class);
 
   private static final Bytes CHAIN_HEAD_KEY =
       Bytes.wrap("chainHeadHash".getBytes(StandardCharsets.UTF_8));
@@ -54,6 +61,8 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
   private static final Bytes BLOCK_HASH_PREFIX = Bytes.of(5);
   private static final Bytes TOTAL_DIFFICULTY_PREFIX = Bytes.of(6);
   private static final Bytes TRANSACTION_LOCATION_PREFIX = Bytes.of(7);
+
+  private final AtomicBoolean closed = new AtomicBoolean(false);
 
   final KeyValueStorage storage;
   final BlockHeaderFunctions blockHeaderFunctions;
@@ -121,6 +130,7 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
 
   @Override
   public Updater updater() {
+    throwIfClosed();
     return new Updater(storage.startTransaction());
   }
 
@@ -133,7 +143,22 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
   }
 
   Optional<Bytes> get(final Bytes prefix, final Bytes key) {
+    throwIfClosed();
     return storage.get(Bytes.concatenate(prefix, key).toArrayUnsafe()).map(Bytes::wrap);
+  }
+
+  @Override
+  public void close() throws IOException {
+    if (closed.compareAndSet(false, true)) {
+      storage.close();
+    }
+  }
+
+  private void throwIfClosed() {
+    if (closed.get()) {
+      LOG.error("Attempting to use a closed KeyValueStorage");
+      throw new IllegalStateException("Storage has been closed");
+    }
   }
 
   public static class Updater implements BlockchainStorage.Updater {
