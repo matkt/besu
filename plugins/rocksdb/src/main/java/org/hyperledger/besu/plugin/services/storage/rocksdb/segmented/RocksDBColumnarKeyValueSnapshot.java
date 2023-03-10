@@ -31,7 +31,6 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.hyperledger.besu.plugin.services.storage.rocksdb.unsegmented.RocksDBKeyValueStorage;
 import org.rocksdb.OptimisticTransactionDB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +43,8 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
 
   /** The Db. */
   final OptimisticTransactionDB db;
+
+  final RocksDBColumnarKeyValueStorage parent;
   /** The Snap tx. */
   final RocksDBSnapshotTransaction snapTx;
 
@@ -52,15 +53,18 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
   /**
    * Instantiates a new RocksDb columnar key value snapshot.
    *
-   * @param db the db
+   * @param db      the db
+   * @param parent
    * @param segment the segment
    * @param metrics the metrics
    */
   RocksDBColumnarKeyValueSnapshot(
-      final OptimisticTransactionDB db,
-      final RocksDbSegmentIdentifier segment,
-      final RocksDBMetrics metrics) {
+          final OptimisticTransactionDB db,
+          final RocksDBColumnarKeyValueStorage parent,
+          final RocksDbSegmentIdentifier segment,
+          final RocksDBMetrics metrics) {
     this.db = db;
+    this.parent = parent;
     this.snapTx = new RocksDBSnapshotTransaction(db, segment.get(), metrics);
   }
 
@@ -130,7 +134,7 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
   }
 
   private void throwIfClosed() {
-    if (closed.get()) {
+    if (parent.isClosed() || closed.get()) {
       LOG.error("Attempting to use a closed RocksDBKeyValueStorage");
       throw new IllegalStateException("Storage has been closed");
     }
