@@ -44,7 +44,6 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
   /** The Db. */
   final OptimisticTransactionDB db;
 
-  final RocksDBColumnarKeyValueStorage parent;
   /** The Snap tx. */
   final RocksDBSnapshotTransaction snapTx;
 
@@ -54,17 +53,13 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
    * Instantiates a new RocksDb columnar key value snapshot.
    *
    * @param db      the db
-   * @param parent the parent storage
    * @param segment the segment
    * @param metrics the metrics
    */
   RocksDBColumnarKeyValueSnapshot(
-          final OptimisticTransactionDB db,
-          final RocksDBColumnarKeyValueStorage parent,
-          final RocksDbSegmentIdentifier segment,
+          final OptimisticTransactionDB db,final RocksDbSegmentIdentifier segment,
           final RocksDBMetrics metrics) {
     this.db = db;
-    this.parent = parent;
     this.snapTx = new RocksDBSnapshotTransaction(db, segment.get(), metrics);
   }
 
@@ -134,7 +129,7 @@ public class RocksDBColumnarKeyValueSnapshot implements SnappedKeyValueStorage {
   }
 
   private void throwIfClosed() {
-    if (parent.isClosed() || closed.get()) {
+    if (closed.get()) {
       LOG.error("Attempting to use a closed RocksDBKeyValueStorage");
       throw new IllegalStateException("Storage has been closed");
     }

@@ -267,7 +267,7 @@ public class RocksDBColumnarKeyValueStorage
   public RocksDBColumnarKeyValueSnapshot takeSnapshot(final RocksDbSegmentIdentifier segment)
       throws StorageException {
     throwIfClosed();
-    return new RocksDBColumnarKeyValueSnapshot(db, this, segment, metrics);
+    return new RocksDBColumnarKeyValueSnapshot(db, segment, metrics);
   }
 
   @Override
@@ -345,10 +345,6 @@ public class RocksDBColumnarKeyValueStorage
           .forEach(ColumnFamilyHandle::close);
       db.close();
     }
-  }
-
-  public boolean isClosed(){
-    return closed.get();
   }
 
   private void throwIfClosed() {
