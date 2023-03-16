@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.trie.NodeFactory;
 import org.hyperledger.besu.ethereum.trie.NodeVisitor;
 import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
-import org.hyperledger.besu.ethereum.trie.sparse.EmptyLeafNode;
 
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
@@ -139,8 +138,6 @@ public class BranchNode<V> implements Node<V> {
     out.endList();
     final Bytes encoded = out.encoded();
     encodedBytes = new WeakReference<>(encoded);
-    if (children.get(0) instanceof EmptyLeafNode<V>)
-      System.out.println("rlp " + encoded + " " + children.get(0).getEncodedBytesRef());
     return encoded;
   }
 

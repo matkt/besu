@@ -43,7 +43,7 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
 
   protected final NodeFactory<V> nodeFactory;
 
-  private Node<V> root;
+  protected Node<V> root;
 
   /**
    * Create a trie.

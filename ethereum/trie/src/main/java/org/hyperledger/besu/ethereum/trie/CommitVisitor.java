@@ -22,7 +22,7 @@ import org.hyperledger.besu.ethereum.trie.patricia.LeafNode;
 
 public class CommitVisitor<V> implements LocationNodeVisitor<V> {
 
-  private final NodeUpdater nodeUpdater;
+  protected final NodeUpdater nodeUpdater;
 
   public CommitVisitor(final NodeUpdater nodeUpdater) {
     this.nodeUpdater = nodeUpdater;
