@@ -22,6 +22,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.BlockParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.FilterParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.processor.BlockTracer;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.processor.Tracer;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.processor.TransactionTrace;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
@@ -120,45 +121,15 @@ public class TraceFilter extends TraceBlock {
           requestContext.getRequest().getId(), resultArrayNode.getArrayNode());
     }
     final BlockHeader header = block.get().getHeader();
-    final BlockHeader previous =
-        getBlockchainQueries()
-            .getBlockchain()
-            .getBlockHeader(block.get().getHeader().getParentHash())
-            .orElse(null);
 
-    if (previous == null) {
-      System.out.println(block.get().getHeader().getParentHash());
-      return new JsonRpcSuccessResponse(
-          requestContext.getRequest().getId(), resultArrayNode.getArrayNode());
-    }
-    try (final var worldState =
-        getBlockchainQueries()
-            .getWorldStateArchive()
-            .getMutable(previous.getStateRoot(), previous.getBlockHash(), false)
-            .map(
-                ws -> {
-                  if (!ws.isPersistable()) {
-                    return ws.copy();
-                  }
-                  return ws;
-                })
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "Missing worldstate for stateroot "
-                            + previous.getStateRoot().toShortHexString()))) {
+    List<Block> blockList = getBlockList(currentBlockNumber, toBlock, block);
 
-      // Source step
-
-      List<Block> blockList = getBlockList(currentBlockNumber, toBlock, block);
+    ArrayNodeWrapper result = Tracer.processTracing(getBlockchainQueries(), Optional.of(header), traceableState -> {
       TraceFilterSource traceFilterSource = new TraceFilterSource(blockList, resultArrayNode);
-
-      // Execution step
-
       final ProtocolSpec protocolSpec = protocolSchedule.getByBlockHeader(header);
       final MainnetTransactionProcessor transactionProcessor =
           protocolSpec.getTransactionProcessor();
-      final ChainUpdater chainUpdater = new ChainUpdater(worldState);
+      final ChainUpdater chainUpdater = new ChainUpdater(traceableState);
       final LabelledMetric<Counter> outputCounter =
           new PrometheusMetricsSystem(BesuMetricCategory.DEFAULT_METRIC_CATEGORIES, false)
               .createLabelledCounter(
@@ -202,13 +173,12 @@ public class TraceFilter extends TraceBlock {
       } catch (InterruptedException | ExecutionException e) {
         throw new RuntimeException(e);
       }
-
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
+      return Optional.of(resultArrayNode);
+    }).orElse(emptyResult());
 
     return new JsonRpcSuccessResponse(
-        requestContext.getRequest().getId(), resultArrayNode.getArrayNode());
+        requestContext.getRequest().getId(), result.getArrayNode());
+
   }
 
   @NotNull
