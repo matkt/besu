@@ -86,7 +86,8 @@ public abstract class SimpleMerkleTrie<K extends Bytes, V> implements MerkleTrie
 
   @Override
   public void putPath(final K path, final V value) {
-    putPath(path, getPutVisitor(value));
+    checkNotNull(path);
+    this.root = root.accept(getPutVisitor(value), path);
   }
 
   @Override
@@ -96,19 +97,13 @@ public abstract class SimpleMerkleTrie<K extends Bytes, V> implements MerkleTrie
   }
 
   @Override
-  public void putPath(final K path, final PathNodeVisitor<V> putVisitor) {
-    checkNotNull(path);
-    this.root = root.accept(putVisitor, path);
-  }
-
-  @Override
   public void remove(final K key) {
     checkNotNull(key);
     this.root = root.accept(getRemoveVisitor(), bytesToPath(key));
   }
 
   @Override
-  public void removePath(final K path, final RemoveVisitor<V> removeVisitor) {
+  public void removePath(final K path, final PathNodeVisitor<V> removeVisitor) {
     checkNotNull(path);
     this.root = root.accept(removeVisitor, path);
   }

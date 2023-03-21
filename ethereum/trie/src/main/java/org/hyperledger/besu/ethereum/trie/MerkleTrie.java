@@ -78,8 +78,6 @@ public interface MerkleTrie<K, V> {
    */
   void put(K key, PathNodeVisitor<V> putVisitor);
 
-  void putPath(K path, PathNodeVisitor<V> putVisitor);
-
   /**
    * Deletes the value mapped to the specified key, if such a value exists (Optional operation).
    *
@@ -93,7 +91,7 @@ public interface MerkleTrie<K, V> {
    * @param path of the node to be deleted.
    * @param removeVisitor custom visitor for the deletion
    */
-  void removePath(K path, RemoveVisitor<V> removeVisitor);
+  void removePath(K path, PathNodeVisitor<V> removeVisitor);
 
   /**
    * Returns the KECCAK256 hash of the root node of the trie.

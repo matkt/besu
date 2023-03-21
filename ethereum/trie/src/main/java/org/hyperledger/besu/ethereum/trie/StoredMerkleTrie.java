@@ -119,7 +119,7 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
   public void putPath(final K path, final V value) {
     checkNotNull(path);
     checkNotNull(value);
-    putPath(path, getPutVisitor(value));
+    this.root = root.accept(getPutVisitor(value), path);
   }
 
   @Override
@@ -129,19 +129,13 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
   }
 
   @Override
-  public void putPath(final K path, final PathNodeVisitor<V> putVisitor) {
-    checkNotNull(path);
-    this.root = root.accept(putVisitor, path);
-  }
-
-  @Override
   public void remove(final K key) {
     checkNotNull(key);
     this.root = root.accept(getRemoveVisitor(), bytesToPath(key));
   }
 
   @Override
-  public void removePath(final K path, final RemoveVisitor<V> removeVisitor) {
+  public void removePath(final K path, final PathNodeVisitor<V> removeVisitor) {
     checkNotNull(path);
     this.root = root.accept(removeVisitor, path);
   }
@@ -164,14 +158,6 @@ public abstract class StoredMerkleTrie<K extends Bytes, V> implements MerkleTrie
         rootHash.equals(EMPTY_TRIE_NODE_HASH)
             ? NullNode.instance()
             : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
-  }
-
-  public void acceptAtRoot(final NodeVisitor<V> visitor) {
-    root.accept(visitor);
-  }
-
-  public void acceptAtRoot(final PathNodeVisitor<V> visitor, final Bytes path) {
-    root.accept(visitor, path);
   }
 
   @Override
