@@ -15,12 +15,6 @@
  */
 package org.hyperledger.besu.ethereum.bonsai.cache;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import io.prometheus.client.guava.cache.CacheMetricsCollector;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -36,6 +30,13 @@ import org.hyperledger.besu.metrics.prometheus.PrometheusMetricsSystem;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import io.prometheus.client.guava.cache.CacheMetricsCollector;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 
 public class CachedMerkleTrieLoader implements BonsaiStorageSubscriber {
 

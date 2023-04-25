@@ -16,9 +16,8 @@
 
 package org.hyperledger.besu.ethereum.bonsai;
 
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.units.bigints.UInt256;
+import static org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager.RETAINED_LAYERS;
+
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.cache.CachedMerkleTrieLoader;
@@ -41,8 +40,6 @@ import org.hyperledger.besu.ethereum.worldstate.StateTrieAccountValue;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.worldstate.WorldState;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -51,7 +48,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
-import static org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager.RETAINED_LAYERS;
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BonsaiWorldStateProvider implements WorldStateArchive {
 
