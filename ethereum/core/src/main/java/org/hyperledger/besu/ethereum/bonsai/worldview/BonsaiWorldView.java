@@ -16,6 +16,9 @@
 
 package org.hyperledger.besu.ethereum.bonsai.worldview;
 
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -26,17 +29,13 @@ import org.hyperledger.besu.evm.worldstate.WorldView;
 import java.util.Map;
 import java.util.Optional;
 
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
-
 public interface BonsaiWorldView extends WorldView {
 
   Optional<Bytes> getCode(Address address, final Hash codeHash);
 
   UInt256 getStorageValue(Address address, UInt256 key);
 
-  Optional<UInt256> getStorageValueBySlotHash(Address address, Hash slotHash);
+  Optional<UInt256> getStorageValueByStorageSlotKey(Address address, StorageSlotKey storageSlotKey);
 
   UInt256 getPriorStorageValue(Address address, UInt256 key);
 

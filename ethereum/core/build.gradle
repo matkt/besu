@@ -63,6 +63,13 @@ dependencies {
 
   annotationProcessor 'org.immutables:value'
 
+  // for zkbesu-756, shoudl not be committed to main
+  implementation 'io.vertx:vertx-web-client'
+  implementation 'io.vertx:vertx-web'
+  implementation 'io.vertx:vertx-unit'
+
+  // end zkbesu-756
+
   testImplementation project(path: ':config', configuration: 'testSupportArtifacts')
   testImplementation project(path: ':ethereum:api')
   testImplementation project(path: ':ethereum:blockcreation')

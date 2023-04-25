@@ -16,10 +16,9 @@
 
 package org.hyperledger.besu.ethereum.bonsai.worldview;
 
-import static org.hyperledger.besu.ethereum.bonsai.BonsaiAccount.fromRLP;
-import static org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
-import static org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
-
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiAccount;
@@ -42,19 +41,19 @@ import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-import javax.annotation.Nonnull;
 
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.hyperledger.besu.ethereum.bonsai.BonsaiAccount.fromRLP;
+import static org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
+import static org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
 
 public class BonsaiWorldState
     implements MutableWorldState, BonsaiWorldView, BonsaiStorageSubscriber {
@@ -149,8 +148,8 @@ public class BonsaiWorldState
 
     // This must be done before updating the accounts so
     // that we can get the storage state hash
-    Stream<Map.Entry<Address, StorageConsumingMap<BonsaiValue<UInt256>>>> storageStream =
-        worldStateUpdater.getStorageToUpdate().entrySet().stream();
+    Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>>
+        storageStream = worldStateUpdater.getStorageToUpdate().entrySet().stream();
     if (maybeStateUpdater.isEmpty()) {
       storageStream =
           storageStream
@@ -239,7 +238,8 @@ public class BonsaiWorldState
   private void updateAccountStorageState(
       final Optional<BonsaiWorldStateKeyValueStorage.BonsaiUpdater> maybeStateUpdater,
       final BonsaiWorldStateUpdateAccumulator worldStateUpdater,
-      final Map.Entry<Address, StorageConsumingMap<BonsaiValue<UInt256>>> storageAccountUpdate) {
+      final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
+          storageAccountUpdate) {
     final Address updatedAddress = storageAccountUpdate.getKey();
     final Hash updatedAddressHash = Hash.hash(updatedAddress);
     if (worldStateUpdater.getAccountsToUpdate().containsKey(updatedAddress)) {
@@ -258,22 +258,22 @@ public class BonsaiWorldState
               storageRoot);
 
       // for manicured tries and composting, collect branches here (not implemented)
-      for (final Map.Entry<Hash, BonsaiValue<UInt256>> storageUpdate :
+      for (final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> storageUpdate :
           storageAccountUpdate.getValue().entrySet()) {
-        final Hash keyHash = storageUpdate.getKey();
+        final Hash slotHash = storageUpdate.getKey().slotHash();
         final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
         try {
           if (updatedStorage == null || updatedStorage.equals(UInt256.ZERO)) {
             maybeStateUpdater.ifPresent(
                 bonsaiUpdater ->
-                    bonsaiUpdater.removeStorageValueBySlotHash(updatedAddressHash, keyHash));
-            storageTrie.remove(keyHash);
+                    bonsaiUpdater.removeStorageValueBySlotHash(updatedAddressHash, slotHash));
+            storageTrie.remove(slotHash);
           } else {
             maybeStateUpdater.ifPresent(
                 bonsaiUpdater ->
                     bonsaiUpdater.putStorageValueBySlotHash(
-                        updatedAddressHash, keyHash, updatedStorage));
-            storageTrie.put(keyHash, BonsaiWorldView.encodeTrieValue(updatedStorage));
+                        updatedAddressHash, slotHash, updatedStorage));
+            storageTrie.put(slotHash, BonsaiWorldView.encodeTrieValue(updatedStorage));
           }
         } catch (MerkleTrieException e) {
           // need to throw to trigger the heal
@@ -502,22 +502,23 @@ public class BonsaiWorldState
 
   @Override
   public UInt256 getStorageValue(final Address address, final UInt256 storageKey) {
-    return getStorageValueBySlotHash(address, Hash.hash(storageKey)).orElse(UInt256.ZERO);
+    return Optional.ofNullable(getStorageValue(address, storageKey)).orElse(UInt256.ZERO);
   }
 
   @Override
-  public Optional<UInt256> getStorageValueBySlotHash(final Address address, final Hash slotHash) {
+  public Optional<UInt256> getStorageValueByStorageSlotKey(
+      final Address address, final StorageSlotKey storageSlotKey) {
     return worldStateStorage
-        .getStorageValueBySlotHash(Hash.hash(address), slotHash)
+        .getStorageValueByStorageSlotKey(Hash.hash(address), storageSlotKey)
         .map(UInt256::fromBytes);
   }
 
-  public Optional<UInt256> getStorageValueBySlotHash(
+  public Optional<UInt256> getStorageValueByStorageSlotKey(
       final Supplier<Optional<Hash>> storageRootSupplier,
       final Address address,
-      final Hash slotHash) {
+      final StorageSlotKey storageSlotKey) {
     return worldStateStorage
-        .getStorageValueBySlotHash(storageRootSupplier, Hash.hash(address), slotHash)
+        .getStorageValueByStorageSlotKey(storageRootSupplier, Hash.hash(address), storageSlotKey)
         .map(UInt256::fromBytes);
   }
 

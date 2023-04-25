@@ -16,6 +16,8 @@
 
 package org.hyperledger.besu.ethereum.bonsai;
 
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Objects;
@@ -74,10 +76,19 @@ public class BonsaiValue<T> {
     } else {
       writer.accept(output, updated);
     }
+    if (!cleared) {
+      output.writeNull();
+    } else {
+      output.writeInt(1);
+    }
   }
 
   public boolean isUnchanged() {
     return Objects.equals(updated, prior);
+  }
+
+  public void setCleared() {
+    this.cleared = true;
   }
 
   public boolean isCleared() {
@@ -94,5 +105,26 @@ public class BonsaiValue<T> {
         + ", cleared="
         + cleared
         + '}';
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    BonsaiValue<?> that = (BonsaiValue<?>) o;
+    return new EqualsBuilder()
+        .append(cleared, that.cleared)
+        .append(prior, that.prior)
+        .append(updated, that.updated)
+        .isEquals();
+  }
+
+  @Override
+  public int hashCode() {
+    return new HashCodeBuilder(17, 37).append(prior).append(updated).append(cleared).toHashCode();
   }
 }
