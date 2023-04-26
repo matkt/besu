@@ -14,13 +14,9 @@
  */
 package org.hyperledger.besu.evm.operation;
 
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.EVM;
-import org.hyperledger.besu.evm.frame.BlockValues;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
-
-import java.util.function.Function;
 
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -41,30 +37,7 @@ public class BlockHashOperation extends AbstractFixedCostOperation {
   @Override
   public Operation.OperationResult executeFixedCostOperation(
       final MessageFrame frame, final EVM evm) {
-    final UInt256 blockArg = UInt256.fromBytes(frame.popStackItem());
-
-    // Short-circuit if value is unreasonably large
-    if (!blockArg.fitsLong()) {
-      frame.pushStackItem(UInt256.ZERO);
-      return successResponse;
-    }
-
-    final long soughtBlock = blockArg.toLong();
-    final BlockValues blockValues = frame.getBlockValues();
-    final long currentBlockNumber = blockValues.getNumber();
-    final long mostRecentBlockNumber = currentBlockNumber - 1;
-
-    // If the current block is the genesis block or the sought block is
-    // not within the last 256 completed blocks, zero is returned.
-    if (currentBlockNumber == 0
-        || soughtBlock < (mostRecentBlockNumber - MAX_RELATIVE_BLOCK)
-        || soughtBlock > mostRecentBlockNumber) {
-      frame.pushStackItem(UInt256.ZERO);
-    } else {
-      final Function<Long, Hash> blockHashLookup = frame.getBlockHashLookup();
-      final Hash blockHash = blockHashLookup.apply(soughtBlock);
-      frame.pushStackItem(UInt256.fromBytes(blockHash));
-    }
+    frame.pushStackItem(UInt256.ZERO);
 
     return successResponse;
   }
