@@ -23,8 +23,6 @@ import org.apache.tuweni.units.bigints.UInt256;
 /** The Block hash operation. */
 public class BlockHashOperation extends AbstractFixedCostOperation {
 
-  private static final int MAX_RELATIVE_BLOCK = 255;
-
   /**
    * Instantiates a new Block hash operation.
    *
