@@ -18,7 +18,7 @@ import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 
-import org.apache.tuweni.units.bigints.UInt256;
+import org.apache.tuweni.bytes.Bytes;
 
 /** The Block hash operation. */
 public class BlockHashOperation extends AbstractFixedCostOperation {
@@ -35,8 +35,8 @@ public class BlockHashOperation extends AbstractFixedCostOperation {
   @Override
   public Operation.OperationResult executeFixedCostOperation(
       final MessageFrame frame, final EVM evm) {
-    frame.pushStackItem(UInt256.ZERO);
-
+    final long number = frame.getBlockValues().getNumber();
+    frame.pushStackItem(Bytes.ofUnsignedLong(number));
     return successResponse;
   }
 }
