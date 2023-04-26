@@ -15,16 +15,15 @@
  */
 package org.hyperledger.besu.ethereum.bonsai.worldview;
 
+import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.Hash;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 import java.util.Optional;
 
-import org.apache.tuweni.units.bigints.UInt256;
-import org.jetbrains.annotations.NotNull;
-
 public record StorageSlotKey(Hash slotHash, Optional<UInt256> slotKey)
-    implements Comparable<org.hyperledger.besu.ethereum.bonsai.worldview.StorageSlotKey> {
+    implements Comparable<StorageSlotKey> {
 
   public StorageSlotKey(final UInt256 slotKey) {
     this(Hash.hash(slotKey), Optional.of(slotKey));
@@ -56,7 +55,7 @@ public record StorageSlotKey(Hash slotHash, Optional<UInt256> slotKey)
 
   @Override
   public int compareTo(
-      @NotNull final org.hyperledger.besu.ethereum.bonsai.worldview.StorageSlotKey other) {
+      @NotNull final StorageSlotKey other) {
     return this.slotHash.compareTo(other.slotHash);
   }
 }

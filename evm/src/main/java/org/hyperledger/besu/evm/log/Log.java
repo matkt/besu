@@ -71,6 +71,7 @@ public class Log {
     in.enterList();
     final Address logger = Address.wrap(in.readBytes());
     final List<LogTopic> topics = in.readList(listIn -> LogTopic.wrap(listIn.readBytes32()));
+
     final Bytes data = in.readBytes();
     in.leaveList();
     return new Log(logger, data, topics);

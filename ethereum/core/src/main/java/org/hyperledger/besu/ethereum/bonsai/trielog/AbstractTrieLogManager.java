@@ -15,6 +15,8 @@
  */
 package org.hyperledger.besu.ethereum.bonsai.trielog;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.cache.CachedBonsaiWorldView;
 import org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -25,14 +27,11 @@ import org.hyperledger.besu.ethereum.bonsai.worldview.BonsaiWorldStateUpdateAccu
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.util.Subscribers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Optional;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.tuweni.bytes.Bytes32;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public abstract class AbstractTrieLogManager implements TrieLogManager {
   private static final Logger LOG = LoggerFactory.getLogger(AbstractTrieLogManager.class);
@@ -44,7 +43,7 @@ public abstract class AbstractTrieLogManager implements TrieLogManager {
   protected final long maxLayersToLoad;
   private final Subscribers<TrieLogAddedObserver> trieLogAddedObservers = Subscribers.create();
 
-  // TODO plumb factory from plugin service:
+  // TODO plumb factory from plugin service, DO NOT MERGE WITH ZkTrieLogFactoryImpl as default
   TrieLogFactory<TrieLogLayer> trieLogFactory = new TrieLogFactoryImpl();
 
   protected AbstractTrieLogManager(
@@ -56,6 +55,7 @@ public abstract class AbstractTrieLogManager implements TrieLogManager {
     this.rootWorldStateStorage = worldStateStorage;
     this.cachedWorldStatesByHash = cachedWorldStatesByHash;
     this.maxLayersToLoad = maxLayersToLoad;
+    this.subscribe(new ZkTrieLogObserver("localhost", 8888));
   }
 
   @Override
@@ -75,7 +75,7 @@ public abstract class AbstractTrieLogManager implements TrieLogManager {
         persistTrieLog(forBlockHeader, forWorldStateRootHash, trieLog, stateUpdater);
 
         // notify trie log added observers, synchronously
-        trieLogAddedObservers.forEach(o -> o.onTrieLogAdded(new TrieLogAddedEvent(trieLog)));
+        trieLogAddedObservers.forEach(o -> o.onTrieLogAdded(new TrieLogAddedEvent(forBlockHeader.getHash(), trieLog)));
 
         success = true;
       } finally {

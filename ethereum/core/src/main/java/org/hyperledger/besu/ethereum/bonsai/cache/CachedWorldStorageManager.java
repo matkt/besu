@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.bonsai.cache;
 
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.bonsai.storage.BonsaiSnapshotWorldStateKeyValueStorage;
@@ -25,6 +26,8 @@ import org.hyperledger.besu.ethereum.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -33,10 +36,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-
-import org.apache.tuweni.bytes.Bytes32;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class CachedWorldStorageManager extends AbstractTrieLogManager
     implements BonsaiStorageSubscriber {
