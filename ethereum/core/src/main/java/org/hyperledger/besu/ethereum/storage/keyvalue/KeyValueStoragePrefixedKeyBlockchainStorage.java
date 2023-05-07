@@ -22,14 +22,20 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
+import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.evm.log.LogTopic;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import com.google.common.collect.Lists;
 import org.apache.tuweni.bytes.Bytes;
@@ -125,7 +131,15 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
   }
 
   private List<TransactionReceipt> rlpDecodeTransactionReceipts(final Bytes bytes) {
-    return RLP.input(bytes).readList(input -> TransactionReceipt.readFrom(input, true, true));
+    return RLP.input(bytes).readList(input ->{
+      input.enterList();
+
+      ArrayList<Bytes32> logTopics = new ArrayList<>(input.readList(RLPInput::readBytes32));
+
+      TransactionReceipt transactionReceipt = TransactionReceipt.readFrom(input, true, true, logTopics);
+      input.leaveList();
+      return transactionReceipt;
+    });
   }
 
   private Hash bytesToHash(final Bytes bytes) {
@@ -248,11 +262,19 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
 
     private Bytes rlpEncode(final List<TransactionReceipt> receipts) {
       return RLP.encode(
-          o ->
-              o.writeList(
-                  receipts,
-                  (transactionReceipt, rlpOutput) ->
-                      transactionReceipt.writeToWithRevertReason(rlpOutput, true)));
+          o -> {
+            o.startList();
+            final Set<Bytes32> topics = new HashSet<>();
+            receipts.forEach(receipt -> receipt.getLogs().forEach(log -> topics.addAll(log.getTopics())));
+            ArrayList<Bytes32> logTopics = new ArrayList<>(topics);
+            o.writeList(logTopics, (bytes32, rlpOutput) -> rlpOutput.writeBytes(bytes32));
+            o.writeList(
+                    receipts,
+                    (transactionReceipt, rlpOutput) ->
+                            transactionReceipt.writeToWithRevertReason(rlpOutput, true, logTopics));
+            o.endList();
+          });
+
     }
   }
 }

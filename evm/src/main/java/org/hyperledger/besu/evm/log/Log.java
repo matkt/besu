@@ -14,12 +14,17 @@
  */
 package org.hyperledger.besu.evm.log;
 
+import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -50,26 +55,25 @@ public class Log {
   }
 
   public void writeTo(final RLPOutput out) {
-    writeTo(out, false);
+    writeTo(out, false, new ArrayList<>());
   }
 
-  public void writeTo(final RLPOutput out, final boolean isCompacted) {
+  public void writeTo(final RLPOutput out, final boolean isCompacted, final ArrayList<Bytes32> logTopics) {
     out.startList();
     out.writeBytes(logger);
-    out.writeList(topics, (topic, listOut) -> listOut.writeBytes(topic));
-    if (isCompacted) {
-      final Bytes shortData = data.trimLeadingZeros();
-      final int zeroLeadDataSize = data.size() - shortData.size();
-      out.writeInt(zeroLeadDataSize);
-      out.writeBytes(shortData);
-    } else {
-      out.writeBytes(data);
-    }
+    out.writeList(topics, (topic, listOut) -> {
+      if(isCompacted){
+        listOut.writeInt(logTopics.indexOf(topic));
+      }else {
+        listOut.writeBytes(topic);
+      }
+    });
+    out.writeBytes(data);
     out.endList();
   }
 
   public static Log readFrom(final RLPInput in) {
-    return readFrom(in, false);
+    return readFrom(in, false, new ArrayList<>());
   }
   /**
    * Reads the log entry from the provided RLP input.
@@ -77,25 +81,18 @@ public class Log {
    * @param in the input from which to decode the log entry.
    * @return the read log entry.
    */
-  public static Log readFrom(final RLPInput in, final boolean isCompacted) {
+  public static Log readFrom(final RLPInput in, final boolean isCompacted, final ArrayList<Bytes32> logTopics) {
     in.enterList();
     final Address logger = Address.wrap(in.readBytes());
-    final List<LogTopic> topics = in.readList(listIn -> LogTopic.wrap(listIn.readBytes32()));
-    final Bytes data;
-    if (isCompacted) {
-      final int zeroLeadDataSize = in.readInt();
-      if (in.nextIsNull()) {
-        data = MutableBytes.create(zeroLeadDataSize);
-        in.skipNext();
-      } else {
-        final Bytes shortData = in.readBytes();
-        MutableBytes unCompactedData = MutableBytes.create(zeroLeadDataSize + shortData.size());
-        unCompactedData.set(zeroLeadDataSize, shortData);
-        data = unCompactedData;
+    final List<LogTopic> topics = in.readList(listIn -> {
+      if(isCompacted){
+        return LogTopic.wrap(logTopics.get(listIn.readInt()));
+      }else {
+        return LogTopic.wrap(listIn.readBytes32());
       }
-    } else {
-      data = in.readBytes();
-    }
+    });
+    final Bytes data;
+    data = in.readBytes();
 
     in.leaveList();
     return new Log(logger, data, topics);
