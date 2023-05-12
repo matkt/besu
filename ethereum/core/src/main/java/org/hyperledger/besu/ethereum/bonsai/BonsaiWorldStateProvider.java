@@ -54,17 +54,18 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings({"AccessStaticViaInstance", "static", "StaticAssignmentInConstructor"})
 public class BonsaiWorldStateProvider implements WorldStateArchive {
 
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiWorldStateProvider.class);
 
   private final Blockchain blockchain;
 
-  private final TrieLogManager trieLogManager;
+  public static TrieLogManager trieLogManager;
   private final BonsaiWorldState persistedState;
   private final BonsaiWorldStateKeyValueStorage worldStateStorage;
 
-  private final CachedMerkleTrieLoader cachedMerkleTrieLoader;
+  public final CachedMerkleTrieLoader cachedMerkleTrieLoader;
 
   public BonsaiWorldStateProvider(
       final StorageProvider provider,
@@ -103,7 +104,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
         .getBlockHeader(persistedState.worldStateBlockHash)
         .ifPresent(
             blockHeader ->
-                this.trieLogManager.addCachedLayer(
+                trieLogManager.addCachedLayer(
                     blockHeader, persistedState.worldStateRootHash, persistedState));
   }
 
@@ -122,7 +123,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
         .getBlockHeader(persistedState.worldStateBlockHash)
         .ifPresent(
             blockHeader ->
-                this.trieLogManager.addCachedLayer(
+                BonsaiWorldStateProvider.trieLogManager.addCachedLayer(
                     blockHeader, persistedState.worldStateRootHash, persistedState));
   }
 

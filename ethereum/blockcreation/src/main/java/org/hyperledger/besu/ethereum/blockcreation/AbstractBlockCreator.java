@@ -19,6 +19,7 @@ import org.hyperledger.besu.datatypes.DataGas;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -39,7 +40,6 @@ import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
-import org.hyperledger.besu.ethereum.mainnet.WithdrawalsProcessor;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.BaseFeeMarket;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
 import org.hyperledger.besu.evm.account.EvmAccount;
@@ -61,6 +61,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings({"AccessStaticViaInstance", "static", "StaticAssignmentInConstructor"})
 public abstract class AbstractBlockCreator implements AsyncBlockCreator {
 
   public interface ExtraDataCalculator {
@@ -75,7 +76,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
   protected final Supplier<Optional<Long>> targetGasLimitSupplier;
 
   private final ExtraDataCalculator extraDataCalculator;
-  private final PendingTransactions pendingTransactions;
+  public static PendingTransactions pendingTransactions;
   protected final ProtocolContext protocolContext;
   protected final ProtocolSchedule protocolSchedule;
   protected final BlockHeaderFunctions blockHeaderFunctions;
@@ -131,6 +132,17 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
     return createBlock(Optional.empty(), Optional.empty(), timestamp);
   }
 
+  public BlockCreationResult createBlock(final Hash fork, long timestamp) {
+    return createBlock(
+        fork,
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty(),
+        Optional.empty(),
+        timestamp,
+        true);
+  }
+
   @Override
   public BlockCreationResult createBlock(
       final List<Transaction> transactions, final List<BlockHeader> ommers, final long timestamp) {
@@ -143,10 +155,17 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       final Optional<List<BlockHeader>> maybeOmmers,
       final long timestamp) {
     return createBlock(
-        maybeTransactions, maybeOmmers, Optional.empty(), Optional.empty(), timestamp, true);
+        Hash.EMPTY,
+        maybeTransactions,
+        maybeOmmers,
+        Optional.empty(),
+        Optional.empty(),
+        timestamp,
+        true);
   }
 
   protected BlockCreationResult createBlock(
+      final Hash fork,
       final Optional<List<Transaction>> maybeTransactions,
       final Optional<List<BlockHeader>> maybeOmmers,
       final Optional<List<Withdrawal>> maybeWithdrawals,
@@ -154,19 +173,22 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       final long timestamp,
       boolean rewardCoinbase) {
 
-    try (final MutableWorldState disposableWorldState = duplicateWorldStateAtParent()) {
+    try (final MutableWorldState disposableWorldState = duplicateWorldStateAtParent(fork)) {
+      final BlockHeader parentHeader =
+          (fork.equals(Hash.EMPTY))
+              ? this.parentHeader
+              : CachedWorldStorageManager.blockForkHash.get(fork);
       final ProtocolSpec newProtocolSpec =
           protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
 
       final ProcessableBlockHeader processableBlockHeader =
-          createPendingBlockHeader(timestamp, maybePrevRandao, newProtocolSpec);
+          createPendingBlockHeader(parentHeader, timestamp, maybePrevRandao, newProtocolSpec);
       final Address miningBeneficiary =
           miningBeneficiaryCalculator.getMiningBeneficiary(processableBlockHeader.getNumber());
       final Wei dataGasPrice =
           newProtocolSpec
               .getFeeMarket()
               .dataPrice(parentHeader.getExcessDataGas().orElse(DataGas.ZERO));
-
       throwIfStopped();
 
       final List<BlockHeader> ommers = maybeOmmers.orElse(selectOmmers());
@@ -174,6 +196,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       throwIfStopped();
       final BlockTransactionSelector.TransactionSelectionResults transactionResults =
           selectTransactions(
+              fork,
               processableBlockHeader,
               disposableWorldState,
               maybeTransactions,
@@ -181,16 +204,8 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
               dataGasPrice,
               newProtocolSpec);
 
-      throwIfStopped();
-
-      final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
-          newProtocolSpec.getWithdrawalsProcessor();
-      final boolean withdrawalsCanBeProcessed =
-          maybeWithdrawalsProcessor.isPresent() && maybeWithdrawals.isPresent();
-      if (withdrawalsCanBeProcessed) {
-        maybeWithdrawalsProcessor
-            .get()
-            .processWithdrawals(maybeWithdrawals.get(), disposableWorldState.updater());
+      if (!fork.equals(Hash.EMPTY) && transactionResults.getTransactions().isEmpty()) {
+        return null;
       }
 
       throwIfStopped();
@@ -228,18 +243,14 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
               .logsBloom(BodyValidation.logsBloom(transactionResults.getReceipts()))
               .gasUsed(transactionResults.getCumulativeGasUsed())
               .extraData(extraDataCalculator.get(parentHeader))
-              .withdrawalsRoot(
-                  withdrawalsCanBeProcessed
-                      ? BodyValidation.withdrawalsRoot(maybeWithdrawals.get())
-                      : null)
+              .withdrawalsRoot(null)
               .depositsRoot(null) // TODO 6110: Derive deposit roots from deposits
               .excessDataGas(newExcessDataGas)
               .buildSealableBlockHeader();
 
       final BlockHeader blockHeader = createFinalBlockHeader(sealableBlockHeader);
 
-      final Optional<List<Withdrawal>> withdrawals =
-          withdrawalsCanBeProcessed ? maybeWithdrawals : Optional.empty();
+      final Optional<List<Withdrawal>> withdrawals = Optional.empty();
       final Block block =
           new Block(
               blockHeader,
@@ -277,6 +288,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
   }
 
   private BlockTransactionSelector.TransactionSelectionResults selectTransactions(
+      final Hash fork,
       final ProcessableBlockHeader processableBlockHeader,
       final MutableWorldState disposableWorldState,
       final Optional<List<Transaction>> transactions,
@@ -307,17 +319,21 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
             protocolSpec.getGasLimitCalculator());
 
     if (transactions.isPresent()) {
-      return selector.evaluateTransactions(transactions.get());
+      return selector.evaluateTransactions(fork, transactions.get());
     } else {
-      return selector.buildTransactionListForBlock();
+      return selector.buildTransactionListForBlock(fork);
     }
   }
 
-  private MutableWorldState duplicateWorldStateAtParent() {
+  private MutableWorldState duplicateWorldStateAtParent(final Bytes fork) {
     final Hash parentStateRoot = parentHeader.getStateRoot();
     return protocolContext
         .getWorldStateArchive()
-        .getMutable(parentHeader, false)
+        .getMutable(
+            (fork.equals(Hash.EMPTY))
+                ? parentHeader
+                : CachedWorldStorageManager.blockForkHash.get(fork),
+            false)
         .orElseThrow(
             () -> {
               LOG.info("Unable to create block because world state is not available");
@@ -334,15 +350,17 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
   }
 
   private ProcessableBlockHeader createPendingBlockHeader(
+      final BlockHeader parentHeader,
       final long timestamp,
       final Optional<Bytes32> maybePrevRandao,
       final ProtocolSpec protocolSpec) {
+
     final long newBlockNumber = parentHeader.getNumber() + 1;
     long gasLimit =
         protocolSpec
             .getGasLimitCalculator()
             .nextGasLimit(
-                parentHeader.getGasLimit(),
+                this.parentHeader.getGasLimit(),
                 targetGasLimitSupplier.get().orElse(parentHeader.getGasLimit()),
                 newBlockNumber);
 

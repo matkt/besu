@@ -104,6 +104,8 @@ public class Transaction
   protected volatile Hash hash;
   // Caches the size in bytes of the encoded transaction.
   protected volatile int size = -1;
+
+  protected Hash parentBlockHash = Hash.EMPTY;
   private final TransactionType transactionType;
 
   private final SignatureAlgorithm signatureAlgorithm = SignatureAlgorithmFactory.getInstance();
@@ -315,6 +317,14 @@ public class Transaction
         sender,
         chainId,
         versionedHashes);
+  }
+
+  public Hash getParentBlockHash() {
+    return parentBlockHash;
+  }
+
+  public void setParentBlockHash(final Hash parentBlockHash) {
+    this.parentBlockHash = parentBlockHash;
   }
 
   /**

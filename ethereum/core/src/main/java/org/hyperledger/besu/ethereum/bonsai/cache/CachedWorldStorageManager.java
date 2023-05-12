@@ -28,6 +28,7 @@ import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,6 +44,10 @@ public class CachedWorldStorageManager extends AbstractTrieLogManager
   private static final Logger LOG = LoggerFactory.getLogger(CachedWorldStorageManager.class);
   private final BonsaiWorldStateProvider archive;
   private final ObservableMetricsSystem metricsSystem;
+
+  public static Hash currentChain = null;
+
+  public static Map<Hash, BlockHeader> blockForkHash = new HashMap<>();
 
   CachedWorldStorageManager(
       final BonsaiWorldStateProvider archive,
@@ -70,6 +75,23 @@ public class CachedWorldStorageManager extends AbstractTrieLogManager
         maxLayersToLoad,
         new ConcurrentHashMap<>(),
         metricsSystem);
+  }
+
+  public Hash createFork(final Function<Hash, Optional<BlockHeader>> hashBlockHeaderFunction) {
+    Optional<Hash> worldStateBlockHash = rootWorldStateStorage.getWorldStateBlockHash();
+
+    worldStateBlockHash
+        .flatMap(hashBlockHeaderFunction)
+        .ifPresent(
+            blockHeader -> {
+              blockForkHash.put(blockHeader.getHash(), blockHeader);
+              // add the head to the cache
+              addCachedLayer(
+                  blockHeader,
+                  blockHeader.getStateRoot(),
+                  new BonsaiWorldState(archive, rootWorldStateStorage));
+            });
+    return worldStateBlockHash.orElseThrow();
   }
 
   @Override

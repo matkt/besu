@@ -58,6 +58,7 @@ public class CliqueBlockMiner extends BlockMiner<CliqueBlockCreator> {
   protected boolean mineBlock() throws InterruptedException {
     if (CliqueHelpers.addressIsAllowedToProduceNextBlock(
         localAddress, protocolContext, parentHeader)) {
+      mineForkBlock();
       return super.mineBlock();
     }
 

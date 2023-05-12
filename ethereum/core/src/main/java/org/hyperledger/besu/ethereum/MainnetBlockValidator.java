@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum;
 
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.chain.BadBlockManager;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -31,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,6 +85,103 @@ public class MainnetBlockValidator implements BlockValidator {
       final boolean shouldPersist) {
     return validateAndProcessBlock(
         context, block, headerValidationMode, ommerValidationMode, shouldPersist, true);
+  }
+
+  public BlockProcessingResult validateAndProcessBlock(
+      final Bytes fork,
+      final ProtocolContext context,
+      final Block block,
+      final HeaderValidationMode headerValidationMode,
+      final HeaderValidationMode ommerValidationMode,
+      final boolean shouldPersist) {
+    return validateAndProcessBlock(
+        fork, context, block, headerValidationMode, ommerValidationMode, shouldPersist, true);
+  }
+
+  public BlockProcessingResult validateAndProcessBlock(
+      final Bytes fork,
+      final ProtocolContext context,
+      final Block block,
+      final HeaderValidationMode headerValidationMode,
+      final HeaderValidationMode ommerValidationMode,
+      final boolean shouldPersist,
+      final boolean shouldRecordBadBlock) {
+
+    final BlockHeader header = block.getHeader();
+    final BlockHeader parentHeader;
+
+    try {
+      final MutableBlockchain blockchain = context.getBlockchain();
+      final Optional<BlockHeader> maybeParentHeader =
+          (fork.equals(Hash.EMPTY))
+              ? blockchain.getBlockHeader(header.getParentHash())
+              : Optional.of(CachedWorldStorageManager.blockForkHash.get(fork));
+      if (maybeParentHeader.isEmpty()) {
+        var retval =
+            new BlockProcessingResult(
+                "Parent block with hash " + header.getParentHash() + " not present");
+        handleAndLogImportFailure(block, retval, shouldRecordBadBlock);
+        return retval;
+      }
+      parentHeader = maybeParentHeader.get();
+
+      if (!blockHeaderValidator.validateHeader(
+          header, parentHeader, context, headerValidationMode)) {
+        var retval = new BlockProcessingResult("header validation rule violated, see logs");
+        handleAndLogImportFailure(block, retval, shouldRecordBadBlock);
+        return retval;
+      }
+    } catch (StorageException ex) {
+      var retval = new BlockProcessingResult(Optional.empty(), ex);
+      handleAndLogImportFailure(block, retval, shouldRecordBadBlock);
+      return retval;
+    }
+    try (final var worldState =
+        context.getWorldStateArchive().getMutable(parentHeader, shouldPersist).orElse(null)) {
+
+      if (worldState == null) {
+        var retval =
+            new BlockProcessingResult(
+                "Unable to process block because parent world state "
+                    + parentHeader.getStateRoot()
+                    + " is not available");
+        handleAndLogImportFailure(block, retval, shouldRecordBadBlock);
+        return retval;
+      }
+      var result = processBlock(context, worldState, block);
+      if (result.isFailed()) {
+        handleAndLogImportFailure(block, result, shouldRecordBadBlock);
+        return result;
+      } else {
+        List<TransactionReceipt> receipts =
+            result.getYield().map(BlockProcessingOutputs::getReceipts).orElse(new ArrayList<>());
+        if (!blockBodyValidator.validateBody(
+            context, block, receipts, worldState.rootHash(), ommerValidationMode)) {
+          handleAndLogImportFailure(block, result, shouldRecordBadBlock);
+          return new BlockProcessingResult("failed to validate output of imported block");
+        }
+
+        return new BlockProcessingResult(
+            Optional.of(new BlockProcessingOutputs(worldState, receipts)));
+      }
+    } catch (MerkleTrieException ex) {
+      context
+          .getSynchronizer()
+          .ifPresentOrElse(
+              synchronizer -> synchronizer.healWorldState(ex.getMaybeAddress(), ex.getLocation()),
+              () ->
+                  handleAndLogImportFailure(
+                      block,
+                      new BlockProcessingResult(Optional.empty(), ex),
+                      shouldRecordBadBlock));
+      return new BlockProcessingResult(Optional.empty(), ex);
+    } catch (StorageException ex) {
+      var retval = new BlockProcessingResult(Optional.empty(), ex);
+      handleAndLogImportFailure(block, retval, shouldRecordBadBlock);
+      return retval;
+    } catch (Exception ex) {
+      throw new RuntimeException(ex);
+    }
   }
 
   @Override

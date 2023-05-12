@@ -15,6 +15,7 @@
 package org.hyperledger.besu.consensus.merge.blockcreation;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.blockcreation.AbstractBlockCreator;
@@ -91,6 +92,7 @@ class MergeBlockCreator extends AbstractBlockCreator {
       final Optional<List<Withdrawal>> withdrawals) {
 
     return createBlock(
+        Hash.EMPTY,
         maybeTransactions,
         Optional.of(Collections.emptyList()),
         withdrawals,

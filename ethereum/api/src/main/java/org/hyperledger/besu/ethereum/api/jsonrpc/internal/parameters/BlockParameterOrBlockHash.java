@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters;
 
 import org.hyperledger.besu.config.JsonUtil;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 
 import java.util.Objects;
@@ -38,7 +39,7 @@ public class BlockParameterOrBlockHash {
 
   private final BlockParameterType type;
   private final OptionalLong number;
-  private final Optional<Hash> blockHash;
+  private Optional<Hash> blockHash;
   private final boolean requireCanonical;
 
   @JsonCreator
@@ -71,10 +72,24 @@ public class BlockParameterOrBlockHash {
         number = OptionalLong.empty();
         blockHash = Optional.empty();
         requireCanonical = false;
+      } else if (CachedWorldStorageManager.currentChain != null) {
+        type = BlockParameterType.HASH;
+        number = OptionalLong.empty();
+        blockHash =
+            Optional.of(
+                CachedWorldStorageManager.blockForkHash
+                    .get(CachedWorldStorageManager.currentChain)
+                    .getBlockHash());
+        requireCanonical = false;
       } else if (normalizedValue.length() >= 65) { // with or without hex prefix
         type = BlockParameterType.HASH;
         number = OptionalLong.empty();
         blockHash = Optional.of(Hash.fromHexStringLenient(normalizedValue));
+        if (CachedWorldStorageManager.blockForkHash.containsKey(blockHash.get())) {
+          blockHash =
+              Optional.of(
+                  CachedWorldStorageManager.blockForkHash.get(blockHash.get()).getBlockHash());
+        }
         requireCanonical = false;
       } else if (normalizedValue.length() > 16) {
         throw new IllegalArgumentException("hex number > 64 bits");

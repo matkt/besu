@@ -24,15 +24,19 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorR
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.util.DomainObjectDecodeUtils;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.transaction.TransactionInvalidReason;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import com.google.common.base.Suppliers;
+import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +46,8 @@ public class EthSendRawTransaction implements JsonRpcMethod {
   private final boolean sendEmptyHashOnInvalidBlock;
 
   private final Supplier<TransactionPool> transactionPool;
+
+  private final Set<Hash> alreadyReceived = new HashSet<>();
 
   public EthSendRawTransaction(final TransactionPool transactionPool) {
     this(Suppliers.ofInstance(transactionPool), false);
@@ -60,26 +66,39 @@ public class EthSendRawTransaction implements JsonRpcMethod {
 
   @Override
   public JsonRpcResponse response(final JsonRpcRequestContext requestContext) {
-    if (requestContext.getRequest().getParamLength() != 1) {
-      return new JsonRpcErrorResponse(
-          requestContext.getRequest().getId(), JsonRpcError.INVALID_PARAMS);
-    }
+
     final String rawTransaction = requestContext.getRequiredParameter(0, String.class);
+
+    final Hash fork =
+        (CachedWorldStorageManager.currentChain != null
+            ? CachedWorldStorageManager.currentChain
+            : requestContext.getOptionalParameter(1, Hash.class).orElse(Hash.EMPTY));
 
     final Transaction transaction;
     try {
       transaction = DomainObjectDecodeUtils.decodeRawTransaction(rawTransaction);
+      if (!CachedWorldStorageManager.blockForkHash.isEmpty()) {
+        transaction.setParentBlockHash(fork);
+      }
       LOG.trace("Received local transaction {}", transaction);
+
+      Hash hash = Hash.hash(Bytes.fromHexString(rawTransaction));
+      if (!alreadyReceived.contains(hash)) {
+        alreadyReceived.add(hash);
+      } else {
+        return new JsonRpcSuccessResponse(
+            requestContext.getRequest().getId(), transaction.getHash().toString());
+      }
     } catch (final RLPException e) {
-      LOG.debug("RLPException: {} caused by {}", e.getMessage(), e.getCause());
+      LOG.info("RLPException: {} caused by {}", e.getMessage(), e.getCause());
       return new JsonRpcErrorResponse(
           requestContext.getRequest().getId(), JsonRpcError.INVALID_PARAMS);
     } catch (final InvalidJsonRpcRequestException i) {
-      LOG.debug("InvalidJsonRpcRequestException: {} caused by {}", i.getMessage(), i.getCause());
+      LOG.info("InvalidJsonRpcRequestException: {} caused by {}", i.getMessage(), i.getCause());
       return new JsonRpcErrorResponse(
           requestContext.getRequest().getId(), JsonRpcError.INVALID_PARAMS);
     } catch (final IllegalArgumentException ill) {
-      LOG.debug("IllegalArgumentException: {} caused by {}", ill.getMessage(), ill.getCause());
+      LOG.info("IllegalArgumentException: {} caused by {}", ill.getMessage(), ill.getCause());
       return new JsonRpcErrorResponse(
           requestContext.getRequest().getId(), JsonRpcError.INVALID_PARAMS);
     }

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.api.jsonrpc.methods;
 
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcApis;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.EthSwitchFork;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.filter.FilterManager;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthAccounts;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthBlockNumber;
@@ -22,6 +23,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthCall;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthChainId;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthCoinbase;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthCreateAccessList;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthCreateFork;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthEstimateGas;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthFeeHistory;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.EthGasPrice;
@@ -148,6 +150,8 @@ public class EthJsonRpcMethods extends ApiGroupJsonRpcMethods {
         new EthGetFilterLogs(filterManager),
         new EthSyncing(synchronizer),
         new EthGetStorageAt(blockchainQueries),
+        new EthCreateFork(blockchainQueries.getBlockchain()),
+        new EthSwitchFork(blockchainQueries.getBlockchain()),
         new EthSendRawTransaction(transactionPool),
         new EthSendTransaction(),
         new EthEstimateGas(

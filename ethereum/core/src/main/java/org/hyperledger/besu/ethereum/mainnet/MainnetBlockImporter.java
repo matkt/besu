@@ -14,7 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.mainnet;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockValidator;
+import org.hyperledger.besu.ethereum.MainnetBlockValidator;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockImporter;
@@ -22,6 +24,8 @@ import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.BlockImportResult.BlockImportStatus;
 
 import java.util.List;
+
+import org.apache.tuweni.bytes.Bytes;
 
 public class MainnetBlockImporter implements BlockImporter {
 
@@ -37,13 +41,28 @@ public class MainnetBlockImporter implements BlockImporter {
       final Block block,
       final HeaderValidationMode headerValidationMode,
       final HeaderValidationMode ommerValidationMode) {
+    return importBlock(Bytes.EMPTY, context, block, headerValidationMode, ommerValidationMode);
+  }
+
+  public synchronized BlockImportResult importBlock(
+      final Bytes fork,
+      final ProtocolContext context,
+      final Block block,
+      final HeaderValidationMode headerValidationMode,
+      final HeaderValidationMode ommerValidationMode) {
     if (context.getBlockchain().contains(block.getHash())) {
       return new BlockImportResult(BlockImportStatus.ALREADY_IMPORTED);
     }
 
     final var result =
-        blockValidator.validateAndProcessBlock(
-            context, block, headerValidationMode, ommerValidationMode);
+        ((MainnetBlockValidator) blockValidator)
+            .validateAndProcessBlock(
+                fork,
+                context,
+                block,
+                headerValidationMode,
+                ommerValidationMode,
+                fork.equals(Hash.EMPTY));
 
     if (result.isSuccessful()) {
       result

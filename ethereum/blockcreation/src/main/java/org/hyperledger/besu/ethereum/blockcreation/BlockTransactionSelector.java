@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.blockcreation;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.GasLimitCalculator;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
@@ -253,19 +254,31 @@ public class BlockTransactionSelector {
     this.gasLimitCalculator = gasLimitCalculator;
   }
 
+  public TransactionSelectionResults buildTransactionListForBlock() {
+    return buildTransactionListForBlock(Hash.EMPTY);
+  }
   /*
   This function iterates over (potentially) all transactions in the PendingTransactions, this is a
   long running process.
   If running in a thread, it can be cancelled via the isCancelled supplier (which will result
   in this throwing an CancellationException).
    */
-  public TransactionSelectionResults buildTransactionListForBlock() {
+  public TransactionSelectionResults buildTransactionListForBlock(final Hash fork) {
     LOG.atDebug()
         .setMessage("Transaction pool stats {}")
         .addArgument(pendingTransactions.logStats())
         .log();
     pendingTransactions.selectTransactions(
-        pendingTransaction -> evaluateTransaction(pendingTransaction, false));
+        pendingTransaction -> {
+          if (fork.equals(Hash.EMPTY)
+              && pendingTransaction.getParentBlockHash().equals(Hash.EMPTY)) {
+            return evaluateTransaction(pendingTransaction, false);
+          } else if (!fork.equals(Hash.EMPTY)
+              && pendingTransaction.getParentBlockHash().equals(fork)) {
+            return evaluateTransaction(pendingTransaction, false);
+          }
+          return TransactionSelectionResult.CONTINUE;
+        });
     LOG.atTrace()
         .setMessage("Transaction selection result result {}")
         .addArgument(transactionSelectionResult::toTraceLog)
@@ -279,8 +292,15 @@ public class BlockTransactionSelector {
    * @param transactions The set of transactions to evaluate.
    * @return The {@code TransactionSelectionResults} results of transaction evaluation.
    */
-  public TransactionSelectionResults evaluateTransactions(final List<Transaction> transactions) {
-    transactions.forEach(transaction -> evaluateTransaction(transaction, true));
+  public TransactionSelectionResults evaluateTransactions(
+      final Hash fork, final List<Transaction> transactions) {
+    for (Transaction transaction : transactions) {
+      if (fork.equals(Hash.EMPTY) && transaction.getParentBlockHash().equals(Hash.EMPTY)) {
+        evaluateTransaction(transaction, true);
+      } else if (!fork.equals(Hash.EMPTY) && transaction.getParentBlockHash().equals(fork)) {
+        evaluateTransaction(transaction, true);
+      }
+    }
     return transactionSelectionResult;
   }
 

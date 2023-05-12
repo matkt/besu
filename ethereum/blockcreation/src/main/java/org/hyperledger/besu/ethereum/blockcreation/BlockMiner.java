@@ -14,8 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.blockcreation;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.blockcreation.BlockCreator.BlockCreationResult;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.chain.MinedBlockObserver;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -23,9 +25,12 @@ import org.hyperledger.besu.ethereum.core.BlockImporter;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.BlockImportResult;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
+import org.hyperledger.besu.ethereum.mainnet.MainnetBlockImporter;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.util.Subscribers;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
@@ -126,7 +131,22 @@ public class BlockMiner<M extends AbstractBlockCreator> implements Runnable {
     return blockCreator.createBlock(Optional.empty(), Optional.empty(), timestamp);
   }
 
+  protected void mineForkBlock() throws InterruptedException {
+    try {
+      for (Hash fork : CachedWorldStorageManager.blockForkHash.keySet()) {
+        mineBlock(fork);
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+      System.out.println("exception while importing fork block");
+    }
+  }
+
   protected boolean mineBlock() throws InterruptedException {
+    return mineBlock(Hash.EMPTY);
+  }
+
+  protected boolean mineBlock(final Hash fork) throws InterruptedException {
     // Ensure the block is allowed to be mined - i.e. the timestamp on the new block is sufficiently
     // ahead of the parent, and still within allowable clock tolerance.
     LOG.trace("Started a mining operation.");
@@ -135,21 +155,33 @@ public class BlockMiner<M extends AbstractBlockCreator> implements Runnable {
 
     final Stopwatch stopwatch = Stopwatch.createStarted();
     LOG.trace("Mining a new block with timestamp {}", newBlockTimestamp);
-    final Block block = minerBlockCreator.createBlock(newBlockTimestamp).getBlock();
+    BlockCreationResult result = minerBlockCreator.createBlock(fork, newBlockTimestamp);
+    if (result == null) {
+      return false;
+    }
+    final Block block = result.getBlock();
+    if (block == null) {
+      return false;
+    }
+
     LOG.trace(
         "Block created, importing to local chain, block includes {} transactions",
         block.getBody().getTransactions().size());
 
-    final BlockImporter importer =
-        protocolSchedule.getByBlockHeader(block.getHeader()).getBlockImporter();
+    ProtocolSpec byBlockHeader = protocolSchedule.getByBlockHeader(block.getHeader());
+    final BlockImporter importer = byBlockHeader.getBlockImporter();
     final BlockImportResult blockImportResult =
-        importer.importBlock(protocolContext, block, HeaderValidationMode.FULL);
+        ((MainnetBlockImporter) importer)
+            .importBlock(
+                fork, protocolContext, block, HeaderValidationMode.FULL, HeaderValidationMode.FULL);
     if (blockImportResult.isImported()) {
       notifyNewBlockListeners(block);
       final double taskTimeInSec = stopwatch.elapsed(TimeUnit.MILLISECONDS) / 1000.0;
       LOG.info(
           String.format(
-              "Produced #%,d / %d tx / %d om / %,d (%01.1f%%) gas / (%s) in %01.3fs",
+              "Produced "
+                  + (!(fork.equals(Hash.EMPTY)) ? "forked block " : "block ")
+                  + "#%,d / %d tx / %d om / %,d (%01.1f%%) gas / (%s) in %01.3fs",
               block.getHeader().getNumber(),
               block.getBody().getTransactions().size(),
               block.getBody().getOmmers().size(),
@@ -157,6 +189,14 @@ public class BlockMiner<M extends AbstractBlockCreator> implements Runnable {
               (block.getHeader().getGasUsed() * 100.0) / block.getHeader().getGasLimit(),
               block.getHash(),
               taskTimeInSec));
+      if (!fork.equals(Hash.EMPTY)) {
+        CachedWorldStorageManager.blockForkHash.put(fork, block.getHeader());
+        AbstractBlockCreator.pendingTransactions.manageBlockAdded(
+            block.getHeader(),
+            block.getBody().getTransactions(),
+            new ArrayList<>(),
+            byBlockHeader.getFeeMarket());
+      }
     } else {
       LOG.error("Illegal block mined, could not be imported to local chain.");
     }
