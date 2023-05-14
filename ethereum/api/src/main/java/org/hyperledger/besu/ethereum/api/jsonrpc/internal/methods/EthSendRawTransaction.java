@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.transaction.TransactionInvalidReason;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -47,7 +48,7 @@ public class EthSendRawTransaction implements JsonRpcMethod {
 
   private final Supplier<TransactionPool> transactionPool;
 
-  private final Set<Hash> alreadyReceived = new HashSet<>();
+  private final Set<Hash> alreadyReceived = Collections.synchronizedSet(new HashSet<>());
 
   public EthSendRawTransaction(final TransactionPool transactionPool) {
     this(Suppliers.ofInstance(transactionPool), false);

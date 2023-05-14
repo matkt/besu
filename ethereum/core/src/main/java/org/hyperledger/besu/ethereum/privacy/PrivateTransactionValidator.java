@@ -102,11 +102,11 @@ public class PrivateTransactionValidator {
               transaction.getChainId().get(), chainId.get()));
     }
 
-    if (chainId.isEmpty() && transaction.getChainId().isPresent()) {
+    /*if (chainId.isEmpty() && transaction.getChainId().isPresent()) {
       return ValidationResult.invalid(
           TransactionInvalidReason.REPLAY_PROTECTED_SIGNATURES_NOT_SUPPORTED,
           "Replay protection (chainId) is not supported");
-    }
+    }*/
 
     // org.bouncycastle.math.ec.ECCurve.AbstractFp.decompressPoint throws an
     // IllegalArgumentException for "Invalid point compression" for bad signatures.
