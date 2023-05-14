@@ -75,6 +75,7 @@ public class EthSendRawTransaction implements JsonRpcMethod {
             ? CachedWorldStorageManager.currentChain
             : requestContext.getOptionalParameter(1, Hash.class).orElse(Hash.EMPTY));
 
+    System.out.println("send raw "+CachedWorldStorageManager.currentChain+" "+rawTransaction);
     final Transaction transaction;
     try {
       transaction = DomainObjectDecodeUtils.decodeRawTransaction(rawTransaction);

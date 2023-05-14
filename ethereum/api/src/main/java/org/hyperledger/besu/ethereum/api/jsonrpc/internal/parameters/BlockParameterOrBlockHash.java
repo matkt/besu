@@ -47,7 +47,16 @@ public class BlockParameterOrBlockHash {
     if (value instanceof String) {
       final String normalizedValue = String.valueOf(value).toLowerCase();
 
-      if (Objects.equals(normalizedValue, "earliest")) {
+      if (CachedWorldStorageManager.currentChain != null) {
+        type = BlockParameterType.HASH;
+        number = OptionalLong.empty();
+        blockHash =
+                Optional.of(
+                        CachedWorldStorageManager.blockForkHash
+                                .get(CachedWorldStorageManager.currentChain)
+                                .getBlockHash());
+        requireCanonical = false;
+      }else if (Objects.equals(normalizedValue, "earliest")) {
         type = BlockParameterType.EARLIEST;
         number = OptionalLong.of(BlockHeader.GENESIS_BLOCK_NUMBER);
         blockHash = Optional.empty();
@@ -72,16 +81,7 @@ public class BlockParameterOrBlockHash {
         number = OptionalLong.empty();
         blockHash = Optional.empty();
         requireCanonical = false;
-      } else if (CachedWorldStorageManager.currentChain != null) {
-        type = BlockParameterType.HASH;
-        number = OptionalLong.empty();
-        blockHash =
-            Optional.of(
-                CachedWorldStorageManager.blockForkHash
-                    .get(CachedWorldStorageManager.currentChain)
-                    .getBlockHash());
-        requireCanonical = false;
-      } else if (normalizedValue.length() >= 65) { // with or without hex prefix
+      }  else if (normalizedValue.length() >= 65) { // with or without hex prefix
         type = BlockParameterType.HASH;
         number = OptionalLong.empty();
         blockHash = Optional.of(Hash.fromHexStringLenient(normalizedValue));

@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcRespon
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.FeeHistory;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.ImmutableFeeHistory;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -75,8 +76,9 @@ public class EthFeeHistory implements JsonRpcMethod {
     final Optional<List<Double>> maybeRewardPercentiles =
         request.getOptionalParameter(2, Double[].class).map(Arrays::asList);
 
-    final BlockHeader chainHeadHeader = blockchain.getChainHeadHeader();
+     BlockHeader chainHeadHeader = (CachedWorldStorageManager.currentChain!=null)?CachedWorldStorageManager.blockForkHash.get(CachedWorldStorageManager.currentChain):blockchain.getChainHeadHeader();
     final long chainHeadBlockNumber = chainHeadHeader.getNumber();
+
     final long resolvedHighestBlockNumber =
         highestBlock
             .getNumber()

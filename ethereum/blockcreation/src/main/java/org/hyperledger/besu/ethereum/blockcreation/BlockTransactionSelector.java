@@ -263,7 +263,7 @@ public class BlockTransactionSelector {
   If running in a thread, it can be cancelled via the isCancelled supplier (which will result
   in this throwing an CancellationException).
    */
-  public TransactionSelectionResults buildTransactionListForBlock(final Hash fork) {
+  public TransactionSelectionResults  buildTransactionListForBlock(final Hash fork) {
     LOG.atDebug()
         .setMessage("Transaction pool stats {}")
         .addArgument(pendingTransactions.logStats())

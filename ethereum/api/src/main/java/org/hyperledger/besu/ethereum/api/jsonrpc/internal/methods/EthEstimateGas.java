@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.JsonCallParameter;
@@ -22,6 +23,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcRespon
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity;
 import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
+import org.hyperledger.besu.ethereum.bonsai.cache.CachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.ImmutableTransactionValidationParams;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
@@ -48,10 +50,16 @@ public class EthEstimateGas extends AbstractEstimateGas {
   public JsonRpcResponse response(final JsonRpcRequestContext requestContext) {
     final JsonCallParameter callParams = validateAndGetCallParams(requestContext);
 
-    final BlockHeader blockHeader = blockHeader();
+    BlockHeader blockHeader = blockHeader();
     if (blockHeader == null) {
       return errorResponse(requestContext, JsonRpcError.INTERNAL_ERROR);
     }
+
+    blockHeader =
+            (CachedWorldStorageManager.currentChain != null)
+                    ? CachedWorldStorageManager.blockForkHash.get(CachedWorldStorageManager.currentChain)
+                    : blockHeader;
+
     if (!blockchainQueries
         .getWorldStateArchive()
         .isWorldStateAvailable(blockHeader.getStateRoot(), blockHeader.getHash())) {
