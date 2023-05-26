@@ -17,6 +17,7 @@ package org.hyperledger.besu.evm.fluent;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.Account;
@@ -47,7 +48,7 @@ public class SimpleAccount implements EvmAccount, MutableAccount {
   private Bytes code;
   private Supplier<Hash> codeHash =
       Suppliers.memoize(() -> code == null ? Hash.EMPTY : Hash.hash(code));
-  private final Map<UInt256, UInt256> storage = new HashMap<>();
+  private final Map<StorageSlotKey, UInt256> storage = new HashMap<>();
 
   /**
    * Instantiates a new Simple account.
@@ -113,7 +114,7 @@ public class SimpleAccount implements EvmAccount, MutableAccount {
   }
 
   @Override
-  public UInt256 getStorageValue(final UInt256 key) {
+  public UInt256 getStorageValue(final StorageSlotKey key) {
     if (storage.containsKey(key)) {
       return storage.get(key);
     } else {
@@ -122,7 +123,7 @@ public class SimpleAccount implements EvmAccount, MutableAccount {
   }
 
   @Override
-  public UInt256 getOriginalStorageValue(final UInt256 key) {
+  public UInt256 getOriginalStorageValue(final StorageSlotKey key) {
     if (parent != null) {
       return parent.getStorageValue(key);
     } else {
@@ -159,7 +160,7 @@ public class SimpleAccount implements EvmAccount, MutableAccount {
   }
 
   @Override
-  public void setStorageValue(final UInt256 key, final UInt256 value) {
+  public void setStorageValue(final StorageSlotKey key, final UInt256 value) {
     storage.put(key, value);
   }
 
@@ -169,7 +170,7 @@ public class SimpleAccount implements EvmAccount, MutableAccount {
   }
 
   @Override
-  public Map<UInt256, UInt256> getUpdatedStorage() {
+  public Map<StorageSlotKey, UInt256> getUpdatedStorage() {
     return storage;
   }
 }

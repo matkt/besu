@@ -15,6 +15,8 @@
 package org.hyperledger.besu.evm.operation;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
@@ -73,11 +75,12 @@ public class SStoreOperation extends AbstractOperation {
     }
 
     final Address address = account.getAddress();
+    final StorageSlotKey storageSlotKey = new StorageSlotKey(key);
     final boolean slotIsWarm = frame.warmUpStorage(address, key);
     final Supplier<UInt256> currentValueSupplier =
-        Suppliers.memoize(() -> account.getStorageValue(key));
+        Suppliers.memoize(() -> account.getStorageValue(storageSlotKey));
     final Supplier<UInt256> originalValueSupplier =
-        Suppliers.memoize(() -> account.getOriginalStorageValue(key));
+        Suppliers.memoize(() -> account.getOriginalStorageValue(storageSlotKey));
 
     final long cost =
         gasCalculator().calculateStorageCost(newValue, currentValueSupplier, originalValueSupplier)
@@ -97,7 +100,7 @@ public class SStoreOperation extends AbstractOperation {
         gasCalculator()
             .calculateStorageRefundAmount(newValue, currentValueSupplier, originalValueSupplier));
 
-    account.setStorageValue(key, newValue);
+    account.setStorageValue(storageSlotKey, newValue);
     frame.storageWasUpdated(key, newValue);
     return new OperationResult(cost, null);
   }

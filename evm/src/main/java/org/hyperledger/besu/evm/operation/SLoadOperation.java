@@ -15,6 +15,7 @@
 package org.hyperledger.besu.evm.operation;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
@@ -55,13 +56,14 @@ public class SLoadOperation extends AbstractOperation {
     try {
       final Account account = frame.getWorldUpdater().get(frame.getRecipientAddress());
       final Address address = account.getAddress();
-      final Bytes32 key = UInt256.fromBytes(frame.popStackItem());
+      final UInt256 key = UInt256.fromBytes(frame.popStackItem());
+      final StorageSlotKey slotKey = new StorageSlotKey(key);
       final boolean slotIsWarm = frame.warmUpStorage(address, key);
       final long cost = slotIsWarm ? warmCost : coldCost;
       if (frame.getRemainingGas() < cost) {
         return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
       } else {
-        frame.pushStackItem(account.getStorageValue(UInt256.fromBytes(key)));
+        frame.pushStackItem(account.getStorageValue(slotKey));
 
         return slotIsWarm ? warmSuccess : coldSuccess;
       }

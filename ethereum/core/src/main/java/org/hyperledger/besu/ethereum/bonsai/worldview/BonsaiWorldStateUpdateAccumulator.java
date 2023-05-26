@@ -349,24 +349,21 @@ public class BonsaiWorldStateUpdateAccumulator
                 pendingStorageUpdates.clear();
               }
 
-              final TreeSet<Map.Entry<UInt256, UInt256>> entries =
+              final TreeSet<Map.Entry<StorageSlotKey, UInt256>> entries =
                   new TreeSet<>(Map.Entry.comparingByKey());
               entries.addAll(updatedAccount.getUpdatedStorage().entrySet());
 
               // parallel stream here may cause database corruption
               entries.forEach(
                   storageUpdate -> {
-                    final UInt256 keyUInt = storageUpdate.getKey();
-                    final Hash slotHash = Hash.hash(keyUInt);
-                    final StorageSlotKey slotKey =
-                        new StorageSlotKey(slotHash, Optional.of(keyUInt));
+                    final StorageSlotKey slotKey = storageUpdate.getKey();
                     final UInt256 value = storageUpdate.getValue();
                     final BonsaiValue<UInt256> pendingValue = pendingStorageUpdates.get(slotKey);
                     if (pendingValue == null) {
                       pendingStorageUpdates.put(
                           slotKey,
                           new BonsaiValue<>(
-                              updatedAccount.getOriginalStorageValue(keyUInt), value));
+                              updatedAccount.getOriginalStorageValue(slotKey), value));
                     } else {
                       pendingValue.setUpdated(value);
                     }
@@ -400,9 +397,8 @@ public class BonsaiWorldStateUpdateAccumulator
   }
 
   @Override
-  public UInt256 getStorageValue(final Address address, final UInt256 slotKey) {
-    StorageSlotKey storageSlotKey = new StorageSlotKey(Hash.hash(slotKey), Optional.of(slotKey));
-    return getStorageValueByStorageSlotKey(address, storageSlotKey).orElse(UInt256.ZERO);
+  public UInt256 getStorageValue(final Address address, final StorageSlotKey slotKey) {
+    return getStorageValueByStorageSlotKey(address, slotKey).orElse(UInt256.ZERO);
   }
 
   @Override
@@ -443,14 +439,12 @@ public class BonsaiWorldStateUpdateAccumulator
   }
 
   @Override
-  public UInt256 getPriorStorageValue(final Address address, final UInt256 storageKey) {
+  public UInt256 getPriorStorageValue(final Address address, final StorageSlotKey storageKey) {
     // TODO maybe log the read into the trie layer?
-    StorageSlotKey storageSlotKey =
-        new StorageSlotKey(Hash.hash(storageKey), Optional.of(storageKey));
     final Map<StorageSlotKey, BonsaiValue<UInt256>> localAccountStorage =
         storageToUpdate.get(address);
     if (localAccountStorage != null) {
-      final BonsaiValue<UInt256> value = localAccountStorage.get(storageSlotKey);
+      final BonsaiValue<UInt256> value = localAccountStorage.get(storageKey);
       if (value != null) {
         if (value.isCleared()) {
           return UInt256.ZERO;

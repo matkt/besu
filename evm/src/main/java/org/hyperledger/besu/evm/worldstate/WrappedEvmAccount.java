@@ -16,6 +16,7 @@ package org.hyperledger.besu.evm.worldstate;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
@@ -102,12 +103,12 @@ public class WrappedEvmAccount implements EvmAccount {
   }
 
   @Override
-  public UInt256 getStorageValue(final UInt256 key) {
+  public UInt256 getStorageValue(final StorageSlotKey key) {
     return mutableAccount.getStorageValue(key);
   }
 
   @Override
-  public UInt256 getOriginalStorageValue(final UInt256 key) {
+  public UInt256 getOriginalStorageValue(final StorageSlotKey key) {
     return mutableAccount.getOriginalStorageValue(key);
   }
 

@@ -118,12 +118,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage, AutoC
     if (flatDbReaderStrategy == null) {
       final FlatDbMode flatDbMode = getFlatDbMode();
       LOG.trace("Bonsai flat db mode found {}", flatDbMode);
-      if (flatDbMode == FlatDbMode.FULL) {
-        return new FullFlatDbReaderStrategy(
-            metricsSystem, accountStorage, codeStorage, storageStorage);
-      }
-      return new PartialFlatDbReaderStrategy(
-          metricsSystem, accountStorage, codeStorage, storageStorage);
+      return new FullFlatDbReaderStrategy(
+              metricsSystem, accountStorage, codeStorage, storageStorage);
     }
     return flatDbReaderStrategy;
   }

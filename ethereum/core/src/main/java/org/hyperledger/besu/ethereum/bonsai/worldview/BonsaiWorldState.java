@@ -503,8 +503,8 @@ public class BonsaiWorldState
   }
 
   @Override
-  public UInt256 getStorageValue(final Address address, final UInt256 storageKey) {
-    return getStorageValueByStorageSlotKey(address, new StorageSlotKey(storageKey))
+  public UInt256 getStorageValue(final Address address, final StorageSlotKey storageKey) {
+    return getStorageValueByStorageSlotKey(address, storageKey)
         .orElse(UInt256.ZERO);
   }
 
@@ -526,7 +526,7 @@ public class BonsaiWorldState
   }
 
   @Override
-  public UInt256 getPriorStorageValue(final Address address, final UInt256 storageKey) {
+  public UInt256 getPriorStorageValue(final Address address, final StorageSlotKey storageKey) {
     return getStorageValue(address, storageKey);
   }
 

@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.worldstate;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
@@ -293,15 +294,15 @@ public class DefaultMutableWorldState implements MutableWorldState {
     }
 
     @Override
-    public UInt256 getStorageValue(final UInt256 key) {
+    public UInt256 getStorageValue(final StorageSlotKey key) {
       return storageTrie()
-          .get(Hash.hash(key))
+          .get(key.getSlotHash())
           .map(DefaultMutableWorldState::convertToUInt256)
           .orElse(UInt256.ZERO);
     }
 
     @Override
-    public UInt256 getOriginalStorageValue(final UInt256 key) {
+    public UInt256 getOriginalStorageValue(final StorageSlotKey key) {
       return getStorageValue(key);
     }
 
@@ -394,7 +395,7 @@ public class DefaultMutableWorldState implements MutableWorldState {
         if (freshState) {
           wrapped.updatedStorageTries.remove(updated.getAddress());
         }
-        final Map<UInt256, UInt256> updatedStorage = updated.getUpdatedStorage();
+        final Map<StorageSlotKey, UInt256> updatedStorage = updated.getUpdatedStorage();
         if (!updatedStorage.isEmpty()) {
           // Apply any storage updates
           final MerkleTrie<Bytes32, Bytes> storageTrie =
@@ -402,21 +403,20 @@ public class DefaultMutableWorldState implements MutableWorldState {
                   ? wrapped.newAccountStorageTrie(Hash.EMPTY_TRIE_HASH)
                   : origin.storageTrie();
           wrapped.updatedStorageTries.put(updated.getAddress(), storageTrie);
-          final TreeSet<Map.Entry<UInt256, UInt256>> entries =
+          final TreeSet<Map.Entry<StorageSlotKey, UInt256>> entries =
               new TreeSet<>(
                   Comparator.comparing(
-                      (Function<Map.Entry<UInt256, UInt256>, UInt256>) Map.Entry::getKey));
+                      storageSlotKeyUInt256Entry -> storageSlotKeyUInt256Entry.getKey().getSlotKey().orElseThrow()));
           entries.addAll(updatedStorage.entrySet());
 
-          for (final Map.Entry<UInt256, UInt256> entry : entries) {
+          for (final Map.Entry<StorageSlotKey, UInt256> entry : entries) {
             final UInt256 value = entry.getValue();
-            final Hash keyHash = Hash.hash(entry.getKey());
             if (value.isZero()) {
-              storageTrie.remove(keyHash);
+              storageTrie.remove(entry.getKey().getSlotHash());
             } else {
-              wrapped.newStorageKeyPreimages.put(keyHash, entry.getKey());
+              wrapped.newStorageKeyPreimages.put(entry.getKey().getSlotHash(), entry.getKey().getSlotKey().orElseThrow());
               storageTrie.put(
-                  keyHash, RLP.encode(out -> out.writeBytes(entry.getValue().toMinimalBytes())));
+                      entry.getKey().getSlotHash(), RLP.encode(out -> out.writeBytes(entry.getValue().toMinimalBytes())));
             }
           }
           storageRoot = Hash.wrap(storageTrie.getRootHash());
