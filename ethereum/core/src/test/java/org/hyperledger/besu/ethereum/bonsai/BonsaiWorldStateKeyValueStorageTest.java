@@ -370,6 +370,7 @@ public class BonsaiWorldStateKeyValueStorageTest {
     updaterB.putCode(accountHashB, bytesB);
     updaterA.putCode(accountHashD, bytesC);
 
+    System.out.println(updaterA + " " + updaterB);
     updaterA.commit();
     updaterB.commit();
 

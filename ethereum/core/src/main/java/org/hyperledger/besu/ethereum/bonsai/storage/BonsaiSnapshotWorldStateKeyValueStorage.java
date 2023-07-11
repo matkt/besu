@@ -31,6 +31,7 @@ import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorageAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,20 +45,14 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
 
   public BonsaiSnapshotWorldStateKeyValueStorage(
       final BonsaiWorldStateKeyValueStorage parentWorldStateStorage,
-      final SnappedKeyValueStorage accountStorage,
-      final SnappedKeyValueStorage codeStorage,
-      final SnappedKeyValueStorage storageStorage,
-      final SnappedKeyValueStorage trieBranchStorage,
+      final SnappedKeyValueStorageAdapter keyValueStorageAdapter,
       final KeyValueStorage trieLogStorage,
       final ObservableMetricsSystem metricsSystem) {
     super(
         parentWorldStateStorage.provider,
         parentWorldStateStorage.flatDbMode,
         parentWorldStateStorage.flatDbReaderStrategy,
-        accountStorage,
-        codeStorage,
-        storageStorage,
-        trieBranchStorage,
+            keyValueStorageAdapter,
         trieLogStorage,
         metricsSystem);
     this.parentWorldStateStorage = parentWorldStateStorage;
@@ -69,10 +64,7 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
       final ObservableMetricsSystem metricsSystem) {
     this(
         worldStateStorage,
-        ((SnappableKeyValueStorage) worldStateStorage.accountStorage).takeSnapshot(),
-        ((SnappableKeyValueStorage) worldStateStorage.codeStorage).takeSnapshot(),
-        ((SnappableKeyValueStorage) worldStateStorage.storageStorage).takeSnapshot(),
-        ((SnappableKeyValueStorage) worldStateStorage.trieBranchStorage).takeSnapshot(),
+        ((SnappableKeyValueStorage) worldStateStorage.keyValuesStorage).takeSnapshot(),
         worldStateStorage.trieLogStorage,
         metricsSystem);
   }
@@ -88,7 +80,6 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   @Override
   public BonsaiUpdater updater() {
     return new Updater(
-        DISABLED_GLOBAL_TRANSACTION_SUPPLIER.get(), // no global transaction for snapshot
         accountStorage,
         codeStorage,
         storageStorage,

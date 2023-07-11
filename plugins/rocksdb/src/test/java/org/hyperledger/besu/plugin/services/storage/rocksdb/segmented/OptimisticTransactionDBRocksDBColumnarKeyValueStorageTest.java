@@ -31,9 +31,8 @@ public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
     extends RocksDBColumnarKeyValueStorageTest {
 
   @Override
-  protected SegmentedKeyValueStorage<
-          RocksDbSegmentIdentifier, SegmentedKeyValueStorage.Transaction<RocksDbSegmentIdentifier>>
-      createSegmentedStore() throws Exception {
+  protected SegmentedKeyValueStorage<RocksDbSegmentIdentifier> createSegmentedStore()
+      throws Exception {
     return new OptimisticRocksDBColumnarKeyValueStorage(
         new RocksDBConfigurationBuilder()
             .databaseDir(folder.resolve(Bytes.random(9).toString()))
@@ -45,12 +44,10 @@ public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
   }
 
   @Override
-  protected SegmentedKeyValueStorage<
-          RocksDbSegmentIdentifier, SegmentedKeyValueStorage.Transaction<RocksDbSegmentIdentifier>>
-      createSegmentedStore(
-          final Path path,
-          final List<SegmentIdentifier> segments,
-          final List<SegmentIdentifier> ignorableSegments) {
+  protected SegmentedKeyValueStorage<RocksDbSegmentIdentifier> createSegmentedStore(
+      final Path path,
+      final List<SegmentIdentifier> segments,
+      final List<SegmentIdentifier> ignorableSegments) {
     return new OptimisticRocksDBColumnarKeyValueStorage(
         new RocksDBConfigurationBuilder().databaseDir(path).build(),
         segments,

@@ -14,8 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
-import static org.hyperledger.besu.plugin.services.storage.GlobalKeyValueStorageTransaction.DISABLED_GLOBAL_TRANSACTION_SUPPLIER;
-
 import org.hyperledger.besu.ethereum.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.bonsai.cache.CachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
@@ -35,13 +33,13 @@ import org.hyperledger.besu.ethereum.worldstate.DefaultMutableWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DefaultWorldStateArchive;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
+import org.hyperledger.besu.services.kvstore.adapter.InMemorySegmentedKeyValueStorageAdapter;
 
 public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
 
   public InMemoryKeyValueStorageProvider() {
     super(
-        () -> DISABLED_GLOBAL_TRANSACTION_SUPPLIER.get(),
-        segmentIdentifier -> new InMemoryKeyValueStorage(),
+            InMemorySegmentedKeyValueStorageAdapter::new,
         new InMemoryKeyValueStorage(),
         SEGMENT_ISOLATION_SUPPORTED,
         SNAPSHOT_ISOLATION_UNSUPPORTED,

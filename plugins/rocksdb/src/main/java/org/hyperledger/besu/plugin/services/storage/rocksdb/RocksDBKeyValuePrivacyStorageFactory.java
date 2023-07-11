@@ -18,7 +18,7 @@ import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.GlobalKeyValueStorageTransaction;
-import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageAdapter;
 import org.hyperledger.besu.plugin.services.storage.PrivacyKeyValueStorageFactory;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.DatabaseMetadata;
@@ -26,6 +26,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.Databa
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -60,8 +61,8 @@ public class RocksDBKeyValuePrivacyStorageFactory implements PrivacyKeyValueStor
   }
 
   @Override
-  public KeyValueStorage createKeyValueStorage(
-      final SegmentIdentifier segment,
+  public KeyValueStorageAdapter createKeyValueStorage(
+      final List<SegmentIdentifier> segments,
       final BesuConfiguration commonConfiguration,
       final MetricsSystem metricsSystem)
       throws StorageException {
@@ -73,7 +74,7 @@ public class RocksDBKeyValuePrivacyStorageFactory implements PrivacyKeyValueStor
       }
     }
 
-    return publicFactory.createKeyValueStorage(segment, commonConfiguration, metricsSystem);
+    return publicFactory.createKeyValueStorage(segments, commonConfiguration, metricsSystem);
   }
 
   @Override

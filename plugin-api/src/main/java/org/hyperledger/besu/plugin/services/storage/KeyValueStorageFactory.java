@@ -20,6 +20,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.io.Closeable;
+import java.util.List;
 
 /** Factory for creating key-value storage instances. */
 @Unstable
@@ -42,24 +43,23 @@ public interface KeyValueStorageFactory extends Closeable {
    * key-space. Segments created with the identifier of an existing segment should have the same
    * data as that existing segment.
    *
-   * @param segment identity of the isolation segment, an identifier for the data set the storage
+   * @param segments identity of the isolation segment, an identifier for the data set the storage
    *     will contain.
    * @param configuration common configuration available to plugins, in a populated state.
    * @param metricsSystem metrics component for recording key-value storage events.
    * @return the storage instance reserved for the given segment.
-   * @exception StorageException problem encountered when creating storage for the segment.
+   * @throws StorageException problem encountered when creating storage for the segment.
    */
+  KeyValueStorageAdapter createKeyValueStorage(
+      List<SegmentIdentifier> segments,
+      BesuConfiguration configuration,
+      MetricsSystem metricsSystem)
+      throws StorageException;
+
   KeyValueStorage createKeyValueStorage(
       SegmentIdentifier segment, BesuConfiguration configuration, MetricsSystem metricsSystem)
       throws StorageException;
 
-  /**
-   * Creates a global key-value storage transaction that can be shared across multiple segments.
-   *
-   * @return the global transaction.
-   */
-  GlobalKeyValueStorageTransaction<?> createGlobalKeyValueStorageTransaction()
-      throws StorageException;
   /**
    * Whether storage segment isolation is supported by the factory created instances.
    *

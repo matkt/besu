@@ -23,6 +23,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionTransitionValidatorDecorator;
 
 import java.util.List;
+import java.util.Map;
 
 import org.rocksdb.OptimisticTransactionDB;
 import org.rocksdb.RocksDB;
@@ -87,13 +88,14 @@ public class OptimisticRocksDBColumnarKeyValueStorage extends RocksDBColumnarKey
   /**
    * Take snapshot RocksDb columnar key value snapshot.
    *
-   * @param segment the segment
+   * @param segmentIdentifiers
    * @return the RocksDb columnar key value snapshot
    * @throws StorageException the storage exception
    */
-  public RocksDBColumnarKeyValueSnapshot takeSnapshot(final RocksDbSegmentIdentifier segment)
+  public RocksDBColumnarKeyValueSnapshot takeSnapshot(
+      final Map<SegmentIdentifier, RocksDbSegmentIdentifier> segmentIdentifiers)
       throws StorageException {
     throwIfClosed();
-    return new RocksDBColumnarKeyValueSnapshot(db, segment, metrics);
+    return new RocksDBColumnarKeyValueSnapshot(db, metrics, segmentIdentifiers);
   }
 }

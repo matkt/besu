@@ -62,9 +62,8 @@ public class KeyValueStorageProviderBuilder {
     storageFactory.createKeyValueStorage(
         KeyValueSegmentIdentifier.BLOCKCHAIN, commonConfiguration, metricsSystem);
     return new KeyValueStorageProvider(
-        () -> storageFactory.createGlobalKeyValueStorageTransaction(),
-        segment ->
-            storageFactory.createKeyValueStorage(segment, commonConfiguration, metricsSystem),
+        segments ->
+            storageFactory.createKeyValueStorage(segments, commonConfiguration, metricsSystem),
         worldStatePreImageStorage,
         storageFactory.isSegmentIsolationSupported(),
         storageFactory.isSnapshotIsolationSupported(),

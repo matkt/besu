@@ -707,6 +707,7 @@ public class BlockchainQueries {
       }
       return result;
     } catch (final Exception e) {
+      e.printStackTrace();
       throw new IllegalStateException("Error retrieving matching logs", e);
     }
   }

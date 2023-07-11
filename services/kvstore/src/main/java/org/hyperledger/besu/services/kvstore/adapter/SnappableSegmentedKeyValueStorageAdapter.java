@@ -12,13 +12,16 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.services.kvstore;
+package org.hyperledger.besu.services.kvstore.adapter;
 
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
-import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorageAdapter;
+import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage;
 
-import java.util.function.Supplier;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * The type Segmented key value storage adapter.
@@ -27,7 +30,7 @@ import java.util.function.Supplier;
  */
 public class SnappableSegmentedKeyValueStorageAdapter<S> extends SegmentedKeyValueStorageAdapter<S>
     implements SnappableKeyValueStorage {
-  private final Supplier<SnappedKeyValueStorage> snapshotSupplier;
+  private final Function<Map<SegmentIdentifier, S>, SnappedKeyValueStorageAdapter> snapshotSupplier;
 
   /**
    * Instantiates a new Segmented key value storage adapter.
@@ -36,12 +39,11 @@ public class SnappableSegmentedKeyValueStorageAdapter<S> extends SegmentedKeyVal
    * @param storage the storage
    */
   public SnappableSegmentedKeyValueStorageAdapter(
-      final SegmentIdentifier segment,
-      final SegmentedKeyValueStorage<S, SegmentedKeyValueStorage.Transaction<S>> storage) {
+      final List<SegmentIdentifier> segment, final SegmentedKeyValueStorage<S> storage) {
     this(
         segment,
         storage,
-        () -> {
+        (segmentIdentifiers) -> {
           throw new UnsupportedOperationException("Snapshot not supported");
         });
   }
@@ -49,20 +51,22 @@ public class SnappableSegmentedKeyValueStorageAdapter<S> extends SegmentedKeyVal
   /**
    * Instantiates a new Segmented key value storage adapter.
    *
-   * @param segment the segment
+   * @param segments the segments
    * @param storage the storage
    * @param snapshotSupplier the snapshot supplier
    */
   public SnappableSegmentedKeyValueStorageAdapter(
-      final SegmentIdentifier segment,
-      final SegmentedKeyValueStorage<S, SegmentedKeyValueStorage.Transaction<S>> storage,
-      final Supplier<SnappedKeyValueStorage> snapshotSupplier) {
-    super(segment, storage);
+      final List<SegmentIdentifier> segments,
+      final SegmentedKeyValueStorage<S> storage,
+      final Function<Map<SegmentIdentifier, S>, SnappedKeyValueStorageAdapter> snapshotSupplier) {
+    super(segments, storage);
     this.snapshotSupplier = snapshotSupplier;
   }
 
   @Override
-  public SnappedKeyValueStorage takeSnapshot() {
-    return snapshotSupplier.get();
+  public SnappedKeyValueStorageAdapter takeSnapshot() {
+    return snapshotSupplier.apply(segmentsHandle);
   }
+
+
 }

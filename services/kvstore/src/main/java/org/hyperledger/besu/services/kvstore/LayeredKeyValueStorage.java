@@ -18,7 +18,6 @@ package org.hyperledger.besu.services.kvstore;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
-import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 
 import java.util.Map;
 import java.util.Optional;
@@ -34,8 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Key value storage which stores in memory all updates to a parent worldstate storage. */
-public class LayeredKeyValueStorage extends InMemoryKeyValueStorage
-    implements SnappedKeyValueStorage {
+public class LayeredKeyValueStorage extends InMemoryKeyValueStorage {
 
   private static final Logger LOG = LoggerFactory.getLogger(LayeredKeyValueStorage.class);
 
@@ -171,11 +169,6 @@ public class LayeredKeyValueStorage extends InMemoryKeyValueStorage
   @Override
   public boolean isClosed() {
     return parent.isClosed();
-  }
-
-  @Override
-  public SnappedKeyValueStorage clone() {
-    return new LayeredKeyValueStorage(hashValueStore, parent);
   }
 
   private void throwIfClosed() {

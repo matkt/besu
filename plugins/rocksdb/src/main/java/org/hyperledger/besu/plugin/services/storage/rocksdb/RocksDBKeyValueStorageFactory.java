@@ -20,8 +20,8 @@ import org.hyperledger.besu.ethereum.worldstate.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
-import org.hyperledger.besu.plugin.services.storage.GlobalKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageAdapter;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageFactory;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.DatabaseMetadata;
@@ -31,15 +31,13 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.OptimisticRocksDBColumnarKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.PessimisticRocksDBColumnarKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.RocksDBColumnarKeyValueStorage;
-import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage;
-import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageAdapter;
-import org.hyperledger.besu.services.kvstore.SnappableSegmentedKeyValueStorageAdapter;
+import org.hyperledger.besu.services.kvstore.adapter.SegmentedKeyValueStorageAdapter;
+import org.hyperledger.besu.services.kvstore.adapter.SnappableSegmentedKeyValueStorageAdapter;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -148,9 +146,18 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
     return NAME;
   }
 
-  @Override
   public KeyValueStorage createKeyValueStorage(
       final SegmentIdentifier segment,
+      final BesuConfiguration commonConfiguration,
+      final MetricsSystem metricsSystem)
+      throws StorageException {
+    return KeyValueStorageAdapter.getKeyValueStorage(
+        segment, createKeyValueStorage(List.of(segment), commonConfiguration, metricsSystem));
+  }
+
+  @Override
+  public KeyValueStorageAdapter createKeyValueStorage(
+      final List<SegmentIdentifier> segments,
       final BesuConfiguration commonConfiguration,
       final MetricsSystem metricsSystem)
       throws StorageException {
@@ -191,18 +198,15 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
           }
         }
 
-        final RocksDbSegmentIdentifier rocksSegment =
-            segmentedStorage.getSegmentIdentifierByName(segment);
-
         if (isForestStorageFormat) {
-          return new SegmentedKeyValueStorageAdapter<>(segment, segmentedStorage);
+          return new SegmentedKeyValueStorageAdapter<>(segments, segmentedStorage);
         } else {
           return new SnappableSegmentedKeyValueStorageAdapter<>(
-              segment,
+              segments,
               segmentedStorage,
-              () ->
+              (segmentIdentifiers) ->
                   ((OptimisticRocksDBColumnarKeyValueStorage) segmentedStorage)
-                      .takeSnapshot(rocksSegment));
+                      .takeSnapshot(segmentIdentifiers));
         }
       }
       default -> throw new IllegalStateException(
@@ -210,31 +214,6 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
               "Developer error: A supported database version (%d) was detected but there is no associated creation logic.",
               databaseVersion));
     }
-  }
-
-  @Override
-  public GlobalKeyValueStorageTransaction<?> createGlobalKeyValueStorageTransaction()
-      throws StorageException {
-    final SegmentedKeyValueStorage.Transaction<RocksDbSegmentIdentifier> transaction =
-        segmentedStorage.startTransaction();
-    return new GlobalKeyValueStorageTransaction<
-        SegmentedKeyValueStorage.Transaction<RocksDbSegmentIdentifier>>() {
-      @Override
-      public Optional<SegmentedKeyValueStorage.Transaction<RocksDbSegmentIdentifier>>
-          getGlobalTransaction() {
-        return Optional.of(transaction);
-      }
-
-      @Override
-      protected void commitGlobalTransaction() {
-        transaction.commit();
-      }
-
-      @Override
-      protected void rollbackGlobalTransaction() {
-        transaction.rollback();
-      }
-    };
   }
 
   /**

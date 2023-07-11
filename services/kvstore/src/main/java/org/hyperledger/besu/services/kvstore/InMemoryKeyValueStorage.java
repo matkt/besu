@@ -17,11 +17,8 @@ package org.hyperledger.besu.services.kvstore;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
 import org.hyperledger.besu.plugin.services.exception.StorageException;
-import org.hyperledger.besu.plugin.services.storage.GlobalKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
-import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
-import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 
 import java.io.PrintStream;
 import java.util.HashMap;
@@ -40,8 +37,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 
 /** The In memory key value storage. */
-public class InMemoryKeyValueStorage
-    implements SnappedKeyValueStorage, SnappableKeyValueStorage, KeyValueStorage {
+public class InMemoryKeyValueStorage implements KeyValueStorage {
 
   /** protected access for the backing hash map. */
   protected final Map<Bytes, Optional<byte[]>> hashValueStore;
@@ -161,13 +157,6 @@ public class InMemoryKeyValueStorage
   }
 
   @Override
-  public KeyValueStorageTransaction startTransaction(
-      final GlobalKeyValueStorageTransaction<?> globalTransaction) throws StorageException {
-    // no global transaction support
-    return startTransaction();
-  }
-
-  @Override
   public boolean isClosed() {
     return false;
   }
@@ -179,16 +168,6 @@ public class InMemoryKeyValueStorage
    */
   public Set<Bytes> keySet() {
     return Set.copyOf(hashValueStore.keySet());
-  }
-
-  @Override
-  public SnappedKeyValueStorage takeSnapshot() {
-    return new InMemoryKeyValueStorage(new HashMap<>(hashValueStore));
-  }
-
-  @Override
-  public KeyValueStorageTransaction getSnapshotTransaction() {
-    return startTransaction();
   }
 
   /** In memory transaction. */

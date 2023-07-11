@@ -45,6 +45,7 @@ public class KeyValueStorageTransactionTransitionValidatorDecorator
   @Override
   public void remove(final byte[] key) {
     checkState(active, "Cannot invoke remove() on a completed transaction.");
+
     transaction.remove(key);
   }
 

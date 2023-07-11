@@ -34,10 +34,10 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 public class VariablesKeyValueStorage implements VariablesStorage {
-  final KeyValueStorage variables;
+  final KeyValueStorage storage;
 
-  public VariablesKeyValueStorage(final KeyValueStorage variables) {
-    this.variables = variables;
+  public VariablesKeyValueStorage(final KeyValueStorage storage) {
+    this.storage = storage;
   }
 
   @Override
@@ -69,7 +69,7 @@ public class VariablesKeyValueStorage implements VariablesStorage {
 
   @Override
   public Updater updater() {
-    return new Updater(variables.startTransaction());
+    return new Updater(storage.startTransaction());
   }
 
   private Hash bytesToHash(final Bytes bytes) {
@@ -77,7 +77,7 @@ public class VariablesKeyValueStorage implements VariablesStorage {
   }
 
   Optional<Bytes> getVariable(final Keys key) {
-    return variables.get(key.toByteArray()).map(Bytes::wrap);
+    return storage.get(key.toByteArray()).map(Bytes::wrap);
   }
 
   public static class Updater implements VariablesStorage.Updater {

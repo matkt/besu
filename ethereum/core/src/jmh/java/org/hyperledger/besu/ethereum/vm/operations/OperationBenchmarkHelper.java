@@ -28,10 +28,11 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageAdapter;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfigurationBuilder;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.OptimisticRocksDBColumnarKeyValueStorage;
-import org.hyperledger.besu.services.kvstore.SnappableSegmentedKeyValueStorageAdapter;
+import org.hyperledger.besu.services.kvstore.adapter.SnappableSegmentedKeyValueStorageAdapter;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -70,8 +71,11 @@ public class OperationBenchmarkHelper {
             RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS);
 
     final KeyValueStorage keyValueStorage =
-        new SnappableSegmentedKeyValueStorageAdapter<>(
-            KeyValueSegmentIdentifier.BLOCKCHAIN, optimisticRocksDBColumnarKeyValueStorage);
+        KeyValueStorageAdapter.getKeyValueStorage(
+            KeyValueSegmentIdentifier.BLOCKCHAIN,
+            new SnappableSegmentedKeyValueStorageAdapter<>(
+                List.of(KeyValueSegmentIdentifier.BLOCKCHAIN),
+                optimisticRocksDBColumnarKeyValueStorage));
 
     final ExecutionContextTestFixture executionContext =
         ExecutionContextTestFixture.builder().blockchainKeyValueStorage(keyValueStorage).build();

@@ -61,7 +61,6 @@ public class MainnetBlockProcessor extends AbstractBlockProcessor {
     final Address miningBeneficiary = getMiningBeneficiaryCalculator().calculateBeneficiary(header);
     final MutableAccount miningBeneficiaryAccount =
         updater.getOrCreate(miningBeneficiary).getMutable();
-
     miningBeneficiaryAccount.incrementBalance(coinbaseReward);
     for (final BlockHeader ommerHeader : ommers) {
       if (ommerHeader.getNumber() - header.getNumber() > MAX_GENERATION) {

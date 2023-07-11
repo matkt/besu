@@ -17,12 +17,14 @@ package org.hyperledger.besu.ethereum.bonsai.storage.flat;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
@@ -34,6 +36,11 @@ import kotlin.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageAdapter;
+
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
 
 /**
  * This class represents a FlatDbReaderStrategy, which is responsible for reading data from flat
@@ -102,30 +109,24 @@ public abstract class FlatDbReaderStrategy {
    * Retrieves the code data for the given code hash and account hash.
    */
   public Optional<Bytes> getCode(
-      final Bytes32 codeHash, final Hash accountHash, final KeyValueStorage codeStorage) {
+      final Bytes32 codeHash, final Hash accountHash, final KeyValueStorageAdapter worldStateStorage) {
     if (codeHash.equals(Hash.EMPTY)) {
       return Optional.of(Bytes.EMPTY);
     } else {
-      return codeStorage
-          .get(accountHash.toArrayUnsafe())
+      return worldStateStorage
+          .get(CODE_STORAGE, accountHash.toArrayUnsafe())
           .map(Bytes::wrap)
           .filter(b -> Hash.hash(b).equals(codeHash));
     }
   }
 
   public void clearAll(
-      final KeyValueStorage accountStorage,
-      final KeyValueStorage storageStorage,
-      final KeyValueStorage codeStorage) {
-    accountStorage.clear();
-    storageStorage.clear();
-    codeStorage.clear();
+      final KeyValueStorageAdapter worldStateStorage) {
+    worldStateStorage.clear(List.of(ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE, CODE_STORAGE));
   }
 
-  public void resetOnResync(
-      final KeyValueStorage accountStorage, final KeyValueStorage storageStorage) {
-    accountStorage.clear();
-    storageStorage.clear();
+  public void resetOnResync(final KeyValueStorageAdapter worldStateStorage) {
+    worldStateStorage.clear(List.of(ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE));
   }
 
   public Map<Bytes32, Bytes> streamAccountFlatDatabase(

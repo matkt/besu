@@ -28,7 +28,6 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbSegmentIdenti
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbUtil;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfiguration;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage;
-import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorage.Transaction;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -68,8 +67,7 @@ import org.slf4j.LoggerFactory;
 
 /** The RocksDb columnar key value storage. */
 public abstract class RocksDBColumnarKeyValueStorage
-    implements SegmentedKeyValueStorage<
-        RocksDbSegmentIdentifier, Transaction<RocksDbSegmentIdentifier>> {
+    implements SegmentedKeyValueStorage<RocksDbSegmentIdentifier> {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
   static final String DEFAULT_COLUMN = "default";

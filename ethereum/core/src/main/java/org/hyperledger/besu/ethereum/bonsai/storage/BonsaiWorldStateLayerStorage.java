@@ -19,7 +19,7 @@ import org.hyperledger.besu.ethereum.bonsai.storage.BonsaiWorldStateKeyValueStor
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
-import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorageAdapter;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
 
 public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyValueStorage
@@ -37,10 +37,10 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
   }
 
   public BonsaiWorldStateLayerStorage(
-      final SnappedKeyValueStorage accountStorage,
-      final SnappedKeyValueStorage codeStorage,
-      final SnappedKeyValueStorage storageStorage,
-      final SnappedKeyValueStorage trieBranchStorage,
+      final SnappedKeyValueStorageAdapter accountStorage,
+      final SnappedKeyValueStorageAdapter codeStorage,
+      final SnappedKeyValueStorageAdapter storageStorage,
+      final SnappedKeyValueStorageAdapter trieBranchStorage,
       final KeyValueStorage trieLogStorage,
       final BonsaiWorldStateKeyValueStorage parent,
       final ObservableMetricsSystem metricsSystem) {
