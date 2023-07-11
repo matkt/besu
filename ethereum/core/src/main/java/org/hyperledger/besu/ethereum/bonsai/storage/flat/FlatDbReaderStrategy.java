@@ -120,11 +120,6 @@ public abstract class FlatDbReaderStrategy {
     }
   }
 
-  public void clearAll(
-      final KeyValueStorageAdapter worldStateStorage) {
-    worldStateStorage.clear(List.of(ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE, CODE_STORAGE));
-  }
-
   public void resetOnResync(final KeyValueStorageAdapter worldStateStorage) {
     worldStateStorage.clear(List.of(ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE));
   }

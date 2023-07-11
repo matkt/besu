@@ -27,10 +27,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
 
   public BonsaiWorldStateLayerStorage(final BonsaiWorldStateKeyValueStorage parent) {
     this(
-        new LayeredKeyValueStorage(parent.accountStorage),
-        new LayeredKeyValueStorage(parent.codeStorage),
-        new LayeredKeyValueStorage(parent.storageStorage),
-        new LayeredKeyValueStorage(parent.trieBranchStorage),
+        new LayeredKeyValueStorage(parent.worldState),
         parent.trieLogStorage,
         parent,
         parent.metricsSystem);

@@ -29,6 +29,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Streams;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransactionAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,14 +38,14 @@ public class LayeredKeyValueStorage extends InMemoryKeyValueStorage {
 
   private static final Logger LOG = LoggerFactory.getLogger(LayeredKeyValueStorage.class);
 
-  private final KeyValueStorage parent;
+  private final KeyValueStorageTransactionAdapter parent;
 
   /**
    * Instantiates a new Layered key value storage.
    *
    * @param parent the parent key value storage for this layered storage.
    */
-  public LayeredKeyValueStorage(final KeyValueStorage parent) {
+  public LayeredKeyValueStorage(final KeyValueStorageTransactionAdapter parent) {
     this(new ConcurrentHashMap<>(), parent);
   }
 
@@ -55,7 +56,7 @@ public class LayeredKeyValueStorage extends InMemoryKeyValueStorage {
    * @param parent the parent key value storage for this layered storage.
    */
   public LayeredKeyValueStorage(
-      final Map<Bytes, Optional<byte[]>> map, final KeyValueStorage parent) {
+      final Map<Bytes, Optional<byte[]>> map, final KeyValueStorageTransactionAdapter parent) {
     super(map);
     this.parent = parent;
   }

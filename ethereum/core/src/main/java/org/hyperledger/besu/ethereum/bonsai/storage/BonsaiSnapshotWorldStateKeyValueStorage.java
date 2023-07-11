@@ -15,7 +15,6 @@
  */
 package org.hyperledger.besu.ethereum.bonsai.storage;
 
-import static org.hyperledger.besu.plugin.services.storage.GlobalKeyValueStorageTransaction.DISABLED_GLOBAL_TRANSACTION_SUPPLIER;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -24,7 +23,6 @@ import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
-import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -64,7 +62,7 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
       final ObservableMetricsSystem metricsSystem) {
     this(
         worldStateStorage,
-        ((SnappableKeyValueStorage) worldStateStorage.keyValuesStorage).takeSnapshot(),
+        ((SnappableKeyValueStorage) worldStateStorage.worldState).takeSnapshot(),
         worldStateStorage.trieLogStorage,
         metricsSystem);
   }
@@ -80,11 +78,8 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   @Override
   public BonsaiUpdater updater() {
     return new Updater(
-        accountStorage,
-        codeStorage,
-        storageStorage,
-        trieBranchStorage,
-        trieLogStorage);
+            worldState.startTransaction(),
+        trieLogStorage.startTransaction());
   }
 
   @Override
@@ -218,10 +213,7 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
       subscribers.forEach(BonsaiStorageSubscriber::onCloseStorage);
 
       // close all of the SnappedKeyValueStorages:
-      accountStorage.close();
-      codeStorage.close();
-      storageStorage.close();
-      trieBranchStorage.close();
+      worldState.close();
 
       // unsubscribe the parent worldstate
       parentWorldStateStorage.unSubscribe(subscribeParentId);
