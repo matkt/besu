@@ -28,7 +28,6 @@ import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.metrics.prometheus.PrometheusMetricsSystem;
 
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -60,8 +59,8 @@ public class CachedMerkleTrieLoader implements BonsaiStorageSubscriber {
       final BonsaiWorldStateKeyValueStorage worldStateStorage,
       final Hash worldStateRootHash,
       final Address account) {
-    CompletableFuture.runAsync(
-        () -> cacheAccountNodes(worldStateStorage, worldStateRootHash, account));
+    // CompletableFuture.runAsync(
+    //    () -> cacheAccountNodes(worldStateStorage, worldStateRootHash, account));
   }
 
   @VisibleForTesting
@@ -93,7 +92,7 @@ public class CachedMerkleTrieLoader implements BonsaiStorageSubscriber {
       final BonsaiWorldStateKeyValueStorage worldStateStorage,
       final Address account,
       final StorageSlotKey slotKey) {
-    CompletableFuture.runAsync(() -> cacheStorageNodes(worldStateStorage, account, slotKey));
+    // CompletableFuture.runAsync(() -> cacheStorageNodes(worldStateStorage, account, slotKey));
   }
 
   @VisibleForTesting

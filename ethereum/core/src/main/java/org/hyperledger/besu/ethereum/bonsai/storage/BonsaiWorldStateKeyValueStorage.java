@@ -156,34 +156,24 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage, AutoC
 
   @Override
   public Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return composedWorldStateStorage
-          .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
-          .map(Bytes::wrap)
-          .filter(b -> Hash.hash(b).equals(nodeHash));
-    }
+    System.out.println("getAccountStateTrieNode");
+    new Exception().printStackTrace(System.out);
+    throw new RuntimeException("getAccountStateTrieNode error");
   }
 
   @Override
   public Optional<Bytes> getAccountStorageTrieNode(
       final Hash accountHash, final Bytes location, final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return composedWorldStateStorage
-          .get(TRIE_BRANCH_STORAGE, Bytes.concatenate(accountHash, location).toArrayUnsafe())
-          .map(Bytes::wrap)
-          .filter(b -> Hash.hash(b).equals(nodeHash));
-    }
+    System.out.println("getAccountStorageTrieNode");
+    new Exception().printStackTrace(System.out);
+    throw new RuntimeException("getAccountStorageTrieNode error");
   }
 
   @Override
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
-    return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, Bytes.concatenate(key).toArrayUnsafe())
-        .map(Bytes::wrap);
+    System.out.println("getTrieNodeUnsafe");
+    new Exception().printStackTrace(System.out);
+    throw new RuntimeException("getTrieNodeUnsafe error");
   }
 
   public Optional<byte[]> getTrieLog(final Hash blockHash) {
@@ -191,9 +181,9 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateStorage, AutoC
   }
 
   public Optional<Bytes> getStateTrieNode(final Bytes location) {
-    return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
-        .map(Bytes::wrap);
+    System.out.println("getStateTrieNode");
+    new Exception().printStackTrace(System.out);
+    throw new RuntimeException("getStateTrieNode error");
   }
 
   public Optional<Bytes> getWorldStateRootHash() {

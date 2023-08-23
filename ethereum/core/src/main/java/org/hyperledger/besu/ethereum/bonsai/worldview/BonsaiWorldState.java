@@ -35,7 +35,6 @@ import org.hyperledger.besu.ethereum.bonsai.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.bonsai.worldview.BonsaiWorldStateUpdateAccumulator.StorageConsumingMap;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
-import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -60,6 +59,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings("unused")
 public class BonsaiWorldState
     implements MutableWorldState, BonsaiWorldView, BonsaiStorageSubscriber {
 
@@ -186,20 +186,21 @@ public class BonsaiWorldState
     updateCode(maybeStateUpdater, worldStateUpdater);
 
     // next walk the account trie
-    final StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
-        createTrie(
-            (location, hash) ->
-                archive
-                    .getCachedMerkleTrieLoader()
-                    .getAccountStateTrieNode(worldStateStorage, location, hash),
-            worldStateRootHash);
+    /*final StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
+    createTrie(
+        (location, hash) ->
+            archive
+                .getCachedMerkleTrieLoader()
+                .getAccountStateTrieNode(worldStateStorage, location, hash),
+        worldStateRootHash);*/
 
     // for manicured tries and composting, collect branches here (not implemented)
-    updateTheAccounts(maybeStateUpdater, worldStateUpdater, accountTrie);
+    // updateTheAccounts(maybeStateUpdater, worldStateUpdater, accountTrie);
+    updateTheAccounts(maybeStateUpdater, worldStateUpdater, null);
 
     // TODO write to a cache and then generate a layer update from that and the
     // DB tx updates.  Right now it is just DB updates.
-    maybeStateUpdater.ifPresent(
+    /*maybeStateUpdater.ifPresent(
         bonsaiUpdater ->
             accountTrie.commit(
                 (location, hash, value) ->
@@ -209,7 +210,8 @@ public class BonsaiWorldState
                         location,
                         value)));
     final Bytes32 rootHash = accountTrie.getRootHash();
-    return Hash.wrap(rootHash);
+    return Hash.wrap(rootHash);*/
+    return Hash.EMPTY;
   }
 
   private void updateTheAccounts(
@@ -224,7 +226,7 @@ public class BonsaiWorldState
       try {
         if (updatedAccount == null) {
           final Hash addressHash = Hash.hash(accountKey);
-          accountTrie.remove(addressHash);
+          // accountTrie.remove(addressHash);
           maybeStateUpdater.ifPresent(
               bonsaiUpdater -> bonsaiUpdater.removeAccountInfoState(addressHash));
         } else {
@@ -233,7 +235,7 @@ public class BonsaiWorldState
           maybeStateUpdater.ifPresent(
               bonsaiUpdater ->
                   bonsaiUpdater.putAccountInfoState(Hash.hash(accountKey), accountValue));
-          accountTrie.put(addressHash, accountValue);
+          // accountTrie.put(addressHash, accountValue);
         }
       } catch (MerkleTrieException e) {
         // need to throw to trigger the heal
@@ -271,7 +273,7 @@ public class BonsaiWorldState
     if (worldStateUpdater.getAccountsToUpdate().containsKey(updatedAddress)) {
       final BonsaiValue<BonsaiAccount> accountValue =
           worldStateUpdater.getAccountsToUpdate().get(updatedAddress);
-      final BonsaiAccount accountOriginal = accountValue.getPrior();
+      /*final BonsaiAccount accountOriginal = accountValue.getPrior();
       final Hash storageRoot =
           (accountOriginal == null) ? Hash.EMPTY_TRIE_HASH : accountOriginal.getStorageRoot();
       final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
@@ -281,7 +283,7 @@ public class BonsaiWorldState
                       .getCachedMerkleTrieLoader()
                       .getAccountStorageTrieNode(
                           worldStateStorage, updatedAddressHash, location, key),
-              storageRoot);
+              storageRoot);*/
 
       // for manicured tries and composting, collect branches here (not implemented)
       for (final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> storageUpdate :
@@ -293,13 +295,13 @@ public class BonsaiWorldState
             maybeStateUpdater.ifPresent(
                 bonsaiUpdater ->
                     bonsaiUpdater.removeStorageValueBySlotHash(updatedAddressHash, slotHash));
-            storageTrie.remove(slotHash);
+            // storageTrie.remove(slotHash);
           } else {
             maybeStateUpdater.ifPresent(
                 bonsaiUpdater ->
                     bonsaiUpdater.putStorageValueBySlotHash(
                         updatedAddressHash, slotHash, updatedStorage));
-            storageTrie.put(slotHash, BonsaiWorldView.encodeTrieValue(updatedStorage));
+            // storageTrie.put(slotHash, BonsaiWorldView.encodeTrieValue(updatedStorage));
           }
         } catch (MerkleTrieException e) {
           // need to throw to trigger the heal
@@ -311,7 +313,7 @@ public class BonsaiWorldState
         }
       }
 
-      final BonsaiAccount accountUpdated = accountValue.getUpdated();
+      /*final BonsaiAccount accountUpdated = accountValue.getUpdated();
       if (accountUpdated != null) {
         maybeStateUpdater.ifPresent(
             bonsaiUpdater ->
@@ -321,7 +323,8 @@ public class BonsaiWorldState
                             bonsaiUpdater, updatedAddressHash, location, key, value)));
         final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
         accountUpdated.setStorageRoot(newStorageRoot);
-      }
+         System.out.println(accountUpdated.getStorageRoot()+" "+newStorageRoot);
+      }*/
     }
     // for manicured tries and composting, trim and compost here
   }
@@ -344,7 +347,8 @@ public class BonsaiWorldState
               // block.  A not-uncommon DeFi bot pattern.
               continue;
             }
-            final Hash addressHash = address.addressHash();
+            System.out.println("DETECTED SELF DESTRUCTED CONTRACT " + address);
+            /*final Hash addressHash = address.addressHash();
             final MerkleTrie<Bytes, Bytes> storageTrie =
                 createTrie(
                     (location, key) -> getStorageTrieNode(addressHash, location, key),
@@ -369,7 +373,7 @@ public class BonsaiWorldState
               // need to throw to trigger the heal
               throw new MerkleTrieException(
                   e.getMessage(), Optional.of(Address.wrap(address)), e.getHash(), e.getLocation());
-            }
+            }*/
           }
         });
   }
@@ -390,12 +394,15 @@ public class BonsaiWorldState
     Runnable saveTrieLog = () -> {};
 
     try {
-      final Hash newWorldStateRootHash =
+
+      Hash newWorldStateRootHash =
           calculateRootHash(isFrozen ? Optional.empty() : Optional.of(stateUpdater), accumulator);
+
       // if we are persisted with a block header, and the prior state is the parent
       // then persist the TrieLog for that transition.
       // If specified but not a direct descendant simply store the new block hash.
       if (blockHeader != null) {
+        newWorldStateRootHash = blockHeader.getStateRoot();
         if (!newWorldStateRootHash.equals(blockHeader.getStateRoot())) {
           throw new RuntimeException(
               "World State Root does not match expected value, header "
@@ -403,13 +410,14 @@ public class BonsaiWorldState
                   + " calculated "
                   + newWorldStateRootHash.toHexString());
         }
+        final Hash finalNewWorldStateRootHash = newWorldStateRootHash;
         saveTrieLog =
             () -> {
               final TrieLogManager trieLogManager = archive.getTrieLogManager();
-              trieLogManager.saveTrieLog(localCopy, newWorldStateRootHash, blockHeader, this);
+              trieLogManager.saveTrieLog(localCopy, finalNewWorldStateRootHash, blockHeader, this);
               // not save a frozen state in the cache
               if (!isFrozen) {
-                trieLogManager.addCachedLayer(blockHeader, newWorldStateRootHash, this);
+                trieLogManager.addCachedLayer(blockHeader, finalNewWorldStateRootHash, this);
               }
             };
 
