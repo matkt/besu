@@ -305,11 +305,6 @@ public class BonsaiWorldStateUpdateAccumulator
                           new StorageConsumingMap<>(
                               updatedAddress, new ConcurrentHashMap<>(), storagePreloader));
 
-              if (tracked.getStorageWasCleared()) {
-                storageToClear.add(updatedAddress);
-                pendingStorageUpdates.clear();
-              }
-
               if (tracked.getWrappedAccount() == null) {
                 updatedAccount = new BonsaiAccount(this, tracked);
                 tracked.setWrappedAccount(updatedAccount);
@@ -349,6 +344,11 @@ public class BonsaiWorldStateUpdateAccumulator
                                     .orElse(null),
                                 null));
                 pendingCode.setUpdated(updatedAccount.getCode());
+              }
+
+              if (tracked.getStorageWasCleared()) {
+                storageToClear.add(updatedAddress);
+                pendingStorageUpdates.clear();
               }
 
               // This is especially to avoid unnecessary computation for withdrawals and
