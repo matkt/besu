@@ -140,18 +140,17 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
   @Override
   public void codeSuccess(final MessageFrame frame, final OperationTracer operationTracer) {
     final Bytes contractCode = frame.getOutputData();
-
     final long depositFee = gasCalculator.codeDepositGasCost(frame, contractCode.size());
 
     if (frame.getRemainingGas() < depositFee) {
-      LOG.trace(
+      LOG.info(
           "Not enough gas to pay the code deposit fee for {}: "
               + "remaining gas = {} < {} = deposit fee",
           frame.getContractAddress(),
           frame.getRemainingGas(),
           depositFee);
       if (requireCodeDepositToSucceed) {
-        LOG.trace("Contract creation error: insufficient funds for code deposit");
+        LOG.info("Contract creation error: insufficient funds for code deposit");
         frame.setExceptionalHaltReason(Optional.of(ExceptionalHaltReason.INSUFFICIENT_GAS));
         frame.setState(MessageFrame.State.EXCEPTIONAL_HALT);
         operationTracer.traceAccountCreationResult(
@@ -172,7 +171,7 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
             gasCalculator.completedCreateContractGasCost(frame);
 
         if (frame.getRemainingGas() < statelessContractCompletionFee) {
-          LOG.trace(
+          LOG.info(
               "Not enough gas to pay the contract creation completion fee for {}: "
                   + "remaining gas = {} < {} = deposit fee",
               frame.getContractAddress(),

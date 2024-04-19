@@ -115,6 +115,7 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
       gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, BALANCE_LEAF_KEY);
     }
 
+    System.out.println("contract create init " + gas);
     return gas;
   }
 
@@ -129,6 +130,7 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY);
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY);
 
+    System.out.println("Contract creation " + gas);
     return gas;
   }
 
@@ -173,12 +175,31 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
   @Override
   public long touchCodeChunksUponContractCreation(final Address address, final long codeLength) {
     long gas = 0;
-    for (long i = 0; i < (codeLength + 30) / 31; i++) {
+    long i;
+    for (i = 0; i < (codeLength + 30) / 31; i++) {
       gas +=
           touchAddressOnWriteAndComputeGas(
               address,
-              CODE_OFFSET.subtract(i).divide(VERKLE_NODE_WIDTH),
-              CODE_OFFSET.subtract(i).mod(VERKLE_NODE_WIDTH));
+              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH));
+    }
+    System.out.println("deposit gas " + gas + " " + i);
+    return gas;
+  }
+
+  @Override
+  public long touchCodeChunks(
+      final Address address, final long offset, final long readSize, final long codeLength) {
+    long gas = 0;
+    if (readSize == 0 || codeLength == 0 || offset > codeLength) {
+      return 0;
+    }
+    for (long i = offset / 31; i <= (Math.min(offset + readSize, codeLength) - 1) / 31; i++) {
+      gas +=
+          touchAddressOnReadAndComputeGas(
+              address,
+              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH));
     }
     return gas;
   }
