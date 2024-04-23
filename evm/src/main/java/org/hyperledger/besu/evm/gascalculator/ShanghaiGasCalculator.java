@@ -204,7 +204,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
             .getAccessWitness()
             .touchAddressOnWriteAndComputeGas(
                 frame.getRecipientAddress(), treeIndexes.get(0), treeIndexes.get(1));
-    System.out.println("sstore gas cost " + gasCost + " " + key);
     return gasCost;
   }
 
@@ -217,7 +216,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
             .getAccessWitness()
             .touchAddressOnReadAndComputeGas(
                 frame.getContractAddress(), treeIndexes.get(0), treeIndexes.get(1));
-    System.out.println("sload gas cost " + gasCost + " " + key + " " + frame.getContractAddress());
     return gasCost;
   }
 
@@ -283,7 +281,7 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
       final long codeSize) {
     long gasCost = super.dataCopyOperationGasCost(frame, memOffset, readSize);
     System.out.println(
-        frame.getContractAddress() + " " + codeOffset + " " + readSize + " " + codeSize);
+        frame.getContractAddress() + " " + codeOffset + " " + readSize + " " + codeSize+" "+gasCost);
     if (!frame.wasCreatedInTransaction(frame.getContractAddress())) {
       gasCost =
           clampedAdd(
@@ -292,7 +290,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
                   .getAccessWitness()
                   .touchCodeChunks(frame.getContractAddress(), codeOffset, readSize, codeSize));
     }
-    System.out.println("copy gas cost " + gasCost);
     return gasCost;
   }
 
@@ -301,32 +298,28 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
       final MessageFrame frame, final long codeOffset, final long readSize, final long codeSize) {
     long gasCost = super.pushOperationGasCost(frame, codeOffset, readSize, codeSize);
     if (!frame.wasCreatedInTransaction(frame.getContractAddress())) {
-      gasCost =
-          clampedAdd(
-              gasCost,
-              frame
-                  .getAccessWitness()
-                  .touchCodeChunks(frame.getContractAddress(), codeOffset, readSize, codeSize));
-      System.out.println("push "+isPrecompile(frame.getContractAddress())+" "+frame.getContractAddress()+" "+codeOffset+" "+readSize+" "+codeSize+" "+gasCost);
+      if(readSize==1){
+        if( (codeOffset%31==0)){
+          gasCost =
+                  clampedAdd(
+                          gasCost,
+                          frame
+                                  .getAccessWitness()
+                                  .touchCodeChunks(frame.getContractAddress(), codeOffset+1, readSize, codeSize));
+
+        }
+      } else {
+        gasCost =
+                clampedAdd(
+                        gasCost,
+                        frame
+                                .getAccessWitness()
+                                .touchCodeChunks(frame.getContractAddress(), codeOffset, readSize, codeSize));
+
+      }
+      //System.out.println("push "+isPrecompile(frame.getContractAddress())+" "+frame.getContractAddress()+" "+codeOffset+" "+readSize+" "+codeSize+" "+gasCost);
     }
     return gasCost;
-  }
-
-  @Override
-  public long extCodeSizeOperationGasCost(final MessageFrame frame) {
-    if(!isPrecompile(frame.getContractAddress())) {
-      long gasCost =
-                      frame
-                              .getAccessWitness()
-                              .touchAddressOnReadAndComputeGas(frame.getContractAddress(), UInt256.ZERO, VERSION_LEAF_KEY);
-      return
-              clampedAdd(
-                      gasCost,
-                      frame
-                              .getAccessWitness()
-                              .touchAddressOnReadAndComputeGas(frame.getContractAddress(), UInt256.ZERO, CODE_SIZE_LEAF_KEY));
-    }
-    return 0;
   }
 
   @Override

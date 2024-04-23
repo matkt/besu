@@ -34,5 +34,5 @@ public interface AccessWitness {
 
   long touchCodeChunksUponContractCreation(Address address, long codeLength);
 
-  long touchCodeChunks(Address address, long offset, long readSize, long codeLength);
+  long touchCodeChunks(Address address, long startPc, long readSize, long codeLength);
 }
