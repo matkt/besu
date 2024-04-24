@@ -46,6 +46,11 @@ public class CreateOperation extends AbstractCreateOperation {
   public long cost(final MessageFrame frame, final Supplier<Code> unused) {
     final int inputOffset = clampedToInt(frame.getStackItem(1));
     final int inputSize = clampedToInt(frame.getStackItem(2));
+    System.out.println(
+        "create "
+            + gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)
+            + " "
+            + gasCalculator().initcodeCost(inputSize));
     return clampedAdd(
         clampedAdd(
             gasCalculator().txCreateCost(),

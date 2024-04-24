@@ -208,7 +208,6 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
       frame.pushStackItem(FAILURE_STACK_ITEM);
       onInvalid(frame, (CodeInvalid) outputCode);
     }
-
     final int currentPC = frame.getPC();
     frame.setPC(currentPC + 1);
   }

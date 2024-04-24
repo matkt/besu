@@ -15,7 +15,6 @@
 package org.hyperledger.besu.evm;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static org.hyperledger.besu.evm.operation.PushOperation.PUSH_BASE;
 import static org.hyperledger.besu.evm.operation.SwapOperation.SWAP_BASE;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -53,7 +52,6 @@ import org.hyperledger.besu.evm.operation.OperationRegistry;
 import org.hyperledger.besu.evm.operation.OrOperation;
 import org.hyperledger.besu.evm.operation.PopOperation;
 import org.hyperledger.besu.evm.operation.Push0Operation;
-import org.hyperledger.besu.evm.operation.PushOperation;
 import org.hyperledger.besu.evm.operation.SDivOperation;
 import org.hyperledger.besu.evm.operation.SGtOperation;
 import org.hyperledger.besu.evm.operation.SLtOperation;
@@ -184,16 +182,18 @@ public class EVM {
     var operationTracer = tracing == OperationTracer.NO_TRACING ? null : tracing;
     byte[] code = frame.getCode().getBytes().toArrayUnsafe();
 
-
     Operation[] operationArray = operations.getOperations();
     while (frame.getState() == MessageFrame.State.CODE_EXECUTING) {
       Operation currentOperation;
       int opcode;
       int pc = frame.getPC();
 
-      long gasBefore = 0;
       if (!frame.wasCreatedInTransaction(frame.getContractAddress())) {
-          gasBefore= frame.getAccessWitness().touchCodeChunks(frame.getContractAddress(), pc, 1, code.length);
+        final long statelessGas =
+            frame
+                .getAccessWitness()
+                .touchCodeChunks(frame.getContractAddress(), pc, 1, code.length);
+        frame.decrementRemainingGas(statelessGas);
       }
       try {
         opcode = code[pc] & 0xff;
@@ -286,7 +286,6 @@ public class EVM {
       } catch (final UnderflowException ue) {
         result = UNDERFLOW_RESPONSE;
       }
-        System.out.println("opcode "+currentOperation.getName()+" "+(gasBefore+result.getGasCost())+" "+result.getGasCost());
       final ExceptionalHaltReason haltReason = result.getHaltReason();
       if (haltReason != null) {
         LOG.trace("MessageFrame evaluation halted because of {}", haltReason);
@@ -296,11 +295,14 @@ public class EVM {
         frame.setExceptionalHaltReason(Optional.of(ExceptionalHaltReason.INSUFFICIENT_GAS));
         frame.setState(State.EXCEPTIONAL_HALT);
       }
+
+      System.out.println("opcode " + currentOperation.getName() + " " + frame.getRemainingGas());
       if (frame.getState() == State.CODE_EXECUTING) {
         final int currentPC = frame.getPC();
         final int opSize = result.getPcIncrement();
         frame.setPC(currentPC + opSize);
       }
+
       if (operationTracer != null) {
         operationTracer.tracePostExecution(frame, result);
       }

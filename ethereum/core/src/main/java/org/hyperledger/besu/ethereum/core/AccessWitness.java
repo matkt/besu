@@ -19,7 +19,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.apache.tuweni.units.bigints.UInt256;
-import org.hyperledger.besu.evm.internal.Words;
 
 public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitness {
 
@@ -191,19 +190,21 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
     if ((readSize == 0 && codeLength == 0) || startPc > codeLength) {
       return 0;
     }
-    long endPc = startPc+readSize;
-    if(endPc>codeLength){
+    long endPc = startPc + readSize;
+    if (endPc > codeLength) {
       endPc = codeLength;
     }
-    if(endPc>0){
-      endPc-=1;
+    if (endPc > 0) {
+      endPc -= 1;
     }
-    for (long i = startPc / 31; i <= endPc/31; i++) {
-      gas = clampedAdd(gas,
-          touchAddressOnReadAndComputeGas(
-              address,
-              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
-              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
+    for (long i = startPc / 31; i <= endPc / 31; i++) {
+      gas =
+          clampedAdd(
+              gas,
+              touchAddressOnReadAndComputeGas(
+                  address,
+                  CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+                  CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
     }
     return gas;
   }

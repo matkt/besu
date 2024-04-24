@@ -142,7 +142,13 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
   public void codeSuccess(final MessageFrame frame, final OperationTracer operationTracer) {
     final Bytes contractCode = frame.getOutputData();
     final long depositFee = gasCalculator.codeDepositGasCost(frame, contractCode.size());
-
+    System.out.println(
+        "opcode CREATE "
+            + depositFee
+            + " "
+            + contractCode.size()
+            + " "
+            + frame.getCode().getSize());
     if (frame.getRemainingGas() < depositFee) {
       LOG.info(
           "Not enough gas to pay the code deposit fee for {}: "
@@ -170,6 +176,8 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
 
         final long statelessContractCompletionFee =
             gasCalculator.completedCreateContractGasCost(frame);
+
+        System.out.println("opcode CREATE completion" + statelessContractCompletionFee);
 
         if (frame.getRemainingGas() < statelessContractCompletionFee) {
           LOG.info(

@@ -317,7 +317,6 @@ public interface GasCalculator {
 
   long pushOperationGasCost(MessageFrame frame, long codeOffset, long readSize, long codeSize);
 
-
   long extCodeSizeOperationGasCost(MessageFrame frame);
 
   /**
@@ -680,5 +679,4 @@ public interface GasCalculator {
       final MutableAccount sender) {
     return 0L;
   }
-
 }
