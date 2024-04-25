@@ -296,7 +296,20 @@ public class EVM {
         frame.setState(State.EXCEPTIONAL_HALT);
       }
 
-      System.out.println("opcode " + currentOperation.getName() + " " + frame.getRemainingGas());
+      System.out.println(
+          "opcode "
+              + frame.getDepth()
+              + " "
+              + frame.getRemainingGas()
+              + " "
+              + result.getGasCost()
+              + " "
+              + frame.getExceptionalHaltReason()
+              + " "
+              + currentOperation.getName()
+              + " "
+              + frame.getRemainingGas());
+
       if (frame.getState() == State.CODE_EXECUTING) {
         final int currentPC = frame.getPC();
         final int opSize = result.getPcIncrement();
@@ -308,6 +321,8 @@ public class EVM {
       }
     }
   }
+
+  public static boolean letsgo = false;
 
   /**
    * Get Operations (unsafe)

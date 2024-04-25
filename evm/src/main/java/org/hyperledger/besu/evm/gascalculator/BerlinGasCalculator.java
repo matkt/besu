@@ -115,6 +115,7 @@ public class BerlinGasCalculator extends IstanbulGasCalculator {
 
   @Override
   public long getWarmStorageReadCost() {
+    System.out.println("getWarmStorageReadCost");
     return WARM_STORAGE_READ_COST;
   }
 
@@ -184,6 +185,7 @@ public class BerlinGasCalculator extends IstanbulGasCalculator {
       final Account recipient,
       final Address to,
       final boolean accountIsWarm) {
+    System.out.println("allo ?");
     final long baseCost =
         super.callOperationGasCost(
             frame,

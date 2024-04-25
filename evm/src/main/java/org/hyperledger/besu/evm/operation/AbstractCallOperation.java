@@ -252,7 +252,6 @@ public abstract class AbstractCallOperation extends AbstractOperation {
     final Account recipient = frame.getWorldUpdater().get(address(frame));
     final Address to = to(frame);
     GasCalculator gasCalculator = gasCalculator();
-
     return gasCalculator.callOperationGasCost(
         frame,
         stipend,

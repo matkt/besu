@@ -27,6 +27,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.VersionedHash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
+import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.code.CodeSection;
 import org.hyperledger.besu.evm.internal.MemoryEntry;
 import org.hyperledger.besu.evm.internal.OperandStack;
@@ -420,6 +421,9 @@ public class MessageFrame {
    */
   public long decrementRemainingGas(final long amount) {
     this.gasRemaining -= amount;
+    if (EVM.letsgo) {
+      new Exception("dec gas amount " + amount).printStackTrace(System.out);
+    }
     return this.gasRemaining;
   }
 
@@ -439,6 +443,9 @@ public class MessageFrame {
    */
   public void incrementRemainingGas(final long amount) {
     this.gasRemaining += amount;
+    if (EVM.letsgo) {
+      new Exception("dec gas amount " + amount).printStackTrace(System.out);
+    }
   }
 
   /**

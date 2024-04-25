@@ -78,6 +78,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
     gas += touchAddressOnReadAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY);
     gas += touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY);
     gas += touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY);
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return gas;
   }
 
@@ -88,7 +92,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
 
     gas += touchAddressOnReadAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY);
     gas += touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY);
-
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return gas;
   }
 
@@ -99,7 +106,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
 
     gas += touchAddressOnWriteAndComputeGas(caller, zeroTreeIndex, BALANCE_LEAF_KEY);
     gas += touchAddressOnWriteAndComputeGas(target, zeroTreeIndex, BALANCE_LEAF_KEY);
-
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return gas;
   }
 
@@ -108,12 +118,16 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
       final Address address, final boolean createSendsValue) {
 
     long gas = 0;
-
+    System.out.println("touch " + address);
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY);
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY);
 
     if (createSendsValue) {
       gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, BALANCE_LEAF_KEY);
+    }
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
     }
     return gas;
   }
@@ -128,6 +142,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY);
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY);
     gas += touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY);
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return gas;
   }
 
@@ -144,7 +162,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
     gas += touchAddressOnReadAndComputeGas(origin, zeroTreeIndex, CODE_SIZE_LEAF_KEY);
 
     // modifying this after update on EIP-4762 to not charge simple transfers
-
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return 0;
   }
 
@@ -165,7 +186,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
       gas += touchAddressOnReadAndComputeGas(target, zeroTreeIndex, BALANCE_LEAF_KEY);
     }
     // modifying this after update on EIP-4762 to not charge simple transfers
-
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
+    }
     return 0;
   }
 
@@ -179,6 +203,10 @@ public class AccessWitness implements org.hyperledger.besu.datatypes.AccessWitne
               address,
               CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
               CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH));
+    }
+    if (gas == 0) {
+      new Exception("gound zero").printStackTrace(System.out);
+      System.out.println("found szeo");
     }
     return gas;
   }

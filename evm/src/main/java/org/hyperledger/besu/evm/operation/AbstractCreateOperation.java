@@ -72,8 +72,11 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
     }
 
     Supplier<Code> codeSupplier = () -> getInitCode(frame, evm);
+    System.out.println("before create cos " + frame.getRemainingGas());
 
     final long cost = cost(frame, codeSupplier);
+
+    System.out.println("after create cos " + frame.getRemainingGas());
     if (frame.isStatic()) {
       return new OperationResult(cost, ExceptionalHaltReason.ILLEGAL_STATE_CHANGE);
     } else if (frame.getRemainingGas() < cost) {
@@ -105,9 +108,16 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
       // addresses disk loading delay, and we already have the code.
       Code code = evm.getCodeUncached(inputData);
 
+      final Address contractAddress = targetContractAddress(frame, code);
+      final Wei contractValue = Wei.wrap(frame.getStackItem(0));
+
       if (code.isValid() && frame.getCode().getEofVersion() <= code.getEofVersion()) {
+
+        long statlessGasCost = statelessCost(frame, contractAddress, contractValue);
+        System.out.println("touching " + statlessGasCost);
+        frame.decrementRemainingGas(statlessGasCost);
         frame.decrementRemainingGas(cost);
-        spawnChildMessage(frame, code, evm);
+        spawnChildMessage(frame, contractAddress, contractValue, code, evm);
         frame.incrementRemainingGas(cost);
       } else {
         fail(frame);
@@ -125,6 +135,9 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
    * @return the long
    */
   protected abstract long cost(final MessageFrame frame, Supplier<Code> codeSupplier);
+
+  protected abstract long statelessCost(
+      final MessageFrame frame, final Address contractAddress, final Wei value);
 
   /**
    * Target contract address.
@@ -152,10 +165,12 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
     frame.pushStackItem(FAILURE_STACK_ITEM);
   }
 
-  private void spawnChildMessage(final MessageFrame parent, final Code code, final EVM evm) {
-    final Wei value = Wei.wrap(parent.getStackItem(0));
-
-    final Address contractAddress = targetContractAddress(parent, code);
+  private void spawnChildMessage(
+      final MessageFrame parent,
+      final Address contractAddress,
+      final Wei contractValue,
+      final Code code,
+      final EVM evm) {
 
     final long childGasStipend =
         gasCalculator().gasAvailableForChildCreate(parent.getRemainingGas());
@@ -170,8 +185,8 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
         .contract(contractAddress)
         .inputData(Bytes.EMPTY)
         .sender(parent.getRecipientAddress())
-        .value(value)
-        .apparentValue(value)
+        .value(contractValue)
+        .apparentValue(contractValue)
         .code(code)
         .accessWitness(parent.getAccessWitness())
         .completer(child -> complete(parent, child, evm))

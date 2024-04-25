@@ -19,6 +19,7 @@ import static org.hyperledger.besu.evm.internal.Words.clampedToInt;
 import static org.hyperledger.besu.evm.internal.Words.clampedToLong;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.account.Account;
@@ -46,16 +47,18 @@ public class CreateOperation extends AbstractCreateOperation {
   public long cost(final MessageFrame frame, final Supplier<Code> unused) {
     final int inputOffset = clampedToInt(frame.getStackItem(1));
     final int inputSize = clampedToInt(frame.getStackItem(2));
-    System.out.println(
-        "create "
-            + gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)
-            + " "
-            + gasCalculator().initcodeCost(inputSize));
+
     return clampedAdd(
         clampedAdd(
             gasCalculator().txCreateCost(),
             gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),
         gasCalculator().initcodeCost(inputSize));
+  }
+
+  @Override
+  public long statelessCost(
+      final MessageFrame frame, final Address contractAddress, final Wei value) {
+    return gasCalculator().initcodeStatelessCost(frame, contractAddress, value);
   }
 
   @Override

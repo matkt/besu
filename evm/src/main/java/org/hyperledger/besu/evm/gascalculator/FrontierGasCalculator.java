@@ -318,11 +318,6 @@ public class FrontierGasCalculator implements GasCalculator {
   }
 
   @Override
-  public long initCreateContractGasCost(final MessageFrame frame) {
-    return 0;
-  }
-
-  @Override
   public long completedCreateContractGasCost(final MessageFrame frame) {
     return 0;
   }
@@ -377,6 +372,12 @@ public class FrontierGasCalculator implements GasCalculator {
 
   @Override
   public long initcodeCost(final int initCodeLength) {
+    return 0;
+  }
+
+  @Override
+  public long initcodeStatelessCost(
+      final MessageFrame frame, final Address address, final Wei value) {
     return 0;
   }
 
