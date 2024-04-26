@@ -88,10 +88,9 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
   }
 
   @Override
-  public long initCreateContractGasCost(final MessageFrame frame) {
-    return frame
-        .getAccessWitness()
-        .touchAndChargeContractCreateInit(frame.getContractAddress(), !frame.getValue().isZero());
+  public long initcodeStatelessCost(
+      final MessageFrame frame, final Address address, final Wei value) {
+    return frame.getAccessWitness().touchAndChargeContractCreateInit(address, !value.isZero());
   }
 
   @Override
@@ -99,16 +98,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
     return frame
         .getAccessWitness()
         .touchAndChargeContractCreateCompleted(frame.getContractAddress());
-  }
-
-  @Override
-  public long codeDepositGasCost(final MessageFrame frame, final int codeSize) {
-    long cost = super.codeDepositGasCost(frame, codeSize);
-    return clampedAdd(
-        cost,
-        frame
-            .getAccessWitness()
-            .touchCodeChunksUponContractCreation(frame.getContractAddress(), codeSize));
   }
 
   @SuppressWarnings("removal")
@@ -133,47 +122,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
   @Override
   public long initcodeCost(final int initCodeLength) {
     return numWords(initCodeLength) * INIT_CODE_COST;
-  }
-
-  @Override
-  public long callOperationGasCost(
-      final MessageFrame frame,
-      final long stipend,
-      final long inputDataOffset,
-      final long inputDataLength,
-      final long outputDataOffset,
-      final long outputDataLength,
-      final Wei transferValue,
-      final Account recipient,
-      final Address to) {
-
-    final long baseCost =
-        super.callOperationGasCost(
-            frame,
-            stipend,
-            inputDataOffset,
-            inputDataLength,
-            outputDataOffset,
-            outputDataLength,
-            transferValue,
-            recipient,
-            to);
-    long cost = baseCost;
-    if (frame.getWorldUpdater().get(to) == null) {
-      cost = clampedAdd(baseCost, frame.getAccessWitness().touchAndChargeProofOfAbsence(to));
-    } else {
-      if (!super.isPrecompile(to)) {
-        cost = clampedAdd(baseCost, frame.getAccessWitness().touchAndChargeMessageCall(to));
-      }
-    }
-
-    if (!transferValue.isZero()) {
-      cost =
-          clampedAdd(
-              baseCost,
-              frame.getAccessWitness().touchAndChargeValueTransfer(recipient.getAddress(), to));
-    }
-    return cost;
   }
 
   @Override
@@ -216,9 +164,6 @@ public class ShanghaiGasCalculator extends LondonGasCalculator {
             .getAccessWitness()
             .touchAddressOnReadAndComputeGas(
                 frame.getContractAddress(), treeIndexes.get(0), treeIndexes.get(1));
-    if (gasCost == 0) {
-      gasCost = WARM_STORAGE_READ_COST;
-    }
     return gasCost;
   }
 

@@ -120,6 +120,11 @@ class AbstractCreateOperationTest {
     }
 
     @Override
+    public long statelessCost(final MessageFrame frame, final Address address, final Wei value) {
+      return frame.getAccessWitness().touchAndChargeContractCreateInit(address, !value.isZero());
+    }
+
+    @Override
     protected Address targetContractAddress(final MessageFrame frame, final Code initcode) {
       final Account sender = frame.getWorldUpdater().get(frame.getRecipientAddress());
       // Decrement nonce by 1 to normalize the effect of transaction execution

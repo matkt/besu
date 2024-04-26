@@ -20,6 +20,7 @@ import static org.hyperledger.besu.evm.internal.Words.clampedToInt;
 import static org.hyperledger.besu.evm.internal.Words.clampedToLong;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -55,6 +56,11 @@ public class Create2Operation extends AbstractCreateOperation {
             gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),
         clampedAdd(
             gasCalculator().createKeccakCost(inputSize), gasCalculator().initcodeCost(inputSize)));
+  }
+
+  @Override
+  public long statelessCost(final MessageFrame frame, final Address address, final Wei value) {
+    return frame.getAccessWitness().touchAndChargeContractCreateInit(address, !value.isZero());
   }
 
   @Override

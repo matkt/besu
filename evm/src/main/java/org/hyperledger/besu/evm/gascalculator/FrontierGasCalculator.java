@@ -307,7 +307,8 @@ public class FrontierGasCalculator implements GasCalculator {
   }
 
   @Override
-  public long initCreateContractGasCost(final MessageFrame frame) {
+  public long initcodeStatelessCost(
+      final MessageFrame frame, final Address address, final Wei value) {
     return 0;
   }
 
@@ -379,6 +380,16 @@ public class FrontierGasCalculator implements GasCalculator {
       final MessageFrame frame, final long offset, final long length) {
     return copyWordsToMemoryGasCost(
         frame, VERY_LOW_TIER_GAS_COST, COPY_WORD_GAS_COST, offset, length);
+  }
+
+  @Override
+  public long codeCopyOperationGasCost(
+      final MessageFrame frame,
+      final long memOffset,
+      final long codeOffset,
+      final long readSize,
+      final long codeSize) {
+    return dataCopyOperationGasCost(frame, memOffset, readSize);
   }
 
   @Override
@@ -575,5 +586,11 @@ public class FrontierGasCalculator implements GasCalculator {
   @Override
   public long getMinimumTransactionCost() {
     return TX_BASE_COST;
+  }
+
+  @Override
+  public long pushOperationGasCost(
+      final MessageFrame frame, final long codeOffset, final long readSize, final long codeSize) {
+    return getVeryLowTierGasCost();
   }
 }

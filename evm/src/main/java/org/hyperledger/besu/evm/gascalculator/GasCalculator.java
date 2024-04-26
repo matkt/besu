@@ -231,7 +231,10 @@ public interface GasCalculator {
    */
   long gasAvailableForChildCall(MessageFrame frame, long stipend, boolean transfersValue);
 
-  long initCreateContractGasCost(MessageFrame frame);
+  default long initcodeStatelessCost(
+      final MessageFrame frame, final Address address, final Wei value) {
+    return 0;
+  }
 
   long completedCreateContractGasCost(final MessageFrame frame);
 
@@ -301,6 +304,9 @@ public interface GasCalculator {
    * @return the amount of gas consumed by the data copy operation
    */
   long dataCopyOperationGasCost(MessageFrame frame, long offset, long length);
+
+  long codeCopyOperationGasCost(
+      MessageFrame frame, long memOffset, long codeOffset, long readSize, final long codeSize);
 
   /**
    * Returns the cost of expanding memory for the specified access.
@@ -653,4 +659,7 @@ public interface GasCalculator {
       final MutableAccount sender) {
     return 0L;
   }
+
+  long pushOperationGasCost(
+      final MessageFrame frame, final long codeOffset, final long readSize, final long codeSize);
 }
