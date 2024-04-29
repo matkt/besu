@@ -24,10 +24,11 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,11 +40,8 @@ import org.slf4j.LoggerFactory;
 public class DynamicPivotBlockSelector {
 
   private static final Duration DEFAULT_CHECK_INTERVAL = Duration.ofSeconds(60);
-  public static final BiConsumer<BlockHeader, Boolean> doNothingOnPivotChange = (___, __) -> {};
 
   private static final Logger LOG = LoggerFactory.getLogger(DynamicPivotBlockSelector.class);
-
-  private final AtomicBoolean isTimeToCheckAgain = new AtomicBoolean(true);
 
   private final EthContext ethContext;
   private final FastSyncActions syncActions;
@@ -53,6 +51,8 @@ public class DynamicPivotBlockSelector {
   private final int pivotBlockDistanceBeforeCaching;
 
   private Optional<BlockHeader> lastPivotBlockFound;
+
+  private ScheduledFuture<?> pivotBlockCheckScheduler;
 
   public DynamicPivotBlockSelector(
       final EthContext ethContext,
@@ -68,86 +68,98 @@ public class DynamicPivotBlockSelector {
     this.lastPivotBlockFound = Optional.empty();
   }
 
-  public void check(final BiConsumer<BlockHeader, Boolean> onNewPivotBlock) {
-    if (isTimeToCheckAgain.compareAndSet(true, false)) {
-      AtomicBoolean delayNextCheck = new AtomicBoolean(false);
+  public void start(final BiConsumer<BlockHeader, Boolean> onNewPivotBlock) {
+    pivotBlockCheckScheduler =
+        ethContext
+            .getScheduler()
+            .scheduleFutureTaskWithFixedDelay(
+                () -> {
+                  LOG.debug("Is time to check the pivot again");
+                  checkPivotBlock(onNewPivotBlock);
+                },
+                Duration.ZERO,
+                DEFAULT_CHECK_INTERVAL);
+  }
 
-      syncState
-          .getPivotBlockNumber()
-          .ifPresent(
-              currentPivotBlockNumber -> {
-                final long bestChainHeight = syncActions.getBestChainHeight();
-                final long distanceNextPivotBlock =
-                    bestChainHeight
-                        - lastPivotBlockFound
-                            .map(ProcessableBlockHeader::getNumber)
-                            .orElse(currentPivotBlockNumber);
-
-                final CompletableFuture<Void> searchForNewPivot;
-
-                if (distanceNextPivotBlock > pivotBlockDistanceBeforeCaching) {
-                  LOG.atDebug()
-                      .setMessage(
-                          "Searching for a new pivot: current pivot {} best chain height {} distance next pivot {} last pivot block found {}")
-                      .addArgument(currentPivotBlockNumber)
-                      .addArgument(bestChainHeight)
-                      .addArgument(distanceNextPivotBlock)
-                      .addArgument(this::logLastPivotBlockFound)
-                      .log();
-
-                  searchForNewPivot =
-                      CompletableFuture.completedFuture(FastSyncState.EMPTY_SYNC_STATE)
-                          .thenCompose(syncActions::selectPivotBlock)
-                          .thenCompose(
-                              fss -> {
-                                if (isSamePivotBlock(fss)) {
-                                  LOG.atDebug()
-                                      .setMessage(
-                                          "New pivot {} is equal to last found {}, nothing to do")
-                                      .addArgument(fss::getPivotBlockHash)
-                                      .addArgument(this::logLastPivotBlockFound)
-                                      .log();
-                                  return CompletableFuture.completedFuture(null);
-                                }
-                                return downloadNewPivotBlock(fss);
-                              })
-                          .whenComplete(
-                              (unused, throwable) -> {
-                                if (throwable != null) {
-                                  LOG.debug("Error while searching for a new pivot", throwable);
-                                }
-                              });
-                } else {
-                  searchForNewPivot = CompletableFuture.completedFuture(null);
-                }
-
-                try {
-                  searchForNewPivot
-                      .thenRun(
-                          () -> {
-                            final long distance = bestChainHeight - currentPivotBlockNumber;
-                            if (distance > pivotBlockWindowValidity) {
-                              LOG.atDebug()
-                                  .setMessage(
-                                      "Switch to new pivot: current pivot {} is distant {} from current best chain height {} last pivot block found {}")
-                                  .addArgument(currentPivotBlockNumber)
-                                  .addArgument(distance)
-                                  .addArgument(bestChainHeight)
-                                  .addArgument(this::logLastPivotBlockFound)
-                                  .log();
-                              switchToNewPivotBlock(onNewPivotBlock);
-                            }
-                            // delay next check only if we are successful
-                            delayNextCheck.set(true);
-                          })
-                      .get();
-                } catch (InterruptedException | ExecutionException e) {
-                  LOG.debug("Exception while searching for new pivot", e);
-                }
-              });
-
-      scheduleNextCheck(delayNextCheck.get());
+  public void stop() {
+    if (pivotBlockCheckScheduler != null && !pivotBlockCheckScheduler.isCancelled()) {
+      pivotBlockCheckScheduler.cancel(true);
     }
+  }
+
+  @VisibleForTesting
+  public void checkPivotBlock(final BiConsumer<BlockHeader, Boolean> onNewPivotBlock) {
+    syncState
+        .getPivotBlockNumber()
+        .ifPresent(
+            currentPivotBlockNumber -> {
+              final long bestChainHeight = syncActions.getBestChainHeight();
+              final long distanceNextPivotBlock =
+                  bestChainHeight
+                      - lastPivotBlockFound
+                          .map(ProcessableBlockHeader::getNumber)
+                          .orElse(currentPivotBlockNumber);
+
+              final CompletableFuture<Void> searchForNewPivot;
+
+              if (distanceNextPivotBlock > pivotBlockDistanceBeforeCaching) {
+                LOG.atDebug()
+                    .setMessage(
+                        "Searching for a new pivot: current pivot {} best chain height {} distance next pivot {} last pivot block found {}")
+                    .addArgument(currentPivotBlockNumber)
+                    .addArgument(bestChainHeight)
+                    .addArgument(distanceNextPivotBlock)
+                    .addArgument(this::logLastPivotBlockFound)
+                    .log();
+
+                searchForNewPivot =
+                    CompletableFuture.completedFuture(FastSyncState.EMPTY_SYNC_STATE)
+                        .thenCompose(syncActions::selectPivotBlock)
+                        .thenCompose(
+                            fss -> {
+                              if (isSamePivotBlock(fss)) {
+                                LOG.atDebug()
+                                    .setMessage(
+                                        "New pivot {} is equal to last found {}, nothing to do")
+                                    .addArgument(fss::getPivotBlockHash)
+                                    .addArgument(this::logLastPivotBlockFound)
+                                    .log();
+                                return CompletableFuture.completedFuture(null);
+                              }
+                              return downloadNewPivotBlock(fss);
+                            })
+                        .whenComplete(
+                            (unused, throwable) -> {
+                              if (throwable != null) {
+                                LOG.debug("Error while searching for a new pivot", throwable);
+                              }
+                            });
+              } else {
+                searchForNewPivot = CompletableFuture.completedFuture(null);
+              }
+
+              try {
+                searchForNewPivot
+                    .thenRun(
+                        () -> {
+                          final long distance = bestChainHeight - currentPivotBlockNumber;
+                          if (distance > pivotBlockWindowValidity) {
+                            LOG.atDebug()
+                                .setMessage(
+                                    "Switch to new pivot: current pivot {} is distant {} from current best chain height {} last pivot block found {}")
+                                .addArgument(currentPivotBlockNumber)
+                                .addArgument(distance)
+                                .addArgument(bestChainHeight)
+                                .addArgument(this::logLastPivotBlockFound)
+                                .log();
+                            switchToNewPivotBlock(onNewPivotBlock);
+                          }
+                        })
+                    .get();
+              } catch (InterruptedException | ExecutionException e) {
+                LOG.debug("Exception while searching for new pivot", e);
+              }
+            });
   }
 
   private CompletableFuture<Void> downloadNewPivotBlock(final FastSyncState fss) {
@@ -168,21 +180,6 @@ public class DynamicPivotBlockSelector {
     return lastPivotBlockFound.isPresent()
         && fss.hasPivotBlockHash()
         && lastPivotBlockFound.get().getHash().equals(fss.getPivotBlockHash().get());
-  }
-
-  private void scheduleNextCheck(final boolean delayNextCheck) {
-    if (delayNextCheck) {
-      ethContext
-          .getScheduler()
-          .scheduleFutureTask(
-              () -> {
-                LOG.debug("Is time to check the pivot again");
-                isTimeToCheckAgain.set(true);
-              },
-              DEFAULT_CHECK_INTERVAL);
-    } else {
-      isTimeToCheckAgain.set(true);
-    }
   }
 
   public void switchToNewPivotBlock(final BiConsumer<BlockHeader, Boolean> onSwitchDone) {

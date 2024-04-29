@@ -21,6 +21,7 @@ import static org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordina
 import org.hyperledger.besu.ethereum.chain.BlockAddedObserver;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.context.SnapSyncStatePersistenceManager;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.AccountRangeDataRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.BytecodeRequest;
@@ -29,6 +30,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.StorageRangeDataR
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.heal.AccountFlatDatabaseHealingRangeRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.request.heal.StorageFlatDatabaseHealingRangeRequest;
 import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldDownloadState;
+import org.hyperledger.besu.ethereum.eth.sync.worldstate.WorldStateDownloadProcess;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
@@ -47,7 +49,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -150,6 +152,22 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
   }
 
   @Override
+  public CompletableFuture<Void> startDownload(
+      final WorldStateDownloadProcess worldStateDownloadProcess, final EthScheduler ethScheduler) {
+    pivotBlockSelector.start(
+        (____, isNewPivotBlock) -> {
+          if (isNewPivotBlock) {
+            if (snapSyncState.isHealTrieInProgress()) {
+              snapSyncState.setWaitingBlockchain(false);
+              reloadTrieHeal();
+            }
+            notifyTaskAvailable();
+          }
+        });
+    return super.startDownload(worldStateDownloadProcess, ethScheduler);
+  }
+
+  @Override
   public synchronized void notifyTaskAvailable() {
     notifyAll();
   }
@@ -206,6 +224,8 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
               });
           updater.commit();
 
+          // disable the pivot block selector
+          pivotBlockSelector.stop();
           // Remove the blockchain observer
           blockchain.removeObserver(blockObserverId);
           // Notify that the snap sync has completed
@@ -424,19 +444,9 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest> 
 
   public BlockAddedObserver createBlockchainObserver() {
     return addedBlockContext -> {
-      final AtomicBoolean foundNewPivotBlock = new AtomicBoolean(false);
-      pivotBlockSelector.check(
-          (____, isNewPivotBlock) -> {
-            if (isNewPivotBlock) {
-              foundNewPivotBlock.set(true);
-            }
-          });
-
-      final boolean isNewPivotBlockFound = foundNewPivotBlock.get();
       final boolean isBlockchainCaughtUp =
           snapSyncState.isWaitingBlockchain() && !pivotBlockSelector.isBlockchainBehind();
-
-      if (snapSyncState.isHealTrieInProgress() && (isNewPivotBlockFound || isBlockchainCaughtUp)) {
+      if (snapSyncState.isHealTrieInProgress() && isBlockchainCaughtUp) {
         snapSyncState.setWaitingBlockchain(false);
         reloadTrieHeal();
       }

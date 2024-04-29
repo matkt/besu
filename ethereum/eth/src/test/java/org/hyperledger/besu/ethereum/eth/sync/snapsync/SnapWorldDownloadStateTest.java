@@ -389,7 +389,7 @@ public class SnapWorldDownloadStateTest {
               return null;
             })
         .when(dynamicPivotBlockManager)
-        .check(any());
+        .start(any());
 
     final Block newBlock =
         new Block(
