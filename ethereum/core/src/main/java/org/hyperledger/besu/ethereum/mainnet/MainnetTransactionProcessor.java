@@ -489,7 +489,8 @@ public class MainnetTransactionProcessor {
       }
 
       if (initialFrame.getState() == MessageFrame.State.COMPLETED_SUCCESS) {
-        TransactionProcessingResult successful = TransactionProcessingResult.successful(
+        TransactionProcessingResult successful =
+            TransactionProcessingResult.successful(
                 initialFrame.getLogs(),
                 gasUsedByTransaction,
                 refundedGas,
@@ -510,8 +511,12 @@ public class MainnetTransactionProcessor {
               transaction.getHash(),
               initialFrame.getRevertReason().get());
         }
-        TransactionProcessingResult failed = TransactionProcessingResult.failed(
-                gasUsedByTransaction, refundedGas, validationResult, initialFrame.getRevertReason());
+        TransactionProcessingResult failed =
+            TransactionProcessingResult.failed(
+                gasUsedByTransaction,
+                refundedGas,
+                validationResult,
+                initialFrame.getRevertReason());
         failed.setMiningBenef(coinbaseWeiDelta);
         return failed;
       }
