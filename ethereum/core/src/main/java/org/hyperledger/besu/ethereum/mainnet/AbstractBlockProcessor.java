@@ -48,7 +48,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,10 +160,11 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
               roundWorldStateUpdater.commit();
               transactionConflictChecker.saveParallelizedTransactionProcessingResult(
                       transaction, roundWorldState.getAccumulator(), result);
-            }, cachedThreadPoolExecutor))
-            .collect(Collectors.toList());
+            }, cachedThreadPoolExecutor)).toList();
 
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    CompletableFuture<Void>[] futuresArray = (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
+    CompletableFuture.allOf(futuresArray);
+
     cachedThreadPoolExecutor.shutdown();
 
     int confirmedParallelizedTransaction = 0;
