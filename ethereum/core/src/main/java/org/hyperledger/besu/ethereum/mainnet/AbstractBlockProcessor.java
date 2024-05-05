@@ -45,6 +45,10 @@ import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -134,29 +138,34 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                             calculateExcessBlobGasForParent(protocolSpec, parentHeader)))
             .orElse(Wei.ZERO);
 
-    transactionConflictChecker.getParallelizedTransactions().parallelStream()
-        .forEach(
-            transaction -> {
+    ExecutorService cachedThreadPoolExecutor = Executors.newCachedThreadPool();
+
+    List<CompletableFuture<Void>> futures = transactionConflictChecker.getParallelizedTransactions().stream()
+            .map(transaction -> CompletableFuture.runAsync(() -> {
               BonsaiWorldState roundWorldState =
-                  new BonsaiWorldState((BonsaiWorldState) worldState);
+                      new BonsaiWorldState((BonsaiWorldState) worldState);
               WorldUpdater roundWorldStateUpdater = roundWorldState.updater();
 
               final TransactionProcessingResult result =
-                  transactionProcessor.processTransaction(
-                      roundWorldStateUpdater,
-                      blockHeader,
-                      transaction.transaction(),
-                      miningBeneficiary,
-                      OperationTracer.NO_TRACING,
-                      blockHashLookup,
-                      true,
-                      TransactionValidationParams.processingBlock(),
-                      privateMetadataUpdater,
-                      blobGasPrice);
+                      transactionProcessor.processTransaction(
+                              roundWorldStateUpdater,
+                              blockHeader,
+                              transaction.transaction(),
+                              miningBeneficiary,
+                              OperationTracer.NO_TRACING,
+                              blockHashLookup,
+                              true,
+                              TransactionValidationParams.processingBlock(),
+                              privateMetadataUpdater,
+                              blobGasPrice);
               roundWorldStateUpdater.commit();
               transactionConflictChecker.saveParallelizedTransactionProcessingResult(
-                  transaction, roundWorldState.getAccumulator(), result);
-            });
+                      transaction, roundWorldState.getAccumulator(), result);
+            }, cachedThreadPoolExecutor))
+            .collect(Collectors.toList());
+
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    cachedThreadPoolExecutor.shutdown();
 
     int confirmedParallelizedTransaction = 0;
     try {
