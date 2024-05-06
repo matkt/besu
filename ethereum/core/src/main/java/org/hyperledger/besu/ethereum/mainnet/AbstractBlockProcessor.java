@@ -112,6 +112,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     final List<TransactionReceipt> receipts = new ArrayList<>();
     long currentGasUsed = 0;
     long currentBlobGasUsed = 0;
+    long startTime = System.nanoTime();
 
     final ProtocolSpec protocolSpec = protocolSchedule.getByBlockHeader(blockHeader);
 
@@ -170,6 +171,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     CompletableFuture.allOf(futuresArray).join();
 
     threadPool.shutdown();
+    System.out.println("**** "+ Thread.currentThread().getName() + ": Parallel execution : " + (System.nanoTime() - startTime)/1000 + " micros ****");
 
     int confirmedParallelizedTransaction = 0;
     try {
@@ -316,6 +318,8 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     System.out.println(worldState.updater().get(miningBeneficiary).getBalance());
     try {
       worldState.persist(blockHeader);
+      System.out.println("**** "+ Thread.currentThread().getName() + ": Block execution : " + (System.nanoTime() - startTime)/1000 + " micros ****");
+
     } catch (MerkleTrieException e) {
       LOG.trace("Merkle trie exception during Transaction processing ", e);
       if (worldState instanceof BonsaiWorldState) {
