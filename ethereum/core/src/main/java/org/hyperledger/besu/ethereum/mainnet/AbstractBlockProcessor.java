@@ -167,7 +167,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
             }, boundedThreadPool)).toList();
 
     CompletableFuture<Void>[] futuresArray = (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
-    CompletableFuture.allOf(futuresArray);
+    CompletableFuture.allOf(futuresArray).join();
 
     boundedThreadPool.shutdown();
 
