@@ -121,7 +121,8 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     final BlockHashLookup blockHashLookup = new CachingBlockHashLookup(blockHeader, blockchain);
     final Address miningBeneficiary = miningBeneficiaryCalculator.calculateBeneficiary(blockHeader);
 
-    TransactionConflictChecker transactionConflictChecker = new TransactionConflictChecker();
+    TransactionConflictChecker transactionConflictChecker =
+        new TransactionConflictChecker(transactions.size());
     transactionConflictChecker.findParallelTransactions(miningBeneficiary, transactions);
 
     Optional<BlockHeader> maybeParentHeader =
@@ -177,20 +178,27 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
         final DiffBasedWorldStateUpdateAccumulator<BonsaiAccount> transactionAccumulator =
             (DiffBasedWorldStateUpdateAccumulator<BonsaiAccount>)
-                transactionConflictChecker.getAccumulatorByTransaction().get((long) i);
+                transactionConflictChecker.getAccumulatorByTransaction()[i];
+        TransactionConflictChecker.TransactionWithLocation transactionWithLocation =
+            new TransactionConflictChecker.TransactionWithLocation(i, transaction);
         if (transactionAccumulator != null
             && !transactionConflictChecker.checkConflicts(
-                miningBeneficiary,
-                new TransactionConflictChecker.TransactionWithLocation(i, transaction),
-                transactionAccumulator,
-                blockUpdater)) {
+                miningBeneficiary, transactionWithLocation, transactionAccumulator, blockUpdater)) {
           blockUpdater.cloneFromUpdater(
               (DiffBasedWorldStateUpdateAccumulator<BonsaiAccount>)
-                  transactionConflictChecker.getAccumulatorByTransaction().get((long) i));
-          transactionProcessingResult =
-              transactionConflictChecker.getResultByTransaction().get((long) i);
+                  transactionConflictChecker.getAccumulatorByTransaction()[i]);
+          transactionProcessingResult = transactionConflictChecker.getResultByTransaction()[i];
           confirmedParallelizedTransaction++;
         } else {
+          if (transactionAccumulator != null) {
+            blockUpdater.clonePriorFromUpdater(
+                transactionAccumulator,
+                transactionConflictChecker.getNoConflictsData(
+                    miningBeneficiary,
+                    transactionWithLocation,
+                    transactionAccumulator,
+                    blockUpdater));
+          }
           transactionProcessingResult =
               transactionProcessor.processTransaction(
                   blockUpdater,
@@ -203,6 +211,45 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                   TransactionValidationParams.processingBlock(),
                   privateMetadataUpdater,
                   blobGasPrice);
+
+          /*System.out.println(
+              transactionConflictChecker.getResultByTransaction().containsKey((long) i)
+                  + " "
+                  + transactionConflictChecker.getAccumulatorByTransaction().containsKey((long) i));
+          if(transactionAccumulator!=null && !transactionConflictChecker.checkConflicts(
+                  miningBeneficiary,
+                  new TransactionConflictChecker.TransactionWithLocation(i, transaction),
+                  transactionAccumulator,
+                  blockUpdater)) {
+            if (transactionConflictChecker.getResultByTransaction().containsKey((long) i)
+                    && transactionProcessingResult.getGasRemaining()
+                    != transactionConflictChecker
+                    .getResultByTransaction()
+                    .get((long) i)
+                    .getGasRemaining()) {
+              System.out.println("Issue with " + transaction.getHash());
+              throw new RuntimeException("euuh");
+            }
+            if (transactionConflictChecker.getResultByTransaction().containsKey((long) i)
+                    && transactionProcessingResult.getMiningBenef() == null
+                    && transactionConflictChecker.getResultByTransaction().get((long) i).getMiningBenef()
+                    != null) {
+              System.out.println("Issue with 2" + transaction.getHash());
+              throw new RuntimeException("euuh");
+            }
+            if (transactionConflictChecker.getResultByTransaction().containsKey((long) i)
+                    && !transactionProcessingResult
+                    .getMiningBenef()
+                    .equals(
+                            transactionConflictChecker
+                                    .getResultByTransaction()
+                                    .get((long) i)
+                                    .getMiningBenef())) {
+              System.out.println("Issue with 3" + transaction.getHash());
+              throw new RuntimeException("euuh");
+            }
+            throw new RuntimeException("euuh");
+          }*/
         }
         final var coinbase = blockUpdater.getOrCreate(miningBeneficiary);
         if (transactionProcessingResult.getMiningBenef() != null) {

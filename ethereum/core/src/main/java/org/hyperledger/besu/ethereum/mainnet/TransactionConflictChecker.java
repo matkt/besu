@@ -6,25 +6,24 @@ import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class TransactionConflictChecker {
 
-  private final List<TransactionWithLocation> parallelizedTransactions =
-      Collections.synchronizedList(new ArrayList<>());
+  private final List<TransactionWithLocation> parallelizedTransactions = new ArrayList<>();
 
-  private final Map<Long, DiffBasedWorldStateUpdateAccumulator<?>>
-      accumulatorByParallelizedTransaction = new ConcurrentHashMap<>();
+  private final DiffBasedWorldStateUpdateAccumulator<?>[] accumulatorByParallelizedTransaction;
 
-  private final Map<Long, TransactionProcessingResult> resultByParallelizedTransaction =
-      new ConcurrentHashMap<>();
+  private final TransactionProcessingResult[] resultByParallelizedTransaction;
+
+  public TransactionConflictChecker(final int nbTrx) {
+    this.accumulatorByParallelizedTransaction = new DiffBasedWorldStateUpdateAccumulator<?>[nbTrx];
+    this.resultByParallelizedTransaction = new TransactionProcessingResult[nbTrx];
+  }
 
   public void findParallelTransactions(
       final Address producer, final List<Transaction> transactions) {
@@ -58,8 +57,8 @@ public class TransactionConflictChecker {
       final TransactionWithLocation transaction,
       final DiffBasedWorldStateUpdateAccumulator<?> accumulator,
       final TransactionProcessingResult result) {
-    accumulatorByParallelizedTransaction.put(transaction.getLocation(), accumulator);
-    resultByParallelizedTransaction.put(transaction.getLocation(), result);
+    accumulatorByParallelizedTransaction[transaction.getLocation()] = accumulator;
+    resultByParallelizedTransaction[transaction.getLocation()] = result;
   }
 
   public boolean checkConflicts(
@@ -67,19 +66,45 @@ public class TransactionConflictChecker {
       final TransactionWithLocation transaction,
       final DiffBasedWorldStateUpdateAccumulator<?> trxAccumulator,
       final DiffBasedWorldStateUpdateAccumulator<?> blockAccumulator) {
+
     final Set<Address> addressesTouchedByTransaction =
         getAddressesTouchedByTransaction(transaction, Optional.of(trxAccumulator));
     if (addressesTouchedByTransaction.contains(producer)) {
       return true;
     }
-    final Set<Address> commonAddresses = new HashSet<>(addressesTouchedByTransaction);
-    commonAddresses.retainAll(blockAccumulator.getAccountsToUpdate().keySet());
+
+    List<Address> addressesTouchByBlock = new ArrayList<>();
+    blockAccumulator
+        .getAccountsToUpdate()
+        .forEach(
+            (address, diffBasedValue) -> {
+              if (!diffBasedValue.isUnchanged()) {
+                addressesTouchByBlock.add(address);
+              }
+            });
+
+    final List<Address> commonAddresses = new ArrayList<>(addressesTouchedByTransaction);
+    commonAddresses.retainAll(addressesTouchByBlock);
     return !commonAddresses.isEmpty();
+  }
+
+  public List<Address> getNoConflictsData(
+      final Address producer,
+      final TransactionWithLocation transaction,
+      final DiffBasedWorldStateUpdateAccumulator<?> trxAccumulator,
+      final DiffBasedWorldStateUpdateAccumulator<?> blockAccumulator) {
+    final Set<Address> addressesTouchedByTransaction =
+        getAddressesTouchedByTransaction(transaction, Optional.of(trxAccumulator));
+    final List<Address> safeAddresses = new ArrayList<>(addressesTouchedByTransaction);
+    safeAddresses.removeAll(blockAccumulator.getAccountsToUpdate().keySet());
+    safeAddresses.remove(producer);
+    return safeAddresses;
   }
 
   private Set<Address> getAddressesTouchedByTransaction(
       final TransactionWithLocation transaction,
       final Optional<DiffBasedWorldStateUpdateAccumulator<?>> accumulator) {
+
     HashSet<Address> addresses = new HashSet<>();
     addresses.add(transaction.getSender());
     if (transaction.getTo().isPresent()) {
@@ -95,24 +120,24 @@ public class TransactionConflictChecker {
     return parallelizedTransactions;
   }
 
-  public Map<Long, DiffBasedWorldStateUpdateAccumulator<?>> getAccumulatorByTransaction() {
+  public DiffBasedWorldStateUpdateAccumulator<?>[] getAccumulatorByTransaction() {
     return accumulatorByParallelizedTransaction;
   }
 
-  public Map<Long, TransactionProcessingResult> getResultByTransaction() {
+  public TransactionProcessingResult[] getResultByTransaction() {
     return resultByParallelizedTransaction;
   }
 
   public static final class TransactionWithLocation {
-    private final long location;
+    private final int location;
     private final Transaction transaction;
 
-    public TransactionWithLocation(final long location, final Transaction transaction) {
+    public TransactionWithLocation(final int location, final Transaction transaction) {
       this.location = location;
       this.transaction = transaction;
     }
 
-    public long getLocation() {
+    public int getLocation() {
       return location;
     }
 

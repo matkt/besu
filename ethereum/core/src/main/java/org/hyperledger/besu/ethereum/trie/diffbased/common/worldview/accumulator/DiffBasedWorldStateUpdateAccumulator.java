@@ -42,6 +42,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -99,6 +100,55 @@ public abstract class DiffBasedWorldStateUpdateAccumulator<ACCOUNT extends DiffB
     storageToUpdate.putAll(source.storageToUpdate);
     updatedAccounts.putAll(source.updatedAccounts);
     deletedAccounts.addAll(source.deletedAccounts);
+    this.isAccumulatorStateChanged = true;
+  }
+
+  public void clonePriorFromUpdater(
+      final DiffBasedWorldStateUpdateAccumulator<ACCOUNT> source,
+      final List<Address> addressesToUpdate) {
+    source
+        .getAccountsToUpdate()
+        .forEach(
+            (address, diffBasedValue) -> {
+              if (addressesToUpdate.contains(address)) {
+                ACCOUNT mutableAccount =
+                    diffBasedValue.getPrior() != null
+                        ? copyAccount(diffBasedValue.getPrior(), this, true)
+                        : null;
+                accountsToUpdate.put(
+                    address, new DiffBasedValue<>(diffBasedValue.getPrior(), mutableAccount));
+              }
+            });
+    source
+        .getCodeToUpdate()
+        .forEach(
+            (address, diffBasedValue) -> {
+              if (addressesToUpdate.contains(address)) {
+                codeToUpdate.put(
+                    address,
+                    new DiffBasedValue<>(diffBasedValue.getPrior(), diffBasedValue.getPrior()));
+              }
+            });
+    source
+        .getStorageToUpdate()
+        .forEach(
+            (address, slots) -> {
+              if (addressesToUpdate.contains(address)) {
+                StorageConsumingMap<StorageSlotKey, DiffBasedValue<UInt256>> storageConsumingMap =
+                    storageToUpdate.computeIfAbsent(
+                        address,
+                        k ->
+                            new StorageConsumingMap<>(
+                                address, new ConcurrentHashMap<>(), storagePreloader));
+                slots.forEach(
+                    (storageSlotKey, uInt256DiffBasedValue) -> {
+                      storageConsumingMap.put(
+                          storageSlotKey,
+                          new DiffBasedValue<>(
+                              uInt256DiffBasedValue.getPrior(), uInt256DiffBasedValue.getPrior()));
+                    });
+              }
+            });
     this.isAccumulatorStateChanged = true;
   }
 
