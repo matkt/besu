@@ -141,7 +141,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                             calculateExcessBlobGasForParent(protocolSpec, parentHeader)))
             .orElse(Wei.ZERO);
 
-    ExecutorService boundedThreadPool = MonitoredExecutors.newBoundedThreadPool("ParallelTransactions", 10, transactions.size(), transactions.size(), new NoOpMetricsSystem());
+    ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
     List<CompletableFuture<Void>> futures = transactionConflictChecker.getParallelizedTransactions().stream()
             .map(transaction -> CompletableFuture.runAsync(() -> {
@@ -164,12 +164,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
               roundWorldStateUpdater.commit();
               transactionConflictChecker.saveParallelizedTransactionProcessingResult(
                       transaction, roundWorldState.getAccumulator(), result);
-            }, boundedThreadPool)).toList();
+            }, threadPool)).toList();
 
     CompletableFuture<Void>[] futuresArray = (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
     CompletableFuture.allOf(futuresArray).join();
 
-    boundedThreadPool.shutdown();
+    threadPool.shutdown();
 
     int confirmedParallelizedTransaction = 0;
     try {
