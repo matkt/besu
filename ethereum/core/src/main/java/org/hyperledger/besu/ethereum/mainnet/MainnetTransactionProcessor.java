@@ -255,8 +255,8 @@ public class MainnetTransactionProcessor {
       final TransactionValidationParams transactionValidationParams,
       final PrivateMetadataUpdater privateMetadataUpdater,
       final Wei blobGasPrice) {
+    long startTime = System.nanoTime();
     try {
-      StopWatch stopWatch = new StopWatch();
       final var transactionValidator = transactionValidatorFactory.get();
       LOG.trace("Starting execution of {}", transaction);
       ValidationResult<TransactionInvalidReason> validationResult =
@@ -499,7 +499,7 @@ public class MainnetTransactionProcessor {
                 initialFrame.getOutputData(),
                 validationResult);
         successful.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time : " + stopWatch.getNanoTime()/1000 + " micros");
+        System.out.println(Thread.currentThread().getName() + ": execution time : " + (startTime - System.nanoTime()) + " ns");
         return successful;
       } else {
         if (initialFrame.getExceptionalHaltReason().isPresent()) {
@@ -521,7 +521,7 @@ public class MainnetTransactionProcessor {
                 validationResult,
                 initialFrame.getRevertReason());
         failed.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + stopWatch.getNanoTime()/1000 + " micros");
+        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + (startTime - System.nanoTime()) + " ns");
         return failed;
       }
     } catch (final MerkleTrieException re) {
