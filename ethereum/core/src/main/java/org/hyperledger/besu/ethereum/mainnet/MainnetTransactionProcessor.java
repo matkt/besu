@@ -499,7 +499,7 @@ public class MainnetTransactionProcessor {
                 initialFrame.getOutputData(),
                 validationResult);
         successful.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time : " + (System.nanoTime() - startTime)/1000 + " micros");
+        System.out.println(Thread.currentThread().getName() + ": execution time " + transaction.getHash().toHexString() +" : " + (System.nanoTime() - startTime)/1000 + " micros");
         return successful;
       } else {
         if (initialFrame.getExceptionalHaltReason().isPresent()) {
