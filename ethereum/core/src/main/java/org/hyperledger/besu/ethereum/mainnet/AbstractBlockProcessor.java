@@ -141,7 +141,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                             calculateExcessBlobGasForParent(protocolSpec, parentHeader)))
             .orElse(Wei.ZERO);
 
-    ExecutorService boundedThreadPool = MonitoredExecutors.newBoundedThreadPool("ParallelTransactions", 10, transactions.size(), new NoOpMetricsSystem());
+    ExecutorService boundedThreadPool = MonitoredExecutors.newBoundedThreadPool("ParallelTransactions", 10, transactions.size(), transactions.size(), new NoOpMetricsSystem());
 
     List<CompletableFuture<Void>> futures = transactionConflictChecker.getParallelizedTransactions().stream()
             .map(transaction -> CompletableFuture.runAsync(() -> {
