@@ -499,7 +499,7 @@ public class MainnetTransactionProcessor {
                 initialFrame.getOutputData(),
                 validationResult);
         successful.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time : " + (startTime - System.nanoTime()) + " ns");
+        System.out.println(Thread.currentThread().getName() + ": execution time : " + (System.nanoTime() - startTime)/1000 + " micros");
         return successful;
       } else {
         if (initialFrame.getExceptionalHaltReason().isPresent()) {
@@ -521,7 +521,7 @@ public class MainnetTransactionProcessor {
                 validationResult,
                 initialFrame.getRevertReason());
         failed.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + (startTime - System.nanoTime()) + " ns");
+        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + (System.nanoTime() - startTime)/1000 + " micros");
         return failed;
       }
     } catch (final MerkleTrieException re) {
