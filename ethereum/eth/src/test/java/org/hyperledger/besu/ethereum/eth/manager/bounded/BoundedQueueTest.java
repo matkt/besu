@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.eth.manager.bounded;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.ethereum.util.BoundedQueue;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import org.junit.jupiter.api.Test;

@@ -14,7 +14,7 @@
  */
 package org.hyperledger.besu.consensus.common.bft;
 
-import org.hyperledger.besu.ethereum.eth.manager.MonitoredExecutors;
+import org.hyperledger.besu.ethereum.util.MonitoredExecutors;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
 import java.time.Duration;

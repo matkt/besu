@@ -35,6 +35,7 @@ import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.util.MonitoredExecutors;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.ethereum.vm.CachingBlockHashLookup;
 import org.hyperledger.besu.evm.gascalculator.CancunGasCalculator;
@@ -49,6 +50,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.metrics.prometheus.PrometheusMetricsSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -138,7 +141,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                             calculateExcessBlobGasForParent(protocolSpec, parentHeader)))
             .orElse(Wei.ZERO);
 
-    ExecutorService cachedThreadPoolExecutor = Executors.newCachedThreadPool();
+    ExecutorService boundedThreadPool = MonitoredExecutors.newBoundedThreadPool("ParallelTransactions", 10, transactions.size(), new NoOpMetricsSystem());
 
     List<CompletableFuture<Void>> futures = transactionConflictChecker.getParallelizedTransactions().stream()
             .map(transaction -> CompletableFuture.runAsync(() -> {
@@ -161,12 +164,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
               roundWorldStateUpdater.commit();
               transactionConflictChecker.saveParallelizedTransactionProcessingResult(
                       transaction, roundWorldState.getAccumulator(), result);
-            }, cachedThreadPoolExecutor)).toList();
+            }, boundedThreadPool)).toList();
 
     CompletableFuture<Void>[] futuresArray = (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
     CompletableFuture.allOf(futuresArray);
 
-    cachedThreadPoolExecutor.shutdown();
+    boundedThreadPool.shutdown();
 
     int confirmedParallelizedTransaction = 0;
     try {
