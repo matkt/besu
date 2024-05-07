@@ -35,7 +35,6 @@ import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.util.MonitoredExecutors;
 import org.hyperledger.besu.ethereum.vm.BlockHashLookup;
 import org.hyperledger.besu.ethereum.vm.CachingBlockHashLookup;
 import org.hyperledger.besu.evm.gascalculator.CancunGasCalculator;
@@ -50,8 +49,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
-import org.hyperledger.besu.metrics.prometheus.PrometheusMetricsSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -144,35 +141,53 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
     ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
-    List<CompletableFuture<Void>> futures = transactionConflictChecker.getParallelizedTransactions().stream()
-            .map(transaction -> CompletableFuture.runAsync(() -> {
-              System.out.println(Thread.currentThread().getName() + ": start time " + transaction.transaction().getHash().toHexString() +" : " + (System.nanoTime() / 1000) + " micros");
-              BonsaiWorldState roundWorldState =
-                      new BonsaiWorldState((BonsaiWorldState) worldState);
-              WorldUpdater roundWorldStateUpdater = roundWorldState.updater();
+    List<CompletableFuture<Void>> futures =
+        transactionConflictChecker.getParallelizedTransactions().stream()
+            .map(
+                transaction ->
+                    CompletableFuture.runAsync(
+                        () -> {
+                          System.out.println(
+                              Thread.currentThread().getName()
+                                  + ": start time "
+                                  + transaction.transaction().getHash().toHexString()
+                                  + " : "
+                                  + (System.nanoTime() / 1000)
+                                  + " micros");
+                          BonsaiWorldState roundWorldState =
+                              new BonsaiWorldState((BonsaiWorldState) worldState);
+                          WorldUpdater roundWorldStateUpdater = roundWorldState.updater();
 
-              final TransactionProcessingResult result =
-                      transactionProcessor.processTransaction(
-                              roundWorldStateUpdater,
-                              blockHeader,
-                              transaction.transaction(),
-                              miningBeneficiary,
-                              OperationTracer.NO_TRACING,
-                              blockHashLookup,
-                              true,
-                              TransactionValidationParams.processingBlock(),
-                              privateMetadataUpdater,
-                              blobGasPrice);
-              roundWorldStateUpdater.commit();
-              transactionConflictChecker.saveParallelizedTransactionProcessingResult(
-                      transaction, roundWorldState.getAccumulator(), result);
-            }, threadPool)).toList();
+                          final TransactionProcessingResult result =
+                              transactionProcessor.processTransaction(
+                                  roundWorldStateUpdater,
+                                  blockHeader,
+                                  transaction.transaction(),
+                                  miningBeneficiary,
+                                  OperationTracer.NO_TRACING,
+                                  blockHashLookup,
+                                  true,
+                                  TransactionValidationParams.processingBlock(),
+                                  privateMetadataUpdater,
+                                  blobGasPrice);
+                          roundWorldStateUpdater.commit();
+                          transactionConflictChecker.saveParallelizedTransactionProcessingResult(
+                              transaction, roundWorldState.getAccumulator(), result);
+                        },
+                        threadPool))
+            .toList();
 
-    CompletableFuture<Void>[] futuresArray = (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
+    CompletableFuture<Void>[] futuresArray =
+        (CompletableFuture<Void>[]) futures.toArray(new CompletableFuture<?>[0]);
     CompletableFuture.allOf(futuresArray).join();
 
     threadPool.shutdown();
-    System.out.println("**** "+ Thread.currentThread().getName() + ": Parallel execution : " + (System.nanoTime() - startTime)/1000 + " micros ****");
+    System.out.println(
+        "**** "
+            + Thread.currentThread().getName()
+            + ": Parallel execution : "
+            + (System.nanoTime() - startTime) / 1000
+            + " micros ****");
 
     int confirmedParallelizedTransaction = 0;
     try {
@@ -319,7 +334,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     System.out.println(worldState.updater().get(miningBeneficiary).getBalance());
     try {
       worldState.persist(blockHeader);
-      System.out.println("**** "+ Thread.currentThread().getName() + ": Block execution : " + (System.nanoTime() - startTime)/1000 + " micros ****");
+      System.out.println(
+          "**** "
+              + Thread.currentThread().getName()
+              + ": Block execution : "
+              + (System.nanoTime() - startTime) / 1000
+              + " micros ****");
 
     } catch (MerkleTrieException e) {
       LOG.trace("Merkle trie exception during Transaction processing ", e);

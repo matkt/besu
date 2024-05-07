@@ -50,6 +50,10 @@ public class TransactionConflictChecker {
         }
       }
     }
+
+    parallelizedTransactions.sort(
+        (o1, o2) -> Long.compare(o2.transaction.getGasLimit(), o1.transaction.getGasLimit()));
+
     System.out.println("findParallelTransactions end " + parallelizedTransactions.size());
   }
 
