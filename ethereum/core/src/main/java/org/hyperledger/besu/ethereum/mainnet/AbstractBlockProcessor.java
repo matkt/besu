@@ -313,7 +313,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                         return transactionWithLocation;
                       });
                 },
-                parallelizedTransactions.size())
+                5)
             .andFinishWith("requestCompleteTransaction", requestsToComplete::put);
 
     serviceFuture = processParallelizedTransactionPipeline.start(executorService);
