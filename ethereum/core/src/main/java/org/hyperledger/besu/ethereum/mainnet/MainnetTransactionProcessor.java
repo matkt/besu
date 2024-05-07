@@ -19,7 +19,6 @@ import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_PRIVAT
 import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_TRANSACTION;
 import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_TRANSACTION_HASH;
 
-import org.apache.commons.lang3.time.StopWatch;
 import org.hyperledger.besu.collections.trie.BytesTrieSet;
 import org.hyperledger.besu.datatypes.AccessListEntry;
 import org.hyperledger.besu.datatypes.Address;
@@ -502,7 +501,13 @@ public class MainnetTransactionProcessor {
                 initialFrame.getOutputData(),
                 validationResult);
         successful.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time " + transaction.getHash().toHexString() +" : " + (System.nanoTime() - startTime)/1000 + " micros");
+        System.out.println(
+            Thread.currentThread().getName()
+                + ": execution time "
+                + transaction.getHash().toHexString()
+                + " : "
+                + (System.nanoTime() - startTime) / 1000
+                + " micros");
         return successful;
       } else {
         if (initialFrame.getExceptionalHaltReason().isPresent()) {
@@ -524,7 +529,11 @@ public class MainnetTransactionProcessor {
                 validationResult,
                 initialFrame.getRevertReason());
         failed.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + (System.nanoTime() - startTime)/1000 + " micros");
+        System.out.println(
+            Thread.currentThread().getName()
+                + ": execution time / failed: "
+                + (System.nanoTime() - startTime) / 1000
+                + " micros");
         return failed;
       }
     } catch (final MerkleTrieException re) {
