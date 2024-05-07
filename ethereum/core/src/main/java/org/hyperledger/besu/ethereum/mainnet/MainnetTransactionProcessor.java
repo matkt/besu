@@ -19,7 +19,6 @@ import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_PRIVAT
 import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_TRANSACTION;
 import static org.hyperledger.besu.ethereum.mainnet.PrivateStateUtils.KEY_TRANSACTION_HASH;
 
-import org.apache.commons.lang3.time.StopWatch;
 import org.hyperledger.besu.collections.trie.BytesTrieSet;
 import org.hyperledger.besu.datatypes.AccessListEntry;
 import org.hyperledger.besu.datatypes.Address;
@@ -43,8 +42,6 @@ import org.hyperledger.besu.evm.processor.AbstractMessageProcessor;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
-import java.sql.Date;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -262,8 +259,17 @@ public class MainnetTransactionProcessor {
       final Wei blobGasPrice) {
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
     long startTime = System.nanoTime();
+
     LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
-    System.out.println(Thread.currentThread().getName() + ": start time "+ now.format(formatter));
+    System.out.println(Thread.currentThread().getName() + ": start time " + now.format(formatter));
+
+    System.out.println(
+        Thread.currentThread().getName()
+            + ": start time "
+            + transaction.getHash().toHexString()
+            + " : "
+            + (startTime / 1000)
+            + " micros");
     try {
       final var transactionValidator = transactionValidatorFactory.get();
       LOG.trace("Starting execution of {}", transaction);
@@ -507,7 +513,13 @@ public class MainnetTransactionProcessor {
                 initialFrame.getOutputData(),
                 validationResult);
         successful.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time " + transaction.getHash().toHexString() +" : " + (System.nanoTime() - startTime)/1000 + " micros");
+        System.out.println(
+            Thread.currentThread().getName()
+                + ": execution time "
+                + transaction.getHash().toHexString()
+                + " : "
+                + (System.nanoTime() - startTime) / 1000
+                + " micros");
         return successful;
       } else {
         if (initialFrame.getExceptionalHaltReason().isPresent()) {
@@ -529,7 +541,11 @@ public class MainnetTransactionProcessor {
                 validationResult,
                 initialFrame.getRevertReason());
         failed.setMiningBenef(coinbaseWeiDelta);
-        System.out.println(Thread.currentThread().getName() + ": execution time / failed: " + (System.nanoTime() - startTime)/1000 + " micros");
+        System.out.println(
+            Thread.currentThread().getName()
+                + ": execution time / failed: "
+                + (System.nanoTime() - startTime) / 1000
+                + " micros");
         return failed;
       }
     } catch (final MerkleTrieException re) {
