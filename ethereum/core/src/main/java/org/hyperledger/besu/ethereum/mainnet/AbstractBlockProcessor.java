@@ -147,13 +147,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 transaction ->
                     CompletableFuture.runAsync(
                         () -> {
-                          System.out.println(
-                              Thread.currentThread().getName()
-                                  + ": start time "
-                                  + transaction.transaction().getHash().toHexString()
-                                  + " : "
-                                  + (System.nanoTime() / 1000)
-                                  + " micros");
                           BonsaiWorldState roundWorldState =
                               new BonsaiWorldState((BonsaiWorldState) worldState);
                           WorldUpdater roundWorldStateUpdater = roundWorldState.updater();
