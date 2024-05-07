@@ -43,6 +43,8 @@ import org.hyperledger.besu.evm.processor.AbstractMessageProcessor;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
+import java.sql.Date;
+import java.time.Instant;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
@@ -256,6 +258,7 @@ public class MainnetTransactionProcessor {
       final PrivateMetadataUpdater privateMetadataUpdater,
       final Wei blobGasPrice) {
     long startTime = System.nanoTime();
+    System.out.println(Thread.currentThread().getName() + ": start time " + transaction.getHash().toHexString() +" : " + (startTime / 1000) + " micros");
     try {
       final var transactionValidator = transactionValidatorFactory.get();
       LOG.trace("Starting execution of {}", transaction);
