@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.BonsaiWorldStateProvi
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.storage.BonsaiWorldStateLayerStorage;
+import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.storage.CachedBonsaiWorldStateLayerStorage;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.DiffBasedValue;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.cache.DiffBasedCachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.storage.DiffBasedWorldStateKeyValueStorage;
@@ -360,6 +361,11 @@ public class BonsaiWorldState extends DiffBasedWorldState {
   public MutableWorldState freeze() {
     this.isFrozen = true;
     this.worldStateKeyValueStorage = new BonsaiWorldStateLayerStorage(getWorldStateStorage());
+    return this;
+  }
+
+  public MutableWorldState addCache() {
+    this.worldStateKeyValueStorage = new CachedBonsaiWorldStateLayerStorage(getWorldStateStorage());
     return this;
   }
 

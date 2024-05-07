@@ -50,7 +50,7 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
 
   private static final Logger LOG = LoggerFactory.getLogger(LayeredKeyValueStorage.class);
 
-  private final SegmentedKeyValueStorage parent;
+  protected final SegmentedKeyValueStorage parent;
 
   /**
    * Instantiates a new Layered key value storage.
@@ -283,7 +283,7 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
     return new LayeredKeyValueStorage(hashValueStore, parent);
   }
 
-  private void throwIfClosed() {
+  protected void throwIfClosed() {
     if (parent.isClosed()) {
       LOG.error("Attempting to use a closed RocksDBKeyValueStorage");
       throw new StorageException("Storage has been closed");

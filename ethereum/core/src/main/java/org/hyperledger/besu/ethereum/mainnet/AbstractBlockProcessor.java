@@ -141,6 +141,8 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
     ExecutorService threadPool = Executors.newFixedThreadPool(10);
 
+    ((BonsaiWorldState) worldState).addCache();
+
     List<CompletableFuture<Void>> futures =
         transactionConflictChecker.getParallelizedTransactions().stream()
             .map(
@@ -204,15 +206,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
           transactionProcessingResult = transactionConflictChecker.getResultByTransaction()[i];
           confirmedParallelizedTransaction++;
         } else {
-          if (transactionAccumulator != null) {
-            blockUpdater.clonePriorFromUpdater(
-                transactionAccumulator,
-                transactionConflictChecker.getNoConflictsData(
-                    miningBeneficiary,
-                    transactionWithLocation,
-                    transactionAccumulator,
-                    blockUpdater));
-          }
           transactionProcessingResult =
               transactionProcessor.processTransaction(
                   blockUpdater,
