@@ -45,6 +45,8 @@ import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
 import java.sql.Date;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
@@ -257,8 +259,10 @@ public class MainnetTransactionProcessor {
       final TransactionValidationParams transactionValidationParams,
       final PrivateMetadataUpdater privateMetadataUpdater,
       final Wei blobGasPrice) {
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
     long startTime = System.nanoTime();
-    System.out.println(Thread.currentThread().getName() + ": start time " + transaction.getHash().toHexString() +" : " + (startTime / 1000) + " micros");
+    LocalDateTime now = LocalDateTime.now();
+    System.out.println(Thread.currentThread().getName() + ": start time "+ now.format(formatter));
     try {
       final var transactionValidator = transactionValidatorFactory.get();
       LOG.trace("Starting execution of {}", transaction);
