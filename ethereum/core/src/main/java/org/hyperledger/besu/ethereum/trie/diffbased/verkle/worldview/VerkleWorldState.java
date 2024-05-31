@@ -57,7 +57,6 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@SuppressWarnings({"unused", "MismatchedQueryAndUpdateOfCollection", "ModifiedButNotUsed"})
 public class VerkleWorldState extends DiffBasedWorldState {
 
   private static final Logger LOG = LoggerFactory.getLogger(VerkleWorldState.class);

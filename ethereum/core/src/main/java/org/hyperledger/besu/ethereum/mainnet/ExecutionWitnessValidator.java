@@ -14,23 +14,34 @@
  */
 package org.hyperledger.besu.ethereum.mainnet;
 
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.verkle.ExecutionWitness;
+import org.hyperledger.besu.ethereum.trie.verkle.proof.ProofVerifier;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public interface ExecutionWitnessValidator {
 
-  boolean validateExecutionWitness(Optional<ExecutionWitness> executionWitness);
+  boolean validateExecutionWitness(
+      final long blockNumber,
+      final Optional<BlockHeader> maybeParentHeader,
+      Optional<ExecutionWitness> executionWitness);
 
   class ProhibitedExecutionWitness implements ExecutionWitnessValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(ProhibitedExecutionWitness.class);
 
     @Override
-    public boolean validateExecutionWitness(final Optional<ExecutionWitness> executionWitness) {
+    public boolean validateExecutionWitness(
+        final long blockNumber,
+        final Optional<BlockHeader> maybeParentHeader,
+        final Optional<ExecutionWitness> executionWitness) {
       final boolean isValid = executionWitness.isEmpty();
       if (!isValid) {
         LOG.warn(
@@ -45,14 +56,56 @@ public interface ExecutionWitnessValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(AllowedExecutionWitness.class);
 
+    private static final ProofVerifier VERKLE_PROOF_VERIFIER = new ProofVerifier();
+
     @Override
-    public boolean validateExecutionWitness(final Optional<ExecutionWitness> executionWitness) {
-      if (executionWitness.isEmpty()) {
-        LOG.warn("ExecutionWitness must not be empty when ExecutionWitness are activated");
+    public boolean validateExecutionWitness(
+        final long blockNumber,
+        final Optional<BlockHeader> maybeParentHeader,
+        final Optional<ExecutionWitness> maybeExecutionWitness) {
+      if (blockNumber == 0) {
+        LOG.warn("Ignore execution witness verification for genesis block");
+        return true;
+      } else {
+        if (maybeParentHeader.isEmpty()) {
+          LOG.warn("Failed to verify execution witness because parent header is not available");
+          return false;
+        }
+      }
+      if (maybeExecutionWitness.isEmpty()) {
+        LOG.warn(
+            "ExecutionWitness must not be empty when execution witness verification is activated");
         return false;
       }
-      // TODO implement logic to validate a ExecutionWitness?
-      return true;
+
+      final ExecutionWitness executionWitness = maybeExecutionWitness.get();
+      final List<Bytes> keys = new ArrayList<>();
+      final List<Bytes> values = new ArrayList<>();
+      executionWitness
+          .getStateDiff()
+          .stemStateDiff()
+          .forEach(
+              stateDiff ->
+                  stateDiff
+                      .suffixDiffs()
+                      .forEach(
+                          suffixDiff -> {
+                            keys.add(
+                                Bytes.concatenate(stateDiff.stem(), Bytes.of(suffixDiff.suffix())));
+                            values.add(suffixDiff.currentValue());
+                          }));
+      System.out.println();
+      return VERKLE_PROOF_VERIFIER.verifyVerkleProof(
+          keys,
+          values,
+          executionWitness.getVerkleProof().commitmentsByPath(),
+          executionWitness.getVerkleProof().ipaProof().cl(),
+          executionWitness.getVerkleProof().ipaProof().cr(),
+          executionWitness.getVerkleProof().otherStems(),
+          executionWitness.getVerkleProof().d(),
+          executionWitness.getVerkleProof().depthExtensionPresent(),
+          executionWitness.getVerkleProof().ipaProof().finalEvaluation(),
+          maybeParentHeader.get().getStateRoot());
     }
   }
 }

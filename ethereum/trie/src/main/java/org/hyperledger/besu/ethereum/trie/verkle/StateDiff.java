@@ -16,10 +16,10 @@ package org.hyperledger.besu.ethereum.trie.verkle;
 
 import java.util.List;
 
-public record StateDiff(List<StemStateDiff> steamStateDiff) {
+public record StateDiff(List<StemStateDiff> stemStateDiff) {
 
   @Override
   public String toString() {
-    return "StateDiff{" + "steamStateDiff=" + steamStateDiff + '}';
+    return "StateDiff{" + "stemStateDiff=" + stemStateDiff + '}';
   }
 }

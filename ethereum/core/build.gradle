@@ -40,6 +40,10 @@ dependencies {
   implementation project(':enclave')
   implementation project(':ethereum:rlp')
   implementation project(':ethereum:trie')
+  implementation ('org.hyperledger.besu:besu-verkle-trie') {
+    exclude group: 'org.hyperledger.besu.internal'
+    exclude group: 'org.apache.tuweni'
+  }
   implementation project(':ethereum:verkletrie')
   implementation project(':evm')
   implementation project(':metrics:core')

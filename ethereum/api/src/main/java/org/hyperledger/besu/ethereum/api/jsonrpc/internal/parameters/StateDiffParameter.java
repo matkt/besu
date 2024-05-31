@@ -40,11 +40,11 @@ public class StateDiffParameter {
 
   public static StateDiffParameter fromStateDiff(final StateDiff stateDiff) {
     return new StateDiffParameter(
-        StemStateDiffParameter.fromListOfStemStateDiff(stateDiff.steamStateDiff()));
+        StemStateDiffParameter.fromListOfStemStateDiff(stateDiff.stemStateDiff()));
   }
 
   @Override
   public String toString() {
-    return "StateDiffParameter{" + "steamStateDiff=" + steamStateDiff + '}';
+    return "StateDiffParameter{" + "stemStateDiff=" + steamStateDiff + '}';
   }
 }

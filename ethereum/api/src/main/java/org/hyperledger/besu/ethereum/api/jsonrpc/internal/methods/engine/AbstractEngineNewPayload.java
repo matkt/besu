@@ -193,9 +193,13 @@ public abstract class AbstractEngineNewPayload extends ExecutionEngineJsonRpcMet
             .map(ExecutionWitnessParameter::toExecutionWitness);
     if (!getExecutionWitnessValidator(
             protocolSchedule.get(), blockParam.getTimestamp(), blockParam.getBlockNumber())
-        .validateExecutionWitness(maybeExecutionWitness)) {
+        .validateExecutionWitness(
+            blockParam.getBlockNumber(), maybeParentHeader, maybeExecutionWitness)) {
+      LOG.info("Proof is invalid for block " + blockParam.getBlockNumber());
       return new JsonRpcErrorResponse(
           reqId, new JsonRpcError(INVALID_PARAMS, "Invalid executionWitness"));
+    } else {
+      LOG.info("Proof is valid for block " + blockParam.getBlockNumber());
     }
 
     Optional<List<Request>> maybeRequests =
