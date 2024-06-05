@@ -49,12 +49,13 @@ public class Create2Operation extends AbstractCreateOperation {
   public long cost(final MessageFrame frame, final Supplier<Code> unused) {
     final int inputOffset = clampedToInt(frame.getStackItem(1));
     final int inputSize = clampedToInt(frame.getStackItem(2));
-    final long gasCost = clampedAdd(
+    final long gasCost =
         clampedAdd(
-            gasCalculator().txCreateCost(frame),
-            gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),gasCalculator().createKeccakCost(inputSize));
-    final long statelessGasCost =
-            gasCalculator().initcodeCost(inputSize);
+            clampedAdd(
+                gasCalculator().txCreateCost(frame),
+                gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),
+            gasCalculator().createKeccakCost(inputSize));
+    final long statelessGasCost = gasCalculator().initcodeCost(inputSize);
     return clampedAdd(gasCost, statelessGasCost);
   }
 

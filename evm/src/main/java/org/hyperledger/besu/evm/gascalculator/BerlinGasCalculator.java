@@ -21,7 +21,6 @@ import static org.hyperledger.besu.evm.internal.Words.clampedToInt;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.internal.Words;
 import org.hyperledger.besu.evm.precompile.BigIntegerModularExponentiationPrecompiledContract;
@@ -121,8 +120,8 @@ public class BerlinGasCalculator extends IstanbulGasCalculator {
   // Zeroed out old costs
   @Override
   public long getBalanceOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> maybeAddress) {
-    return accountIsWarm ? getWarmStorageReadCost() : getColdAccountAccessCost();
+      final MessageFrame frame, final Optional<Address> maybeAddress) {
+    return 0L;
   }
 
   @Override
@@ -132,20 +131,19 @@ public class BerlinGasCalculator extends IstanbulGasCalculator {
 
   @Override
   public long extCodeHashOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> address) {
-    return (accountIsWarm ? getWarmStorageReadCost() : getColdAccountAccessCost());
+      final MessageFrame frame, final Optional<Address> address) {
+    return 0L;
   }
 
   @Override
   public long getExtCodeSizeOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> maybeAddress) {
-    return (accountIsWarm ? getWarmStorageReadCost() : getColdAccountAccessCost());
+      final MessageFrame frame, final Optional<Address> maybeAddress) {
+    return 0L;
   }
 
   @Override
-  public long getSloadOperationGasCost(
-      final MessageFrame frame, final UInt256 key, final boolean slotIsWarm) {
-    return (slotIsWarm ? getWarmStorageReadCost() : getColdSloadCost());
+  public long getSloadOperationGasCost(final MessageFrame frame, final UInt256 key) {
+    return 0L;
   }
 
   // Redefined costs from EIP-2929
@@ -208,14 +206,11 @@ public class BerlinGasCalculator extends IstanbulGasCalculator {
   public long extCodeCopyOperationGasCost(
       final MessageFrame frame,
       final Address address,
-      final boolean accountIsWarm,
       final long memOffset,
       final long codeOffset,
       final long readSize,
       final long codeSize) {
-    return clampedAdd(
-        copyWordsToMemoryGasCost(frame, 0L, COPY_WORD_GAS_COST, memOffset, readSize),
-        accountIsWarm ? getWarmStorageReadCost() : getColdAccountAccessCost());
+    return copyWordsToMemoryGasCost(frame, 0L, COPY_WORD_GAS_COST, memOffset, readSize);
   }
 
   // defined in Istanbul, but re-implemented with new constants

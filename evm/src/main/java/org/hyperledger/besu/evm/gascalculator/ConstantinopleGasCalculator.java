@@ -47,9 +47,9 @@ public class ConstantinopleGasCalculator extends ByzantiumGasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE2 operation will consume
-   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
-   *     #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)}, and
-   *     {@link #initcodeCost(int)}. As done in {@link
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)},
+   *     {@link #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)},
+   *     and {@link #initcodeCost(int)}. As done in {@link
    *     org.hyperledger.besu.evm.operation.Create2Operation#cost(MessageFrame, Supplier)}
    */
   @SuppressWarnings("removal")
@@ -131,7 +131,7 @@ public class ConstantinopleGasCalculator extends ByzantiumGasCalculator {
 
   @Override
   public long extCodeHashOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> address) {
+      final MessageFrame frame, final Optional<Address> address) {
     return EXTCODE_HASH_COST;
   }
 }

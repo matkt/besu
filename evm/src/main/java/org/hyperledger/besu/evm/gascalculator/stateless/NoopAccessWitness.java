@@ -19,17 +19,17 @@ import org.hyperledger.besu.datatypes.Address;
 
 import org.apache.tuweni.units.bigints.UInt256;
 
-import java.util.List;
-
 public class NoopAccessWitness extends Eip4762AccessWitness implements AccessWitness {
 
   @Override
-  public long touchAddressOnWriteAndComputeGas(final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
+  public long touchAddressOnWriteAndComputeGas(
+      final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
     return 0;
   }
 
   @Override
-  public long touchAddressOnReadAndComputeGas(final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
+  public long touchAddressOnReadAndComputeGas(
+      final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
     return 0;
   }
 
@@ -69,7 +69,8 @@ public class NoopAccessWitness extends Eip4762AccessWitness implements AccessWit
   }
 
   @Override
-  public long touchCodeChunks(final Address address, final long offset, final long readSize, final long codeLength) {
+  public long touchCodeChunks(
+      final Address address, final long offset, final long readSize, final long codeLength) {
     return 0;
   }
 }

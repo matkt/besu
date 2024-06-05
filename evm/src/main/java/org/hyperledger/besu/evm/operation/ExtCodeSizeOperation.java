@@ -20,7 +20,6 @@ import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
-import org.hyperledger.besu.evm.internal.OverflowException;
 import org.hyperledger.besu.evm.internal.UnderflowException;
 import org.hyperledger.besu.evm.internal.Words;
 
@@ -48,7 +47,10 @@ public class ExtCodeSizeOperation extends AbstractOperation {
    */
   protected long cost(
       final boolean accountIsWarm, final MessageFrame frame, final Optional<Address> maybeAddress) {
-    return gasCalculator().getExtCodeSizeOperationGasCost(frame, accountIsWarm, maybeAddress);
+    return gasCalculator().getExtCodeSizeOperationGasCost(frame, maybeAddress)
+        + (accountIsWarm
+            ? gasCalculator().getWarmStorageReadCost()
+            : gasCalculator().getColdAccountAccessCost());
   }
 
   @Override
@@ -67,8 +69,7 @@ public class ExtCodeSizeOperation extends AbstractOperation {
       return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
     } else {
       final Account account = frame.getWorldUpdater().get(address);
-      frame.pushStackItem(
-          account == null ? Bytes.EMPTY : Words.intBytes(account.getCode().size()));
+      frame.pushStackItem(account == null ? Bytes.EMPTY : Words.intBytes(account.getCode().size()));
       return new OperationResult(cost, null);
     }
   }

@@ -20,7 +20,6 @@ import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
-import org.hyperledger.besu.evm.internal.OverflowException;
 import org.hyperledger.besu.evm.internal.UnderflowException;
 import org.hyperledger.besu.evm.internal.Words;
 
@@ -50,7 +49,10 @@ public class BalanceOperation extends AbstractOperation {
    */
   protected long cost(
       final MessageFrame frame, final Optional<Address> maybeAddress, final boolean accountIsWarm) {
-    return gasCalculator().getBalanceOperationGasCost(frame, accountIsWarm, maybeAddress);
+    return gasCalculator().getBalanceOperationGasCost(frame, maybeAddress)
+        + (accountIsWarm
+            ? gasCalculator().getWarmStorageReadCost()
+            : gasCalculator().getColdAccountAccessCost());
   }
 
   @Override

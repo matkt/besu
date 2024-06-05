@@ -333,9 +333,10 @@ public class FrontierGasCalculator implements GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE operation will consume
-   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
-   *     #memoryExpansionGasCost(MessageFrame, long, long)}, and {@link #initcodeCost(int)} As done
-   *     in {@link org.hyperledger.besu.evm.operation.CreateOperation#cost(MessageFrame, Supplier)}
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)},
+   *     {@link #memoryExpansionGasCost(MessageFrame, long, long)}, and {@link #initcodeCost(int)}
+   *     As done in {@link org.hyperledger.besu.evm.operation.CreateOperation#cost(MessageFrame,
+   *     Supplier)}
    */
   @SuppressWarnings("removal")
   @Override
@@ -345,7 +346,8 @@ public class FrontierGasCalculator implements GasCalculator {
     final int initCodeLength = clampedToInt(frame.getStackItem(2));
 
     return clampedAdd(
-        clampedAdd(txCreateCost(frame), memoryExpansionGasCost(frame, initCodeOffset, initCodeLength)),
+        clampedAdd(
+            txCreateCost(frame), memoryExpansionGasCost(frame, initCodeOffset, initCodeLength)),
         initcodeCost(initCodeLength));
   }
 
@@ -354,9 +356,9 @@ public class FrontierGasCalculator implements GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE2 operation will consume
-   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
-   *     #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)}, and
-   *     {@link #initcodeCost(int)}
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)},
+   *     {@link #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)},
+   *     and {@link #initcodeCost(int)}
    */
   @SuppressWarnings("removal")
   @Override
@@ -417,7 +419,7 @@ public class FrontierGasCalculator implements GasCalculator {
 
   @Override
   public long getBalanceOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> maybeAddress) {
+      final MessageFrame frame, final Optional<Address> maybeAddress) {
     return BALANCE_OPERATION_GAS_COST;
   }
 
@@ -453,7 +455,6 @@ public class FrontierGasCalculator implements GasCalculator {
   public long extCodeCopyOperationGasCost(
       final MessageFrame frame,
       final Address address,
-      final boolean accountIsWarm,
       final long memOffset,
       final long codeOffset,
       final long readSize,
@@ -464,14 +465,14 @@ public class FrontierGasCalculator implements GasCalculator {
 
   @Override
   public long extCodeHashOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> address) {
+      final MessageFrame frame, final Optional<Address> address) {
     throw new UnsupportedOperationException(
         "EXTCODEHASH not supported by " + getClass().getSimpleName());
   }
 
   @Override
   public long getExtCodeSizeOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> maybeAddress) {
+      final MessageFrame frame, final Optional<Address> maybeAddress) {
     return extCodeBaseGasCost();
   }
 
@@ -529,8 +530,7 @@ public class FrontierGasCalculator implements GasCalculator {
   }
 
   @Override
-  public long getSloadOperationGasCost(
-      final MessageFrame frame, final UInt256 key, final boolean slotIsWarm) {
+  public long getSloadOperationGasCost(final MessageFrame frame, final UInt256 key) {
     return SLOAD_OPERATION_GAS_COST;
   }
 

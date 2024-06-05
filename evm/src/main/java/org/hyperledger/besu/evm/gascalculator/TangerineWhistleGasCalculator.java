@@ -47,7 +47,7 @@ public class TangerineWhistleGasCalculator extends HomesteadGasCalculator {
 
   @Override
   public long getBalanceOperationGasCost(
-      final MessageFrame frame, final boolean accountIsWarm, final Optional<Address> maybeAddress) {
+      final MessageFrame frame, final Optional<Address> maybeAddress) {
     return BALANCE_OPERATION_GAS_COST;
   }
 
@@ -139,8 +139,7 @@ public class TangerineWhistleGasCalculator extends HomesteadGasCalculator {
   }
 
   @Override
-  public long getSloadOperationGasCost(
-      final MessageFrame frame, final UInt256 key, final boolean slotIsWarm) {
+  public long getSloadOperationGasCost(final MessageFrame frame, final UInt256 key) {
     return SLOAD_OPERATION_GAS_COST;
   }
 }

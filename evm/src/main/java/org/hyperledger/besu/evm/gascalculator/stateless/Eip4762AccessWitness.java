@@ -14,11 +14,8 @@
  */
 package org.hyperledger.besu.evm.gascalculator.stateless;
 
-import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.BALANCE_LEAF_KEY;
 import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.CODE_KECCAK_LEAF_KEY;
 import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.CODE_OFFSET;
-import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.CODE_SIZE_LEAF_KEY;
-import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.NONCE_LEAF_KEY;
 import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.VERKLE_NODE_WIDTH;
 import static org.hyperledger.besu.ethereum.trie.verkle.util.Parameters.VERSION_LEAF_KEY;
 import static org.hyperledger.besu.evm.internal.Words.clampedAdd;
@@ -66,7 +63,7 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
         .toList();
   }
 
-  //to change VERSION_LEAF_KEY to BASIC_DATA_LEAF_KEY
+  // to change VERSION_LEAF_KEY to BASIC_DATA_LEAF_KEY
 
   @Override
   public long accessAccountBasicData(final Address address) {
@@ -91,18 +88,20 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
   @Override
   public long accessAccountStorage(final Address address, final UInt256 storageKey) {
     final List<UInt256> storageSlotTreeIndexes = getStorageSlotTreeIndexes(storageKey);
-    return touchAddressOnReadAndComputeGas(address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
+    return touchAddressOnReadAndComputeGas(
+        address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
   }
 
   @Override
   public long writeAccountStorage(final Address address, final UInt256 storageKey) {
     final List<UInt256> storageSlotTreeIndexes = getStorageSlotTreeIndexes(storageKey);
-    return touchAddressOnWriteAndComputeGas(address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
+    return touchAddressOnWriteAndComputeGas(
+        address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
   }
 
   @Override
   public long touchCodeChunks(
-          final Address address, final long startPc, final long readSize, final long codeLength) {
+      final Address address, final long startPc, final long readSize, final long codeLength) {
     long gas = 0;
     if ((readSize == 0 && codeLength == 0) || startPc > codeLength) {
       return 0;
@@ -116,12 +115,12 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
     }
     for (long i = startPc / 31; i <= endPc / 31; i++) {
       gas =
-              clampedAdd(
-                      gas,
-                      touchAddressOnReadAndComputeGas(
-                              address,
-                              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
-                              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
+          clampedAdd(
+              gas,
+              touchAddressOnReadAndComputeGas(
+                  address,
+                  CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+                  CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
     }
     return gas;
   }
@@ -131,16 +130,15 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
     long gas = 0;
     for (long i = 0; i < (codeLength + 30) / 31; i++) {
       gas =
-              clampedAdd(
-                      gas,
-                      touchAddressOnWriteAndComputeGas(
-                              address,
-                              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
-                              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
+          clampedAdd(
+              gas,
+              touchAddressOnWriteAndComputeGas(
+                  address,
+                  CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+                  CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
     }
     return gas;
   }
-
 
   @Override
   public long touchAddressOnWriteAndComputeGas(
