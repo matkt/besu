@@ -66,154 +66,43 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
         .toList();
   }
 
+  //to change VERSION_LEAF_KEY to BASIC_DATA_LEAF_KEY
+
   @Override
-  public long touchAndChargeProofOfAbsence(final Address address) {
-    long gas = 0;
-    gas =
-        clampedAdd(gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, BALANCE_LEAF_KEY));
-    gas = clampedAdd(gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY));
-    return gas;
+  public long accessAccountBasicData(final Address address) {
+    return touchAddressOnReadAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY);
   }
 
   @Override
-  public long touchAndChargeMessageCall(final Address address) {
-
-    long gas = 0;
-
-    gas =
-        clampedAdd(gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY));
-
-    return gas;
+  public long writeAccountBasicData(final Address address) {
+    return touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY);
   }
 
   @Override
-  public long touchAndChargeValueTransfer(final Address caller, final Address target) {
-
-    long gas = 0;
-
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(caller, zeroTreeIndex, BALANCE_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(target, zeroTreeIndex, BALANCE_LEAF_KEY));
-
-    return gas;
+  public long accessAccountCodeHash(final Address address) {
+    return touchAddressOnReadAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY);
   }
 
   @Override
-  public long touchAndChargeContractCreateInit(
-      final Address address, final boolean createSendsValue) {
-
-    long gas = 0;
-
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas = clampedAdd(gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY));
-
-    if (createSendsValue) {
-      gas =
-          clampedAdd(
-              gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, BALANCE_LEAF_KEY));
-    }
-    return gas;
+  public long writeAccountCodeHash(final Address address) {
+    return touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY);
   }
 
   @Override
-  public long touchAndChargeContractCreateCompleted(final Address address) {
-
-    long gas = 0;
-
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, BALANCE_LEAF_KEY));
-    gas = clampedAdd(gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, NONCE_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_KECCAK_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnWriteAndComputeGas(address, zeroTreeIndex, CODE_SIZE_LEAF_KEY));
-
-    return gas;
-  }
-
-  @SuppressWarnings("unused")
-  @Override
-  public long touchTxOriginAndComputeGas(final Address origin) {
-
-    long gas = 0;
-
-    gas = clampedAdd(gas, touchAddressOnReadAndComputeGas(origin, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnWriteAndComputeGas(origin, zeroTreeIndex, BALANCE_LEAF_KEY));
-    gas = clampedAdd(gas, touchAddressOnWriteAndComputeGas(origin, zeroTreeIndex, NONCE_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnReadAndComputeGas(origin, zeroTreeIndex, CODE_KECCAK_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnReadAndComputeGas(origin, zeroTreeIndex, CODE_SIZE_LEAF_KEY));
-
-    // modifying this after update on EIP-4762 to not charge simple transfers
-
-    return 0;
-  }
-
-  @SuppressWarnings("unused")
-  @Override
-  public long touchTxExistingAndComputeGas(final Address target, final boolean sendsValue) {
-
-    long gas = 0;
-
-    gas = clampedAdd(gas, touchAddressOnReadAndComputeGas(target, zeroTreeIndex, VERSION_LEAF_KEY));
-    gas = clampedAdd(gas, touchAddressOnReadAndComputeGas(target, zeroTreeIndex, NONCE_LEAF_KEY));
-    gas =
-        clampedAdd(gas, touchAddressOnReadAndComputeGas(target, zeroTreeIndex, CODE_SIZE_LEAF_KEY));
-    gas =
-        clampedAdd(
-            gas, touchAddressOnReadAndComputeGas(target, zeroTreeIndex, CODE_KECCAK_LEAF_KEY));
-
-    if (sendsValue) {
-      gas =
-          clampedAdd(
-              gas, touchAddressOnWriteAndComputeGas(target, zeroTreeIndex, BALANCE_LEAF_KEY));
-    } else {
-      gas =
-          clampedAdd(gas, touchAddressOnReadAndComputeGas(target, zeroTreeIndex, BALANCE_LEAF_KEY));
-    }
-    // modifying this after update on EIP-4762 to not charge simple transfers
-
-    return 0;
+  public long accessAccountStorage(final Address address, final UInt256 storageKey) {
+    final List<UInt256> storageSlotTreeIndexes = getStorageSlotTreeIndexes(storageKey);
+    return touchAddressOnReadAndComputeGas(address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
   }
 
   @Override
-  public long touchCodeChunksUponContractCreation(final Address address, final long codeLength) {
-    long gas = 0;
-    for (long i = 0; i < (codeLength + 30) / 31; i++) {
-      gas =
-          clampedAdd(
-              gas,
-              touchAddressOnWriteAndComputeGas(
-                  address,
-                  CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
-                  CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
-    }
-    return gas;
+  public long writeAccountStorage(final Address address, final UInt256 storageKey) {
+    final List<UInt256> storageSlotTreeIndexes = getStorageSlotTreeIndexes(storageKey);
+    return touchAddressOnWriteAndComputeGas(address, storageSlotTreeIndexes.get(0), storageSlotTreeIndexes.get(1));
   }
 
   @Override
   public long touchCodeChunks(
-      final Address address, final long startPc, final long readSize, final long codeLength) {
+          final Address address, final long startPc, final long readSize, final long codeLength) {
     long gas = 0;
     if ((readSize == 0 && codeLength == 0) || startPc > codeLength) {
       return 0;
@@ -227,15 +116,31 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
     }
     for (long i = startPc / 31; i <= endPc / 31; i++) {
       gas =
-          clampedAdd(
-              gas,
-              touchAddressOnReadAndComputeGas(
-                  address,
-                  CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
-                  CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
+              clampedAdd(
+                      gas,
+                      touchAddressOnReadAndComputeGas(
+                              address,
+                              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+                              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
     }
     return gas;
   }
+
+  @Override
+  public long touchCodeChunksUponContractCreation(final Address address, final long codeLength) {
+    long gas = 0;
+    for (long i = 0; i < (codeLength + 30) / 31; i++) {
+      gas =
+              clampedAdd(
+                      gas,
+                      touchAddressOnWriteAndComputeGas(
+                              address,
+                              CODE_OFFSET.add(i).divide(VERKLE_NODE_WIDTH),
+                              CODE_OFFSET.add(i).mod(VERKLE_NODE_WIDTH)));
+    }
+    return gas;
+  }
+
 
   @Override
   public long touchAddressOnWriteAndComputeGas(
@@ -250,7 +155,7 @@ public class Eip4762AccessWitness implements org.hyperledger.besu.datatypes.Acce
     return touchAddressAndChargeGas(address, treeIndex, subIndex, false);
   }
 
-  public long touchAddressAndChargeGas(
+  private long touchAddressAndChargeGas(
       final Address address,
       final UInt256 treeIndex,
       final UInt256 subIndex,

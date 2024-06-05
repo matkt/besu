@@ -20,7 +20,6 @@ import static org.hyperledger.besu.evm.internal.Words.clampedToInt;
 import static org.hyperledger.besu.evm.internal.Words.clampedToLong;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -50,18 +49,13 @@ public class Create2Operation extends AbstractCreateOperation {
   public long cost(final MessageFrame frame, final Supplier<Code> unused) {
     final int inputOffset = clampedToInt(frame.getStackItem(1));
     final int inputSize = clampedToInt(frame.getStackItem(2));
-    return clampedAdd(
+    final long gasCost = clampedAdd(
         clampedAdd(
-            gasCalculator().txCreateCost(),
-            gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),
-        clampedAdd(
-            gasCalculator().createKeccakCost(inputSize), gasCalculator().initcodeCost(inputSize)));
-  }
-
-  @Override
-  protected long statelessCost(
-      final MessageFrame frame, final Address contractAddress, final Wei value) {
-    return gasCalculator().initcodeStatelessCost(frame, contractAddress, value);
+            gasCalculator().txCreateCost(frame),
+            gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),gasCalculator().createKeccakCost(inputSize));
+    final long statelessGasCost =
+            gasCalculator().initcodeCost(inputSize);
+    return clampedAdd(gasCost, statelessGasCost);
   }
 
   @Override

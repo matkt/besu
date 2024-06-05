@@ -47,7 +47,7 @@ public class ConstantinopleGasCalculator extends ByzantiumGasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE2 operation will consume
-   * @deprecated Compose the operation cost from {@link #txCreateCost()}, {@link
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
    *     #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)}, and
    *     {@link #initcodeCost(int)}. As done in {@link
    *     org.hyperledger.besu.evm.operation.Create2Operation#cost(MessageFrame, Supplier)}
@@ -59,7 +59,7 @@ public class ConstantinopleGasCalculator extends ByzantiumGasCalculator {
     final int inputOffset = clampedToInt(frame.getStackItem(1));
     final int inputSize = clampedToInt(frame.getStackItem(2));
     return clampedAdd(
-        clampedAdd(txCreateCost(), memoryExpansionGasCost(frame, inputOffset, inputSize)),
+        clampedAdd(txCreateCost(frame), memoryExpansionGasCost(frame, inputOffset, inputSize)),
         clampedAdd(createKeccakCost(inputSize), initcodeCost(inputSize)));
   }
 

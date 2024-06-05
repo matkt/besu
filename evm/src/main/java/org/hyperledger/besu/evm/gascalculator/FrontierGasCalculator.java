@@ -23,6 +23,7 @@ import static org.hyperledger.besu.evm.internal.Words.numWords;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.operation.ExpOperation;
 
@@ -249,7 +250,7 @@ public class FrontierGasCalculator implements GasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account recipient,
+      final Address recipient,
       final Address to) {
     return callOperationGasCost(
         frame,
@@ -273,7 +274,7 @@ public class FrontierGasCalculator implements GasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account recipient,
+      final Address recipient,
       final Address to,
       final boolean accountIsWarm) {
     final long inputDataMemoryExpansionCost =
@@ -289,7 +290,8 @@ public class FrontierGasCalculator implements GasCalculator {
       cost = clampedAdd(cost, callValueTransferGasCost());
     }
 
-    if (recipient == null) {
+    final MutableAccount recipientAccount = frame.getWorldUpdater().getAccount(recipient);
+    if (recipientAccount == null) {
       cost = clampedAdd(cost, newAccountGasCost());
     }
 
@@ -317,6 +319,11 @@ public class FrontierGasCalculator implements GasCalculator {
   }
 
   @Override
+  public long initCreateContractGasCost(final MessageFrame frame) {
+    return 0;
+  }
+
+  @Override
   public long completedCreateContractGasCost(final MessageFrame frame) {
     return 0;
   }
@@ -326,7 +333,7 @@ public class FrontierGasCalculator implements GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE operation will consume
-   * @deprecated Compose the operation cost from {@link #txCreateCost()}, {@link
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
    *     #memoryExpansionGasCost(MessageFrame, long, long)}, and {@link #initcodeCost(int)} As done
    *     in {@link org.hyperledger.besu.evm.operation.CreateOperation#cost(MessageFrame, Supplier)}
    */
@@ -338,7 +345,7 @@ public class FrontierGasCalculator implements GasCalculator {
     final int initCodeLength = clampedToInt(frame.getStackItem(2));
 
     return clampedAdd(
-        clampedAdd(txCreateCost(), memoryExpansionGasCost(frame, initCodeOffset, initCodeLength)),
+        clampedAdd(txCreateCost(frame), memoryExpansionGasCost(frame, initCodeOffset, initCodeLength)),
         initcodeCost(initCodeLength));
   }
 
@@ -347,7 +354,7 @@ public class FrontierGasCalculator implements GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE2 operation will consume
-   * @deprecated Compose the operation cost from {@link #txCreateCost()}, {@link
+   * @deprecated Compose the operation cost from {@link GasCalculator#txCreateCost(MessageFrame)}, {@link
    *     #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)}, and
    *     {@link #initcodeCost(int)}
    */
@@ -360,7 +367,7 @@ public class FrontierGasCalculator implements GasCalculator {
   }
 
   @Override
-  public long txCreateCost() {
+  public long txCreateCost(final MessageFrame frame) {
     return CREATE_OPERATION_GAS_COST;
   }
 

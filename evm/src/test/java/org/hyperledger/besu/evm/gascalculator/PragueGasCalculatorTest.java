@@ -42,8 +42,7 @@ public class PragueGasCalculatorTest {
   public void testAuthCallOperationGasCostWithTransfer() {
     PragueGasCalculator pragueGasCalculator = new PragueGasCalculator();
     MessageFrame runningIn = mock(MessageFrame.class);
-    Account invoker = mock(MutableAccount.class);
-    when(invoker.getAddress()).thenReturn(Address.fromHexString("0xCafeBabe"));
+    Address invoker = Address.fromHexString("0xCafeBabe");
     Address invokee = Address.fromHexString("0xdeadbeef");
     when(runningIn.isAddressWarm(invokee)).thenReturn(true);
     long gasSpentInAuthCall =
@@ -59,8 +58,7 @@ public class PragueGasCalculatorTest {
   public void testAuthCallOperationGasCostNoTransfer() {
     PragueGasCalculator pragueGasCalculator = new PragueGasCalculator();
     MessageFrame runningIn = mock(MessageFrame.class);
-    Account invoker = mock(MutableAccount.class);
-    when(invoker.getAddress()).thenReturn(Address.fromHexString("0xCafeBabe"));
+    Address invoker = Address.fromHexString("0xCafeBabe");
     Address invokee = Address.fromHexString("0xdeadbeef");
     when(runningIn.isAddressWarm(invokee)).thenReturn(true);
     long gasSpentInAuthCall =

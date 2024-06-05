@@ -60,21 +60,16 @@ public class ExtCodeSizeOperation extends AbstractOperation {
       return new OperationResult(
           cost(true, frame, Optional.empty()), ExceptionalHaltReason.INSUFFICIENT_STACK_ITEMS);
     }
-    try {
-      final boolean accountIsWarm =
-          frame.warmUpAddress(address) || gasCalculator().isPrecompile(address);
-      final long cost = cost(accountIsWarm, frame, Optional.of(address));
-      if (frame.getRemainingGas() < cost) {
-        return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
-      } else {
-        final Account account = frame.getWorldUpdater().get(address);
-        frame.pushStackItem(
-            account == null ? Bytes.EMPTY : Words.intBytes(account.getCode().size()));
-        return new OperationResult(cost, null);
-      }
-    } catch (final OverflowException ofe) {
-      return new OperationResult(
-          cost(true, frame, Optional.of(address)), ExceptionalHaltReason.TOO_MANY_STACK_ITEMS);
+    final boolean accountIsWarm =
+        frame.warmUpAddress(address) || gasCalculator().isPrecompile(address);
+    final long cost = cost(accountIsWarm, frame, Optional.of(address));
+    if (frame.getRemainingGas() < cost) {
+      return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
+    } else {
+      final Account account = frame.getWorldUpdater().get(address);
+      frame.pushStackItem(
+          account == null ? Bytes.EMPTY : Words.intBytes(account.getCode().size()));
+      return new OperationResult(cost, null);
     }
   }
 }

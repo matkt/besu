@@ -22,20 +22,6 @@ public interface AccessWitness {
 
   List<Address> keys();
 
-  long touchAndChargeProofOfAbsence(Address address);
-
-  long touchAndChargeValueTransfer(Address caller, Address target);
-
-  long touchAndChargeMessageCall(Address address);
-
-  long touchTxOriginAndComputeGas(Address origin);
-
-  long touchTxExistingAndComputeGas(Address target, boolean sendsValue);
-
-  long touchAndChargeContractCreateInit(Address address, boolean createSendsValue);
-
-  long touchAndChargeContractCreateCompleted(final Address address);
-
   long touchAddressOnWriteAndComputeGas(Address address, UInt256 treeIndex, UInt256 subIndex);
 
   long touchAddressOnReadAndComputeGas(Address address, UInt256 treeIndex, UInt256 subIndex);
@@ -43,6 +29,18 @@ public interface AccessWitness {
   List<UInt256> getStorageSlotTreeIndexes(UInt256 storageKey);
 
   long touchCodeChunksUponContractCreation(Address address, long codeLength);
+
+  long accessAccountBasicData(Address address);
+
+  long writeAccountBasicData(Address address);
+
+  long accessAccountCodeHash(Address address);
+
+  long writeAccountCodeHash(Address address);
+
+  long accessAccountStorage(Address address, UInt256 storageKey);
+
+  long writeAccountStorage(Address address, UInt256 storageKey);
 
   long touchCodeChunks(Address address, long offset, long readSize, long codeLength);
 

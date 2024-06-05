@@ -173,7 +173,7 @@ public interface GasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account recipient,
+      final Address recipient,
       final Address contract) {
     return callOperationGasCost(
         frame,
@@ -211,7 +211,7 @@ public interface GasCalculator {
       long outputDataOffset,
       long outputDataLength,
       Wei transferValue,
-      Account recipient,
+      Address recipient,
       Address contract,
       boolean accountIsWarm);
 
@@ -238,7 +238,7 @@ public interface GasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account invoker,
+      final Address invoker,
       final Address invokee,
       final boolean accountIsWarm) {
     return 0L;
@@ -261,6 +261,8 @@ public interface GasCalculator {
    */
   long gasAvailableForChildCall(MessageFrame frame, long stipend, boolean transfersValue);
 
+  long initCreateContractGasCost(MessageFrame frame);
+
   long completedCreateContractGasCost(final MessageFrame frame);
 
   /**
@@ -268,7 +270,7 @@ public interface GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE operation will consume
-   * @deprecated Compose the operation cost from {@link #txCreateCost()}, {@link
+   * @deprecated Compose the operation cost from {@link #txCreateCost(MessageFrame)}, {@link
    *     #memoryExpansionGasCost(MessageFrame, long, long)}, and {@link #initcodeCost(int)}
    */
   @Deprecated(since = "24.4.1", forRemoval = true)
@@ -279,7 +281,7 @@ public interface GasCalculator {
    *
    * @param frame The current frame
    * @return the amount of gas the CREATE2 operation will consume
-   * @deprecated Compose the operation cost from {@link #txCreateCost()}, {@link
+   * @deprecated Compose the operation cost from {@link #txCreateCost(MessageFrame)}, {@link
    *     #memoryExpansionGasCost(MessageFrame, long, long)}, {@link #createKeccakCost(int)}, and
    *     {@link #initcodeCost(int)}
    */
@@ -291,7 +293,7 @@ public interface GasCalculator {
    *
    * @return the TX_CREATE value for this gas schedule
    */
-  long txCreateCost();
+  long txCreateCost(final MessageFrame frame);
 
   /**
    * For Creates that need to hash the initcode, this is the gas cost for such hashing
@@ -309,11 +311,6 @@ public interface GasCalculator {
    * @return the gas cost for the create initcode
    */
   long initcodeCost(final int initCodeLength);
-
-  default long initcodeStatelessCost(
-      final MessageFrame frame, final Address address, final Wei value) {
-    return 0;
-  }
 
   /**
    * Returns the amount of gas parent will provide its child CREATE.

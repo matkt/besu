@@ -62,20 +62,15 @@ public class BalanceOperation extends AbstractOperation {
       return new OperationResult(
           cost(frame, Optional.empty(), true), ExceptionalHaltReason.INSUFFICIENT_STACK_ITEMS);
     }
-    try {
-      final boolean accountIsWarm =
-          frame.warmUpAddress(address) || gasCalculator().isPrecompile(address);
-      final long cost = cost(frame, Optional.of(address), accountIsWarm);
-      if (frame.getRemainingGas() < cost) {
-        return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
-      } else {
-        final Account account = frame.getWorldUpdater().get(address);
-        frame.pushStackItem(account == null ? Bytes.EMPTY : account.getBalance());
-        return new OperationResult(cost, null);
-      }
-    } catch (final OverflowException ofe) {
-      return new OperationResult(
-          cost(frame, Optional.of(address), true), ExceptionalHaltReason.TOO_MANY_STACK_ITEMS);
+    final boolean accountIsWarm =
+        frame.warmUpAddress(address) || gasCalculator().isPrecompile(address);
+    final long cost = cost(frame, Optional.of(address), accountIsWarm);
+    if (frame.getRemainingGas() < cost) {
+      return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
+    } else {
+      final Account account = frame.getWorldUpdater().get(address);
+      frame.pushStackItem(account == null ? Bytes.EMPTY : account.getBalance());
+      return new OperationResult(cost, null);
     }
   }
 }

@@ -14,57 +14,22 @@
  */
 package org.hyperledger.besu.evm.gascalculator.stateless;
 
+import org.hyperledger.besu.datatypes.AccessWitness;
 import org.hyperledger.besu.datatypes.Address;
 
 import org.apache.tuweni.units.bigints.UInt256;
 
-public class NoopAccessWitness extends Eip4762AccessWitness {
+import java.util.List;
+
+public class NoopAccessWitness extends Eip4762AccessWitness implements AccessWitness {
 
   @Override
-  public long touchAndChargeProofOfAbsence(final Address address) {
+  public long touchAddressOnWriteAndComputeGas(final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
     return 0;
   }
 
   @Override
-  public long touchAndChargeValueTransfer(final Address caller, final Address target) {
-    return 0;
-  }
-
-  @Override
-  public long touchAndChargeMessageCall(final Address address) {
-    return 0;
-  }
-
-  @Override
-  public long touchTxOriginAndComputeGas(final Address origin) {
-    return 0;
-  }
-
-  @Override
-  public long touchTxExistingAndComputeGas(final Address target, final boolean sendsValue) {
-    return 0;
-  }
-
-  @Override
-  public long touchAndChargeContractCreateInit(
-      final Address address, final boolean createSendsValue) {
-    return 0;
-  }
-
-  @Override
-  public long touchAndChargeContractCreateCompleted(final Address address) {
-    return 0;
-  }
-
-  @Override
-  public long touchAddressOnWriteAndComputeGas(
-      final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
-    return 0;
-  }
-
-  @Override
-  public long touchAddressOnReadAndComputeGas(
-      final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
+  public long touchAddressOnReadAndComputeGas(final Address address, final UInt256 treeIndex, final UInt256 subIndex) {
     return 0;
   }
 
@@ -74,14 +39,37 @@ public class NoopAccessWitness extends Eip4762AccessWitness {
   }
 
   @Override
-  public long touchCodeChunks(
-      final Address address, final long offset, final long readSize, final long codeLength) {
+  public long accessAccountBasicData(final Address address) {
     return 0;
   }
 
   @Override
-  public long touchCodeChunksWithoutAccessCost(
-      final Address address, final long offset, final long readSize, final long codeLength) {
+  public long writeAccountBasicData(final Address address) {
+    return 0;
+  }
+
+  @Override
+  public long accessAccountCodeHash(final Address address) {
+    return 0;
+  }
+
+  @Override
+  public long writeAccountCodeHash(final Address address) {
+    return 0;
+  }
+
+  @Override
+  public long accessAccountStorage(final Address address, final UInt256 storageKey) {
+    return 0;
+  }
+
+  @Override
+  public long writeAccountStorage(final Address address, final UInt256 storageKey) {
+    return 0;
+  }
+
+  @Override
+  public long touchCodeChunks(final Address address, final long offset, final long readSize, final long codeLength) {
     return 0;
   }
 }

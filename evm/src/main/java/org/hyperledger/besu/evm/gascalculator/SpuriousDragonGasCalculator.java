@@ -19,6 +19,7 @@ import static org.hyperledger.besu.evm.internal.Words.clampedAdd;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 
 /** The Spurious dragon gas calculator. */
@@ -38,7 +39,7 @@ public class SpuriousDragonGasCalculator extends TangerineWhistleGasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account recipient,
+      final Address recipient,
       final Address to,
       final boolean accountIsWarm) {
     final long inputDataMemoryExpansionCost =
@@ -53,8 +54,8 @@ public class SpuriousDragonGasCalculator extends TangerineWhistleGasCalculator {
     if (!transferValue.isZero()) {
       cost = clampedAdd(cost, callValueTransferGasCost());
     }
-
-    if ((recipient == null || recipient.isEmpty()) && !transferValue.isZero()) {
+    final MutableAccount recipientAccount = frame.getWorldUpdater().getAccount(recipient);
+    if ((recipientAccount == null || recipientAccount.isEmpty()) && !transferValue.isZero()) {
       cost = clampedAdd(cost, newAccountGasCost());
     }
 

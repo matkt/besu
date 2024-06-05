@@ -113,15 +113,9 @@ class AbstractCreateOperationTest {
       final int inputSize = clampedToInt(frame.getStackItem(2));
       return clampedAdd(
           clampedAdd(
-              gasCalculator().txCreateCost(),
+              gasCalculator().txCreateCost(frame),
               gasCalculator().memoryExpansionGasCost(frame, inputOffset, inputSize)),
           gasCalculator().initcodeCost(inputSize));
-    }
-
-    @Override
-    protected long statelessCost(
-        final MessageFrame frame, final Address contractAddress, final Wei value) {
-      return gasCalculator().initcodeStatelessCost(frame, contractAddress, value);
     }
 
     @Override

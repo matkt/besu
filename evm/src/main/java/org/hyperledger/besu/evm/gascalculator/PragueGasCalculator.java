@@ -72,7 +72,7 @@ public class PragueGasCalculator extends CancunGasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account invoker,
+      final Address invoker,
       final Address invokee,
       final boolean accountIsWarm) {
 

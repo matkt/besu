@@ -19,6 +19,7 @@ import static org.hyperledger.besu.evm.internal.Words.clampedAdd;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.internal.Words;
 
@@ -69,7 +70,7 @@ public class TangerineWhistleGasCalculator extends HomesteadGasCalculator {
       final long outputDataOffset,
       final long outputDataLength,
       final Wei transferValue,
-      final Account recipient,
+      final Address recipient,
       final Address to,
       final boolean accountIsWarm) {
     final long inputDataMemoryExpansionCost =
@@ -85,7 +86,8 @@ public class TangerineWhistleGasCalculator extends HomesteadGasCalculator {
       cost = clampedAdd(cost, callValueTransferGasCost());
     }
 
-    if (recipient == null) {
+    final MutableAccount recipientAccount = frame.getWorldUpdater().getAccount(recipient);
+    if (recipientAccount == null) {
       cost = clampedAdd(cost, newAccountGasCost());
     }
 
