@@ -81,6 +81,9 @@ public class FullFlatDbStrategy extends FlatDbStrategy {
       final StorageSlotKey storageSlotKey,
       final SegmentedKeyValueStorage storage) {
     getStorageValueCounter.inc();
+    if(storageRootSupplier.get().isEmpty() || storageRootSupplier.get().get().equals(Hash.EMPTY_TRIE_HASH)){
+      return Optional.empty();
+    }
     final Optional<Bytes> storageFound =
         storage
             .get(
