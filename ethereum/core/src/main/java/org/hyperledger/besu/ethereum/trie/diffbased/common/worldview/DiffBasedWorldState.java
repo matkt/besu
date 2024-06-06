@@ -39,6 +39,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 
@@ -298,6 +299,11 @@ public abstract class DiffBasedWorldState
   public Stream<StreamableAccount> streamAccounts(final Bytes32 startKeyHash, final int limit) {
     throw new RuntimeException("storage format do not provide account streaming.");
   }
+
+  public abstract Optional<UInt256> getStorageValueByStorageSlotKey(
+          Supplier<Optional<Hash>> storageRootSupplier,
+          Address address,
+          StorageSlotKey storageSlotKey);
 
   @Override
   public UInt256 getPriorStorageValue(final Address address, final UInt256 storageKey) {

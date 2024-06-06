@@ -413,6 +413,7 @@ public class BonsaiWorldState extends DiffBasedWorldState {
         .map(UInt256::fromBytes);
   }
 
+  @Override
   public Optional<UInt256> getStorageValueByStorageSlotKey(
       final Supplier<Optional<Hash>> storageRootSupplier,
       final Address address,

@@ -47,6 +47,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -434,7 +435,9 @@ public abstract class DiffBasedWorldStateUpdateAccumulator<ACCOUNT extends DiffB
     try {
       final Optional<UInt256> valueUInt =
           (wrappedWorldView() instanceof DiffBasedWorldState worldState)
-              ? worldState.getStorageValueByStorageSlotKey(address, storageSlotKey)
+              ? worldState.getStorageValueByStorageSlotKey((Supplier<Optional<Hash>>) () ->
+                  Optional.ofNullable(accountsToUpdate.get(address)).map(DiffBasedValue::getPrior)
+                          .map(ACCOUNT::getStorageRoot),address, storageSlotKey)
               : wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
       storageToUpdate
           .computeIfAbsent(
