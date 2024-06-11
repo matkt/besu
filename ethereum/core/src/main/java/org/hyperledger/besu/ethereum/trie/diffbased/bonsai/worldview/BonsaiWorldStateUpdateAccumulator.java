@@ -34,24 +34,12 @@ import java.util.concurrent.CompletableFuture;
 
 public class BonsaiWorldStateUpdateAccumulator
     extends DiffBasedWorldStateUpdateAccumulator<BonsaiAccount> {
-
-  final boolean isAccountPreloadEnabled;
-
   public BonsaiWorldStateUpdateAccumulator(
       final DiffBasedWorldView world,
       final Consumer<DiffBasedValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
     super(world, accountPreloader, storagePreloader, evmConfiguration);
-    isAccountPreloadEnabled = false;
-  }
-
-  public BonsaiWorldStateUpdateAccumulator(final DiffBasedWorldView world, final Consumer<DiffBasedValue<BonsaiAccount>> accountPreloader,
-                                           final Consumer<StorageSlotKey> storagePreloader,
-                                           final EvmConfiguration evmConfiguration,
-                                           final boolean isAccountPreloadEnabled) {
-    super(world, accountPreloader, storagePreloader, evmConfiguration);
-    this.isAccountPreloadEnabled = isAccountPreloadEnabled;
   }
 
   @Override

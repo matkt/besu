@@ -99,8 +99,7 @@ public class BonsaiWorldState extends DiffBasedWorldState {
             (addr, value) ->
                 this.bonsaiCachedMerkleTrieLoader.preLoadStorageSlot(
                     getWorldStateStorage(), addr, value),
-            evmConfiguration,
-                worldStateKeyValueStorage.getClass().equals(BonsaiWorldStateKeyValueStorage.class)));
+            evmConfiguration));
   }
 
   @Override
