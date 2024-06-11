@@ -63,7 +63,7 @@ public abstract class DiffBasedWorldStateUpdateAccumulator<ACCOUNT extends DiffB
   protected final Consumer<DiffBasedValue<ACCOUNT>> accountPreloader;
   protected final Consumer<StorageSlotKey> storagePreloader;
 
-  private final AccountConsumingMap<DiffBasedValue<ACCOUNT>> accountsToUpdate;
+  protected final AccountConsumingMap<DiffBasedValue<ACCOUNT>> accountsToUpdate;
   private final Map<Address, DiffBasedValue<Bytes>> codeToUpdate = new ConcurrentHashMap<>();
   private final Set<Address> storageToClear = Collections.synchronizedSet(new HashSet<>());
   protected final EvmConfiguration evmConfiguration;
@@ -71,7 +71,7 @@ public abstract class DiffBasedWorldStateUpdateAccumulator<ACCOUNT extends DiffB
   // storage sub mapped by _hashed_ key.  This is because in self_destruct calls we need to
   // enumerate the old storage and delete it.  Those are trie stored by hashed key by spec and the
   // alternative was to keep a giant pre-image cache of the entire trie.
-  private final Map<Address, StorageConsumingMap<StorageSlotKey, DiffBasedValue<UInt256>>>
+  protected final Map<Address, StorageConsumingMap<StorageSlotKey, DiffBasedValue<UInt256>>>
       storageToUpdate = new ConcurrentHashMap<>();
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
@@ -181,8 +181,8 @@ public abstract class DiffBasedWorldStateUpdateAccumulator<ACCOUNT extends DiffB
     return loadAccount(address, DiffBasedValue::getUpdated);
   }
 
-  protected ACCOUNT loadAccount(
-      final Address address, final Function<DiffBasedValue<ACCOUNT>, ACCOUNT> accountFunction) {
+  public ACCOUNT loadAccount(
+          final Address address, final Function<DiffBasedValue<ACCOUNT>, ACCOUNT> accountFunction) {
     try {
       final DiffBasedValue<ACCOUNT> diffBasedValue = accountsToUpdate.get(address);
       if (diffBasedValue == null) {

@@ -20,20 +20,33 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.diffbased.common.DiffBasedAccount;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.DiffBasedValue;
+import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWorldView;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.preload.Consumer;
+import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 public class BonsaiWorldStateUpdateAccumulator
     extends DiffBasedWorldStateUpdateAccumulator<BonsaiAccount> {
+
+
+  private final Map<Address, Map<StorageSlotKey, Optional<UInt256>>>
+          storageCache = new ConcurrentHashMap<>();
+
   public BonsaiWorldStateUpdateAccumulator(
       final DiffBasedWorldView world,
       final Consumer<DiffBasedValue<BonsaiAccount>> accountPreloader,
@@ -100,29 +113,112 @@ public class BonsaiWorldStateUpdateAccumulator
     BonsaiAccount.assertCloseEnoughForDiffing(source, account, context);
   }
 
-  @Override
-  public Account get(final Address address) {
-    final Account account = super.get(address);
-    preloadAccount(account);
-    return account;
-  }
-
-  @Override
-  public MutableAccount getAccount(final Address address) {
-    final MutableAccount account = super.getAccount(address);
-    preloadAccount(account);
-    return account;
-  }
-
-  private void preloadAccount(final Account account){
+  private void preloadAccount(final BonsaiAccount account){
     CompletableFuture.runAsync(() -> {
-      if(account instanceof BonsaiAccount bonsaiAccount){
-        if(!bonsaiAccount.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)){
-          for (int i = 0; i < 256; i++) {
-            getStorageValueByStorageSlotKey(account.getAddress(), new StorageSlotKey(UInt256.valueOf(i)));
-          }
+      if(!account.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)){
+        for (int i = 0; i < 256; i++) {
+          cacheStorageValueByStorageSlotKeyWithCache(account.getAddress(), new StorageSlotKey(UInt256.valueOf(i)));
         }
       }
     });
+  }
+
+  @Override
+  public BonsaiAccount loadAccount(
+          final Address address, final Function<DiffBasedValue<BonsaiAccount>, BonsaiAccount> accountFunction) {
+    try {
+      final DiffBasedValue<BonsaiAccount> diffBasedValue = accountsToUpdate.get(address);
+      if (diffBasedValue == null) {
+        final Account account;
+        if (wrappedWorldView() instanceof DiffBasedWorldStateUpdateAccumulator) {
+          final DiffBasedWorldStateUpdateAccumulator<BonsaiAccount> worldStateUpdateAccumulator =
+                  (DiffBasedWorldStateUpdateAccumulator<BonsaiAccount>) wrappedWorldView();
+          account = worldStateUpdateAccumulator.loadAccount(address, accountFunction);
+        } else {
+          account = wrappedWorldView().get(address);
+        }
+        if (account instanceof DiffBasedAccount diffBasedAccount) {
+          BonsaiAccount mutableAccount = copyAccount((BonsaiAccount) diffBasedAccount, this, true);
+          accountsToUpdate.put(
+                  address, new DiffBasedValue<>((BonsaiAccount) diffBasedAccount, mutableAccount));
+          preloadAccount(mutableAccount);
+          return mutableAccount;
+        } else {
+          // add the empty read in accountsToUpdate
+          accountsToUpdate.put(address, new DiffBasedValue<>(null, null));
+          return null;
+        }
+      } else {
+        return accountFunction.apply(diffBasedValue);
+      }
+    } catch (MerkleTrieException e) {
+      // need to throw to trigger the heal
+      throw new MerkleTrieException(
+              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+    }
+  }
+
+  @Override
+  public Optional<UInt256> getStorageValueByStorageSlotKey(
+          final Address address, final StorageSlotKey storageSlotKey) {
+    final Map<StorageSlotKey, DiffBasedValue<UInt256>> localAccountStorage =
+            storageToUpdate.get(address);
+    if (localAccountStorage != null) {
+      final DiffBasedValue<UInt256> value = localAccountStorage.get(storageSlotKey);
+      if (value != null) {
+        return Optional.ofNullable(value.getUpdated());
+      }
+    }
+    try {
+      final Optional<UInt256> valueUInt;
+      if( (wrappedWorldView() instanceof DiffBasedWorldState worldState)) {
+        Map<StorageSlotKey, Optional<UInt256>> storageCacheForAccount = storageCache.get(address);
+        if (storageCacheForAccount != null) {
+          Optional<UInt256> cachedSlot = storageCacheForAccount.get(storageSlotKey);
+          if (cachedSlot != null) {
+            valueUInt = cachedSlot;
+          } else {
+            valueUInt = worldState.getStorageValueByStorageSlotKey(address, storageSlotKey);
+          }
+        } else {
+          valueUInt = worldState.getStorageValueByStorageSlotKey(address, storageSlotKey);
+        }
+      }else {
+        valueUInt = wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
+      }
+      storageToUpdate
+              .computeIfAbsent(
+                      address,
+                      key ->
+                              new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader))
+              .put(
+                      storageSlotKey, new DiffBasedValue<>(valueUInt.orElse(null), valueUInt.orElse(null)));
+      return valueUInt;
+    } catch (MerkleTrieException e) {
+      // need to throw to trigger the heal
+      throw new MerkleTrieException(
+              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+    }
+  }
+
+  private void cacheStorageValueByStorageSlotKeyWithCache(
+          final Address address, final StorageSlotKey storageSlotKey) {
+    try {
+      final Optional<UInt256> valueUInt =
+              (wrappedWorldView() instanceof DiffBasedWorldState worldState)
+                      ? worldState.getStorageValueByStorageSlotKey(address, storageSlotKey)
+                      : wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
+      storageCache
+              .computeIfAbsent(
+                      address,
+                      key ->
+                              new ConcurrentHashMap<>())
+              .put(
+                      storageSlotKey, valueUInt);
+    } catch (MerkleTrieException e) {
+      // need to throw to trigger the heal
+      throw new MerkleTrieException(
+              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+    }
   }
 }
