@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview;
 
+import org.apache.tuweni.units.bigints.UInt256;
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -24,17 +25,33 @@ import org.hyperledger.besu.ethereum.trie.diffbased.common.DiffBasedValue;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWorldView;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.preload.Consumer;
+import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
+import java.util.concurrent.CompletableFuture;
+
 public class BonsaiWorldStateUpdateAccumulator
     extends DiffBasedWorldStateUpdateAccumulator<BonsaiAccount> {
+
+  final boolean isAccountPreloadEnabled;
+
   public BonsaiWorldStateUpdateAccumulator(
       final DiffBasedWorldView world,
       final Consumer<DiffBasedValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
     super(world, accountPreloader, storagePreloader, evmConfiguration);
+    isAccountPreloadEnabled = false;
+  }
+
+  public BonsaiWorldStateUpdateAccumulator(final DiffBasedWorldView world, final Consumer<DiffBasedValue<BonsaiAccount>> accountPreloader,
+                                           final Consumer<StorageSlotKey> storagePreloader,
+                                           final EvmConfiguration evmConfiguration,
+                                           final boolean isAccountPreloadEnabled) {
+    super(world, accountPreloader, storagePreloader, evmConfiguration);
+    this.isAccountPreloadEnabled = isAccountPreloadEnabled;
   }
 
   @Override
@@ -93,5 +110,31 @@ public class BonsaiWorldStateUpdateAccumulator
   protected void assertCloseEnoughForDiffing(
       final BonsaiAccount source, final AccountValue account, final String context) {
     BonsaiAccount.assertCloseEnoughForDiffing(source, account, context);
+  }
+
+  @Override
+  public Account get(final Address address) {
+    final Account account = super.get(address);
+    preloadAccount(account);
+    return account;
+  }
+
+  @Override
+  public MutableAccount getAccount(final Address address) {
+    final MutableAccount account = super.getAccount(address);
+    preloadAccount(account);
+    return account;
+  }
+
+  private void preloadAccount(final Account account){
+    CompletableFuture.runAsync(() -> {
+      if(account instanceof BonsaiAccount bonsaiAccount){
+        if(!bonsaiAccount.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)){
+          for (int i = 0; i < 256; i++) {
+            getStorageValueByStorageSlotKey(account.getAddress(), new StorageSlotKey(UInt256.valueOf(i)));
+          }
+        }
+      }
+    });
   }
 }
