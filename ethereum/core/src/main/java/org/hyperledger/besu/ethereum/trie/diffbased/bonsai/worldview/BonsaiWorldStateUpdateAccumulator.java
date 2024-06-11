@@ -122,7 +122,7 @@ public class BonsaiWorldStateUpdateAccumulator
       }
     });
   }
-
+  @SuppressWarnings("unchecked")
   @Override
   public BonsaiAccount loadAccount(
           final Address address, final Function<DiffBasedValue<BonsaiAccount>, BonsaiAccount> accountFunction) {
