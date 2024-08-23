@@ -16,6 +16,7 @@ package org.hyperledger.besu.services;
 
 import org.hyperledger.besu.consensus.merge.MergeContext;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.ConsensusContext;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -74,17 +75,12 @@ public class SynchronizationServiceImpl implements SynchronizationService {
   @Override
   public void fireNewUnverifiedForkchoiceEvent(
       final Hash head, final Hash safeBlock, final Hash finalizedBlock) {
-    final MergeContext mergeContext = protocolContext.getConsensusContext(MergeContext.class);
-    if (mergeContext != null) {
+    final ConsensusContext context = protocolContext.getConsensusContext(ConsensusContext.class);
+    if (context instanceof MergeContext mergeContext) {
       mergeContext.fireNewUnverifiedForkchoiceEvent(head, safeBlock, finalizedBlock);
-      protocolContext.getBlockchain().setFinalized(finalizedBlock);
-      protocolContext.getBlockchain().setSafeBlock(safeBlock);
-    } else {
-      LOG.atWarn()
-          .setMessage(
-              "The merge context is unavailable, hence the fork choice event cannot be triggered")
-          .log();
     }
+    protocolContext.getBlockchain().setFinalized(finalizedBlock);
+    protocolContext.getBlockchain().setSafeBlock(safeBlock);
   }
 
   @Override
