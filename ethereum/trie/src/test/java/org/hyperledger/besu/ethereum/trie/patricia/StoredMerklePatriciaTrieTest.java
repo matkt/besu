@@ -43,7 +43,14 @@ public class StoredMerklePatriciaTrieTest extends AbstractMerklePatriciaTrieTest
     valueSerializer =
         value -> (value != null) ? Bytes.wrap(value.getBytes(StandardCharsets.UTF_8)) : null;
     valueDeserializer = bytes -> new String(bytes.toArrayUnsafe(), StandardCharsets.UTF_8);
-    return new StoredMerklePatriciaTrie<>(merkleStorage::get, valueSerializer, valueDeserializer);
+    return new StoredBatchMerklePatriciaTrie<>(
+        (location, hash) -> {
+          System.out.println(location + " " + hash);
+          return merkleStorage.get(location, hash);
+        },
+        valueSerializer,
+        valueDeserializer,
+        new MerkleTrieNodeBatcher<>());
   }
 
   @Test

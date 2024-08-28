@@ -38,7 +38,8 @@ import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWo
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.preload.StorageConsumingMap;
-import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.MerkleTrieNodeBatcher;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredBatchMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -168,6 +169,8 @@ public class BonsaiWorldState extends DiffBasedWorldState {
 
     // TODO write to a cache and then generate a layer update from that and the
     // DB tx updates.  Right now it is just DB updates.
+
+    final Bytes32 rootHash = accountTrie.getRootHash();
     maybeStateUpdater.ifPresent(
         bonsaiUpdater ->
             accountTrie.commit(
@@ -177,7 +180,6 @@ public class BonsaiWorldState extends DiffBasedWorldState {
                         bonsaiUpdater.getWorldStateTransaction(),
                         location,
                         value)));
-    final Bytes32 rootHash = accountTrie.getRootHash();
     return Hash.wrap(rootHash);
   }
 
@@ -298,17 +300,17 @@ public class BonsaiWorldState extends DiffBasedWorldState {
 
       final BonsaiAccount accountUpdated = accountValue.getUpdated();
       if (accountUpdated != null) {
+        // only use storage root of the trie when trie is enabled
+        if (!worldStateConfig.isTrieDisabled()) {
+          final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
+          accountUpdated.setStorageRoot(newStorageRoot);
+        }
         maybeStateUpdater.ifPresent(
             bonsaiUpdater ->
                 storageTrie.commit(
                     (location, key, value) ->
                         writeStorageTrieNode(
                             bonsaiUpdater, updatedAddressHash, location, key, value)));
-        // only use storage root of the trie when trie is enabled
-        if (!worldStateConfig.isTrieDisabled()) {
-          final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
-          accountUpdated.setStorageRoot(newStorageRoot);
-        }
       }
     }
     // for manicured tries and composting, trim and compost here
@@ -458,8 +460,12 @@ public class BonsaiWorldState extends DiffBasedWorldState {
     if (worldStateConfig.isTrieDisabled()) {
       return new NoOpMerkleTrie<>();
     } else {
-      return new StoredMerklePatriciaTrie<>(
-          nodeLoader, rootHash, Function.identity(), Function.identity());
+      return new StoredBatchMerklePatriciaTrie<>(
+          nodeLoader,
+          rootHash,
+          Function.identity(),
+          Function.identity(),
+          new MerkleTrieNodeBatcher<>());
     }
   }
 
