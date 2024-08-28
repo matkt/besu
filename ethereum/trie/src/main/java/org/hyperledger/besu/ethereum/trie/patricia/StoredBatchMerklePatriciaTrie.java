@@ -74,7 +74,9 @@ public class StoredBatchMerklePatriciaTrie<K extends Bytes, V>
   @Override
   public Bytes32 getRootHash() {
     root.accept(Bytes.EMPTY, new NodeBatcherVisitor<>(merkleTrieNodeBatcher));
-    merkleTrieNodeBatcher.calculateStateRoot();
-    return root.getHash();
+    merkleTrieNodeBatcher.runAsyncComputeStateRoot();
+    final Bytes32 hash = root.getHash();
+    merkleTrieNodeBatcher.cancel();
+    return hash;
   }
 }
