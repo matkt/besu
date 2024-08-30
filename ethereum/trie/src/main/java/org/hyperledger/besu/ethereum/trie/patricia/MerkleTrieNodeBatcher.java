@@ -16,10 +16,11 @@ package org.hyperledger.besu.ethereum.trie.patricia;
 
 import org.hyperledger.besu.ethereum.trie.Node;
 
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.apache.tuweni.bytes.Bytes;
 
@@ -52,39 +53,39 @@ public class MerkleTrieNodeBatcher<V> {
       return;
     }
 
-    final List<Map.Entry<Bytes, Node<V>>> sortedNodesByLocation =
-        new ArrayList<>(updatedNodes.entrySet());
-    sortedNodesByLocation.sort(
-        (entry1, entry2) -> Integer.compare(entry2.getKey().size(), entry1.getKey().size()));
+    final Map<Bytes, Node<V>> sortedMap =
+        updatedNodes.entrySet().stream()
+            .sorted(
+                (entry1, entry2) -> Integer.compare(entry2.getKey().size(), entry1.getKey().size()))
+            .collect(
+                Collectors.toMap(
+                    Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
 
-    int currentDepth = -1; // Tracks the depth of the current batch
-
-    final List<Node<V>> nodesInSameLevel = new ArrayList<>();
-    for (Map.Entry<Bytes, Node<V>> entry : sortedNodesByLocation) {
-      final Bytes location = entry.getKey();
-      final Node<V> node = entry.getValue();
-      if (location.size() != currentDepth) {
-        if (!nodesInSameLevel.isEmpty()) {
-          processBatch(nodesInSameLevel);
-          nodesInSameLevel.clear();
+    int currentDepth = -1; // Tracks the depth of the current bat
+    // ch
+    final Map<Bytes, Node<V>> independentNodes = new HashMap<>();
+    while (!sortedMap.isEmpty()) {
+      for (Map.Entry<Bytes, Node<V>> entry : sortedMap.entrySet()) {
+        final Bytes location = entry.getKey();
+        final Node<V> node = entry.getValue();
+        if (node.isDirty()) {
+          final boolean matchFound =
+              independentNodes.entrySet().stream()
+                  .anyMatch(e -> e.getKey().commonPrefixLength(location) > 0);
+          if (!matchFound) {
+            independentNodes.put(location, node);
+          }
         }
-        if (location.isEmpty()) {
-          // We will end up updating the root node. Once all the batching is finished,
-          // we will update the previous states of the nodes by setting them to the new ones.
-          calculateRootInternalNodeHash(node);
-          updatedNodes.clear();
-          return;
-        }
-        currentDepth = location.size();
       }
-      if (node.isDirty()) {
-        nodesInSameLevel.add(node);
+      if (!independentNodes.isEmpty()) {
+        System.out.println("current batch " + independentNodes.size());
+        processBatch(independentNodes.values());
       }
+      independentNodes.forEach(sortedMap::remove);
     }
-    throw new IllegalStateException("root node not found");
   }
 
-  private void processBatch(final List<Node<V>> nodes) {
+  private void processBatch(final Collection<Node<V>> nodes) {
     nodes.parallelStream()
         .forEach(
             vNode -> {
