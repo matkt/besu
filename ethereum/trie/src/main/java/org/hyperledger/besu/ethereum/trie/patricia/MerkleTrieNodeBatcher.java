@@ -61,37 +61,43 @@ public class MerkleTrieNodeBatcher<V> {
                 Collectors.toMap(
                     Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
 
-    int currentDepth = -1; // Tracks the depth of the current bat
-    // ch
-    final Map<Bytes, Node<V>> independentNodes = new HashMap<>();
     while (!sortedMap.isEmpty()) {
+      final Map<Bytes, Node<V>> independentNodes = new HashMap<>();
       for (Map.Entry<Bytes, Node<V>> entry : sortedMap.entrySet()) {
         final Bytes location = entry.getKey();
         final Node<V> node = entry.getValue();
-        if (node.isDirty()) {
-          final boolean matchFound =
-              independentNodes.entrySet().stream()
-                  .anyMatch(e -> e.getKey().commonPrefixLength(location) > 0);
-          if (!matchFound) {
-            independentNodes.put(location, node);
-          }
+        final boolean matchFound =
+            independentNodes.entrySet().stream()
+                .anyMatch(
+                    e ->
+                        e.getKey().size() > location.size()
+                            && e.getKey().commonPrefixLength(location) > 0);
+        if (!matchFound) {
+          independentNodes.put(location, node);
         }
       }
       if (!independentNodes.isEmpty()) {
-        System.out.println("current batch " + independentNodes.size());
         processBatch(independentNodes.values());
       }
-      independentNodes.forEach(sortedMap::remove);
+      independentNodes.forEach((bytes, vNode) -> sortedMap.remove(bytes));
     }
   }
 
   private void processBatch(final Collection<Node<V>> nodes) {
-    nodes.parallelStream()
-        .forEach(
-            vNode -> {
-              vNode.getEncodedBytes();
-              vNode.getHash();
-            });
+    if (nodes.size() > 25) {
+      nodes.parallelStream()
+          .forEach(
+              vNode -> {
+                vNode.getEncodedBytes();
+                vNode.getHash();
+              });
+    } else {
+      nodes.forEach(
+          vNode -> {
+            vNode.getEncodedBytes();
+            vNode.getHash();
+          });
+    }
   }
 
   private void calculateRootInternalNodeHash(final Node<V> root) {
