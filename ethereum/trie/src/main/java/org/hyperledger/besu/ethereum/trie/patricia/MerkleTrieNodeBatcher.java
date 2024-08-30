@@ -20,9 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 
 import org.apache.tuweni.bytes.Bytes;
 
@@ -34,11 +31,6 @@ import org.apache.tuweni.bytes.Bytes;
 @SuppressWarnings("unused")
 public class MerkleTrieNodeBatcher<V> {
 
-  private static final int NCPU = Runtime.getRuntime().availableProcessors();
-  private static final Executor executor = Executors.newFixedThreadPool(NCPU);
-  private static final List<CompletableFuture<?>> futures = new ArrayList<>();
-
-  private static final int MAX_BATCH_SIZE = 1000; // Maximum number of nodes in a batch
   private final Map<Bytes, Node<V>> updatedNodes = new HashMap<>();
 
   /**
@@ -71,7 +63,7 @@ public class MerkleTrieNodeBatcher<V> {
     for (Map.Entry<Bytes, Node<V>> entry : sortedNodesByLocation) {
       final Bytes location = entry.getKey();
       final Node<V> node = entry.getValue();
-      if (location.size() != currentDepth || nodesInSameLevel.size() > MAX_BATCH_SIZE) {
+      if (location.size() != currentDepth) {
         if (!nodesInSameLevel.isEmpty()) {
           processBatch(nodesInSameLevel);
           nodesInSameLevel.clear();
@@ -92,22 +84,13 @@ public class MerkleTrieNodeBatcher<V> {
     throw new IllegalStateException("root node not found");
   }
 
-  public void cancel() {
-    futures.forEach(completableFuture -> completableFuture.cancel(true));
-  }
-
   private void processBatch(final List<Node<V>> nodes) {
-    for (int i = 0; i < nodes.size(); i++) {
-      int finalI = i;
-      futures.add(
-          CompletableFuture.runAsync(
-              () -> {
-                final Node<V> vNode = nodes.get(finalI);
-                vNode.getEncodedBytes();
-                vNode.getHash();
-              },
-              executor));
-    }
+    nodes.parallelStream()
+        .forEach(
+            vNode -> {
+              vNode.getEncodedBytes();
+              vNode.getHash();
+            });
   }
 
   private void calculateRootInternalNodeHash(final Node<V> root) {
