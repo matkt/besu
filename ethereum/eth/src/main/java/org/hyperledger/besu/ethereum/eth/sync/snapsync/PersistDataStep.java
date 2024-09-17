@@ -56,7 +56,11 @@ public class PersistDataStep {
     try {
       final WorldStateKeyValueStorage.Updater updater = worldStateStorageCoordinator.updater();
       for (Task<SnapDataRequest> task : tasks) {
-        if (task.getData().isResponseReceived()) {
+        final boolean isResponseReceived = task.getData().isResponseReceived();
+        if (isResponseReceived) {
+          if(task.getData() instanceof TrieNodeHealingRequest && task.getData().isExpired(snapSyncState)){
+            continue; // not persist expired trie node request
+          }
           // enqueue child requests
           final Stream<SnapDataRequest> childRequests =
               task.getData()
