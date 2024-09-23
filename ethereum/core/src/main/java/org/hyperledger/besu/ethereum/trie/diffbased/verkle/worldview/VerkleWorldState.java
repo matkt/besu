@@ -126,13 +126,13 @@ public class VerkleWorldState extends DiffBasedWorldState {
             accountKey -> {
               final DiffBasedValue<VerkleAccount> accountUpdate =
                   worldStateUpdater.getAccountsToUpdate().get(accountKey);
-              // generate account triekeys
+              // generate triekeys for account
               final List<Bytes32> accountKeyIds = new ArrayList<>();
               if (accountUpdate != null && !accountUpdate.isUnchanged()) {
                 accountKeyIds.add(trieKeyPreloader.generateAccountKeyId());
               }
 
-              // generate storage triekeys
+              // generate triekeys for storage
               final List<Bytes32> storageKeyIds = new ArrayList<>();
               final StorageConsumingMap<StorageSlotKey, DiffBasedValue<UInt256>>
                   storageAccountUpdate = worldStateUpdater.getStorageToUpdate().get(accountKey);
@@ -145,7 +145,7 @@ public class VerkleWorldState extends DiffBasedWorldState {
                 }
               }
 
-              // generate code triekeys
+              // generate triekeys for code
               final List<Bytes32> codeKeyIds = new ArrayList<>();
               final DiffBasedValue<Bytes> codeUpdate =
                   worldStateUpdater.getCodeToUpdate().get(accountKey);
