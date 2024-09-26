@@ -46,6 +46,7 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.operation.BlockHashOperation;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.services.txselection.PluginTransactionSelector;
 
 import java.util.Collections;
 import java.util.Optional;
@@ -106,8 +107,8 @@ class ParallelizedConcurrentTransactionProcessorTest {
 
     processor.runTransaction(
         worldState,
+        () -> PluginTransactionSelector.ACCEPT_ALL,
         blockHeader,
-        0,
         transaction,
         miningBeneficiary,
         (blockNumber) -> Hash.EMPTY,
@@ -130,7 +131,7 @@ class ParallelizedConcurrentTransactionProcessorTest {
     assertTrue(
         processor
             .applyParallelizedTransactionResult(
-                worldState, miningBeneficiary, transaction, 0, Optional.empty(), Optional.empty())
+                worldState, miningBeneficiary, transaction, Optional.empty(), Optional.empty())
             .isPresent(),
         "Expected the transaction context to be stored");
   }
@@ -152,17 +153,17 @@ class ParallelizedConcurrentTransactionProcessorTest {
 
     processor.runTransaction(
         worldState,
+        () -> PluginTransactionSelector.ACCEPT_ALL,
         blockHeader,
-        0,
         transaction,
         miningBeneficiary,
         (blockNumber) -> Hash.EMPTY,
         blobGasPrice,
         privateMetadataUpdater);
 
-    Optional<TransactionProcessingResult> result =
+    Optional<ParallelizedTransactionContext> result =
         processor.applyParallelizedTransactionResult(
-            worldState, miningBeneficiary, transaction, 0, Optional.empty(), Optional.empty());
+            worldState, miningBeneficiary, transaction, Optional.empty(), Optional.empty());
     assertTrue(result.isEmpty(), "Expected the transaction result to indicate a failure");
   }
 
@@ -181,8 +182,8 @@ class ParallelizedConcurrentTransactionProcessorTest {
 
     processor.runTransaction(
         worldState,
+        () -> PluginTransactionSelector.ACCEPT_ALL,
         blockHeader,
-        0,
         transaction,
         miningBeneficiary,
         (blockNumber) -> Hash.EMPTY,
@@ -205,9 +206,9 @@ class ParallelizedConcurrentTransactionProcessorTest {
     // simulate a conflict
     when(transactionCollisionDetector.hasCollision(any(), any(), any(), any())).thenReturn(true);
 
-    Optional<TransactionProcessingResult> result =
+    Optional<ParallelizedTransactionContext> result =
         processor.applyParallelizedTransactionResult(
-            worldState, miningBeneficiary, transaction, 0, Optional.empty(), Optional.empty());
+            worldState, miningBeneficiary, transaction, Optional.empty(), Optional.empty());
     assertTrue(result.isEmpty(), "Expected no transaction result to be applied due to conflict");
   }
 }

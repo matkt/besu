@@ -18,7 +18,9 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
+import org.hyperledger.besu.ethereum.eth.transactions.layered.SenderPendingTransactions;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.PreprocessingContext;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.plugin.data.TransactionSelectionResult;
 
@@ -74,8 +76,13 @@ public interface PendingTransactions {
 
   Optional<Transaction> restoreBlob(Transaction transaction);
 
-  @FunctionalInterface
   interface TransactionSelector {
-    TransactionSelectionResult evaluateTransaction(PendingTransaction pendingTransaction);
+
+    Optional<PreprocessingContext> runBlockPreProcessing(
+        final List<SenderPendingTransactions> candidateTransactions);
+
+    TransactionSelectionResult evaluateTransaction(
+        final Optional<PreprocessingContext> preProcessingContext,
+        final PendingTransaction pendingTransaction);
   }
 }

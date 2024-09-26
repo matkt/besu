@@ -53,6 +53,15 @@ public interface PluginTransactionSelector {
   }
 
   /**
+   * Method to merge external selector in the current selector
+   *
+   * @param externalSelector external selector to merge
+   */
+  default void mergeExternalSelector(final PluginTransactionSelector externalSelector) {
+    // nothing to do
+  }
+
+  /**
    * Method called to decide whether a transaction is added to a block. The result can also indicate
    * that no further transactions can be added to the block.
    *

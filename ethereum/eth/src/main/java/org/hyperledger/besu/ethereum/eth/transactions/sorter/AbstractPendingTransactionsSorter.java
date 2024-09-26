@@ -248,7 +248,7 @@ public abstract class AbstractPendingTransactionsSorter implements PendingTransa
         for (final PendingTransaction transactionToProcess :
             accountTransactionOrder.transactionsToProcess(highestPriorityPendingTransaction)) {
           final TransactionSelectionResult result =
-              selector.evaluateTransaction(transactionToProcess);
+              selector.evaluateTransaction(Optional.empty(), transactionToProcess);
 
           if (result.discard()) {
             transactionsToRemove.add(transactionToProcess.getTransaction());

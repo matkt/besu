@@ -17,22 +17,26 @@ package org.hyperledger.besu.ethereum.mainnet.parallelization;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.plugin.services.txselection.PluginTransactionSelector;
 
 import java.util.Objects;
 
 public final class ParallelizedTransactionContext {
   private final DiffBasedWorldStateUpdateAccumulator<?> transactionAccumulator;
   private final TransactionProcessingResult transactionProcessingResult;
+  private final PluginTransactionSelector pluginTransactionSelector;
   private final boolean isMiningBeneficiaryTouchedPreRewardByTransaction;
   private final Wei miningBeneficiaryReward;
 
   public ParallelizedTransactionContext(
       final DiffBasedWorldStateUpdateAccumulator<?> transactionAccumulator,
       final TransactionProcessingResult transactionProcessingResult,
+      final PluginTransactionSelector pluginTransactionSelector,
       final boolean isMiningBeneficiaryTouchedPreRewardByTransaction,
       final Wei miningBeneficiaryReward) {
     this.transactionAccumulator = transactionAccumulator;
     this.transactionProcessingResult = transactionProcessingResult;
+    this.pluginTransactionSelector = pluginTransactionSelector;
     this.isMiningBeneficiaryTouchedPreRewardByTransaction =
         isMiningBeneficiaryTouchedPreRewardByTransaction;
     this.miningBeneficiaryReward = miningBeneficiaryReward;
@@ -44,6 +48,10 @@ public final class ParallelizedTransactionContext {
 
   public TransactionProcessingResult transactionProcessingResult() {
     return transactionProcessingResult;
+  }
+
+  public PluginTransactionSelector getPluginTransactionSelector() {
+    return pluginTransactionSelector;
   }
 
   public boolean isMiningBeneficiaryTouchedPreRewardByTransaction() {
@@ -95,6 +103,7 @@ public final class ParallelizedTransactionContext {
   public static class Builder {
     private DiffBasedWorldStateUpdateAccumulator<?> transactionAccumulator;
     private TransactionProcessingResult transactionProcessingResult;
+    private PluginTransactionSelector pluginTransactionSelector;
     private boolean isMiningBeneficiaryTouchedPreRewardByTransaction;
     private Wei miningBeneficiaryReward = Wei.ZERO;
 
@@ -107,6 +116,12 @@ public final class ParallelizedTransactionContext {
     public Builder transactionProcessingResult(
         final TransactionProcessingResult transactionProcessingResult) {
       this.transactionProcessingResult = transactionProcessingResult;
+      return this;
+    }
+
+    public Builder pluginTransactionSelector(
+        final PluginTransactionSelector pluginTransactionSelector) {
+      this.pluginTransactionSelector = pluginTransactionSelector;
       return this;
     }
 
@@ -126,6 +141,7 @@ public final class ParallelizedTransactionContext {
       return new ParallelizedTransactionContext(
           transactionAccumulator,
           transactionProcessingResult,
+          pluginTransactionSelector,
           isMiningBeneficiaryTouchedPreRewardByTransaction,
           miningBeneficiaryReward);
     }

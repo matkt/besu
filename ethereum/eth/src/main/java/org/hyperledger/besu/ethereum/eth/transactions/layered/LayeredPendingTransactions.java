@@ -36,6 +36,7 @@ import org.hyperledger.besu.ethereum.eth.transactions.PendingTransactions;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionAddedResult;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPoolConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.PreprocessingContext;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.AccountState;
@@ -329,13 +330,17 @@ public class LayeredPendingTransactions implements PendingTransactions {
     for (final var entry : candidateTxsByScore.entrySet()) {
       LOG.trace("Evaluating txs with score {}", entry.getKey());
 
+      final Optional<PreprocessingContext> preprocessingContext =
+          selector.runBlockPreProcessing(entry.getValue());
+
       for (final var senderTxs : entry.getValue()) {
         LOG.trace("Evaluating sender txs {}", senderTxs);
 
         if (!skipSenders.contains(senderTxs.sender())) {
 
           for (final var candidatePendingTx : senderTxs.pendingTransactions()) {
-            final var selectionResult = selector.evaluateTransaction(candidatePendingTx);
+            final var selectionResult =
+                selector.evaluateTransaction(preprocessingContext, candidatePendingTx);
 
             LOG.atTrace()
                 .setMessage("Selection result {} for transaction {}")

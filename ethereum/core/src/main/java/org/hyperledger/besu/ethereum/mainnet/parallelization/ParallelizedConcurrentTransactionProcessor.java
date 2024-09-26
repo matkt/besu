@@ -15,9 +15,11 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.MiningParameters;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
@@ -28,19 +30,22 @@ import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.operation.BlockHashOperation;
-import org.hyperledger.besu.evm.tracing.OperationTracer;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
+import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
+import org.hyperledger.besu.plugin.services.txselection.PluginTransactionSelector;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 
 /**
  * Optimizes transaction processing by executing transactions in parallel within a given block.
@@ -52,14 +57,14 @@ import com.google.common.annotations.VisibleForTesting;
 public class ParallelizedConcurrentTransactionProcessor {
 
   private static final int NCPU = Runtime.getRuntime().availableProcessors();
-  private static final Executor executor = Executors.newFixedThreadPool(NCPU);
+  public static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   private final MainnetTransactionProcessor transactionProcessor;
 
   private final TransactionCollisionDetector transactionCollisionDetector;
 
-  private final Map<Integer, ParallelizedTransactionContext>
-      parallelizedTransactionContextByLocation = new ConcurrentHashMap<>();
+  private final Cache<Hash, ParallelizedTransactionContext> parallelizedTransactionContextByHash =
+      CacheBuilder.newBuilder().maximumSize(1000).build();
 
   /**
    * Constructs a PreloadConcurrentTransactionProcessor with a specified transaction processor. This
@@ -99,7 +104,7 @@ public class ParallelizedConcurrentTransactionProcessor {
    */
   public void runAsyncBlock(
       final MutableWorldState worldState,
-      final BlockHeader blockHeader,
+      final ProcessableBlockHeader blockHeader,
       final List<Transaction> transactions,
       final Address miningBeneficiary,
       final BlockHashOperation.BlockHashLookup blockHashLookup,
@@ -107,16 +112,16 @@ public class ParallelizedConcurrentTransactionProcessor {
       final PrivateMetadataUpdater privateMetadataUpdater) {
     for (int i = 0; i < transactions.size(); i++) {
       final Transaction transaction = transactions.get(i);
-      final int transactionLocation = i;
       /*
        * All transactions are executed in the background by copying the world state of the block on which the transactions need to be executed, ensuring that each one has its own accumulator.
        */
+
       CompletableFuture.runAsync(
           () ->
               runTransaction(
                   worldState,
+                  () -> PluginTransactionSelector.ACCEPT_ALL,
                   blockHeader,
-                  transactionLocation,
                   transaction,
                   miningBeneficiary,
                   blockHashLookup,
@@ -126,11 +131,45 @@ public class ParallelizedConcurrentTransactionProcessor {
     }
   }
 
+  public void runAsyncBlockSelection(
+      final MutableWorldState worldState,
+      final MiningParameters miningParameters,
+      final ProcessableBlockHeader blockHeader,
+      final List<Transaction> transactions,
+      final Address miningBeneficiary,
+      final BlockHashOperation.BlockHashLookup blockHashLookup,
+      final Wei blobGasPrice,
+      final PrivateMetadataUpdater privateMetadataUpdater) {
+    for (int i = 0; i < transactions.size(); i++) {
+      final Transaction transaction = transactions.get(i);
+      /*
+       * All transactions are executed in the background by copying the world state of the block on which the transactions need to be executed, ensuring that each one has its own accumulator.
+       */
+      CompletableFuture.runAsync(
+              () -> {
+                runTransaction(
+                    worldState,
+                    () ->
+                        miningParameters
+                            .getTransactionSelectionService()
+                            .createPluginTransactionSelector(),
+                    blockHeader,
+                    transaction,
+                    miningBeneficiary,
+                    blockHashLookup,
+                    blobGasPrice,
+                    privateMetadataUpdater);
+              },
+              executor)
+          .orTimeout(500, TimeUnit.MILLISECONDS);
+    }
+  }
+
   @VisibleForTesting
   public void runTransaction(
       final MutableWorldState worldState,
-      final BlockHeader blockHeader,
-      final int transactionLocation,
+      final Supplier<PluginTransactionSelector> pluginTransactionSelectorSupplier,
+      final ProcessableBlockHeader blockHeader,
       final Transaction transaction,
       final Address miningBeneficiary,
       final BlockHashOperation.BlockHashLookup blockHashLookup,
@@ -144,15 +183,21 @@ public class ParallelizedConcurrentTransactionProcessor {
           new ParallelizedTransactionContext.Builder();
       final DiffBasedWorldStateUpdateAccumulator<?> roundWorldStateUpdater =
           (DiffBasedWorldStateUpdateAccumulator<?>) roundWorldState.updater();
+
+      final PluginTransactionSelector pluginTransactionSelector =
+          pluginTransactionSelectorSupplier.get();
+      final BlockAwareOperationTracer operationTracer =
+          pluginTransactionSelector.getOperationTracer();
+
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(
               roundWorldStateUpdater,
               blockHeader,
               transaction,
               miningBeneficiary,
-              new OperationTracer() {
+              new ParallelizedOperationTracer(operationTracer) {
                 @Override
-                public void traceBeforeRewardTransaction(
+                public void catchBeforeRewardTransaction(
                     final WorldView worldView,
                     final org.hyperledger.besu.datatypes.Transaction tx,
                     final Wei miningReward) {
@@ -182,7 +227,8 @@ public class ParallelizedConcurrentTransactionProcessor {
 
       contextBuilder
           .transactionAccumulator(roundWorldState.getAccumulator())
-          .transactionProcessingResult(result);
+          .transactionProcessingResult(result)
+          .pluginTransactionSelector(pluginTransactionSelector);
 
       final ParallelizedTransactionContext parallelizedTransactionContext = contextBuilder.build();
       if (!parallelizedTransactionContext.isMiningBeneficiaryTouchedPreRewardByTransaction()) {
@@ -193,8 +239,10 @@ public class ParallelizedConcurrentTransactionProcessor {
          */
         roundWorldStateUpdater.getAccountsToUpdate().remove(miningBeneficiary);
       }
-      parallelizedTransactionContextByLocation.put(
-          transactionLocation, parallelizedTransactionContext);
+      System.out.println("finished " + transaction.getHash());
+
+      parallelizedTransactionContextByHash.put(
+          transaction.getHash(), parallelizedTransactionContext);
     }
   }
 
@@ -213,7 +261,6 @@ public class ParallelizedConcurrentTransactionProcessor {
    * @param worldState Mutable world state intended for applying transaction results.
    * @param miningBeneficiary Address of the beneficiary for mining rewards.
    * @param transaction Transaction for which the result is to be applied.
-   * @param transactionLocation Index of the transaction within the block.
    * @param confirmedParallelizedTransactionCounter Metric counter for confirmed parallelized
    *     transactions
    * @param conflictingButCachedTransactionCounter Metric counter for conflicting but cached
@@ -221,18 +268,18 @@ public class ParallelizedConcurrentTransactionProcessor {
    * @return Optional containing the transaction processing result if applied, or empty if the
    *     transaction needs to be replayed due to a conflict.
    */
-  public Optional<TransactionProcessingResult> applyParallelizedTransactionResult(
+  public Optional<ParallelizedTransactionContext> applyParallelizedTransactionResult(
       final MutableWorldState worldState,
       final Address miningBeneficiary,
       final Transaction transaction,
-      final int transactionLocation,
       final Optional<Counter> confirmedParallelizedTransactionCounter,
       final Optional<Counter> conflictingButCachedTransactionCounter) {
     final DiffBasedWorldState diffBasedWorldState = (DiffBasedWorldState) worldState;
     final DiffBasedWorldStateUpdateAccumulator blockAccumulator =
         (DiffBasedWorldStateUpdateAccumulator) diffBasedWorldState.updater();
     final ParallelizedTransactionContext parallelizedTransactionContext =
-        parallelizedTransactionContextByLocation.remove(transactionLocation);
+        parallelizedTransactionContextByHash.getIfPresent(transaction.getHash());
+    parallelizedTransactionContextByHash.invalidate(transaction.getHash());
     /*
      * If `parallelizedTransactionContext` is not null, it means that the transaction had time to complete in the background.
      */
@@ -250,14 +297,11 @@ public class ParallelizedConcurrentTransactionProcessor {
             .incrementBalance(parallelizedTransactionContext.miningBeneficiaryReward());
 
         blockAccumulator.importStateChangesFromSource(transactionAccumulator);
-
-        if (confirmedParallelizedTransactionCounter.isPresent())
-          confirmedParallelizedTransactionCounter.get().inc();
-        return Optional.of(transactionProcessingResult);
+        confirmedParallelizedTransactionCounter.ifPresent(Counter::inc);
+        return Optional.of(parallelizedTransactionContext);
       } else {
         blockAccumulator.importPriorStateFromSource(transactionAccumulator);
-        if (conflictingButCachedTransactionCounter.isPresent())
-          conflictingButCachedTransactionCounter.get().inc();
+        conflictingButCachedTransactionCounter.ifPresent(Counter::inc);
         // If there is a conflict, we return an empty result to signal the block processor to
         // re-execute the transaction.
         return Optional.empty();

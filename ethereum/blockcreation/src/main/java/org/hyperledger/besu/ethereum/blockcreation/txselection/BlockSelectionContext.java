@@ -23,8 +23,10 @@ import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.BlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
+import org.hyperledger.besu.evm.operation.BlockHashOperation;
 
 public record BlockSelectionContext(
+    BlockHashOperation.BlockHashLookup blockHashLookup,
     MiningParameters miningParameters,
     GasCalculator gasCalculator,
     GasLimitCalculator gasLimitCalculator,

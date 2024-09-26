@@ -131,9 +131,9 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
                   worldState,
                   miningBeneficiary,
                   transaction,
-                  location,
                   confirmedParallelizedTransactionCounter,
                   conflictingButCachedTransactionCounter)
+              .map(ParallelizedTransactionContext::transactionProcessingResult)
               .orElse(null);
     }
 
@@ -151,21 +151,6 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
           blockHashLookup);
     } else {
       return transactionProcessingResult;
-    }
-  }
-
-  static class ParallelizedPreProcessingContext implements PreprocessingContext {
-    final ParallelizedConcurrentTransactionProcessor parallelizedConcurrentTransactionProcessor;
-
-    public ParallelizedPreProcessingContext(
-        final ParallelizedConcurrentTransactionProcessor
-            parallelizedConcurrentTransactionProcessor) {
-      this.parallelizedConcurrentTransactionProcessor = parallelizedConcurrentTransactionProcessor;
-    }
-
-    public ParallelizedConcurrentTransactionProcessor
-        getParallelizedConcurrentTransactionProcessor() {
-      return parallelizedConcurrentTransactionProcessor;
     }
   }
 

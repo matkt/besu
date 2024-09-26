@@ -37,22 +37,25 @@ import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.transactions.PendingTransaction;
+import org.hyperledger.besu.ethereum.eth.transactions.PendingTransactions;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
+import org.hyperledger.besu.ethereum.eth.transactions.layered.SenderPendingTransactions;
 import org.hyperledger.besu.ethereum.mainnet.AbstractBlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.BlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.PreprocessingContext;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.vm.CachingBlockHashLookup;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
-import org.hyperledger.besu.evm.operation.BlockHashOperation.BlockHashLookup;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.data.TransactionSelectionResult;
 import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
 import org.hyperledger.besu.plugin.services.txselection.PluginTransactionSelector;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -88,19 +91,20 @@ import org.slf4j.LoggerFactory;
 public class BlockTransactionSelector {
   private static final Logger LOG = LoggerFactory.getLogger(BlockTransactionSelector.class);
   private final Supplier<Boolean> isCancelled;
-  private final MainnetTransactionProcessor transactionProcessor;
-  private final Blockchain blockchain;
-  private final MutableWorldState worldState;
+  protected final MainnetTransactionProcessor transactionProcessor;
+  protected final Blockchain blockchain;
+  protected final MutableWorldState worldState;
   private final AbstractBlockProcessor.TransactionReceiptFactory transactionReceiptFactory;
-  private final BlockSelectionContext blockSelectionContext;
-  private final TransactionSelectionResults transactionSelectionResults =
+  protected final BlockSelectionContext blockSelectionContext;
+  protected final TransactionSelectionResults transactionSelectionResults =
       new TransactionSelectionResults();
-  private final List<AbstractTransactionSelector> transactionSelectors;
-  private final PluginTransactionSelector pluginTransactionSelector;
-  private final BlockAwareOperationTracer pluginOperationTracer;
+  protected final List<AbstractTransactionSelector> transactionSelectors;
+  protected final PluginTransactionSelector pluginTransactionSelector;
+  protected final BlockAwareOperationTracer pluginOperationTracer;
   private final EthScheduler ethScheduler;
   private final AtomicBoolean isTimeout = new AtomicBoolean(false);
   private final long blockTxsSelectionMaxTime;
+  protected final MiningParameters miningParameters;
   private WorldUpdater blockWorldStateUpdater;
 
   public BlockTransactionSelector(
@@ -120,6 +124,7 @@ public class BlockTransactionSelector {
       final BlockHashProcessor blockHashProcessor,
       final PluginTransactionSelector pluginTransactionSelector,
       final EthScheduler ethScheduler) {
+    this.miningParameters = miningParameters;
     this.transactionProcessor = transactionProcessor;
     this.blockchain = blockchain;
     this.worldState = worldState;
@@ -128,6 +133,7 @@ public class BlockTransactionSelector {
     this.ethScheduler = ethScheduler;
     this.blockSelectionContext =
         new BlockSelectionContext(
+            new CachingBlockHashLookup(processableBlockHeader, blockchain),
             miningParameters,
             gasCalculator,
             gasLimitCalculator,
@@ -183,7 +189,23 @@ public class BlockTransactionSelector {
             () ->
                 blockSelectionContext
                     .transactionPool()
-                    .selectTransactions(this::evaluateTransaction));
+                    .selectTransactions(
+                        new PendingTransactions.TransactionSelector() {
+                          @Override
+                          public Optional<PreprocessingContext> runBlockPreProcessing(
+                              final List<SenderPendingTransactions> candidateTxsByScore) {
+                            return BlockTransactionSelector.this.runBlockPreProcessing(
+                                candidateTxsByScore);
+                          }
+
+                          @Override
+                          public TransactionSelectionResult evaluateTransaction(
+                              final Optional<PreprocessingContext> preProcessingContext,
+                              final PendingTransaction pendingTransaction) {
+                            return BlockTransactionSelector.this.evaluateTransaction(
+                                preProcessingContext, pendingTransaction);
+                          }
+                        }));
 
     try {
       txSelection.get(blockTxsSelectionMaxTime, TimeUnit.MILLISECONDS);
@@ -216,8 +238,15 @@ public class BlockTransactionSelector {
    */
   public TransactionSelectionResults evaluateTransactions(final List<Transaction> transactions) {
     transactions.forEach(
-        transaction -> evaluateTransaction(new PendingTransaction.Local.Priority(transaction)));
+        transaction ->
+            evaluateTransaction(
+                Optional.empty(), new PendingTransaction.Local.Priority(transaction)));
     return transactionSelectionResults;
+  }
+
+  protected Optional<PreprocessingContext> runBlockPreProcessing(
+      final List<SenderPendingTransactions> candidateTransactions) {
+    return Optional.empty();
   }
 
   /**
@@ -226,11 +255,13 @@ public class BlockTransactionSelector {
    * called until the block under construction is suitably full (in terms of gasLimit) and the
    * provided transaction's gasLimit does not fit within the space remaining in the block.
    *
+   * @param preProcessingContext pre processing context of the transaction
    * @param pendingTransaction The transaction to be evaluated.
    * @return The result of the transaction evaluation process.
    * @throws CancellationException if the transaction selection process is cancelled.
    */
   private TransactionSelectionResult evaluateTransaction(
+      final Optional<PreprocessingContext> preProcessingContext,
       final PendingTransaction pendingTransaction) {
     checkCancellation();
 
@@ -244,7 +275,8 @@ public class BlockTransactionSelector {
 
     final WorldUpdater txWorldStateUpdater = blockWorldStateUpdater.updater();
     final TransactionProcessingResult processingResult =
-        processTransaction(pendingTransaction, txWorldStateUpdater);
+        processTransaction(
+            preProcessingContext, worldState, txWorldStateUpdater, pendingTransaction);
 
     var postProcessingSelectionResult = evaluatePostProcessing(evaluationContext, processingResult);
 
@@ -255,7 +287,7 @@ public class BlockTransactionSelector {
         evaluationContext, postProcessingSelectionResult, txWorldStateUpdater);
   }
 
-  private TransactionEvaluationContext createTransactionEvaluationContext(
+  protected TransactionEvaluationContext createTransactionEvaluationContext(
       final PendingTransaction pendingTransaction) {
     final Wei transactionGasPriceInBlock =
         blockSelectionContext
@@ -282,7 +314,7 @@ public class BlockTransactionSelector {
    * @param evaluationContext The current selection session data.
    * @return The result of the transaction selection process.
    */
-  private TransactionSelectionResult evaluatePreProcessing(
+  protected TransactionSelectionResult evaluatePreProcessing(
       final TransactionEvaluationContext evaluationContext) {
 
     for (var selector : transactionSelectors) {
@@ -321,24 +353,18 @@ public class BlockTransactionSelector {
         evaluationContext, processingResult);
   }
 
-  /**
-   * Processes a transaction
-   *
-   * @param pendingTransaction The transaction to be processed.
-   * @param worldStateUpdater The world state updater.
-   * @return The result of the transaction processing.
-   */
-  private TransactionProcessingResult processTransaction(
-      final PendingTransaction pendingTransaction, final WorldUpdater worldStateUpdater) {
-    final BlockHashLookup blockHashLookup =
-        new CachingBlockHashLookup(blockSelectionContext.pendingBlockHeader(), blockchain);
+  protected TransactionProcessingResult processTransaction(
+      final Optional<PreprocessingContext> preProcessingContext,
+      final MutableWorldState worldState,
+      final WorldUpdater txWorldStateUpdater,
+      final PendingTransaction pendingTransaction) {
     return transactionProcessor.processTransaction(
-        worldStateUpdater,
+        txWorldStateUpdater,
         blockSelectionContext.pendingBlockHeader(),
         pendingTransaction.getTransaction(),
         blockSelectionContext.miningBeneficiary(),
         pluginOperationTracer,
-        blockHashLookup,
+        blockSelectionContext.blockHashLookup(),
         false,
         TransactionValidationParams.mining(),
         blockSelectionContext.blobGasPrice());

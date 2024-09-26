@@ -134,6 +134,10 @@ public class TransactionPool implements BlockAddedObserver {
     subscribeDroppedTransactions(this::unmapBlobsOnTransactionDropped);
   }
 
+  public TransactionPoolMetrics getMetrics() {
+    return metrics;
+  }
+
   private void initLogForReplay() {
     // log the initial block header data
     LOG_FOR_REPLAY

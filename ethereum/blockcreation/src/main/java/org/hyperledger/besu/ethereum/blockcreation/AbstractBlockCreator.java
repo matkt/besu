@@ -23,6 +23,7 @@ import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.BlockTransactionSelector;
+import org.hyperledger.besu.ethereum.blockcreation.txselection.ParallelizedBlockTransactionSelector;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.TransactionSelectionResults;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
@@ -377,7 +378,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
             .blobGasPricePerGas(calculateExcessBlobGasForParent(protocolSpec, parentHeader));
 
     final BlockTransactionSelector selector =
-        new BlockTransactionSelector(
+        new ParallelizedBlockTransactionSelector(
             miningParameters,
             transactionProcessor,
             protocolContext.getBlockchain(),
