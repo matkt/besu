@@ -23,12 +23,14 @@ import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.DiffBasedWo
 import org.hyperledger.besu.ethereum.trie.diffbased.common.worldview.accumulator.DiffBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.BesuContext;
 import org.hyperledger.besu.plugin.services.TrieLogService;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogEvent;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogFactory;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogProvider;
 import org.hyperledger.besu.util.Subscribers;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.LongStream;
@@ -112,9 +114,36 @@ public class TrieLogManager {
         .addArgument(worldStateRootHash::toHexString)
         .log();
 
-    stateUpdater
-        .getTrieLogStorageTransaction()
-        .put(blockHeader.getHash().toArrayUnsafe(), trieLogFactory.serialize(trieLog));
+    KeyValueStorageTransaction trieLogStorageTransaction =
+        stateUpdater.getTrieLogStorageTransaction();
+    trieLogStorageTransaction.put(
+        blockHeader.getHash().toArrayUnsafe(), trieLogFactory.serialize(trieLog));
+
+    trieLog
+        .getAccountChanges()
+        .forEach(
+            (address, accountValueLogTuple) -> {
+              Bytes accountPrefix =
+                  Bytes.concatenate(
+                      Bytes.wrap("preimage-account".getBytes(StandardCharsets.UTF_8)),
+                      address.addressHash());
+              trieLogStorageTransaction.put(accountPrefix.toArrayUnsafe(), address.toArrayUnsafe());
+              Bytes slotAccountPrefix =
+                  Bytes.concatenate(
+                      Bytes.wrap("preimage-slot".getBytes(StandardCharsets.UTF_8)),
+                      address.addressHash());
+              trieLog
+                  .getStorageChanges(address)
+                  .forEach(
+                      (storageSlotKey, uInt256LogTuple) -> {
+                        if (storageSlotKey.getSlotKey().isPresent()) {
+                          trieLogStorageTransaction.put(
+                              Bytes.concatenate(slotAccountPrefix, storageSlotKey.getSlotHash())
+                                  .toArrayUnsafe(),
+                              storageSlotKey.getSlotKey().get().toArrayUnsafe());
+                        }
+                      });
+            });
   }
 
   public long getMaxLayersToLoad() {

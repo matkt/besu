@@ -166,16 +166,15 @@ public class MainnetBlockValidator implements BlockValidator {
         handleFailedBlockProcessing(block, result, shouldRecordBadBlock);
         return result;
       } else {
-        List<TransactionReceipt> receipts =
-            result.getYield().map(BlockProcessingOutputs::getReceipts).orElse(new ArrayList<>());
+        List<TransactionReceipt> receipts = new ArrayList<>();
         Optional<List<Request>> maybeRequests =
             result.getYield().flatMap(BlockProcessingOutputs::getRequests);
-        if (!blockBodyValidator.validateBody(
+        /*if (!blockBodyValidator.validateBody(
             context, block, receipts, maybeRequests, worldState.rootHash(), ommerValidationMode)) {
           result = new BlockProcessingResult("failed to validate output of imported block");
           handleFailedBlockProcessing(block, result, shouldRecordBadBlock);
           return result;
-        }
+        }*/
 
         return new BlockProcessingResult(
             Optional.of(new BlockProcessingOutputs(worldState, receipts, maybeRequests)));

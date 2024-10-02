@@ -85,7 +85,6 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.diffbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.diffbased.common.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.diffbased.common.trielog.TrieLogPruner;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -97,7 +96,6 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.permissioning.NodeMessagePermissioningProvider;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.io.Closeable;
 import java.math.BigInteger;
@@ -116,6 +114,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The Besu controller builder that builds Besu Controller. */
+@SuppressWarnings("unused")
 public abstract class BesuControllerBuilder implements MiningParameterOverrides {
   private static final Logger LOG = LoggerFactory.getLogger(BesuControllerBuilder.class);
 
@@ -740,17 +739,6 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
 
     final JsonRpcMethods additionalJsonRpcMethodFactory =
         createAdditionalJsonRpcMethodFactory(protocolContext, protocolSchedule, miningParameters);
-
-    if (dataStorageConfiguration.getBonsaiLimitTrieLogsEnabled()
-        && DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())) {
-      final TrieLogManager trieLogManager =
-          ((BonsaiWorldStateProvider) worldStateArchive).getTrieLogManager();
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
-          worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
-      final TrieLogPruner trieLogPruner =
-          createTrieLogPruner(worldStateKeyValueStorage, blockchain, scheduler);
-      trieLogManager.subscribe(trieLogPruner);
-    }
 
     final List<Closeable> closeables = new ArrayList<>();
     closeables.add(protocolContext.getWorldStateArchive());

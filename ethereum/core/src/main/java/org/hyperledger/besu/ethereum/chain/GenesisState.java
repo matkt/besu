@@ -186,6 +186,7 @@ public final class GenesisState {
       final GenesisConfigFile genesisConfigFile) {
     try (var worldState = createGenesisWorldState(dataStorageConfiguration)) {
       writeAccountsTo(worldState, genesisConfigFile.streamAllocations(), null);
+      System.out.println(worldState.rootHash());
       return worldState.rootHash();
     } catch (Exception e) {
       throw new RuntimeException(e);

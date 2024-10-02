@@ -68,13 +68,15 @@ public class GenesisWorldStateProvider {
                 new NoOpMetricsSystem()),
             new NoOpMetricsSystem(),
             DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    DiffBasedWorldStateConfig diffBasedWorldStateConfig = new DiffBasedWorldStateConfig();
+    diffBasedWorldStateConfig.setTrieDisabled(false);
     return new BonsaiWorldState(
         bonsaiWorldStateKeyValueStorage,
         bonsaiCachedMerkleTrieLoader,
         new NoOpBonsaiCachedWorldStorageManager(bonsaiWorldStateKeyValueStorage),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
-        new DiffBasedWorldStateConfig());
+        diffBasedWorldStateConfig);
   }
 
   /**

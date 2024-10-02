@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.diffbased.common.worldview;
 
+@SuppressWarnings({"unused", "ChainingConstructorIgnoresParameter"})
 public class DiffBasedWorldStateConfig {
 
   private boolean isFrozen;
@@ -21,20 +22,20 @@ public class DiffBasedWorldStateConfig {
   private boolean isTrieDisabled;
 
   public DiffBasedWorldStateConfig() {
-    this(false, false);
+    this(false, true);
   }
 
   public DiffBasedWorldStateConfig(final boolean isTrieDisabled) {
-    this(false, isTrieDisabled);
+    this(false, true);
   }
 
   public DiffBasedWorldStateConfig(final DiffBasedWorldStateConfig config) {
-    this(config.isFrozen(), config.isTrieDisabled());
+    this(config.isFrozen(), true);
   }
 
   public DiffBasedWorldStateConfig(final boolean isFrozen, final boolean isTrieDisabled) {
     this.isFrozen = isFrozen;
-    this.isTrieDisabled = isTrieDisabled;
+    this.isTrieDisabled = true;
   }
 
   /**

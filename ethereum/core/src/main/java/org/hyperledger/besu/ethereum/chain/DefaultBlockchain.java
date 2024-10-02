@@ -113,10 +113,10 @@ public class DefaultBlockchain implements MutableBlockchain {
     final Hash chainHead = blockchainStorage.getChainHead().get();
     chainHeader = blockchainStorage.getBlockHeader(chainHead).get();
     totalDifficulty = blockchainStorage.getTotalDifficulty(chainHead).get();
-    final BlockBody chainHeadBody = blockchainStorage.getBlockBody(chainHead).get();
+    /*final BlockBody chainHeadBody = blockchainStorage.getBlockBody(chainHead).get();
     chainHeadTransactionCount = chainHeadBody.getTransactions().size();
     chainHeadOmmerCount = chainHeadBody.getOmmers().size();
-
+    */
     this.reorgLoggingThreshold = reorgLoggingThreshold;
     this.blockChoiceRule = heaviestChainBlockChoiceRule;
     this.numberOfBlocksToCache = numberOfBlocksToCache;
@@ -456,20 +456,19 @@ public class DefaultBlockchain implements MutableBlockchain {
     }
 
     final Block block = blockWithReceipts.getBlock();
-    final List<TransactionReceipt> receipts = blockWithReceipts.getReceipts();
     final Hash hash = block.getHash();
     final Difficulty td = calculateTotalDifficulty(block.getHeader());
 
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
 
     updater.putBlockHeader(hash, block.getHeader());
-    updater.putBlockBody(hash, block.getBody());
-    updater.putTransactionReceipts(hash, receipts);
+    // updater.putBlockBody(hash, block.getBody());
+    // updater.putTransactionReceipts(hash, receipts);
     updater.putTotalDifficulty(hash, td);
 
     final BlockAddedEvent blockAddedEvent;
     if (storeOnly) {
-      blockAddedEvent = handleStoreOnly(blockWithReceipts);
+      handleStoreOnly(blockWithReceipts);
     } else {
       blockAddedEvent = updateCanonicalChainData(updater, blockWithReceipts);
       if (blockAddedEvent.isNewCanonicalHead()) {
@@ -478,7 +477,7 @@ public class DefaultBlockchain implements MutableBlockchain {
     }
 
     updater.commit();
-    blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
+    // blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
   }
 
   @Override
