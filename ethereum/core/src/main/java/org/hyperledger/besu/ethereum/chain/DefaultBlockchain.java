@@ -60,6 +60,7 @@ import io.prometheus.client.guava.cache.CacheMetricsCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings("unused")
 public class DefaultBlockchain implements MutableBlockchain {
   private static final Logger LOG = LoggerFactory.getLogger(DefaultBlockchain.class);
 
@@ -451,9 +452,9 @@ public class DefaultBlockchain implements MutableBlockchain {
   private void appendBlockHelper(
       final BlockWithReceipts blockWithReceipts, final boolean storeOnly) {
 
-    if (!blockShouldBeProcessed(blockWithReceipts.getBlock(), blockWithReceipts.getReceipts())) {
+    /*if (!blockShouldBeProcessed(blockWithReceipts.getBlock(), blockWithReceipts.getReceipts())) {
       return;
-    }
+    }*/
 
     final Block block = blockWithReceipts.getBlock();
     final Hash hash = block.getHash();

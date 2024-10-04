@@ -30,6 +30,9 @@ import org.hyperledger.besu.plugin.services.trielogs.TrieLogFactory;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogProvider;
 import org.hyperledger.besu.util.Subscribers;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
@@ -119,19 +122,19 @@ public class TrieLogManager {
     trieLogStorageTransaction.put(
         blockHeader.getHash().toArrayUnsafe(), trieLogFactory.serialize(trieLog));
 
+
     trieLog
         .getAccountChanges()
         .forEach(
             (address, accountValueLogTuple) -> {
               Bytes accountPrefix =
                   Bytes.concatenate(
-                      Bytes.wrap("preimage-account".getBytes(StandardCharsets.UTF_8)),
+                      Bytes.wrap("preimage".getBytes(StandardCharsets.UTF_8)),
                       address.addressHash());
               trieLogStorageTransaction.put(accountPrefix.toArrayUnsafe(), address.toArrayUnsafe());
               Bytes slotAccountPrefix =
                   Bytes.concatenate(
-                      Bytes.wrap("preimage-slot".getBytes(StandardCharsets.UTF_8)),
-                      address.addressHash());
+                      Bytes.wrap("preimage-slot".getBytes(StandardCharsets.UTF_8)));
               trieLog
                   .getStorageChanges(address)
                   .forEach(

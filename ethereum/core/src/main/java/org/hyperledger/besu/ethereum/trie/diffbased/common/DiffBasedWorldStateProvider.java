@@ -34,6 +34,7 @@ import org.hyperledger.besu.evm.worldstate.WorldState;
 import org.hyperledger.besu.plugin.BesuContext;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -100,6 +101,9 @@ public abstract class DiffBasedWorldStateProvider implements WorldStateArchive {
             blockHeader ->
                 this.cachedWorldStorageManager.addCachedLayer(
                     blockHeader, persistedState.getWorldStateRootHash(), persistedState));
+    persistedState.getWorldStateStorage().getTrieLogStorage().streamFromKey(Bytes.wrap("preimage".getBytes(StandardCharsets.UTF_8)).toArrayUnsafe()).forEach(pair -> {
+      System.out.println("pair "+Bytes.of(pair.getKey())+" "+Bytes.of(pair.getRight()));
+            });
   }
 
   @Override
