@@ -115,7 +115,7 @@ public class StorageRangeDataRequest extends SnapDataRequest {
               (key, value) ->
                   ((BonsaiWorldStateKeyValueStorage.Updater) updater)
                       .putStorageValueBySlotHash(
-                          accountHash, Hash.wrap(key), Bytes32.leftPad(RLP.decodeValue(value))));
+                          accountHash, Hash.wrap(key), RLP.decodeValue(value)));
         });
 
     stackTrie.commit(flatDatabaseUpdater.get(), nodeUpdater);

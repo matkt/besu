@@ -87,7 +87,7 @@ public class StorageTrieNodeHealingRequest extends TrieNodeHealingRequest {
           onBonsai
               .updater()
               .putStorageValueBySlotHash(
-                  accountHash, getSlotHash(location, path), Bytes32.leftPad(RLP.decodeValue(value)))
+                  accountHash, getSlotHash(location, path), RLP.decodeValue(value))
               .commit();
         });
     return Stream.empty();

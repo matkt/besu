@@ -185,7 +185,7 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
             if (!value.equals(flatDbEntry)) {
               // Update the storage value
               bonsaiUpdater.putStorageValueBySlotHash(
-                  accountHash, Hash.wrap(key), Bytes32.leftPad(RLP.decodeValue(value)));
+                  accountHash, Hash.wrap(key), RLP.decodeValue(value));
             }
           });
       // For each remaining key, remove the storage value

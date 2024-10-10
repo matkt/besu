@@ -87,9 +87,7 @@ class StorageTrieNodeDataRequest extends TrieNodeDataRequest {
           worldStateKeyValueStorage
               .updater()
               .putStorageValueBySlotHash(
-                  accountHash.get(),
-                  getSlotHash(location, path),
-                  Bytes32.leftPad(RLP.decodeValue(value)))
+                  accountHash.get(), getSlotHash(location, path), RLP.decodeValue(value))
               .commit();
         });
 
