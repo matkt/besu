@@ -61,10 +61,10 @@ public class TrieLogFactoryImpl implements TrieLogFactory {
 
     for (final var updatedCode : accumulator.getCodeToUpdate().entrySet()) {
       layer.addCodeChange(
-          updatedCode.getKey(),
-          updatedCode.getValue().getPrior(),
-          updatedCode.getValue().getUpdated(),
-          blockHeader.getBlockHash());
+              updatedCode.getKey(),
+              updatedCode.getValue().getPrior(),
+              updatedCode.getValue().getUpdated(),
+              blockHeader.getBlockHash());
     }
 
     for (final var updatesStorage : accumulator.getStorageToUpdate().entrySet()) {
@@ -120,17 +120,21 @@ public class TrieLogFactoryImpl implements TrieLogFactory {
       }
 
       final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges =
-          layer.getStorageChanges().get(address);
+              layer.getStorageChanges().get(address);
       if (storageChanges == null) {
         output.writeNull();
       } else {
         output.startList();
         for (final Map.Entry<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChangeEntry :
-            storageChanges.entrySet()) {
+                storageChanges.entrySet()) {
           output.startList();
           // do not write slotKey, it is not used in mainnet bonsai trielogs
+          StorageSlotKey storageSlotKey = storageChangeEntry.getKey();
           output.writeBytes(storageChangeEntry.getKey().getSlotHash());
           writeInnerRlp(storageChangeEntry.getValue(), output, RLPOutput::writeUInt256Scalar);
+          if (storageSlotKey.getSlotKey().isPresent()) {
+            output.writeUInt256Scalar(storageSlotKey.getSlotKey().get());
+          }
           output.endList();
         }
         output.endList();
@@ -165,8 +169,8 @@ public class TrieLogFactoryImpl implements TrieLogFactory {
         final boolean isCleared = getOptionalIsCleared(input);
         input.leaveList();
         newLayer
-            .getAccountChanges()
-            .put(address, new DiffBasedValue<>(oldValue, newValue, isCleared));
+                .getAccountChanges()
+                .put(address, new DiffBasedValue<>(oldValue, newValue, isCleared));
       }
 
       if (input.nextIsNull()) {
@@ -186,12 +190,19 @@ public class TrieLogFactoryImpl implements TrieLogFactory {
         final Map<StorageSlotKey, DiffBasedValue<UInt256>> storageChanges = new TreeMap<>();
         input.enterList();
         while (!input.isEndOfCurrentList()) {
-          input.enterList();
+
+          int storageElementlistSize = input.enterList();
           final Hash slotHash = Hash.wrap(input.readBytes32());
-          final StorageSlotKey storageSlotKey = new StorageSlotKey(slotHash, Optional.empty());
           final UInt256 oldValue = nullOrValue(input, RLPInput::readUInt256Scalar);
           final UInt256 newValue = nullOrValue(input, RLPInput::readUInt256Scalar);
           final boolean isCleared = getOptionalIsCleared(input);
+          final Optional<UInt256> slotKey =
+                  Optional.of(storageElementlistSize)
+                          .filter(listSize -> listSize == 5)
+                          .map(__ -> input.readUInt256Scalar())
+                          .or(Optional::empty);
+
+          final StorageSlotKey storageSlotKey = new StorageSlotKey(slotHash, slotKey);
           storageChanges.put(storageSlotKey, new DiffBasedValue<>(oldValue, newValue, isCleared));
           input.leaveList();
         }
@@ -221,25 +232,25 @@ public class TrieLogFactoryImpl implements TrieLogFactory {
 
   protected static boolean getOptionalIsCleared(final RLPInput input) {
     return Optional.of(input.isEndOfCurrentList())
-        .filter(isEnd -> !isEnd) // isCleared is optional
-        .map(__ -> nullOrValue(input, RLPInput::readInt))
-        .filter(i -> i == 1)
-        .isPresent();
+            .filter(isEnd -> !isEnd) // isCleared is optional
+            .map(__ -> nullOrValue(input, RLPInput::readInt))
+            .filter(i -> i == 1)
+            .isPresent();
   }
 
   public static <T> void writeRlp(
-      final TrieLog.LogTuple<T> value,
-      final RLPOutput output,
-      final BiConsumer<RLPOutput, T> writer) {
+          final TrieLog.LogTuple<T> value,
+          final RLPOutput output,
+          final BiConsumer<RLPOutput, T> writer) {
     output.startList();
     writeInnerRlp(value, output, writer);
     output.endList();
   }
 
   public static <T> void writeInnerRlp(
-      final TrieLog.LogTuple<T> value,
-      final RLPOutput output,
-      final BiConsumer<RLPOutput, T> writer) {
+          final TrieLog.LogTuple<T> value,
+          final RLPOutput output,
+          final BiConsumer<RLPOutput, T> writer) {
     if (value.getPrior() == null) {
       output.writeNull();
     } else {
