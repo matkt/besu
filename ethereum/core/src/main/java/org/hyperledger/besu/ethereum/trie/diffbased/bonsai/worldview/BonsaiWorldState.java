@@ -63,6 +63,8 @@ public class BonsaiWorldState extends DiffBasedWorldState {
 
   protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
 
+  private final Object PERSIST_TOKEN = new Object();
+
   public BonsaiWorldState(
       final BonsaiWorldStateProvider archive,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
@@ -153,15 +155,20 @@ public class BonsaiWorldState extends DiffBasedWorldState {
 
     // TODO write to a cache and then generate a layer update from that and the
     // DB tx updates.  Right now it is just DB updates.
-    maybeStateUpdater.ifPresent(
-        bonsaiUpdater ->
-            accountTrie.commit(
-                (location, hash, value) ->
-                    writeTrieNode(
-                        TRIE_BRANCH_STORAGE,
-                        bonsaiUpdater.getWorldStateTransaction(),
-                        location,
-                        value)));
+
+    accountTrie.commit(
+        (location, hash, value) -> {
+          maybeStateUpdater.ifPresent(
+              bonsaiUpdater -> {
+                synchronized (PERSIST_TOKEN) {
+                  writeTrieNode(
+                      TRIE_BRANCH_STORAGE,
+                      bonsaiUpdater.getWorldStateTransaction(),
+                      location,
+                      value);
+                }
+              });
+        });
     final Bytes32 rootHash = accountTrie.getRootHash();
     return Hash.wrap(rootHash);
   }
@@ -283,12 +290,15 @@ public class BonsaiWorldState extends DiffBasedWorldState {
 
       final BonsaiAccount accountUpdated = accountValue.getUpdated();
       if (accountUpdated != null) {
-        maybeStateUpdater.ifPresent(
-            bonsaiUpdater ->
-                storageTrie.commit(
-                    (location, key, value) ->
-                        writeStorageTrieNode(
-                            bonsaiUpdater, updatedAddressHash, location, key, value)));
+        storageTrie.commit(
+            (location, key, value) -> {
+              maybeStateUpdater.ifPresent(
+                  bonsaiUpdater -> {
+                    synchronized (PERSIST_TOKEN) {
+                      writeStorageTrieNode(bonsaiUpdater, updatedAddressHash, location, key, value);
+                    }
+                  });
+            });
         // only use storage root of the trie when trie is enabled
         if (!worldStateConfig.isTrieDisabled()) {
           final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
