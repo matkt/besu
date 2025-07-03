@@ -70,6 +70,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The RocksDb columnar key value storage. */
+@SuppressWarnings("unused")
 public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValueStorage {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
@@ -289,10 +290,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
                 : config.getCacheCapacity());
     return new BlockBasedTableConfig()
         .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-        .setBlockCache(cache)
+            .setBlockCache(new LRUCache(4L * 1024 * 1024 * 1024))
             .setFilterPolicy(new BloomFilter(20, false))
             .setPartitionFilters(true)
             .setCacheIndexAndFilterBlocks(true)
+            .setPinL0FilterAndIndexBlocksInCache(true)
             .setBlockSize(ROCKSDB_BLOCK_SIZE);
   }
 
