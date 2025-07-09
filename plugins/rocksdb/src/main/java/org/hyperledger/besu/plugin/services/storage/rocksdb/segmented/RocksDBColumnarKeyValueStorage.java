@@ -17,6 +17,7 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
 
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
@@ -288,15 +289,21 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             config.isHighSpec() && segment.isEligibleToHighSpecFlag()
                 ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                 : config.getCacheCapacity());
-    return new BlockBasedTableConfig()
-        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+    BlockBasedTableConfig blockBasedTableConfig = new BlockBasedTableConfig()
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
             .setBlockCache(cache)
             .setFilterPolicy(new BloomFilter(20, false))
             .setPartitionFilters(true)
             .setCacheIndexAndFilterBlocks(true)
             .setPinTopLevelIndexAndFilter(true)
             .setPinL0FilterAndIndexBlocksInCache(true)
-            .setBlockSize(16*1024);
+            .setEnableIndexCompression(false);
+    if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
+      blockBasedTableConfig.setBlockSize(128);
+    }else {
+      blockBasedTableConfig.setBlockSize(16*1024);
+    }
+    return blockBasedTableConfig;
   }
 
   /***
