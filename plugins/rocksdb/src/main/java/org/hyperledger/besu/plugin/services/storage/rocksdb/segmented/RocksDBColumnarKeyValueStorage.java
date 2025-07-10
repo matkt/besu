@@ -290,23 +290,23 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*2
+                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
-      blockBasedTableConfig.setBlockSize(128);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(15, false));
       blockBasedTableConfig.setBlockCache(cache)
-            .setPartitionFilters(false)
-              .setCacheIndexAndFilterBlocks(false);
+            .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(false)
+              .setBlockSize(ROCKSDB_BLOCK_SIZE);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
-      blockBasedTableConfig.setBlockSize(16*1024);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
       blockBasedTableConfig.setBlockCache(cache)
-              .setPartitionFilters(false)
-              .setCacheIndexAndFilterBlocks(false);
+              .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(false)
+              .setBlockSize(ROCKSDB_BLOCK_SIZE);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
@@ -316,7 +316,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(true)
               .setCacheIndexAndFilterBlocks(false)
-              .setBlockSize(16*1024);
+              .setBlockSize(ROCKSDB_BLOCK_SIZE);
     } else {
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
