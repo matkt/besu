@@ -300,7 +300,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
               .setEnableIndexCompression(false);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
-              new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*2);
+              new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC);
       blockBasedTableConfig.setBlockSize(16*1024);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
       blockBasedTableConfig.setBlockCache(cache)
