@@ -284,22 +284,39 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private BlockBasedTableConfig createBlockBasedTableConfig(
       final SegmentIdentifier segment, final RocksDBConfiguration config) {
-    final LRUCache cache =
-        new LRUCache(segment.isEligibleToHighSpecFlag()
-                ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                : config.getCacheCapacity());
+
     BlockBasedTableConfig blockBasedTableConfig = new BlockBasedTableConfig()
-            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-            .setBlockCache(cache)
-            .setFilterPolicy(new BloomFilter(20, false))
-            .setPartitionFilters(true)
-            .setCacheIndexAndFilterBlocks(true)
-            .setPinTopLevelIndexAndFilter(true)
-            .setPinL0FilterAndIndexBlocksInCache(true)
-            .setEnableIndexCompression(false);
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION);
     if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
+      final LRUCache cache =
+              new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*2);
       blockBasedTableConfig.setBlockSize(128);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
+      blockBasedTableConfig.setBlockCache(cache)
+            .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(true)
+              .setPinTopLevelIndexAndFilter(true)
+              .setPinL0FilterAndIndexBlocksInCache(true)
+              .setEnableIndexCompression(false);
+    }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
+      final LRUCache cache =
+              new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*2);
+      blockBasedTableConfig.setBlockSize(16*1024);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
+      blockBasedTableConfig.setBlockCache(cache)
+              .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(true)
+              .setPinTopLevelIndexAndFilter(true)
+              .setPinL0FilterAndIndexBlocksInCache(true)
+              .setEnableIndexCompression(false);
     }else {
+      final LRUCache cache =
+              new LRUCache(segment.isEligibleToHighSpecFlag()
+                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
+                      : config.getCacheCapacity());
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
+      blockBasedTableConfig.setCacheIndexAndFilterBlocks(false);
+      blockBasedTableConfig.setBlockCache(cache);
       blockBasedTableConfig.setBlockSize(16*1024);
     }
     return blockBasedTableConfig;
