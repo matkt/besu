@@ -293,7 +293,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
       blockBasedTableConfig.setBlockSize(128);
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(15, false));
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
             .setPartitionFilters(false)
               .setCacheIndexAndFilterBlocks(true)
@@ -305,7 +305,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
       blockBasedTableConfig.setBlockSize(16*1024);
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(false)
               .setCacheIndexAndFilterBlocks(true)
