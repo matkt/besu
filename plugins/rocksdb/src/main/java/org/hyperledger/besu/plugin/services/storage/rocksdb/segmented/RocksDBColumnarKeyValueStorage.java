@@ -292,26 +292,21 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
               new LRUCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
-      blockBasedTableConfig.setBlockSize(ROCKSDB_BLOCK_SIZE);
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(15, false));
+      blockBasedTableConfig.setBlockSize(128);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
-            .setPartitionFilters(false)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true);
+            .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(false);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                       : config.getCacheCapacity());
-      blockBasedTableConfig
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
+      blockBasedTableConfig.setBlockSize(16*1024);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
-              .setPartitionFilters(false)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true);
+              .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(false);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
@@ -320,10 +315,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
+              .setCacheIndexAndFilterBlocks(false)
+              .setBlockSize(16*1024);
     } else {
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
