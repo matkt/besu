@@ -295,10 +295,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setBlockSize(128);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(15, false));
       blockBasedTableConfig.setBlockCache(cache)
-            .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true);
+            .setPartitionFilters(false)
+              .setCacheIndexAndFilterBlocks(false);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
@@ -307,10 +305,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setBlockSize(16*1024);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
       blockBasedTableConfig.setBlockCache(cache)
-              .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true);
+              .setPartitionFilters(false)
+              .setCacheIndexAndFilterBlocks(false);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
@@ -319,9 +315,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(true)
-              .setPinTopLevelIndexAndFilter(true)
-              .setPinL0FilterAndIndexBlocksInCache(true)
+              .setCacheIndexAndFilterBlocks(false)
               .setBlockSize(16*1024);
     } else {
       final LRUCache cache =
