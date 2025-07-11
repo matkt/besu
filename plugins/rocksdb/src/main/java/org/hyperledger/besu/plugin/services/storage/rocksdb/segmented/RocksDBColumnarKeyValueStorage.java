@@ -56,6 +56,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.IndexType;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.OptionsUtil;
@@ -296,8 +297,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
             .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(false)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
+              .setBlockSize(ROCKSDB_BLOCK_SIZE)
+              .setCacheIndexAndFilterBlocks(true)
+              .setCacheIndexAndFilterBlocksWithHighPriority(true)
+              .setPinL0FilterAndIndexBlocksInCache(true)
+              .setIndexType(IndexType.kTwoLevelIndexSearch)
+              .setFilterPolicy(new BloomFilter(14, false))
+              .setMetadataBlockSize(4*4096);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
