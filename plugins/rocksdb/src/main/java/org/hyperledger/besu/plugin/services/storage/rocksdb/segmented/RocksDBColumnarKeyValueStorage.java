@@ -228,6 +228,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     final var options =
         new ColumnFamilyOptions()
             .setTtl(0)
+                .setTargetFileSizeBase(128)
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
@@ -247,7 +248,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         .setEnableBlobGarbageCollection(
             isStaticDataGarbageCollectionEnabled(segment, configuration))
         .setMinBlobSize(100)
-            .setTargetFileSizeBase(128)
         .setBlobCompressionType(CompressionType.LZ4_COMPRESSION);
     if (configuration.getBlobGarbageCollectionAgeCutoff().isPresent()) {
       // fraction of file age to be considered eligible for GC;
