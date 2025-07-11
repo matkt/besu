@@ -56,6 +56,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.HyperClockCache;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.OptionsUtil;
@@ -288,40 +289,41 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     BlockBasedTableConfig blockBasedTableConfig = new BlockBasedTableConfig()
             .setFormatVersion(ROCKSDB_FORMAT_VERSION);
     if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
+      final HyperClockCache cache =
+              new HyperClockCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(15, false));
+                      : config.getCacheCapacity(), 0, 6, false);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
             .setPartitionFilters(true)
               .setCacheIndexAndFilterBlocks(false)
               .setBlockSize(ROCKSDB_BLOCK_SIZE);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
+      final HyperClockCache cache =
+              new HyperClockCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(12, false));
+                      : config.getCacheCapacity(), 0, 6, false);
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(true)
               .setCacheIndexAndFilterBlocks(false)
               .setBlockSize(ROCKSDB_BLOCK_SIZE);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
+      final HyperClockCache cache =
+              new HyperClockCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
+                      : config.getCacheCapacity(), 0, 6, false);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
               .setPartitionFilters(true)
               .setCacheIndexAndFilterBlocks(false)
               .setBlockSize(ROCKSDB_BLOCK_SIZE);
     } else {
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
+
+      final HyperClockCache cache =
+              new HyperClockCache(segment.isEligibleToHighSpecFlag()
                       ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
+                      : config.getCacheCapacity(), 0, 6, false);
       blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
       blockBasedTableConfig.setBlockCache(cache)
       .setPartitionFilters(true)
