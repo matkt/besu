@@ -229,7 +229,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     final var options =
         new ColumnFamilyOptions()
             .setTtl(0)
-                .setTargetFileSizeBase(128)
+                .setTargetFileSizeBase(256)
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
@@ -292,18 +292,15 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
+                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*3
                       : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
+      blockBasedTableConfig.setFilterPolicy(new BloomFilter(8, false));
       blockBasedTableConfig.setBlockCache(cache)
             .setPartitionFilters(true)
               .setBlockSize(ROCKSDB_BLOCK_SIZE)
               .setCacheIndexAndFilterBlocks(true)
               .setCacheIndexAndFilterBlocksWithHighPriority(true)
-              .setPinL0FilterAndIndexBlocksInCache(true)
-              .setIndexType(IndexType.kTwoLevelIndexSearch)
-              .setFilterPolicy(new BloomFilter(14, false))
-              .setMetadataBlockSize(4*4096);
+              .setPinL0FilterAndIndexBlocksInCache(true);
     }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
       final LRUCache cache =
               new LRUCache(segment.isEligibleToHighSpecFlag()
