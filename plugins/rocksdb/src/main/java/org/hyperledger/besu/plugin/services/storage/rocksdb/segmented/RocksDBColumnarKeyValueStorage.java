@@ -308,7 +308,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCreateIfMissing(true)
             .setMaxOpenFiles(configuration.getMaxOpenFiles())
             .setStatistics(stats)
-            //.setAvoidUnnecessaryBlockingIO(true)
+            .setAvoidUnnecessaryBlockingIO(true)
             //.setAdviseRandomOnOpen(true)
             //.setIncreaseParallelism(Runtime.getRuntime().availableProcessors()*4)
             //.setMaxBackgroundJobs(Runtime.getRuntime().availableProcessors()*4)
