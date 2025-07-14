@@ -312,6 +312,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setAvoidUnnecessaryBlockingIO(true)
             .setParanoidChecks(false)
             .setAdviseRandomOnOpen(true)
+            .setBytesPerSync(1026*16)
             .setRowCache(new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC))
             .setCreateMissingColumnFamilies(true)
             .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
