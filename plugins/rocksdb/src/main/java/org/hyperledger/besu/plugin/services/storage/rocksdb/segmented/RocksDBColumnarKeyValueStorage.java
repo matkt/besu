@@ -312,7 +312,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setAdviseRandomOnOpen(true)
             .setIncreaseParallelism(Runtime.getRuntime().availableProcessors()*4)
             .setMaxBackgroundJobs(Runtime.getRuntime().availableProcessors()*4)
-            .setRowCache(new LRUCache(256 * 1024 * 1024))
+            //.setRowCache(new LRUCache(256 * 1024 * 1024))
             .setCreateMissingColumnFamilies(true)
             .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
             .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
