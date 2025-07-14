@@ -17,6 +17,8 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
 
+import org.apache.tuweni.units.bigints.UInt256;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
@@ -303,6 +305,10 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @param stats The statistics object
    */
   private void setGlobalOptions(final RocksDBConfiguration configuration, final Statistics stats) {
+    for (int i = 0; i < 10; i++) {
+      System.out.println(i+" "+ Hash.hash(UInt256.valueOf(i)));
+    }
+
     options = new DBOptions();
     System.out.println("rocjsdb "+options.bytesPerSync());
     options
