@@ -17,7 +17,6 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
 
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
@@ -56,7 +55,6 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
-import org.rocksdb.IndexType;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.OptionsUtil;
@@ -72,7 +70,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The RocksDb columnar key value storage. */
-@SuppressWarnings("unused")
 public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValueStorage {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
@@ -102,7 +99,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   protected final AtomicBoolean closed = new AtomicBoolean(false);
 
   private final WriteOptions tryDeleteOptions =
-      new WriteOptions().setNoSlowdown(true).setIgnoreMissingColumnFamilies(true);
+          new WriteOptions().setNoSlowdown(true).setIgnoreMissingColumnFamilies(true);
   private final ReadOptions readOptions = new ReadOptions().setVerifyChecksums(false);
   private final MetricsSystem metricsSystem;
   private final RocksDBMetricsFactory rocksDBMetricsFactory;
@@ -145,12 +142,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @throws StorageException the storage exception
    */
   public RocksDBColumnarKeyValueStorage(
-      final RocksDBConfiguration configuration,
-      final List<SegmentIdentifier> defaultSegments,
-      final List<SegmentIdentifier> ignorableSegments,
-      final MetricsSystem metricsSystem,
-      final RocksDBMetricsFactory rocksDBMetricsFactory)
-      throws StorageException {
+          final RocksDBConfiguration configuration,
+          final List<SegmentIdentifier> defaultSegments,
+          final List<SegmentIdentifier> ignorableSegments,
+          final MetricsSystem metricsSystem,
+          final RocksDBMetricsFactory rocksDBMetricsFactory)
+          throws StorageException {
 
     this.configuration = configuration;
     this.metricsSystem = metricsSystem;
@@ -159,18 +156,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     try {
       trimmedSegments = new ArrayList<>(defaultSegments);
       final List<byte[]> existingColumnFamilies =
-          RocksDB.listColumnFamilies(new Options(), configuration.getDatabaseDir().toString());
+              RocksDB.listColumnFamilies(new Options(), configuration.getDatabaseDir().toString());
       // Only ignore if not existed currently
       ignorableSegments.stream()
-          .filter(
-              ignorableSegment ->
-                  existingColumnFamilies.stream()
-                      .noneMatch(existed -> Arrays.equals(existed, ignorableSegment.getId())))
-          .forEach(trimmedSegments::remove);
+              .filter(
+                      ignorableSegment ->
+                              existingColumnFamilies.stream()
+                                      .noneMatch(existed -> Arrays.equals(existed, ignorableSegment.getId())))
+              .forEach(trimmedSegments::remove);
       columnDescriptors =
-          trimmedSegments.stream()
-              .map(segment -> createColumnDescriptor(segment, configuration))
-              .collect(Collectors.toList());
+              trimmedSegments.stream()
+                      .map(segment -> createColumnDescriptor(segment, configuration))
+                      .collect(Collectors.toList());
 
       setGlobalOptions(configuration, stats);
 
@@ -190,7 +187,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @return a column family descriptor
    */
   private ColumnFamilyDescriptor createColumnDescriptor(
-      final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
+          final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
     boolean dynamicLevelBytes = true;
     try {
       ConfigOptions configOptions = new ConfigOptions();
@@ -198,12 +195,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       List<ColumnFamilyDescriptor> cfDescriptors = new ArrayList<>();
 
       String latestOptionsFileName =
-          OptionsUtil.getLatestOptionsFileName(
-              configuration.getDatabaseDir().toString(), Env.getDefault());
+              OptionsUtil.getLatestOptionsFileName(
+                      configuration.getDatabaseDir().toString(), Env.getDefault());
       LOG.trace("Latest OPTIONS file detected: " + latestOptionsFileName);
 
       String optionsFilePath =
-          configuration.getDatabaseDir().toString() + "/" + latestOptionsFileName;
+              configuration.getDatabaseDir().toString() + "/" + latestOptionsFileName;
       OptionsUtil.loadOptionsFromFile(configOptions, optionsFilePath, dbOptions, cfDescriptors);
 
       LOG.trace("RocksDB options loaded successfully from: " + optionsFilePath);
@@ -227,12 +224,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     BlockBasedTableConfig basedTableConfig = createBlockBasedTableConfig(segment, configuration);
 
     final var options =
-        new ColumnFamilyOptions()
-            .setTtl(0)
-                .setTargetFileSizeBase(256)
-            .setCompressionType(CompressionType.LZ4_COMPRESSION)
-            .setTableFormatConfig(basedTableConfig)
-            .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
+            new ColumnFamilyOptions()
+                    .setTtl(0)
+                    .setCompressionType(CompressionType.LZ4_COMPRESSION)
+                    .setTableFormatConfig(basedTableConfig)
+                    .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, options);
     }
@@ -241,35 +237,35 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   private static void configureBlobDBForSegment(
-      final SegmentIdentifier segment,
-      final RocksDBConfiguration configuration,
-      final ColumnFamilyOptions options) {
+          final SegmentIdentifier segment,
+          final RocksDBConfiguration configuration,
+          final ColumnFamilyOptions options) {
     options
-        .setEnableBlobFiles(true)
-        .setEnableBlobGarbageCollection(
-            isStaticDataGarbageCollectionEnabled(segment, configuration))
-        .setMinBlobSize(100)
-        .setBlobCompressionType(CompressionType.LZ4_COMPRESSION);
+            .setEnableBlobFiles(true)
+            .setEnableBlobGarbageCollection(
+                    isStaticDataGarbageCollectionEnabled(segment, configuration))
+            .setMinBlobSize(100)
+            .setBlobCompressionType(CompressionType.LZ4_COMPRESSION);
     if (configuration.getBlobGarbageCollectionAgeCutoff().isPresent()) {
       // fraction of file age to be considered eligible for GC;
       // 0.25 = oldest 25% of files eligible;
       // 1 = all files eligible
       options.setBlobGarbageCollectionAgeCutoff(
-          configuration.getBlobGarbageCollectionAgeCutoff().get());
+              configuration.getBlobGarbageCollectionAgeCutoff().get());
     }
     if (configuration.getBlobGarbageCollectionForceThreshold().isPresent()) {
       // fraction of garbage in eligible blob files to trigger GC;
       // 1 = trigger when eligible file contains 100% garbage;
       // 0 = trigger for all eligible files;
       options.setBlobGarbageCollectionForceThreshold(
-          configuration.getBlobGarbageCollectionForceThreshold().get());
+              configuration.getBlobGarbageCollectionForceThreshold().get());
     }
   }
 
   private static boolean isStaticDataGarbageCollectionEnabled(
-      final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
+          final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
     if (BLOCKCHAIN.getName().equals(segment.getName())
-        && configuration.isBlockchainGarbageCollectionEnabled()) {
+            && configuration.isBlockchainGarbageCollectionEnabled()) {
       return true;
     } else {
       return segment.isStaticDataGarbageCollectionEnabled();
@@ -285,54 +281,19 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @return Block Base Table configuration
    */
   private BlockBasedTableConfig createBlockBasedTableConfig(
-      final SegmentIdentifier segment, final RocksDBConfiguration config) {
-
-    BlockBasedTableConfig blockBasedTableConfig = new BlockBasedTableConfig()
-            .setFormatVersion(ROCKSDB_FORMAT_VERSION);
-    if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*3
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(8, false));
-      blockBasedTableConfig.setBlockCache(cache)
+          final SegmentIdentifier segment, final RocksDBConfiguration config) {
+    final LRUCache cache =
+            new LRUCache(
+                    config.isHighSpec() && segment.isEligibleToHighSpecFlag()
+                            ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
+                            : config.getCacheCapacity());
+    return new BlockBasedTableConfig()
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+            .setBlockCache(cache)
+            .setFilterPolicy(new BloomFilter(10, false))
             .setPartitionFilters(true)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE)
-              .setCacheIndexAndFilterBlocks(true)
-              .setCacheIndexAndFilterBlocksWithHighPriority(true)
-              .setPinL0FilterAndIndexBlocksInCache(true);
-    }else if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
-      blockBasedTableConfig.setBlockCache(cache)
-              .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(false)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
-    }else if(segment.getName().equals(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE.getName())){
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
-      blockBasedTableConfig.setBlockCache(cache)
-              .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(false)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
-    } else {
-      final LRUCache cache =
-              new LRUCache(segment.isEligibleToHighSpecFlag()
-                      ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                      : config.getCacheCapacity());
-      blockBasedTableConfig.setFilterPolicy(new BloomFilter(10, false));
-      blockBasedTableConfig.setBlockCache(cache)
-      .setPartitionFilters(true)
-              .setCacheIndexAndFilterBlocks(false)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
-    }
-    return blockBasedTableConfig;
+            .setCacheIndexAndFilterBlocks(false)
+            .setBlockSize(ROCKSDB_BLOCK_SIZE);
   }
 
   /***
@@ -344,15 +305,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private void setGlobalOptions(final RocksDBConfiguration configuration, final Statistics stats) {
     options = new DBOptions();
     options
-        .setCreateIfMissing(true)
-        .setMaxOpenFiles(configuration.getMaxOpenFiles())
-        .setStatistics(stats)
-        .setCreateMissingColumnFamilies(true)
-        .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
-        .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
-        .setEnv(Env.getDefault().setBackgroundThreads(configuration.getBackgroundThreadCount()))
-        .setMaxTotalWalSize(WAL_MAX_TOTAL_SIZE)
-        .setRecycleLogFileNum(WAL_MAX_TOTAL_SIZE / EXPECTED_WAL_FILE_SIZE);
+            .setUseDirectReads(true)
+            .setUseDirectIoForFlushAndCompaction(true)
+            .setCreateIfMissing(true)
+            .setMaxOpenFiles(configuration.getMaxOpenFiles())
+            .setStatistics(stats)
+            .setCreateMissingColumnFamilies(true)
+            .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
+            .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
+            .setEnv(Env.getDefault().setBackgroundThreads(configuration.getBackgroundThreadCount()))
+            .setMaxTotalWalSize(WAL_MAX_TOTAL_SIZE)
+            .setRecycleLogFileNum(WAL_MAX_TOTAL_SIZE / EXPECTED_WAL_FILE_SIZE);
   }
 
   /**
@@ -364,12 +327,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @return StorageException wrapping the RocksDB Exception
    */
   protected static StorageException parseRocksDBException(
-      final RocksDBException ex,
-      final List<SegmentIdentifier> defaultSegments,
-      final List<SegmentIdentifier> ignorableSegments) {
+          final RocksDBException ex,
+          final List<SegmentIdentifier> defaultSegments,
+          final List<SegmentIdentifier> ignorableSegments) {
     String message = ex.getMessage();
     List<SegmentIdentifier> knownSegments =
-        Streams.concat(defaultSegments.stream(), ignorableSegments.stream()).distinct().toList();
+            Streams.concat(defaultSegments.stream(), ignorableSegments.stream()).distinct().toList();
 
     // parse out unprintable segment names for a more useful exception:
     String columnExceptionMessagePrefix = "Column families not opened: ";
@@ -378,23 +341,23 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
       List<String> unHandledSegments = new ArrayList<>();
       Splitter.on(", ")
-          .splitToStream(substring)
-          .forEach(
-              part -> {
-                byte[] bytes = part.getBytes(StandardCharsets.UTF_8);
-                unHandledSegments.add(
-                    knownSegments.stream()
-                        .filter(seg -> Arrays.equals(seg.getId(), bytes))
-                        .findFirst()
-                        .map(seg -> new SegmentRecord(seg.getName(), seg.getId()))
-                        .orElse(new SegmentRecord(part, bytes))
-                        .forDisplay());
-              });
+              .splitToStream(substring)
+              .forEach(
+                      part -> {
+                        byte[] bytes = part.getBytes(StandardCharsets.UTF_8);
+                        unHandledSegments.add(
+                                knownSegments.stream()
+                                        .filter(seg -> Arrays.equals(seg.getId(), bytes))
+                                        .findFirst()
+                                        .map(seg -> new SegmentRecord(seg.getName(), seg.getId()))
+                                        .orElse(new SegmentRecord(part, bytes))
+                                        .forDisplay());
+                      });
 
       return new StorageException(
-          "RocksDBException: Unhandled column families: ["
-              + unHandledSegments.stream().collect(Collectors.joining(", "))
-              + "]");
+              "RocksDBException: Unhandled column families: ["
+                      + unHandledSegments.stream().collect(Collectors.joining(", "))
+                      + "]");
     } else {
       return new StorageException(ex);
     }
@@ -407,29 +370,29 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   void initColumnHandles() throws RocksDBException {
     // will not include the DEFAULT columnHandle, we do not use it:
     columnHandlesBySegmentIdentifier =
-        trimmedSegments.stream()
-            .collect(
-                Collectors.toMap(
-                    segmentId -> segmentId,
-                    segment -> {
-                      var columnHandle =
-                          columnHandles.stream()
-                              .filter(
-                                  ch -> {
-                                    try {
-                                      return Arrays.equals(ch.getName(), segment.getId());
-                                    } catch (RocksDBException e) {
-                                      throw new RuntimeException(e);
-                                    }
-                                  })
-                              .findFirst()
-                              .orElseThrow(
-                                  () ->
-                                      new RuntimeException(
-                                          "Column handle not found for segment "
-                                              + segment.getName()));
-                      return new RocksDbSegmentIdentifier(getDB(), columnHandle);
-                    }));
+            trimmedSegments.stream()
+                    .collect(
+                            Collectors.toMap(
+                                    segmentId -> segmentId,
+                                    segment -> {
+                                      var columnHandle =
+                                              columnHandles.stream()
+                                                      .filter(
+                                                              ch -> {
+                                                                try {
+                                                                  return Arrays.equals(ch.getName(), segment.getId());
+                                                                } catch (RocksDBException e) {
+                                                                  throw new RuntimeException(e);
+                                                                }
+                                                              })
+                                                      .findFirst()
+                                                      .orElseThrow(
+                                                              () ->
+                                                                      new RuntimeException(
+                                                                              "Column handle not found for segment "
+                                                                                      + segment.getName()));
+                                      return new RocksDbSegmentIdentifier(getDB(), columnHandle);
+                                    }));
   }
 
   /**
@@ -448,7 +411,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   @Override
   public Optional<byte[]> get(final SegmentIdentifier segment, final byte[] key)
-      throws StorageException {
+          throws StorageException {
     throwIfClosed();
 
     try (final OperationTimer.TimingContext ignored = metrics.getReadLatency().startTimer()) {
@@ -460,27 +423,27 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   @Override
   public Optional<NearestKeyValue> getNearestBefore(
-      final SegmentIdentifier segmentIdentifier, final Bytes key) throws StorageException {
+          final SegmentIdentifier segmentIdentifier, final Bytes key) throws StorageException {
 
     try (final RocksIterator rocksIterator =
-        getDB().newIterator(safeColumnHandle(segmentIdentifier))) {
+                 getDB().newIterator(safeColumnHandle(segmentIdentifier))) {
       rocksIterator.seekForPrev(key.toArrayUnsafe());
       return Optional.of(rocksIterator)
-          .filter(AbstractRocksIterator::isValid)
-          .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
+              .filter(AbstractRocksIterator::isValid)
+              .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
     }
   }
 
   @Override
   public Optional<NearestKeyValue> getNearestAfter(
-      final SegmentIdentifier segmentIdentifier, final Bytes key) throws StorageException {
+          final SegmentIdentifier segmentIdentifier, final Bytes key) throws StorageException {
 
     try (final RocksIterator rocksIterator =
-        getDB().newIterator(safeColumnHandle(segmentIdentifier))) {
+                 getDB().newIterator(safeColumnHandle(segmentIdentifier))) {
       rocksIterator.seek(key.toArrayUnsafe());
       return Optional.of(rocksIterator)
-          .filter(AbstractRocksIterator::isValid)
-          .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
+              .filter(AbstractRocksIterator::isValid)
+              .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
     }
   }
 
@@ -493,7 +456,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   @Override
   public Stream<Pair<byte[], byte[]>> streamFromKey(
-      final SegmentIdentifier segmentIdentifier, final byte[] startKey) {
+          final SegmentIdentifier segmentIdentifier, final byte[] startKey) {
     final RocksIterator rocksIterator = getDB().newIterator(safeColumnHandle(segmentIdentifier));
     rocksIterator.seek(startKey);
     return RocksDbIterator.create(rocksIterator).toStream();
@@ -501,13 +464,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   @Override
   public Stream<Pair<byte[], byte[]>> streamFromKey(
-      final SegmentIdentifier segmentIdentifier, final byte[] startKey, final byte[] endKey) {
+          final SegmentIdentifier segmentIdentifier, final byte[] startKey, final byte[] endKey) {
     final Bytes endKeyBytes = Bytes.wrap(endKey);
     final RocksIterator rocksIterator = getDB().newIterator(safeColumnHandle(segmentIdentifier));
     rocksIterator.seek(startKey);
     return RocksDbIterator.create(rocksIterator)
-        .toStream()
-        .takeWhile(e -> endKeyBytes.compareTo(Bytes.wrap(e.getKey())) >= 0);
+            .toStream()
+            .takeWhile(e -> endKeyBytes.compareTo(Bytes.wrap(e.getKey())) >= 0);
   }
 
   @Override
@@ -533,26 +496,26 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   @Override
   public Set<byte[]> getAllKeysThat(
-      final SegmentIdentifier segmentIdentifier, final Predicate<byte[]> returnCondition) {
+          final SegmentIdentifier segmentIdentifier, final Predicate<byte[]> returnCondition) {
     return stream(segmentIdentifier)
-        .filter(pair -> returnCondition.test(pair.getKey()))
-        .map(Pair::getKey)
-        .collect(toUnmodifiableSet());
+            .filter(pair -> returnCondition.test(pair.getKey()))
+            .map(Pair::getKey)
+            .collect(toUnmodifiableSet());
   }
 
   @Override
   public Set<byte[]> getAllValuesFromKeysThat(
-      final SegmentIdentifier segmentIdentifier, final Predicate<byte[]> returnCondition) {
+          final SegmentIdentifier segmentIdentifier, final Predicate<byte[]> returnCondition) {
     return stream(segmentIdentifier)
-        .filter(pair -> returnCondition.test(pair.getKey()))
-        .map(Pair::getValue)
-        .collect(toUnmodifiableSet());
+            .filter(pair -> returnCondition.test(pair.getKey()))
+            .map(Pair::getValue)
+            .collect(toUnmodifiableSet());
   }
 
   @Override
   public void clear(final SegmentIdentifier segmentIdentifier) {
     Optional.ofNullable(columnHandlesBySegmentIdentifier.get(segmentIdentifier))
-        .ifPresent(RocksDbSegmentIdentifier::reset);
+            .ifPresent(RocksDbSegmentIdentifier::reset);
   }
 
   @Override
@@ -562,8 +525,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       options.close();
       tryDeleteOptions.close();
       columnHandlesBySegmentIdentifier.values().stream()
-          .map(RocksDbSegmentIdentifier::get)
-          .forEach(ColumnFamilyHandle::close);
+              .map(RocksDbSegmentIdentifier::get)
+              .forEach(ColumnFamilyHandle::close);
       getDB().close();
     }
   }
