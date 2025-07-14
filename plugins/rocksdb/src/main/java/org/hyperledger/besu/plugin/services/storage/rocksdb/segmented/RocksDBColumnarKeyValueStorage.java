@@ -305,11 +305,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private void setGlobalOptions(final RocksDBConfiguration configuration, final Statistics stats) {
     options = new DBOptions();
     options
-            .setUseDirectReads(true)
-            .setUseDirectIoForFlushAndCompaction(true)
             .setCreateIfMissing(true)
             .setMaxOpenFiles(configuration.getMaxOpenFiles())
             .setStatistics(stats)
+            .setAvoidUnnecessaryBlockingIO(true)
+            .setAdviseRandomOnOpen(true)
+            .setIncreaseParallelism(100)
             .setCreateMissingColumnFamilies(true)
             .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
             .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
