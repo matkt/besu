@@ -304,6 +304,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private void setGlobalOptions(final RocksDBConfiguration configuration, final Statistics stats) {
     options = new DBOptions();
+    System.out.println("rocjsdb "+options.bytesPerSync());
     options
             .setCreateIfMissing(true)
             .setMaxOpenFiles(configuration.getMaxOpenFiles())
@@ -311,9 +312,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setAvoidUnnecessaryBlockingIO(true)
             .setParanoidChecks(false)
             .setAdviseRandomOnOpen(true)
-            //.setIncreaseParallelism(Runtime.getRuntime().availableProcessors())
-            //.setMaxBackgroundJobs(Runtime.getRuntime().availableProcessors()*2)
-            .setRowCache(new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC/2))
+            .setRowCache(new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC))
             .setCreateMissingColumnFamilies(true)
             .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
             .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
