@@ -14,9 +14,11 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat;
 
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_HOT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.getContractSlotColumn;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -94,7 +96,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Hash slotHash,
       final Bytes storageValue) {
     transaction.put(
-        ACCOUNT_STORAGE_STORAGE,
+        getContractSlotColumn(accountHash),
         Bytes.concatenate(accountHash, slotHash).toArrayUnsafe(),
         storageValue.toArrayUnsafe());
   }
@@ -106,13 +108,15 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Hash accountHash,
       final Hash slotHash) {
     transaction.remove(
-        ACCOUNT_STORAGE_STORAGE, Bytes.concatenate(accountHash, slotHash).toArrayUnsafe());
+        getContractSlotColumn(accountHash),
+        Bytes.concatenate(accountHash, slotHash).toArrayUnsafe());
   }
 
   @Override
   public void clearAll(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
     storage.clear(ACCOUNT_STORAGE_STORAGE);
+    storage.clear(ACCOUNT_HOT_STORAGE_STORAGE);
     storage.clear(CODE_STORAGE);
   }
 
@@ -120,6 +124,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
   public void resetOnResync(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
     storage.clear(ACCOUNT_STORAGE_STORAGE);
+    storage.clear(ACCOUNT_HOT_STORAGE_STORAGE);
   }
 
   @Override
@@ -131,7 +136,8 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
 
     return storage
         .streamFromKey(
-            ACCOUNT_STORAGE_STORAGE, Bytes.concatenate(accountHash, startKeyHash).toArrayUnsafe())
+            getContractSlotColumn(accountHash),
+            Bytes.concatenate(accountHash, startKeyHash).toArrayUnsafe())
         .takeWhile(pair -> Bytes.wrap(pair.getKey()).slice(0, Hash.SIZE).equals(accountHash))
         .map(
             pair ->
@@ -150,7 +156,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
 
     return storage
         .streamFromKey(
-            ACCOUNT_STORAGE_STORAGE,
+            getContractSlotColumn(accountHash),
             Bytes.concatenate(accountHash, startKeyHash).toArrayUnsafe(),
             Bytes.concatenate(accountHash, endKeyHash).toArrayUnsafe())
         .map(

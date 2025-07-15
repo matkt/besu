@@ -62,8 +62,8 @@ public class SLoadOperation extends AbstractOperation {
         return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
       } else {
         UInt256 storageValue = account.getStorageValue(UInt256.fromBytes(key));
-        if(storageValue.isZero()){
-          System.out.println(account.getAddress()+" "+key);
+        if (storageValue.isZero()) {
+          System.out.println(account.getAddress() + " " + key);
         }
         frame.pushStackItem(storageValue);
 

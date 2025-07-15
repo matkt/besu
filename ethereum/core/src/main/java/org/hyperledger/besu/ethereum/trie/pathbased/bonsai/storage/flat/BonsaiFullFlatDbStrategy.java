@@ -15,10 +15,10 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
@@ -83,7 +83,7 @@ public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
     final Optional<Bytes> storageFound =
         storage
             .get(
-                ACCOUNT_STORAGE_STORAGE,
+                KeyValueSegmentIdentifier.getContractSlotColumn(accountHash),
                 Bytes.concatenate(accountHash, storageSlotKey.getSlotHash()).toArrayUnsafe())
             .map(Bytes::wrap);
     if (storageFound.isPresent()) {
