@@ -229,7 +229,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         new ColumnFamilyOptions()
             .setTtl(0)
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                .setMaxBytesForLevelBase(512 * 1024 * 1024)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
     if (segment.containsStaticData()) {
@@ -295,7 +294,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         .setBlockCache(cache)
         .setFilterPolicy(new BloomFilter(10, false))
         .setPartitionFilters(true)
-        .setCacheIndexAndFilterBlocks(false)
+        .setCacheIndexAndFilterBlocks(true)
+            .setPinL0FilterAndIndexBlocksInCache(true)
+            .setCacheIndexAndFilterBlocksWithHighPriority(true)
         .setBlockSize(ROCKSDB_BLOCK_SIZE);
   }
 
