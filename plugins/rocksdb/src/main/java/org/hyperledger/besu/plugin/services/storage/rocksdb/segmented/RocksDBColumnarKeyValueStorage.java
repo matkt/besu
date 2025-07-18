@@ -15,9 +15,11 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
@@ -57,6 +59,8 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.HyperClockCache;
+import org.rocksdb.IndexType;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.OptionsUtil;
@@ -231,6 +235,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
+    if(segment.getName().equals(ACCOUNT_STORAGE_STORAGE.getName())){
+      options.useFixedLengthPrefixExtractor(Hash.SIZE);
+    }
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, options);
     }
@@ -289,15 +296,32 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             config.isHighSpec() && segment.isEligibleToHighSpecFlag()
                 ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
                 : config.getCacheCapacity());
-    return new BlockBasedTableConfig()
-        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-        .setBlockCache(cache)
-        .setFilterPolicy(new BloomFilter(10, false))
-        .setPartitionFilters(true)
-        .setCacheIndexAndFilterBlocks(true)
-            .setPinL0FilterAndIndexBlocksInCache(true)
-            .setCacheIndexAndFilterBlocksWithHighPriority(true)
-        .setBlockSize(ROCKSDB_BLOCK_SIZE);
+
+    if(segment.getName().equals(KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE.getName())) {
+      return new BlockBasedTableConfig()
+              .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+              .setBlockCache(cache)
+              .setFilterPolicy(new BloomFilter(10, false))
+              .setPartitionFilters(true)
+              .setCacheIndexAndFilterBlocks(true)
+              .setPinL0FilterAndIndexBlocksInCache(true)
+              .setCacheIndexAndFilterBlocksWithHighPriority(true)
+              .setWholeKeyFiltering(false)
+              .setIndexType(IndexType.kHashSearch)
+              .setBlockSize(ROCKSDB_BLOCK_SIZE);
+    }else{
+         return new BlockBasedTableConfig()
+                .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+                .setBlockCache(cache)
+                .setFilterPolicy(new BloomFilter(10, false))
+                .setPartitionFilters(true)
+                .setCacheIndexAndFilterBlocks(true)
+                .setPinL0FilterAndIndexBlocksInCache(true)
+                .setCacheIndexAndFilterBlocksWithHighPriority(true)
+                .setBlockSize(ROCKSDB_BLOCK_SIZE);
+    }
+
+
   }
 
   /***

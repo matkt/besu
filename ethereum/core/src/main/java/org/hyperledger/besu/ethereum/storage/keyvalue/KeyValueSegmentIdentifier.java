@@ -66,9 +66,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   BACKWARD_SYNC_CHAIN(new byte[] {15}),
   SNAPSYNC_MISSING_ACCOUNT_RANGE(new byte[] {16}),
   SNAPSYNC_ACCOUNT_TO_FIX(new byte[] {17}),
-  CHAIN_PRUNER_STATE(new byte[] {18}),
-  ACCOUNT_HOT_STORAGE_STORAGE(
-      new byte[] {19}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE), false, true, false);
+  CHAIN_PRUNER_STATE(new byte[] {18});
 
   private static final List<Hash> HOT_CONTRACTS = new ArrayList<>();
   static {
@@ -149,8 +147,6 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   }
 
   public static KeyValueSegmentIdentifier getContractSlotColumn(final Hash accountHash) {
-    return HOT_CONTRACTS.contains(accountHash)
-        ? ACCOUNT_HOT_STORAGE_STORAGE
-        : ACCOUNT_STORAGE_STORAGE;
+    return ACCOUNT_STORAGE_STORAGE;
   }
 }

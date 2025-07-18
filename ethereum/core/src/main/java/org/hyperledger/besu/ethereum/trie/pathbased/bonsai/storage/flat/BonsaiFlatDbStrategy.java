@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat;
 
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_HOT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
@@ -116,7 +115,6 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
   public void clearAll(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
     storage.clear(ACCOUNT_STORAGE_STORAGE);
-    storage.clear(ACCOUNT_HOT_STORAGE_STORAGE);
     storage.clear(CODE_STORAGE);
   }
 
@@ -124,7 +122,6 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
   public void resetOnResync(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
     storage.clear(ACCOUNT_STORAGE_STORAGE);
-    storage.clear(ACCOUNT_HOT_STORAGE_STORAGE);
   }
 
   @Override
