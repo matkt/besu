@@ -309,6 +309,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         .setMaxOpenFiles(configuration.getMaxOpenFiles())
         .setStatistics(stats)
         .setCreateMissingColumnFamilies(true)
+        .setRowCache(new LRUCache(ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC))
         .setLogFileTimeToRoll(TIME_TO_ROLL_LOG_FILE)
         .setKeepLogFileNum(NUMBER_OF_LOG_FILES_TO_KEEP)
         .setEnv(Env.getDefault().setBackgroundThreads(configuration.getBackgroundThreadCount()))
