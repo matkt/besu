@@ -235,9 +235,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
-    if(segment.getName().equals(ACCOUNT_STORAGE_STORAGE.getName())){
-      options.useFixedLengthPrefixExtractor(Hash.SIZE);
-    }
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, options);
     }
@@ -306,9 +303,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
               .setCacheIndexAndFilterBlocks(true)
               .setPinL0FilterAndIndexBlocksInCache(true)
               .setCacheIndexAndFilterBlocksWithHighPriority(true)
-              .setWholeKeyFiltering(false)
               .setIndexType(IndexType.kHashSearch)
-              .setBlockSize(ROCKSDB_BLOCK_SIZE);
+              .setBlockSize(ROCKSDB_BLOCK_SIZE/4);
     }else{
          return new BlockBasedTableConfig()
                 .setFormatVersion(ROCKSDB_FORMAT_VERSION)
