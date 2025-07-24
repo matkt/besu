@@ -14,7 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.referencetests;
 
-import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createVerkleInMemoryWorldStateArchive;
+import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -65,7 +65,7 @@ public class VerkleReferenceTestCaseSpec implements BlockchainReferenceTestCase 
       final Map<String, ReferenceTestWorldState.AccountMock> accounts,
       final MutableBlockchain blockchain,
       final BlockHeader genesis) {
-    final WorldStateArchive worldStateArchive = createVerkleInMemoryWorldStateArchive(blockchain);
+    final WorldStateArchive worldStateArchive = createBinTrieInMemoryWorldStateArchive(blockchain);
 
     final MutableWorldState worldState = worldStateArchive.getWorldState();
     final WorldUpdater updater = worldState.updater();

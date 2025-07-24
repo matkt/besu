@@ -27,23 +27,23 @@ import com.google.common.annotations.VisibleForTesting;
 public class ExecutionWitnessParameter {
 
   private final StateDiffParameter stateDiffParameter;
-  private final VerkleProofParameter verkleProofParameter;
+  private final BinTrieProofParameter binTrieProofParameter;
   private final Hash parentStateRoot;
 
   @VisibleForTesting
   public ExecutionWitnessParameter() {
     this.stateDiffParameter = null;
-    this.verkleProofParameter = null;
+    this.binTrieProofParameter = null;
     this.parentStateRoot = null;
   }
 
   @JsonCreator
   public ExecutionWitnessParameter(
       @JsonProperty("stateDiff") final StateDiffParameter stateDiff,
-      @JsonProperty("verkleProof") final VerkleProofParameter verkleProof,
+      @JsonProperty("verkleProof") final BinTrieProofParameter binTrieProof,
       @JsonProperty("parentStateRoot") final Hash parentStateRoot) {
     this.stateDiffParameter = stateDiff;
-    this.verkleProofParameter = verkleProof;
+    this.binTrieProofParameter = binTrieProof;
     this.parentStateRoot = parentStateRoot;
   }
 
@@ -51,14 +51,14 @@ public class ExecutionWitnessParameter {
       final ExecutionWitness executionWitness) {
     return new ExecutionWitnessParameter(
         StateDiffParameter.fromStateDiff(executionWitness.getStateDiff()),
-        VerkleProofParameter.fromVerkleProof(executionWitness.getVerkleProof()),
+        BinTrieProofParameter.fromBinTrieProof(executionWitness.getBinTrieProof()),
         executionWitness.getParentStateRoot());
   }
 
   public ExecutionWitness toExecutionWitness() {
     return new ExecutionWitness(
         StateDiffParameter.toStateDiff(stateDiffParameter),
-        VerkleProofParameter.toVerkleProof(verkleProofParameter),
+        BinTrieProofParameter.toBinTrieProof(binTrieProofParameter),
         parentStateRoot);
   }
 
@@ -68,8 +68,8 @@ public class ExecutionWitnessParameter {
   }
 
   @JsonGetter
-  public VerkleProofParameter getVerkleProof() {
-    return verkleProofParameter;
+  public BinTrieProofParameter getBinTrieProof() {
+    return binTrieProofParameter;
   }
 
   @JsonGetter
@@ -83,12 +83,12 @@ public class ExecutionWitnessParameter {
     if (o == null || getClass() != o.getClass()) return false;
     ExecutionWitnessParameter that = (ExecutionWitnessParameter) o;
     return Objects.equals(stateDiffParameter, that.stateDiffParameter)
-        && Objects.equals(verkleProofParameter, that.verkleProofParameter)
+        && Objects.equals(binTrieProofParameter, that.binTrieProofParameter)
         && Objects.equals(parentStateRoot, that.parentStateRoot);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(stateDiffParameter, verkleProofParameter, parentStateRoot);
+    return Objects.hash(stateDiffParameter, binTrieProofParameter, parentStateRoot);
   }
 }

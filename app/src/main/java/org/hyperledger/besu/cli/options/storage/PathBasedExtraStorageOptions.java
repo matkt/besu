@@ -133,7 +133,7 @@ public class PathBasedExtraStorageOptions
    */
   public void validate(final CommandLine commandLine, final DataStorageFormat dataStorageFormat) {
     if (DataStorageFormat.BONSAI == dataStorageFormat
-        || DataStorageFormat.VERKLE == dataStorageFormat) {
+        || DataStorageFormat.BINTRIE == dataStorageFormat) {
       if (limitTrieLogsEnabled) {
         if (maxLayersToLoad < MINIMUM_TRIE_LOG_RETENTION_LIMIT) {
           throw new CommandLine.ParameterException(

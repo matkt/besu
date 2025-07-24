@@ -15,10 +15,10 @@
 package org.hyperledger.besu.ethereum.core;
 
 import static org.assertj.core.util.Preconditions.checkArgument;
+import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
-import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createVerkleInMemoryWorldStateArchive;
 import static org.mockito.Mockito.mock;
 
 import org.hyperledger.besu.config.GenesisConfig;
@@ -197,7 +197,7 @@ public class BlockchainSetupUtil {
       // only used in tests no global code cache is needed
       DataStorageConfiguration dataStorageConfiguration;
       switch (storageFormat) {
-        case VERKLE -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_VERKLE_CONFIG;
+        case BINTRIE -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG;
         case BONSAI -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
         default -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_CONFIG;
       }
@@ -212,7 +212,7 @@ public class BlockchainSetupUtil {
       switch (storageFormat) {
         case BONSAI ->
             worldArchive = createBonsaiInMemoryWorldStateArchive(blockchain, serviceManager);
-        case VERKLE -> worldArchive = createVerkleInMemoryWorldStateArchive(blockchain);
+        case BINTRIE -> worldArchive = createBinTrieInMemoryWorldStateArchive(blockchain);
         default -> worldArchive = createInMemoryWorldStateArchive();
       }
       final TransactionPool transactionPool = mock(TransactionPool.class);

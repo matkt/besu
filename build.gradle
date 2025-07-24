@@ -448,7 +448,7 @@ configure(allprojects - project(':platform')) {
       // trie module
       '-org.hyperledger.besu.ethereum.trie.*,' +
       '-org.hyperledger.besu.ethereum.trie,' +
-      // verkle trie module
+      // stateless trie module
       '-org.hyperledger.besu.ethereum.verkletrie,' +
       '-org.hyperledger.besu.ethereum.verkletrie.*',
       true)

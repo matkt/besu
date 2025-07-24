@@ -17,11 +17,11 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.trielog;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.trielog.BinTrieTrieLogFactoryImpl;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactoryImpl;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.trielog.VerkleTrieLogFactoryImpl;
 import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.services.TrieLogService;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -156,9 +156,9 @@ public class TrieLogManager {
         return trieLogService.getTrieLogFactory().get();
       }
     }
-    // Otherwise default to VERKLE TrieLogFactoryImpl
-    if (dataStorageFormat.equals(DataStorageFormat.VERKLE)) {
-      return new VerkleTrieLogFactoryImpl();
+    // Otherwise default to BINTRIE TrieLogFactoryImpl
+    if (dataStorageFormat.equals(DataStorageFormat.BINTRIE)) {
+      return new BinTrieTrieLogFactoryImpl();
     }
     // or default to BONSAI TrieLogFactoryImpl
     return new BonsaiTrieLogFactoryImpl();

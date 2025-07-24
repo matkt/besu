@@ -14,9 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.storage.keyvalue;
 
+import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.BINTRIE;
 import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.BONSAI;
 import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.FOREST;
-import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.VERKLE;
 import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.X_BONSAI_ARCHIVE;
 
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -36,14 +36,14 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
 
   PRUNING_STATE(new byte[] {5}, EnumSet.of(FOREST)),
   ACCOUNT_INFO_STATE(
-      new byte[] {6}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, VERKLE), false, true, false),
-  CODE_STORAGE(new byte[] {7}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, VERKLE)),
+      new byte[] {6}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), false, true, false),
+  CODE_STORAGE(new byte[] {7}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE)),
   ACCOUNT_STORAGE_STORAGE(
-      new byte[] {8}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, VERKLE), false, true, false),
+      new byte[] {8}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), false, true, false),
   TRIE_BRANCH_STORAGE(
-      new byte[] {9}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, VERKLE), false, true, false),
+      new byte[] {9}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), false, true, false),
   TRIE_LOG_STORAGE(
-      new byte[] {10}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, VERKLE), true, false, true),
+      new byte[] {10}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), true, false, true),
   ACCOUNT_INFO_STATE_ARCHIVE(
       "ACCOUNT_INFO_STATE_ARCHIVE".getBytes(StandardCharsets.UTF_8),
       EnumSet.of(X_BONSAI_ARCHIVE),

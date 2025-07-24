@@ -77,8 +77,8 @@ public interface HardforkId {
     PARIS(true, "Paris"),
     /** Shanghai fork. */
     SHANGHAI(true, "Shanghai"),
-    /** Verkle testnet */
-    VERKLE(true, "Verkle"),
+    /** Bintrie testnet */
+    BINTRIE(true, "Verkle"),
     /** Cancun fork. */
     CANCUN(true, "Cancun"),
     /** Cancun + EOF fork. */

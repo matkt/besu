@@ -14,8 +14,8 @@
  */
 package org.hyperledger.besu.evm.gascalculator;
 
-import static org.hyperledger.besu.ethereum.stateless.util.Parameters.BASIC_DATA_LEAF_KEY;
-import static org.hyperledger.besu.ethereum.stateless.util.Parameters.CODE_HASH_LEAF_KEY;
+import static org.hyperledger.besu.ethereum.stateless.verkle.util.Parameters.BASIC_DATA_LEAF_KEY;
+import static org.hyperledger.besu.ethereum.stateless.verkle.util.Parameters.CODE_HASH_LEAF_KEY;
 import static org.hyperledger.besu.evm.internal.Words.clampedAdd;
 
 import org.hyperledger.besu.datatypes.AccessWitness;
@@ -46,12 +46,12 @@ public class Eip4762GasCalculator extends CancunGasCalculator {
 
   @Override
   public long getColdSloadCost() {
-    return 0; // no cold gas cost after verkle
+    return 0; // no cold gas cost after bintrie
   }
 
   @Override
   public long getColdAccountAccessCost() {
-    return 0; // no cold gas cost after verkle
+    return 0; // no cold gas cost after bintrie
   }
 
   @Override

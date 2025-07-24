@@ -55,16 +55,16 @@ public interface DataStorageConfiguration {
           .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DISABLED)
           .build();
 
-  DataStorageConfiguration DEFAULT_VERKLE_CONFIG =
+  DataStorageConfiguration DEFAULT_BINTRIE_CONFIG =
       ImmutableDataStorageConfiguration.builder()
-          .dataStorageFormat(DataStorageFormat.VERKLE)
+          .dataStorageFormat(DataStorageFormat.BINTRIE)
           .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DEFAULT)
           .verkleSubStorageConfiguration(VerkleSubStorageConfiguration.DEFAULT)
           .build();
 
-  DataStorageConfiguration DEFAULT_VERKLE_STEM_DB_CONFIG =
+  DataStorageConfiguration DEFAULT_BINTRIE_STEM_DB_CONFIG =
       ImmutableDataStorageConfiguration.builder()
-          .dataStorageFormat(DataStorageFormat.VERKLE)
+          .dataStorageFormat(DataStorageFormat.BINTRIE)
           .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DEFAULT)
           .verkleSubStorageConfiguration(
               ImmutableVerkleSubStorageConfiguration.builder()

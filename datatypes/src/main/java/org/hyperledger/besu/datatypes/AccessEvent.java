@@ -20,7 +20,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 /**
  * Manages access events that are done to the stateless AccessWitness. An access mode is passed to
- * the witness representing the type of access being done on the verkle trie leaf node: read, write
+ * the witness representing the type of access being done on the binary trie leaf node: read, write
  * to an existing leaf (reset) or write to a non-existent leaf (set). The access mode is then
  * evaluated against structures that track previous access events, to avoid double charging of a
  * warm account or slot. What results is the **new** access event schedule that is then used for gas

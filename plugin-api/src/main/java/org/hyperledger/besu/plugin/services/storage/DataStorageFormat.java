@@ -23,7 +23,7 @@ public enum DataStorageFormat {
   /** The option for storing archive data e.g. state at any block */
   X_BONSAI_ARCHIVE,
   /** Storage format for stateless clients */
-  VERKLE;
+  BINTRIE;
 
   /**
    * Returns whether the storage format is one of the Bonsai DB formats

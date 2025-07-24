@@ -110,8 +110,8 @@ public abstract class AbstractJsonRpcHttpServiceTest {
     blockchainSetupUtil.importAllBlocks();
   }
 
-  protected void setupVerkleBlockchain() {
-    blockchainSetupUtil = getBlockchainSetupUtil(DataStorageFormat.VERKLE);
+  protected void setupBinTrieBlockchain() {
+    blockchainSetupUtil = getBlockchainSetupUtil(DataStorageFormat.BINTRIE);
     blockchainSetupUtil.importAllBlocks(HeaderValidationMode.NONE, HeaderValidationMode.FULL);
   }
 

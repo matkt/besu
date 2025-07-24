@@ -213,8 +213,8 @@ public class MainnetProtocolSpecFactory {
         metricsSystem);
   }
 
-  public ProtocolSpecBuilder verkleDefinition(final GenesisConfigOptions genesisConfigOptions) {
-    return MainnetProtocolSpecs.verkleDefinition(
+  public ProtocolSpecBuilder binTrieDefinition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.binTrieDefinition(
         chainId,
         isRevertReasonEnabled,
         genesisConfigOptions,

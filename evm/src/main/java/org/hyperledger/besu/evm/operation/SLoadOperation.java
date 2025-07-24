@@ -68,11 +68,11 @@ public class SLoadOperation extends AbstractOperation {
         return new OperationResult(cost, null);
       }
     } catch (final UnderflowException ufe) {
-      // TODO VERKLE FIX THE SLOTISWARM
+      // TODO BINTRIE FIX THE SLOTISWARM
       return new OperationResult(
           cost(frame, Bytes32.ZERO, true), ExceptionalHaltReason.INSUFFICIENT_STACK_ITEMS);
     } catch (final OverflowException ofe) {
-      // TODO VERKLE FIX THE SLOTISWARM
+      // TODO BINTRIE FIX THE SLOTISWARM
       return new OperationResult(
           cost(frame, Bytes32.ZERO, true), ExceptionalHaltReason.TOO_MANY_STACK_ITEMS);
     }

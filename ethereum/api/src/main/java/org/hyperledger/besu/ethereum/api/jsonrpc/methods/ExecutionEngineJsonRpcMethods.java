@@ -129,7 +129,7 @@ public class ExecutionEngineJsonRpcMethods extends ApiGroupJsonRpcMethods {
                   ethPeers,
                   engineQosTimer,
                   metricsSystem),
-              new EngineNewPayloadV6800( // TODO replaced for the verkle test
+              new EngineNewPayloadV6800( // TODO replaced for the bintrie test
                   consensusEngineServer,
                   protocolSchedule,
                   protocolContext,

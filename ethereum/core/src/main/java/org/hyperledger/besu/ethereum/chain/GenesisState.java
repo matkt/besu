@@ -360,13 +360,13 @@ public final class GenesisState {
     if (osakaTimestamp.isPresent()) {
       return genesis.getTimestamp() >= osakaTimestamp.getAsLong();
     }
-    return isVerkleAtGenesis(genesis);
+    return isBinTrieAtGenesis(genesis);
   }
 
-  private static boolean isVerkleAtGenesis(final GenesisConfig genesis) {
-    final OptionalLong verkleTimestamp = genesis.getConfigOptions().getVerkleTime();
-    if (verkleTimestamp.isPresent()) {
-      return genesis.getTimestamp() >= verkleTimestamp.getAsLong();
+  private static boolean isBinTrieAtGenesis(final GenesisConfig genesis) {
+    final OptionalLong binTrieTimestamp = genesis.getConfigOptions().getVerkleTime();
+    if (binTrieTimestamp.isPresent()) {
+      return genesis.getTimestamp() >= binTrieTimestamp.getAsLong();
     }
     return isFutureEipsTimeAtGenesis(genesis);
   }

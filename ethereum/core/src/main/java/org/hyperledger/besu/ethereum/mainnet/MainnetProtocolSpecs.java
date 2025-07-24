@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.mainnet;
 
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.ARROW_GLACIER;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BERLIN;
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BINTRIE;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO1;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO2;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO3;
@@ -42,7 +43,6 @@ import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.PRAGUE
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.SHANGHAI;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.SPURIOUS_DRAGON;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.TANGERINE_WHISTLE;
-import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.VERKLE;
 import static org.hyperledger.besu.ethereum.mainnet.requests.MainnetRequestsProcessor.pragueRequestsProcessors;
 
 import org.hyperledger.besu.config.BlobSchedule;
@@ -682,7 +682,7 @@ public abstract class MainnetProtocolSpecs {
         .hardforkId(SHANGHAI);
   }
 
-  static ProtocolSpecBuilder verkleDefinition(
+  static ProtocolSpecBuilder binTrieDefinition(
       final Optional<BigInteger> chainId,
       final boolean enableRevertReason,
       final GenesisConfigOptions genesisConfigOptions,
@@ -704,7 +704,7 @@ public abstract class MainnetProtocolSpecs {
         .gasCalculator(Eip4762GasCalculator::new)
         .evmBuilder(
             (gasCalculator, jdCacheConfig) ->
-                MainnetEVMs.verkle(
+                MainnetEVMs.bintrie(
                     gasCalculator, chainId.orElse(BigInteger.ZERO), evmConfiguration))
         .transactionProcessorBuilder(
             (gasCalculator,
@@ -726,8 +726,8 @@ public abstract class MainnetProtocolSpecs {
         .withdrawalsProcessor(new WithdrawalsProcessor(clearEmptyAccountStrategy))
         .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
         .blockHashProcessor(new Eip7709BlockHashProcessor())
-        .blockHeaderFunctions(new VerkleDevnetBlockHeaderFunctions())
-        .hardforkId(VERKLE);
+        .blockHeaderFunctions(new BinTrieDevnetBlockHeaderFunctions())
+        .hardforkId(BINTRIE);
   }
 
   static ProtocolSpecBuilder cancunDefinition(

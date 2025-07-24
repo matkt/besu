@@ -40,6 +40,11 @@ dependencies {
   implementation 'io.consensys.tuweni:tuweni-bytes'
   implementation 'org.bouncycastle:bcprov-jdk18on'
 
+  implementation ('org.hyperledger.besu:besu-stateless') {
+    exclude group: 'org.hyperledger.besu.internal'
+    exclude group: 'org.apache.tuweni'
+  }
+
   annotationProcessor 'org.immutables:value'
 
   testImplementation project(':services:kvstore')

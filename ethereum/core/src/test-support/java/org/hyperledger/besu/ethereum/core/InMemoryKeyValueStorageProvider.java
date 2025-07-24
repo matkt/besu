@@ -28,12 +28,12 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValue
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -122,19 +122,19 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         new CodeCache());
   }
 
-  public static VerkleWorldStateProvider createVerkleInMemoryWorldStateArchive(
+  public static BinTrieWorldStateProvider createBinTrieInMemoryWorldStateArchive(
       final Blockchain blockchain) {
-    return createVerkleInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT);
+    return createBinTrieInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT);
   }
 
-  public static VerkleWorldStateProvider createVerkleInMemoryWorldStateArchive(
+  public static BinTrieWorldStateProvider createBinTrieInMemoryWorldStateArchive(
       final Blockchain blockchain, final EvmConfiguration evmConfiguration) {
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider();
-    return new VerkleWorldStateProvider(
-        (VerkleWorldStateKeyValueStorage)
+    return new BinTrieWorldStateProvider(
+        (BinTrieWorldStateKeyValueStorage)
             inMemoryKeyValueStorageProvider.createWorldStateStorage(
-                DataStorageConfiguration.DEFAULT_VERKLE_CONFIG),
+                DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG),
         blockchain,
         Optional.empty(),
         null,

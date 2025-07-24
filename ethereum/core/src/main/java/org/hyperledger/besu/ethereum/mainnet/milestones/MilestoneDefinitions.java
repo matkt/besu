@@ -215,9 +215,9 @@ public class MilestoneDefinitions {
         createTimestampMilestone(
             MainnetHardforkId.BPO5, config.getBpo5Time(), () -> specFactory.bpo5Definition(config)),
         createTimestampMilestone(
-            HardforkId.MainnetHardforkId.VERKLE,
+            HardforkId.MainnetHardforkId.BINTRIE,
             config.getVerkleTime(),
-            () -> specFactory.verkleDefinition(config)),
+            () -> specFactory.binTrieDefinition(config)),
         createTimestampMilestone(
             MainnetHardforkId.FUTURE_EIPS,
             config.getFutureEipsTime(),

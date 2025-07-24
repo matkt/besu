@@ -48,7 +48,7 @@ public class Eip7709BlockHashProcessor extends PragueBlockHashProcessor {
     return new Eip7709BlockHashLookup(EIP_7709_HISTORY_STORAGE_ADDRESS);
   }
 
-  // TODO remove when verkle devnet based on pectra
+  // TODO remove when bintrie devnet based on pectra
   @Override
   public Void process(final BlockProcessingContext context) {
     ProcessableBlockHeader currentBlockHeader = context.getBlockHeader();
@@ -94,5 +94,5 @@ public class Eip7709BlockHashProcessor extends PragueBlockHashProcessor {
     UInt256 value = UInt256.fromBytes(hash);
     account.setStorageValue(slot, value);
   }
-  // TODO end remove when verkle devnet based on pectra
+  // TODO end remove when bintrie devnet based on pectra
 }

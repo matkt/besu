@@ -1411,7 +1411,7 @@ public class MainnetEVMs {
    * @param evmConfiguration the evm configuration
    * @return the evm
    */
-  public static EVM verkle(
+  public static EVM bintrie(
       final GasCalculator gasCalculator,
       final BigInteger chainId,
       final EvmConfiguration evmConfiguration) {
