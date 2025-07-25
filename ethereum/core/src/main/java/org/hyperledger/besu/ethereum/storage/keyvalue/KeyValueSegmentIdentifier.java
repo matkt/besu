@@ -49,7 +49,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   SNAPSYNC_ACCOUNT_TO_FIX(new byte[] {17}),
   CHAIN_PRUNER_STATE(new byte[] {18}),
 
-  VERKLE_TRIE_BRANCH_STORAGE(new byte[] {19}, EnumSet.of(VERKLE), false, true, false);
+  VERKLE_TRIE_BRANCH_STORAGE(new byte[] {19}, EnumSet.of(BONSAI, VERKLE), false, true, false);
 
   private final byte[] id;
   private final EnumSet<DataStorageFormat> formats;

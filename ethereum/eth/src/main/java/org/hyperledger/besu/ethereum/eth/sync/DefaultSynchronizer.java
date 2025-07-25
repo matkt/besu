@@ -334,7 +334,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       fastSyncDownloader.get().deleteFastSyncState();
     }
 
-    LOG.atDebug()
+    LOG.atInfo()
         .setMessage("heal stacktrace: \n{}")
         .addArgument(
             () -> {
@@ -350,7 +350,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
     lines.add("Starting the sync pipeline...");
     LOG.atInfo().setMessage(FramedLogMessage.generate(lines)).log();
 
-    this.syncState.markInitialSyncRestart();
+    /*this.syncState.markInitialSyncRestart();
     this.syncState.markResyncNeeded();
     maybeAccountToRepair.ifPresent(
         address -> {
@@ -362,7 +362,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
           this.syncState.markAccountToRepair(maybeAccountToRepair);
         });
     this.fastSyncDownloader = this.fastSyncFactory.get();
-    start();
+    start();*/
     return true;
   }
 

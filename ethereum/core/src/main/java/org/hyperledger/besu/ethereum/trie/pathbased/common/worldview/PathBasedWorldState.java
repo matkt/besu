@@ -201,7 +201,6 @@ public abstract class PathBasedWorldState
         verifyWorldStateRoot(calculatedRootHash, blockHeader);
         saveTrieLog =
             () -> {
-              System.out.println("trielog saved ? " + blockHeader.getBlockHash());
               trieLogManager.saveTrieLog(localCopy, calculatedRootHash, blockHeader, this);
               // not save a frozen state in the cache
               if (!isStorageFrozen) {

@@ -24,6 +24,7 @@ import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageFactory;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -235,10 +236,8 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
     if (metadataExists) {
       metadata = DatabaseMetadata.lookUpFrom(dataDir);
 
-      if (!metadata
-          .getVersionedStorageFormat()
-          .getFormat()
-          .equals(commonConfiguration.getDataStorageConfiguration().getDatabaseFormat())) {
+      if (!isStorageFormatCompatible(metadata.getVersionedStorageFormat().getFormat(),
+              commonConfiguration.getDataStorageConfiguration().getDatabaseFormat())) {
         handleFormatMismatch(commonConfiguration, dataDir, metadata);
       }
 
@@ -282,6 +281,14 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
     }
 
     return metadata;
+  }
+
+  private boolean isStorageFormatCompatible(final DataStorageFormat stored, final DataStorageFormat requested) {
+    return switch (stored) {
+      case FOREST -> requested == DataStorageFormat.FOREST;
+      case BONSAI -> requested == DataStorageFormat.BONSAI || requested == DataStorageFormat.VERKLE;
+      case VERKLE -> requested == DataStorageFormat.VERKLE;
+    };
   }
 
   private static void handleFormatMismatch(

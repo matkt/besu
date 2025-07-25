@@ -88,7 +88,7 @@ public class VerkleFlatDbStrategyProvider extends FlatDbStrategyProvider {
 
                       return flatDbModeVal;
                     }));
-    LOG.info("Flat db mode found {}", flatDbMode);
+    LOG.debug("Flat db mode found {}", flatDbMode);
 
     return FlatDbMode.STEM;
   }

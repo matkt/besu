@@ -86,7 +86,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .getTrieLogLayer(params.getBlockHash())
             .filter(log -> log.getDataStorageFormat() == DataStorageFormat.VERKLE)
             .flatMap(TrieLog::getStateMigrationLog)
-            .orElse(new StateMigrationLog(params.getBlockHash(), 5000));
+            .orElse(new StateMigrationLog(params.getBlockHash(), 1500));
 
     final BlockHeader bonsaiTarget =
         blockchain.getBlockHeader(migrationLog.getFirstBlockHash()).orElseThrow();
@@ -108,7 +108,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .orElse(false);
 
     if (hasValidBonsaiState || hasValidVerkleState) {
-      LOG.info("Matching world state found. Proceeding with state transition.");
+      LOG.debug("Matching world state found. Proceeding with state transition.");
       return Optional.of(
           new StateTransitionWorldState(
               bonsaiState.get(),
@@ -144,7 +144,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .getTrieLogManager()
             .getTrieLogLayer(chainHeadHeader.getBlockHash())
             .flatMap(TrieLog::getStateMigrationLog)
-            .orElse(new StateMigrationLog(chainHeadHeader.getBlockHash(), 5000));
+            .orElse(new StateMigrationLog(chainHeadHeader.getBlockHash(), 1500));
 
     LOG.debug(
         "State migration log retrieved for chain head block hash: {}",

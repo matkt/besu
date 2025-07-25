@@ -39,7 +39,6 @@ import org.hyperledger.besu.ethereum.mainnet.ClearEmptyAccountStrategy.ClearEmpt
 import org.hyperledger.besu.ethereum.mainnet.ClearEmptyAccountStrategy.NotClearEmptyAccount;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecBuilder.BlockValidatorBuilder;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.CancunBlockHashProcessor;
-import org.hyperledger.besu.ethereum.mainnet.blockhash.Eip7709BlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.FrontierBlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.PragueBlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.BaseFeeMarket;
@@ -60,7 +59,6 @@ import org.hyperledger.besu.evm.gascalculator.BerlinGasCalculator;
 import org.hyperledger.besu.evm.gascalculator.ByzantiumGasCalculator;
 import org.hyperledger.besu.evm.gascalculator.CancunGasCalculator;
 import org.hyperledger.besu.evm.gascalculator.ConstantinopleGasCalculator;
-import org.hyperledger.besu.evm.gascalculator.Eip4762GasCalculator;
 import org.hyperledger.besu.evm.gascalculator.FrontierGasCalculator;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.evm.gascalculator.HomesteadGasCalculator;
@@ -941,28 +939,14 @@ public abstract class MainnetProtocolSpecs {
       final boolean isParallelTxProcessingEnabled,
       final MetricsSystem metricsSystem) {
 
-    final var osakaBlobSchedule =
-        genesisConfigOptions
-            .getBlobScheduleOptions()
-            .flatMap(BlobScheduleOptions::getOsaka)
-            .orElse(BlobScheduleOptions.BlobSchedule.OSAKA_DEFAULT);
-
-    ProtocolSpecBuilder protocolSpecBuilder =
-        pragueDefinition(
+    return pragueDefinition(
             chainId,
             enableRevertReason,
             genesisConfigOptions,
             evmConfiguration,
             miningConfiguration,
             isParallelTxProcessingEnabled,
-            metricsSystem);
-    return addEOF(
-            genesisConfigOptions,
-            chainId,
-            evmConfiguration,
-            protocolSpecBuilder,
-            osakaBlobSchedule.getTarget(),
-            osakaBlobSchedule.getMax())
+            metricsSystem)
         .name("Osaka");
   }
 
@@ -1014,9 +998,9 @@ public abstract class MainnetProtocolSpecs {
       final MiningConfiguration miningConfiguration,
       final boolean isParallelTxProcessingEnabled,
       final MetricsSystem metricsSystem) {
-    final ClearEmptyAccountStrategy clearEmptyAccountStrategy =
-            new ClearEmptyAccountStrategy.ClearEmptyAccountWithException(
-                    List.of(Eip7709BlockHashProcessor.EIP_7709_HISTORY_STORAGE_ADDRESS));
+    /*final ClearEmptyAccountStrategy clearEmptyAccountStrategy =
+        new ClearEmptyAccountStrategy.ClearEmptyAccountWithException(
+            List.of(Eip7709BlockHashProcessor.EIP_7709_HISTORY_STORAGE_ADDRESS));
     return shanghaiDefinition(
             chainId,
             enableRevertReason,
@@ -1025,34 +1009,34 @@ public abstract class MainnetProtocolSpecs {
             miningConfiguration,
             isParallelTxProcessingEnabled,
             metricsSystem)
-            .gasCalculator(Eip4762GasCalculator::new)
-            .evmBuilder(
-                    (gasCalculator, jdCacheConfig) ->
-                            MainnetEVMs.verkle(
-                                    gasCalculator, chainId.orElse(BigInteger.ZERO), evmConfiguration))
-            .transactionProcessorBuilder(
-                    (gasCalculator,
-                     feeMarket,
-                     transactionValidatorFactory,
-                     contractCreationProcessor,
-                     messageCallProcessor) ->
-                            MainnetTransactionProcessor.builder()
-                                    .gasCalculator(gasCalculator)
-                                    .transactionValidatorFactory(transactionValidatorFactory)
-                                    .contractCreationProcessor(contractCreationProcessor)
-                                    .messageCallProcessor(messageCallProcessor)
-                                    .clearEmptyAccountStrategy(clearEmptyAccountStrategy)
-                                    .warmCoinbase(true)
-                                    .maxStackSize(evmConfiguration.evmStackSize())
-                                    .feeMarket(feeMarket)
-                                    .coinbaseFeePriceCalculator(CoinbaseFeePriceCalculator.eip1559())
-                                    .build())
-            .withdrawalsProcessor(new WithdrawalsProcessor(clearEmptyAccountStrategy))
-            .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
-            .blockHashProcessor(new Eip7709BlockHashProcessor())
-            .blockHeaderFunctions(new VerkleDevnetBlockHeaderFunctions())
-            .name("Verkle");
-    /*return pragueDefinition(
+        .gasCalculator(Eip4762GasCalculator::new)
+        .evmBuilder(
+            (gasCalculator, jdCacheConfig) ->
+                MainnetEVMs.verkle(
+                    gasCalculator, chainId.orElse(BigInteger.ZERO), evmConfiguration))
+        .transactionProcessorBuilder(
+            (gasCalculator,
+                feeMarket,
+                transactionValidatorFactory,
+                contractCreationProcessor,
+                messageCallProcessor) ->
+                MainnetTransactionProcessor.builder()
+                    .gasCalculator(gasCalculator)
+                    .transactionValidatorFactory(transactionValidatorFactory)
+                    .contractCreationProcessor(contractCreationProcessor)
+                    .messageCallProcessor(messageCallProcessor)
+                    .clearEmptyAccountStrategy(clearEmptyAccountStrategy)
+                    .warmCoinbase(true)
+                    .maxStackSize(evmConfiguration.evmStackSize())
+                    .feeMarket(feeMarket)
+                    .coinbaseFeePriceCalculator(CoinbaseFeePriceCalculator.eip1559())
+                    .build())
+        .withdrawalsProcessor(new WithdrawalsProcessor(clearEmptyAccountStrategy))
+        .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
+        .blockHashProcessor(new Eip7709BlockHashProcessor())
+        .blockHeaderFunctions(new VerkleDevnetBlockHeaderFunctions())
+        .name("Verkle");*/
+    return pragueDefinition(
             chainId,
             enableRevertReason,
             genesisConfigOptions,
@@ -1061,7 +1045,7 @@ public abstract class MainnetProtocolSpecs {
             isParallelTxProcessingEnabled,
             metricsSystem)
         .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
-        .name("Verkle");*/
+        .name("Verkle");
   }
 
   static ProtocolSpecBuilder futureEipsDefinition(

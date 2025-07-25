@@ -27,7 +27,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.InvalidTrieLogTypeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogFactoryImpl;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
-import org.hyperledger.besu.ethereum.trie.pathbased.transition.MigratedDiffValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -110,11 +109,27 @@ public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
       output.startList();
       output.writeBytes(address);
 
+      final TrieLog.LogTuple<Bytes> codeChange = layer.getCodeChanges().get(address);
+      final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges =
+          layer.getStorageChanges().get(address);
+
+      boolean hasCodeUpdate = codeChange != null && !codeChange.isUnchanged();
+      boolean hasStorageUpdate = false;
+      if (storageChanges != null) {
+        for (TrieLog.LogTuple<UInt256> storageChange : storageChanges.values()) {
+          if (!storageChange.isUnchanged()) {
+            hasStorageUpdate = true;
+            break;
+          }
+        }
+      }
+
       final TrieLog.LogTuple<AccountValue> accountChange = layer.getAccountChanges().get(address);
+
       // We don't add an account in the trielog that hasn't been migrated yet (instance of
       // MigratedDiffValue) and won't be, because it hasn't changed.
       if (accountChange == null
-          || (accountChange.isUnchanged() && accountChange instanceof MigratedDiffValue)) {
+          || (accountChange.isUnchanged() && !hasCodeUpdate && !hasStorageUpdate)) {
         output.writeNull();
       } else {
         writeRlp(
@@ -134,29 +149,28 @@ public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
             });
       }
 
-      final TrieLog.LogTuple<Bytes> codeChange = layer.getCodeChanges().get(address);
       if (codeChange == null || codeChange.isUnchanged()) {
         output.writeNull();
       } else {
         writeRlp(codeChange, output, RLPOutput::writeBytes);
       }
 
-      final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges =
-          layer.getStorageChanges().get(address);
       if (storageChanges == null) {
         output.writeNull();
       } else {
         output.startList();
-        for (final Map.Entry<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChangeEntry :
+        for (final Map.Entry<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChange :
             storageChanges.entrySet()) {
-          output.startList();
-          StorageSlotKey storageSlotKey = storageChangeEntry.getKey();
-          output.writeBytes(storageSlotKey.getSlotHash());
-          writeInnerRlp(storageChangeEntry.getValue(), output, RLPOutput::writeBytes);
-          if (storageSlotKey.getSlotKey().isPresent()) {
-            output.writeUInt256Scalar(storageSlotKey.getSlotKey().get());
+          if (!storageChange.getValue().isUnchanged()) {
+            output.startList();
+            StorageSlotKey storageSlotKey = storageChange.getKey();
+            output.writeBytes(storageSlotKey.getSlotHash());
+            writeInnerRlp(storageChange.getValue(), output, RLPOutput::writeBytes);
+            if (storageSlotKey.getSlotKey().isPresent()) {
+              output.writeUInt256Scalar(storageSlotKey.getSlotKey().get());
+            }
+            output.endList();
           }
-          output.endList();
         }
         output.endList();
       }

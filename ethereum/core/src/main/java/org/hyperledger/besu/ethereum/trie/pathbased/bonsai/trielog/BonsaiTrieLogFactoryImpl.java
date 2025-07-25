@@ -130,14 +130,15 @@ public class BonsaiTrieLogFactoryImpl extends TrieLogFactoryImpl {
     final Hash blockHash = Hash.wrap(input.readBytes32());
     newLayer.setBlockHash(blockHash);
 
-    DataStorageFormat dataStorageFormat;
     if (!input.nextIsList()) {
-      dataStorageFormat = DataStorageFormat.fromValue(input.readInt());
-      if (dataStorageFormat.equals(DataStorageFormat.BONSAI)) {
-        newLayer.setDataStorageFormat(dataStorageFormat);
-      } else {
-        return new InvalidTrieLogTypeException(blockHash, dataStorageFormat);
+      DataStorageFormat format = DataStorageFormat.fromValue(input.readInt());
+      if (format != DataStorageFormat.BONSAI) {
+        return new InvalidTrieLogTypeException(blockHash, format);
       }
+      newLayer.setDataStorageFormat(format);
+    } else {
+      // Default to BONSAI for legacy trie logs
+      newLayer.setDataStorageFormat(DataStorageFormat.BONSAI);
     }
 
     while (!input.isEndOfCurrentList()) {

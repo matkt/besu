@@ -180,21 +180,13 @@ public class TransactionPoolFactory {
 
     syncState.subscribeInSync(
         isInSync -> {
-          if (isInSync != transactionPool.isEnabled()) {
-            if (isInSync && syncState.isInitialSyncPhaseDone()) {
-              LOG.info("Node is in sync, enabling transaction handling");
-              enableTransactionHandling(
-                  transactionTracker,
-                  transactionPool,
-                  transactionsMessageHandler,
-                  pooledTransactionsMessageHandler);
-            } else {
-              if (transactionPool.isEnabled()) {
-                LOG.info("Node out of sync, disabling transaction handling");
-                disableTransactionHandling(
-                    transactionPool, transactionsMessageHandler, pooledTransactionsMessageHandler);
-              }
-            }
+          if (isInSync == transactionPool.isEnabled()) {
+            LOG.info("Node is in sync, enabling transaction handling");
+            enableTransactionHandling(
+                    transactionTracker,
+                    transactionPool,
+                    transactionsMessageHandler,
+                    pooledTransactionsMessageHandler);
           }
         });
 

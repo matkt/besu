@@ -211,7 +211,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
       // Generate pre-images for Bonsai state transition
       // TODO (this should be removed in final version)
-      //generatePreImagesForBonsai();
+      // generatePreImagesForBonsai();
 
       // Persist Bonsai world state
       bonsaiWorldState.persist(blockHeader);
@@ -219,6 +219,37 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
     // Reset the accumulator after persisting state
     accumulator.reset();
+  }
+
+  @Override
+  public Hash rootHash() {
+    final Hash worldStateRootHash;
+      if (isVerkleActive) {
+        if (accumulator.isAccumulatorStateChanged()) {
+          // Import state changes into the Verkle accumulator
+          verkleWorldState
+                  .getAccumulator()
+                  .importStateChangesFromSource(
+                          (PathBasedWorldStateUpdateAccumulator<VerkleAccount>) accumulator);
+
+          // If migration is in progress, perform conversion from Bonsai to Verkle
+          if (migrationProgress.isMigrationInProgress()) {
+            PatriciaToVerkleConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
+          }
+        }
+        worldStateRootHash = verkleWorldState.rootHash();
+      } else {
+        if (accumulator.isAccumulatorStateChanged()) {
+          // Import state changes into the Bonsai accumulator
+          bonsaiWorldState
+                  .getAccumulator()
+                  .importStateChangesFromSource(
+                          (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
+        }
+        worldStateRootHash = bonsaiWorldState.rootHash();
+      }
+      accumulator.resetAccumulatorStateChanged();
+      return worldStateRootHash;
   }
 
   /**
@@ -252,11 +283,6 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   @Override
   public WorldUpdater updater() {
     return getAccumulator();
-  }
-
-  @Override
-  public Hash rootHash() {
-    return getWorldState().rootHash();
   }
 
   @Override

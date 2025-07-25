@@ -98,7 +98,7 @@ public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
                                 SuffixTreeDecoder.decodeNonce(basicDataLeaf),
                                 Wei.of(SuffixTreeDecoder.decodeBalance(basicDataLeaf)),
                                 SuffixTreeDecoder.decodeCodeSize(basicDataLeaf),
-                                Hash.wrap(values.get(1).orElse(Hash.EMPTY_TRIE_HASH)),
+                                Hash.wrap(values.get(1).orElse(Hash.EMPTY)),
                                 true)));
     if (accountFound.isPresent()) {
       getAccountFoundInFlatDatabaseCounter.inc();

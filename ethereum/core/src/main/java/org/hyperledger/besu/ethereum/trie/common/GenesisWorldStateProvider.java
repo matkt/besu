@@ -41,7 +41,6 @@ import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
 import java.util.Objects;
-import java.util.Optional;
 
 @SuppressWarnings("unused")
 public class GenesisWorldStateProvider {
@@ -55,16 +54,22 @@ public class GenesisWorldStateProvider {
    * @return a mutable world state for the Genesis block
    */
   public static MutableWorldState createGenesisWorldState(
-          final DataStorageConfiguration dataStorageConfiguration, final ProtocolSchedule protocolSchedule, final GenesisConfig genesisConfig) {
+      final DataStorageConfiguration dataStorageConfiguration,
+      final ProtocolSchedule protocolSchedule,
+      final GenesisConfig genesisConfig) {
     if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.BONSAI) {
       return createGenesisBonsaiWorldState();
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.VERKLE) {
-      final boolean isVerkleGenesis = protocolSchedule.milestoneFor(HardforkId.MainnetHardforkId.VERKLE).filter(milestone -> milestone==0 || genesisConfig.getTimestamp()>=milestone).isPresent();
-      if(isVerkleGenesis){
+      final boolean isVerkleGenesis =
+          protocolSchedule
+              .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
+              .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
+              .isPresent();
+      if (isVerkleGenesis) {
         return createGenesisVerkleWorldState(dataStorageConfiguration);
-      }else {
+      } else {
         return createGenesisBonsaiWorldState();
       }
     } else {

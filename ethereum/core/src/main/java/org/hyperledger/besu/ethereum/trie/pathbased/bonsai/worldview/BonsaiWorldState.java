@@ -164,7 +164,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
                         location,
                         value)));
     final Bytes32 rootHash = accountTrie.getRootHash();
-    System.out.println("bonsai root " + rootHash);
     return Hash.wrap(rootHash);
   }
 

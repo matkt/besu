@@ -587,9 +587,8 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
     final VariablesStorage variablesStorage = storageProvider.createVariablesStorage();
 
     final WorldStateStorageCoordinator worldStateStorageCoordinator =
-            createWorldStateStorageCoordinator(dataStorageConfiguration, storageProvider, protocolSchedule, genesisConfig);
-
-
+        createWorldStateStorageCoordinator(
+            dataStorageConfiguration, storageProvider, protocolSchedule, genesisConfig);
 
     final BlockchainStorage blockchainStorage =
         storageProvider.createBlockchainStorage(
@@ -835,29 +834,32 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
   }
 
   private WorldStateStorageCoordinator createWorldStateStorageCoordinator(
-          final DataStorageConfiguration dataStorageConfiguration,
-          final StorageProvider storageProvider,
-          final ProtocolSchedule protocolSchedule,
-          final GenesisConfig genesisConfig) {
+      final DataStorageConfiguration dataStorageConfiguration,
+      final StorageProvider storageProvider,
+      final ProtocolSchedule protocolSchedule,
+      final GenesisConfig genesisConfig) {
 
     final DataStorageFormat format = dataStorageConfiguration.getDataStorageFormat();
 
     if (format.equals(DataStorageFormat.FOREST) || format.equals(DataStorageFormat.BONSAI)) {
-      return new WorldStateStorageCoordinator(storageProvider.createWorldStateStorage(dataStorageConfiguration));
+      return new WorldStateStorageCoordinator(
+          storageProvider.createWorldStateStorage(dataStorageConfiguration));
     }
 
-    final boolean isVerkleGenesis = protocolSchedule
-            .milestoneFor(HardforkId.MainnetHardforkId.VERKLE)
+    final boolean isVerkleGenesis =
+        protocolSchedule
+            .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
             .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
             .isPresent();
 
     if (isVerkleGenesis) {
-      return new WorldStateStorageCoordinator(storageProvider.createWorldStateStorage(dataStorageConfiguration));
+      return new WorldStateStorageCoordinator(
+          storageProvider.createWorldStateStorage(dataStorageConfiguration));
     }
 
-    return new WorldStateStorageCoordinator(storageProvider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG));
+    return new WorldStateStorageCoordinator(
+        storageProvider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG));
   }
-
 
   private GenesisState getGenesisState(
       final Optional<BlockHeader> maybeGenesisBlockHeader,
@@ -1180,8 +1182,11 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             worldStateHealerSupplier);
       }
       case VERKLE -> {
-        final Long verkleMilestone = 1747212934L;
-        if (verkleMilestone == 0) {
+        final Optional<Long> verkleMilestone =
+                protocolSchedule
+                        .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
+                        .filter(milestone -> milestone!=0 && genesisConfig.getTimestamp() < milestone);
+        if (verkleMilestone.isEmpty()) {
           final VerkleWorldStateKeyValueStorage verkleWorldStateKeyValueStorage =
               worldStateStorageCoordinator.getStrategy(VerkleWorldStateKeyValueStorage.class);
           yield new VerkleWorldStateProvider(
@@ -1195,7 +1200,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
               evmConfiguration);
         } else {
           final BonsaiWorldStateKeyValueStorage bonsaiWorldStateKeyValueStorage =
-                  worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
+              worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
 
           final BonsaiWorldStateProvider bonsaiWorldStateProvider =
               new BonsaiWorldStateProvider(
@@ -1210,12 +1215,11 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
                   evmConfiguration,
                   worldStateHealerSupplier);
 
-
           final VerkleWorldStateKeyValueStorage verkleWorldStateKeyValueStorage =
-                  storageProvider
-                          .createWorldStateStorageCoordinator(
-                                  DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG)
-                          .getStrategy(VerkleWorldStateKeyValueStorage.class);
+              storageProvider
+                  .createWorldStateStorageCoordinator(
+                      DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG)
+                  .getStrategy(VerkleWorldStateKeyValueStorage.class);
 
           final VerkleWorldStateProvider verkleWorldStateProvider =
               new VerkleWorldStateProvider(
@@ -1228,7 +1232,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
                   besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
                   evmConfiguration);
           yield new StateTransitionWorldStateProvider(
-              bonsaiWorldStateProvider, verkleWorldStateProvider, verkleMilestone, blockchain);
+              bonsaiWorldStateProvider, verkleWorldStateProvider, verkleMilestone.get(), blockchain);
         }
       }
       case FOREST -> {

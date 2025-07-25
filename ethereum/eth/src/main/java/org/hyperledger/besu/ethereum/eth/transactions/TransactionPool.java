@@ -46,6 +46,7 @@ import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.transaction.TransactionInvalidReason;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.fluent.SimpleAccount;
 import org.hyperledger.besu.util.Subscribers;
@@ -477,9 +478,8 @@ public class TransactionPool implements BlockAddedObserver {
           TransactionInvalidReason.PLUGIN_TX_POOL_VALIDATOR, maybePluginInvalid.get());
     }
 
-    //TODO reactivate before merge
-    return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
-    /*try (final var worldState =
+    // TODO reactivate before merge
+    try (final var worldState =
         protocolContext
             .getWorldStateArchive()
             .getWorldState(withBlockHeaderAndNoUpdateNodeHead(chainHeadBlockHeader))
@@ -497,7 +497,7 @@ public class TransactionPool implements BlockAddedObserver {
       return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
     } catch (Exception ex) {
       return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
-    }*/
+    }
   }
 
   private TransactionInvalidReason validatePrice(
