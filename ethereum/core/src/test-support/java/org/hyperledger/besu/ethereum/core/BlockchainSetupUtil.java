@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.core;
 
 import static org.assertj.core.util.Preconditions.checkArgument;
+import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
@@ -34,10 +35,13 @@ import org.hyperledger.besu.ethereum.mainnet.MainnetProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.util.RawBlockIterator;
+import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.testutil.BlockTestUtil;
 import org.hyperledger.besu.testutil.BlockTestUtil.ChainResources;
@@ -121,7 +125,7 @@ public class BlockchainSetupUtil {
   }
 
   public static BlockchainSetupUtil forMainnet() {
-    return createForEthashChain(BlockTestUtil.getMainnetResources(), DataStorageFormat.FOREST);
+    return createForEthashChain(BlockTestUtil.getMainnetResources(), DataStorageFormat.BONSAI);
   }
 
   public static BlockchainSetupUtil forOutdatedFork() {
@@ -143,7 +147,21 @@ public class BlockchainSetupUtil {
         storageFormat,
         BlockchainSetupUtil::mainnetProtocolScheduleProvider,
         BlockchainSetupUtil::mainnetProtocolContextProvider,
-        new EthScheduler(1, 1, 1, 1, new NoOpMetricsSystem()));
+        new EthScheduler(1, 1, 1, 1, new NoOpMetricsSystem()),
+        null);
+  }
+
+  public static BlockchainSetupUtil createForEthashChain(
+      final ChainResources chainResources,
+      final DataStorageFormat storageFormat,
+      final ServiceManager serviceManager) {
+    return create(
+        chainResources,
+        storageFormat,
+        BlockchainSetupUtil::mainnetProtocolScheduleProvider,
+        BlockchainSetupUtil::mainnetProtocolContextProvider,
+        new EthScheduler(1, 1, 1, 1, new NoOpMetricsSystem()),
+        serviceManager);
   }
 
   private static ProtocolSchedule mainnetProtocolScheduleProvider(
@@ -159,8 +177,11 @@ public class BlockchainSetupUtil {
 
   private static ProtocolContext mainnetProtocolContextProvider(
       final MutableBlockchain blockchain, final WorldStateArchive worldStateArchive) {
-    return new ProtocolContext(
-        blockchain, worldStateArchive, new ConsensusContextFixture(), new BadBlockManager());
+    return new ProtocolContext.Builder()
+        .withBlockchain(blockchain)
+        .withWorldStateArchive(worldStateArchive)
+        .withConsensusContext(new ConsensusContextFixture())
+        .build();
   }
 
   private static BlockchainSetupUtil create(
@@ -168,17 +189,32 @@ public class BlockchainSetupUtil {
       final DataStorageFormat storageFormat,
       final ProtocolScheduleProvider protocolScheduleProvider,
       final ProtocolContextProvider protocolContextProvider,
-      final EthScheduler scheduler) {
+      final EthScheduler scheduler,
+      final ServiceManager serviceManager) {
     try {
       final GenesisConfig genesisConfig = GenesisConfig.fromSource(chainResources.getGenesisURL());
       final ProtocolSchedule protocolSchedule = protocolScheduleProvider.get(genesisConfig);
-
-      final GenesisState genesisState = GenesisState.fromConfig(genesisConfig, protocolSchedule);
-      final MutableBlockchain blockchain = createInMemoryBlockchain(genesisState.getBlock());
-      final WorldStateArchive worldArchive =
-          storageFormat == DataStorageFormat.BONSAI
-              ? createBonsaiInMemoryWorldStateArchive(blockchain)
-              : createInMemoryWorldStateArchive();
+      // only used in tests no global code cache is needed
+      DataStorageConfiguration dataStorageConfiguration;
+      switch (storageFormat) {
+        case BINTRIE -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG;
+        case BONSAI -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
+        default -> dataStorageConfiguration = DataStorageConfiguration.DEFAULT_CONFIG;
+      }
+      final GenesisState genesisState =
+          GenesisState.fromConfig(
+              dataStorageConfiguration, genesisConfig, protocolSchedule, new CodeCache());
+      final BlockHeaderFunctions blockHeaderFunctions =
+          ScheduleBasedBlockHeaderFunctions.create(protocolSchedule);
+      final MutableBlockchain blockchain =
+          createInMemoryBlockchain(genesisState.getBlock(), blockHeaderFunctions);
+      final WorldStateArchive worldArchive;
+      switch (storageFormat) {
+        case BONSAI ->
+            worldArchive = createBonsaiInMemoryWorldStateArchive(blockchain, serviceManager);
+        case BINTRIE -> worldArchive = createBinTrieInMemoryWorldStateArchive(blockchain);
+        default -> worldArchive = createInMemoryWorldStateArchive();
+      }
       final TransactionPool transactionPool = mock(TransactionPool.class);
 
       genesisState.writeStateTo(worldArchive.getWorldState());
@@ -186,8 +222,6 @@ public class BlockchainSetupUtil {
 
       final Path blocksPath = Path.of(chainResources.getBlocksURL().toURI());
       final List<Block> blocks = new ArrayList<>();
-      final BlockHeaderFunctions blockHeaderFunctions =
-          ScheduleBasedBlockHeaderFunctions.create(protocolSchedule);
       try (final RawBlockIterator iterator =
           new RawBlockIterator(blocksPath, blockHeaderFunctions)) {
         while (iterator.hasNext()) {

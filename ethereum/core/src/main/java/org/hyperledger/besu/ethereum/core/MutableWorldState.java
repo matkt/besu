@@ -36,4 +36,9 @@ public interface MutableWorldState extends WorldState, MutableWorldView {
   default void announceBlockToImport(final BlockHeader blockToImport) {
     // no op by default
   }
+
+  default MutableWorldState disableTrie() {
+    // no op
+    throw new UnsupportedOperationException("cannot disable trie");
+  }
 }

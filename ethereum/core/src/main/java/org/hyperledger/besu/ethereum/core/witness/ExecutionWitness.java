@@ -24,20 +24,20 @@ import com.google.common.annotations.VisibleForTesting;
 public class ExecutionWitness {
 
   private final StateDiff stateDiff;
-  private final VerkleProof verkleProof;
+  private final BinTrieProof binTrieProof;
   private final Hash parentStateRoot;
 
   @VisibleForTesting
   public ExecutionWitness() {
     this.stateDiff = null;
-    this.verkleProof = null;
+    this.binTrieProof = null;
     this.parentStateRoot = null;
   }
 
   public ExecutionWitness(
-      final StateDiff stateDiff, final VerkleProof verkleProof, final Hash parentStateRoot) {
+      final StateDiff stateDiff, final BinTrieProof binTrieProof, final Hash parentStateRoot) {
     this.stateDiff = stateDiff;
-    this.verkleProof = verkleProof;
+    this.binTrieProof = binTrieProof;
     this.parentStateRoot = parentStateRoot;
   }
 
@@ -51,8 +51,8 @@ public class ExecutionWitness {
     return "ExecutionWitness{"
         + "stateDiff="
         + stateDiff
-        + ", verkleProof="
-        + verkleProof
+        + ", binTrieProof="
+        + binTrieProof
         + ", parentStateRoot="
         + parentStateRoot
         + '}';
@@ -62,8 +62,8 @@ public class ExecutionWitness {
     return stateDiff;
   }
 
-  public VerkleProof getVerkleProof() {
-    return verkleProof;
+  public BinTrieProof getBinTrieProof() {
+    return binTrieProof;
   }
 
   public Hash getParentStateRoot() {
@@ -76,12 +76,12 @@ public class ExecutionWitness {
     if (o == null || getClass() != o.getClass()) return false;
     ExecutionWitness that = (ExecutionWitness) o;
     return Objects.equals(stateDiff, that.stateDiff)
-        && Objects.equals(verkleProof, that.verkleProof)
+        && Objects.equals(binTrieProof, that.binTrieProof)
         && Objects.equals(parentStateRoot, that.parentStateRoot);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(stateDiff, verkleProof, parentStateRoot);
+    return Objects.hash(stateDiff, binTrieProof, parentStateRoot);
   }
 }

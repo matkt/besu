@@ -20,7 +20,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
-import org.hyperledger.besu.ethereum.trie.common.VerkleStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStateTrieAccountValue;
 
 import java.util.Optional;
 
@@ -42,11 +42,11 @@ public class VerkleStateTrieAccountValueTest {
   private void roundTripMainNetAccountValue(
       final long nonce, final Wei balance, final long codeSize, final Hash codeHash) {
 
-    VerkleStateTrieAccountValue accountValue =
-        new VerkleStateTrieAccountValue(nonce, balance, codeHash, Optional.of(codeSize));
+    BinaryStateTrieAccountValue accountValue =
+        new BinaryStateTrieAccountValue(nonce, balance, codeHash, Optional.of(codeSize));
     Bytes encoded = RLP.encode(accountValue::writeTo);
     final RLPInput in = RLP.input(encoded);
-    VerkleStateTrieAccountValue roundTripAccountValue = VerkleStateTrieAccountValue.readFrom(in);
+    BinaryStateTrieAccountValue roundTripAccountValue = BinaryStateTrieAccountValue.readFrom(in);
 
     assertThat(nonce).isEqualTo(roundTripAccountValue.getNonce());
     assertThat(balance).isEqualTo(roundTripAccountValue.getBalance());

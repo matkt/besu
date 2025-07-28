@@ -130,15 +130,6 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
 
   @Override
   public BlockCreationResult createBlock(
-      final List<Transaction> transactions,
-      final List<BlockHeader> ommers,
-      final long timestamp,
-      final BlockHeader parentHeader) {
-    return createBlock(Optional.of(transactions), Optional.of(ommers), timestamp, parentHeader);
-  }
-
-  @Override
-  public BlockCreationResult createBlock(
       final Optional<List<Transaction>> maybeTransactions,
       final Optional<List<BlockHeader>> maybeOmmers,
       final long timestamp,
@@ -160,6 +151,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
     throw new UnsupportedOperationException("Only used by BFT block creators");
   }
 
+  @Override
   public BlockCreationResult createBlock(
       final Optional<List<Transaction>> maybeTransactions,
       final Optional<List<BlockHeader>> maybeOmmers,
@@ -184,7 +176,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       final Optional<Bytes32> maybePrevRandao,
       final Optional<Bytes32> maybeParentBeaconBlockRoot,
       final long timestamp,
-      boolean rewardCoinbase,
+      final boolean rewardCoinbase,
       final BlockHeader parentHeader) {
 
     final var timings = new BlockCreationTiming();
@@ -219,10 +211,6 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
               .getTransactionSelectionService()
               .createPluginTransactionSelector(selectorsStateManager);
       final var operationTracer = pluginTransactionSelector.getOperationTracer();
-      pluginTransactionSelector
-          .getOperationTracer()
-          .traceStartBlock(processableBlockHeader, miningBeneficiary);
-
       operationTracer.traceStartBlock(processableBlockHeader, miningBeneficiary);
       BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
@@ -343,7 +331,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       final ProtocolSpec newProtocolSpec,
       final BlockHeader parentHeader) {
 
-    if (newProtocolSpec.getFeeMarket().implementsDataFee()) {
+    if (newProtocolSpec.getFeeMarket().implementsBlobFee()) {
       final var gasCalculator = newProtocolSpec.getGasCalculator();
       final int newBlobsCount =
           transactionResults.getTransactionsByType(TransactionType.BLOB).stream()
@@ -392,10 +380,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
             isCancelled::get,
             miningBeneficiary,
             blobGasPrice,
-            protocolSpec.getFeeMarket(),
-            protocolSpec.getGasCalculator(),
-            protocolSpec.getGasLimitCalculator(),
-            protocolSpec.getBlockHashProcessor(),
+            protocolSpec,
             pluginTransactionSelector,
             ethScheduler,
             selectorsStateManager);

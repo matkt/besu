@@ -213,8 +213,8 @@ public class MainnetProtocolSpecFactory {
         metricsSystem);
   }
 
-  public ProtocolSpecBuilder verkleDefinition(final GenesisConfigOptions genesisConfigOptions) {
-    return MainnetProtocolSpecs.verkleDefinition(
+  public ProtocolSpecBuilder binTrieDefinition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.binTrieDefinition(
         chainId,
         isRevertReasonEnabled,
         genesisConfigOptions,
@@ -237,6 +237,61 @@ public class MainnetProtocolSpecFactory {
 
   public ProtocolSpecBuilder osakaDefinition(final GenesisConfigOptions genesisConfigOptions) {
     return MainnetProtocolSpecs.osakaDefinition(
+        chainId,
+        isRevertReasonEnabled,
+        genesisConfigOptions,
+        evmConfiguration,
+        miningConfiguration,
+        isParallelTxProcessingEnabled,
+        metricsSystem);
+  }
+
+  public ProtocolSpecBuilder bpo1Definition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.bpo1Definition(
+        chainId,
+        isRevertReasonEnabled,
+        genesisConfigOptions,
+        evmConfiguration,
+        miningConfiguration,
+        isParallelTxProcessingEnabled,
+        metricsSystem);
+  }
+
+  public ProtocolSpecBuilder bpo2Definition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.bpo2Definition(
+        chainId,
+        isRevertReasonEnabled,
+        genesisConfigOptions,
+        evmConfiguration,
+        miningConfiguration,
+        isParallelTxProcessingEnabled,
+        metricsSystem);
+  }
+
+  public ProtocolSpecBuilder bpo3Definition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.bpo3Definition(
+        chainId,
+        isRevertReasonEnabled,
+        genesisConfigOptions,
+        evmConfiguration,
+        miningConfiguration,
+        isParallelTxProcessingEnabled,
+        metricsSystem);
+  }
+
+  public ProtocolSpecBuilder bpo4Definition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.bpo4Definition(
+        chainId,
+        isRevertReasonEnabled,
+        genesisConfigOptions,
+        evmConfiguration,
+        miningConfiguration,
+        isParallelTxProcessingEnabled,
+        metricsSystem);
+  }
+
+  public ProtocolSpecBuilder bpo5Definition(final GenesisConfigOptions genesisConfigOptions) {
+    return MainnetProtocolSpecs.bpo5Definition(
         chainId,
         isRevertReasonEnabled,
         genesisConfigOptions,

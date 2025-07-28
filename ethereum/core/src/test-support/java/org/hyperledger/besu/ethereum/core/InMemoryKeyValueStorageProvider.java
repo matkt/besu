@@ -21,8 +21,6 @@ import org.hyperledger.besu.ethereum.chain.DefaultBlockchain;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.chain.VariablesStorage;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
-import org.hyperledger.besu.ethereum.privacy.storage.PrivateStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.privacy.storage.PrivateStateStorage;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.VariablesKeyValueStorage;
@@ -30,17 +28,19 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValue
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.NoopBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.transition.StateTransitionWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.InMemoryStoragePlugin;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
@@ -103,11 +103,19 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
 
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain) {
-    return createBonsaiInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT);
+    return createBonsaiInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT, null);
   }
 
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain, final EvmConfiguration evmConfiguration) {
+      final Blockchain blockchain, final ServiceManager serviceManager) {
+    return createBonsaiInMemoryWorldStateArchive(
+        blockchain, EvmConfiguration.DEFAULT, serviceManager);
+  }
+
+  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
+      final Blockchain blockchain,
+      final EvmConfiguration evmConfiguration,
+      final ServiceManager serviceManager) {
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider(
             new InMemoryStoragePlugin.InMemoryKeyValueStorageFactory("factory"));
@@ -120,29 +128,31 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         blockchain,
         Optional.empty(),
         bonsaiCachedMerkleTrieLoader,
-        null,
+        serviceManager,
         evmConfiguration,
-        throwingWorldStateHealerSupplier());
+        throwingWorldStateHealerSupplier(),
+        new CodeCache());
   }
 
-  public static VerkleWorldStateProvider createVerkleInMemoryWorldStateArchive(
+  public static BinTrieWorldStateProvider createBinTrieInMemoryWorldStateArchive(
       final Blockchain blockchain) {
-    return createVerkleInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT);
+    return createBinTrieInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT);
   }
 
-  public static VerkleWorldStateProvider createVerkleInMemoryWorldStateArchive(
+  public static BinTrieWorldStateProvider createBinTrieInMemoryWorldStateArchive(
       final Blockchain blockchain, final EvmConfiguration evmConfiguration) {
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider(
             new InMemoryStoragePlugin.InMemoryKeyValueStorageFactory("factory"));
-    return new VerkleWorldStateProvider(
-        (VerkleWorldStateKeyValueStorage)
+    return new BinTrieWorldStateProvider(
+        (BinTrieWorldStateKeyValueStorage)
             inMemoryKeyValueStorageProvider.createWorldStateStorage(
-                DataStorageConfiguration.DEFAULT_VERKLE_CONFIG),
+                DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG),
         blockchain,
         Optional.empty(),
         null,
-        evmConfiguration);
+        evmConfiguration,
+        new CodeCache());
   }
 
   public static StateTransitionWorldStateProvider createStateTransitionInMemoryWorldStateArchive(
@@ -150,6 +160,7 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider(
             new InMemoryStoragePlugin.InMemoryKeyValueStorageFactory("factory"));
+    final CodeCache codeCache = new CodeCache();
     BonsaiWorldStateProvider bonsaiWorldStateProvider =
         new BonsaiWorldStateProvider(
             (BonsaiWorldStateKeyValueStorage)
@@ -160,16 +171,18 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
             new NoopBonsaiCachedMerkleTrieLoader(),
             null,
             EvmConfiguration.DEFAULT,
-            throwingWorldStateHealerSupplier());
-    VerkleWorldStateProvider verkleWorldStateProvider =
-        new VerkleWorldStateProvider(
-            (VerkleWorldStateKeyValueStorage)
+            throwingWorldStateHealerSupplier(),
+            codeCache);
+    BinTrieWorldStateProvider verkleWorldStateProvider =
+        new BinTrieWorldStateProvider(
+            (BinTrieWorldStateKeyValueStorage)
                 inMemoryKeyValueStorageProvider.createWorldStateStorage(
-                    DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG),
+                    DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG),
             blockchain,
             Optional.empty(),
             null,
-            EvmConfiguration.DEFAULT);
+            EvmConfiguration.DEFAULT,
+            codeCache);
     return new StateTransitionWorldStateProvider(
         bonsaiWorldStateProvider, verkleWorldStateProvider, verkleMilestone, blockchain);
   }
@@ -182,10 +195,6 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         provider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_FOREST_CONFIG),
         provider.createWorldStatePreimageStorage(),
         EvmConfiguration.DEFAULT);
-  }
-
-  public static PrivateStateStorage createInMemoryPrivateStateStorage() {
-    return new PrivateStateKeyValueStorage(new InMemoryKeyValueStorage());
   }
 
   public static VariablesStorage createInMemoryVariablesStorage() {

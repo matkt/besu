@@ -19,17 +19,19 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.code.CodeV0;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.trielogs.StateMigrationLog;
 
@@ -42,33 +44,33 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Manages state transitions between Bonsai and Verkle world states, ensuring proper migration of
+ * Manages state transitions between Bonsai and BinTrie world states, ensuring proper migration of
  * storage and accounts.
  *
  * <p>This class is responsible for converting and merging data structures from the Bonsai world
- * state into the Verkle world state, ensuring data consistency and preventing overwriting of
+ * state into the BinTrie world state, ensuring data consistency and preventing overwriting of
  * existing state.
  */
 @SuppressWarnings("unchecked")
 public class StateTransitionWorldState implements MutableWorldState, PathBasedWorldView {
 
   private final BonsaiWorldState bonsaiWorldState;
-  private final VerkleWorldState verkleWorldState;
+  private final BinTrieWorldState verkleWorldState;
   private final StateMigrationLog migrationProgress;
   private PathBasedWorldStateUpdateAccumulator<?> accumulator;
 
-  private boolean isVerkleActive;
+  private boolean isBinTrieActive;
   private final long verkleForkTimeStamp;
 
   public StateTransitionWorldState(
       final BonsaiWorldState bonsaiWorldState,
-      final VerkleWorldState verkleWorldState,
+      final BinTrieWorldState verkleWorldState,
       final StateMigrationLog migrationProgress,
-      final boolean isVerkleActive,
+      final boolean isBinTrieActive,
       final long verkleForkTimeStamp) {
     this.bonsaiWorldState = bonsaiWorldState;
     this.verkleWorldState = verkleWorldState;
-    this.isVerkleActive = isVerkleActive;
+    this.isBinTrieActive = isBinTrieActive;
     this.verkleForkTimeStamp = verkleForkTimeStamp;
     this.migrationProgress = migrationProgress;
     this.accumulator = loadAccumulator();
@@ -76,30 +78,30 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   @Override
   public void announceBlockToImport(final BlockHeader blockToImport) {
-    // Determine if Verkle should be activated based on the fork timestamp.
-    this.isVerkleActive = blockToImport.getTimestamp() >= verkleForkTimeStamp;
+    // Determine if BinTrie should be activated based on the fork timestamp.
+    this.isBinTrieActive = blockToImport.getTimestamp() >= verkleForkTimeStamp;
     // Load the appropriate state accumulator.
     this.accumulator = loadAccumulator();
   }
 
   @Override
   public Account get(final Address address) {
-    if (isVerkleActive) {
+    if (isBinTrieActive) {
       Account account = verkleWorldState.get(address);
-      // If the account is not found in Verkle but migration is ongoing, check in Bonsai
+      // If the account is not found in BinTrie but migration is ongoing, check in Bonsai
       if (account == null && migrationProgress.isMigrationInProgress()) {
         account = bonsaiWorldState.get(address);
-        // Convert Bonsai account to Verkle format if necessary
+        // Convert Bonsai account to BinTrie format if necessary
         if (account instanceof BonsaiAccount bonsaiAccount) {
-          VerkleAccount verkleAccount =
-              new VerkleAccount(
+          BinTrieAccount verkleAccount =
+              new BinTrieAccount(
                   getAccumulator(),
                   address,
                   address.addressHash(),
                   bonsaiAccount.getNonce(),
                   bonsaiAccount.getBalance(),
                   bonsaiAccount.getCodeSize().orElse(0L),
-                  bonsaiAccount.getCode(),
+                  new CodeV0(bonsaiAccount.getCode()),
                   bonsaiAccount.getCodeHash(),
                   true);
           // notify verkle accumulator that the value was not found in verkle by creating a pmt
@@ -110,14 +112,14 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
               .getAccountsToUpdate()
               .put(
                   address,
-                  new MigratedDiffValue<>(new VerkleAccount(verkleAccount), verkleAccount));
+                  new MigratedDiffValue<>(new BinTrieAccount(verkleAccount), verkleAccount));
           return verkleAccount;
         }
       }
 
       return account;
     } else {
-      // If Verkle is not active, retrieve the account from Bonsai
+      // If BinTrie is not active, retrieve the account from Bonsai
       return bonsaiWorldState.get(address);
     }
   }
@@ -136,11 +138,11 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   public Optional<UInt256> getStorageValueByStorageSlotKey(
       final Address address, final StorageSlotKey storageSlotKey) {
 
-    if (isVerkleActive) {
+    if (isBinTrieActive) {
       Optional<UInt256> maybeSlot =
           verkleWorldState.getStorageValueByStorageSlotKey(address, storageSlotKey);
 
-      // If not found in Verkle and migration is ongoing, check in Bonsai
+      // If not found in BinTrie and migration is ongoing, check in Bonsai
       if (maybeSlot.isEmpty() && migrationProgress.isMigrationInProgress()) {
         // read bonsai worldstate
         maybeSlot = bonsaiWorldState.getStorageValueByStorageSlotKey(address, storageSlotKey);
@@ -157,7 +159,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
       }
       return maybeSlot;
     } else {
-      // If Verkle is not active, retrieve the storage value from Bonsai
+      // If BinTrie is not active, retrieve the storage value from Bonsai
       return bonsaiWorldState.getStorageValueByStorageSlotKey(address, storageSlotKey);
     }
   }
@@ -184,23 +186,23 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   @Override
   public void persist(final BlockHeader blockHeader) {
-    if (isVerkleActive) {
-      // Import state changes into the Verkle accumulator
+    if (isBinTrieActive) {
+      // Import state changes into the BinTrie accumulator
       verkleWorldState
           .getAccumulator()
           .importStateChangesFromSource(
-              (PathBasedWorldStateUpdateAccumulator<VerkleAccount>) accumulator);
+              (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
 
-      // If migration is in progress, perform conversion from Bonsai to Verkle
+      // If migration is in progress, perform conversion from Bonsai to BinTrie
       if (migrationProgress.isMigrationInProgress()) {
-        PatriciaToVerkleConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
+        PatriciaToBinTrieConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
       }
       if (migrationProgress.isMigrationInProgress()
           || migrationProgress.isAccountsFullyMigrated()) {
         verkleWorldState.getAccumulator().setStateMigrationLog(Optional.of(migrationProgress));
       }
 
-      // Persist Verkle world state
+      // Persist BinTrie world state
       verkleWorldState.persist(blockHeader);
     } else {
       // Import state changes into the Bonsai accumulator
@@ -224,32 +226,32 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   @Override
   public Hash rootHash() {
     final Hash worldStateRootHash;
-      if (isVerkleActive) {
-        if (accumulator.isAccumulatorStateChanged()) {
-          // Import state changes into the Verkle accumulator
-          verkleWorldState
-                  .getAccumulator()
-                  .importStateChangesFromSource(
-                          (PathBasedWorldStateUpdateAccumulator<VerkleAccount>) accumulator);
+    if (isBinTrieActive) {
+      if (accumulator.isAccumulatorStateChanged()) {
+        // Import state changes into the BinTrie accumulator
+        verkleWorldState
+            .getAccumulator()
+            .importStateChangesFromSource(
+                (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
 
-          // If migration is in progress, perform conversion from Bonsai to Verkle
-          if (migrationProgress.isMigrationInProgress()) {
-            PatriciaToVerkleConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
-          }
+        // If migration is in progress, perform conversion from Bonsai to BinTrie
+        if (migrationProgress.isMigrationInProgress()) {
+          PatriciaToBinTrieConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
         }
-        worldStateRootHash = verkleWorldState.rootHash();
-      } else {
-        if (accumulator.isAccumulatorStateChanged()) {
-          // Import state changes into the Bonsai accumulator
-          bonsaiWorldState
-                  .getAccumulator()
-                  .importStateChangesFromSource(
-                          (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
-        }
-        worldStateRootHash = bonsaiWorldState.rootHash();
       }
-      accumulator.resetAccumulatorStateChanged();
-      return worldStateRootHash;
+      worldStateRootHash = verkleWorldState.rootHash();
+    } else {
+      if (accumulator.isAccumulatorStateChanged()) {
+        // Import state changes into the Bonsai accumulator
+        bonsaiWorldState
+            .getAccumulator()
+            .importStateChangesFromSource(
+                (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
+      }
+      worldStateRootHash = bonsaiWorldState.rootHash();
+    }
+    accumulator.resetAccumulatorStateChanged();
+    return worldStateRootHash;
   }
 
   /**
@@ -266,7 +268,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
         .getAccountsToUpdate()
         .forEach(
             (address, bonsaiAccountDiffBasedValue) ->
-                PatriciaToVerkleConverter.addPreImage(Hash.hash(address), address));
+                PatriciaToBinTrieConverter.addPreImage(Hash.hash(address), address));
 
     bonsaiWorldState
         .getAccumulator()
@@ -275,7 +277,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
             (address, storageUpdates) ->
                 storageUpdates.forEach(
                     (storageSlotKey, value) ->
-                        PatriciaToVerkleConverter.addPreImage(
+                        PatriciaToBinTrieConverter.addPreImage(
                             storageSlotKey.getSlotHash(),
                             storageSlotKey.getSlotKey().orElseThrow())));
   }
@@ -283,6 +285,15 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   @Override
   public WorldUpdater updater() {
     return getAccumulator();
+  }
+
+  @Override
+  public CodeCache codeCache() {
+    if (isBinTrieActive) {
+      return bonsaiWorldState.codeCache();
+    } else {
+      return verkleWorldState.codeCache();
+    }
   }
 
   @Override
@@ -296,15 +307,15 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   }
 
   private PathBasedWorldStateUpdateAccumulator<?> loadAccumulator() {
-    if (isVerkleActive) {
-      return new VerkleWorldStateUpdateAccumulator(this, verkleWorldState.getAccumulator());
+    if (isBinTrieActive) {
+      return new BinTrieWorldStateUpdateAccumulator(this, verkleWorldState.getAccumulator());
     } else {
       return new BonsaiWorldStateUpdateAccumulator(this, bonsaiWorldState.getAccumulator());
     }
   }
 
   private PathBasedWorldState getWorldState() {
-    if (isVerkleActive) {
+    if (isBinTrieActive) {
       return verkleWorldState;
     } else {
       return bonsaiWorldState;

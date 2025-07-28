@@ -32,7 +32,7 @@ public abstract class FlatDbStrategyProvider {
 
   // 0x666C61744462537461747573
   public static final byte[] FLAT_DB_MODE = "flatDbStatus".getBytes(StandardCharsets.UTF_8);
-  private final MetricsSystem metricsSystem;
+  protected final MetricsSystem metricsSystem;
   protected final DataStorageConfiguration dataStorageConfiguration;
   protected FlatDbMode flatDbMode;
   protected FlatDbStrategy flatDbStrategy;
@@ -43,7 +43,6 @@ public abstract class FlatDbStrategyProvider {
       final SegmentedKeyValueStorage composedWorldStateStorage) {
     this.metricsSystem = metricsSystem;
     this.dataStorageConfiguration = dataStorageConfiguration;
-    loadFlatDbStrategy(composedWorldStateStorage);
   }
 
   public void loadFlatDbStrategy(final SegmentedKeyValueStorage composedWorldStateStorage) {
@@ -95,7 +94,11 @@ public abstract class FlatDbStrategyProvider {
                 CodeHashCodeStorageStrategy.isCodeHashValue(keypair.getKey(), keypair.getValue()));
   }
 
-  public FlatDbStrategy getFlatDbStrategy() {
+  public FlatDbStrategy getFlatDbStrategy(
+      final SegmentedKeyValueStorage composedWorldStateStorage) {
+    if (flatDbStrategy == null) {
+      loadFlatDbStrategy(composedWorldStateStorage);
+    }
     return flatDbStrategy;
   }
 

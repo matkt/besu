@@ -14,12 +14,16 @@
  */
 package org.hyperledger.besu.plugin.services.storage.rocksdb;
 
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.BINTRIE_WITH_RECEIPT_COMPACTION;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.BINTRIE_WITH_VARIABLES;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.BONSAI_WITH_VARIABLES;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.FOREST_WITH_VARIABLES;
-import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.VERKLE_WITH_RECEIPT_COMPACTION;
-import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.BaseVersionedStorageFormat.VERKLE_WITH_VARIABLES;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.BLOB_BLOCKCHAIN_GARBAGE_COLLECTION_ENABLED;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.BLOB_GARBAGE_COLLECTION_AGE_CUTOFF;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.BLOB_GARBAGE_COLLECTION_FORCE_THRESHOLD;
 
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -63,8 +67,8 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
       EnumSet.of(
           FOREST_WITH_RECEIPT_COMPACTION,
           BONSAI_WITH_RECEIPT_COMPACTION,
-          VERKLE_WITH_RECEIPT_COMPACTION);
-
+          BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION,
+          BINTRIE_WITH_RECEIPT_COMPACTION);
   private static final String NAME = "rocksdb";
   private final RocksDBMetricsFactory rocksDBMetricsFactory;
   private DatabaseMetadata databaseMetadata;
@@ -167,7 +171,7 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
                   metricsSystem,
                   rocksDBMetricsFactory);
         }
-        case BONSAI -> {
+        case BONSAI, X_BONSAI_ARCHIVE -> {
           LOG.debug("BONSAI mode detected, Using OptimisticTransactionDB.");
           segmentedStorage =
               new OptimisticRocksDBColumnarKeyValueStorage(
@@ -177,8 +181,8 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
                   metricsSystem,
                   rocksDBMetricsFactory);
         }
-        case VERKLE -> {
-          LOG.debug("VERKLE mode detected, Using OptimisticTransactionDB.");
+        case BINTRIE -> {
+          LOG.debug("BINTRIE mode detected, Using OptimisticTransactionDB.");
           segmentedStorage =
               new OptimisticRocksDBColumnarKeyValueStorage(
                   rocksDBConfiguration,
@@ -212,10 +216,31 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
               + " could not be found. You may not have the appropriate permission to access the item.";
       throw new StorageException(message, e);
     }
-    rocksDBConfiguration =
-        RocksDBConfigurationBuilder.from(configuration.get())
-            .databaseDir(storagePath(commonConfiguration))
-            .build();
+    final RocksDBFactoryConfiguration factoryConfig = configuration.get();
+    var configBuilder =
+        RocksDBConfigurationBuilder.from(factoryConfig)
+            .databaseDir(storagePath(commonConfiguration));
+
+    if (commonConfiguration.getDataStorageConfiguration().isHistoryExpiryPruneEnabled()) {
+      configBuilder.isBlockchainGarbageCollectionEnabled(true);
+      final double blobGarbageCollectionAgeCutoff =
+          factoryConfig.getBlobGarbageCollectionAgeCutoff().orElse(0.5);
+      final double blobGarbageCollectionForceThreshold =
+          factoryConfig.getBlobGarbageCollectionForceThreshold().orElse(0.1);
+      configBuilder.blobGarbageCollectionAgeCutoff(Optional.of(blobGarbageCollectionAgeCutoff));
+      configBuilder.blobGarbageCollectionForceThreshold(
+          Optional.of(blobGarbageCollectionForceThreshold));
+      LOG.atInfo()
+          .setMessage("History expiry prune is enabled so setting {}; {}={}; {}={}")
+          .addArgument(BLOB_BLOCKCHAIN_GARBAGE_COLLECTION_ENABLED)
+          .addArgument(BLOB_GARBAGE_COLLECTION_AGE_CUTOFF)
+          .addArgument(blobGarbageCollectionAgeCutoff)
+          .addArgument(BLOB_GARBAGE_COLLECTION_FORCE_THRESHOLD)
+          .addArgument(blobGarbageCollectionForceThreshold)
+          .log();
+    }
+
+    rocksDBConfiguration = configBuilder.build();
   }
 
   private boolean requiresInit() {
@@ -236,8 +261,9 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
     if (metadataExists) {
       metadata = DatabaseMetadata.lookUpFrom(dataDir);
 
-      if (!isStorageFormatCompatible(metadata.getVersionedStorageFormat().getFormat(),
-              commonConfiguration.getDataStorageConfiguration().getDatabaseFormat())) {
+      if (!isStorageFormatCompatible(
+          metadata.getVersionedStorageFormat().getFormat(),
+          commonConfiguration.getDataStorageConfiguration().getDatabaseFormat())) {
         handleFormatMismatch(commonConfiguration, dataDir, metadata);
       }
 
@@ -283,11 +309,14 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
     return metadata;
   }
 
-  private boolean isStorageFormatCompatible(final DataStorageFormat stored, final DataStorageFormat requested) {
+  private boolean isStorageFormatCompatible(
+      final DataStorageFormat stored, final DataStorageFormat requested) {
     return switch (stored) {
       case FOREST -> requested == DataStorageFormat.FOREST;
-      case BONSAI -> requested == DataStorageFormat.BONSAI || requested == DataStorageFormat.VERKLE;
-      case VERKLE -> requested == DataStorageFormat.VERKLE;
+      case BONSAI ->
+          requested == DataStorageFormat.BONSAI || requested == DataStorageFormat.BINTRIE;
+      case X_BONSAI_ARCHIVE -> requested == DataStorageFormat.X_BONSAI_ARCHIVE;
+      case BINTRIE -> requested == DataStorageFormat.BINTRIE;
     };
   }
 
@@ -318,7 +347,7 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
 
     // Besu supports both formats of receipts so no downgrade is needed
     if (runtimeVersion == BONSAI_WITH_VARIABLES
-        || runtimeVersion == VERKLE_WITH_VARIABLES
+        || runtimeVersion == BINTRIE_WITH_VARIABLES
         || runtimeVersion == FOREST_WITH_VARIABLES) {
       LOG.warn(
           "Database contains compacted receipts but receipt compaction is not enabled, new receipts  will "
@@ -354,8 +383,8 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
         existingMetadata.getVersionedStorageFormat();
     if ((existingVersionedStorageFormat == BONSAI_WITH_VARIABLES
             && runtimeVersion == BONSAI_WITH_RECEIPT_COMPACTION)
-        || (existingVersionedStorageFormat == VERKLE_WITH_VARIABLES
-            && runtimeVersion == VERKLE_WITH_RECEIPT_COMPACTION)
+        || (existingVersionedStorageFormat == BINTRIE_WITH_VARIABLES
+            && runtimeVersion == BINTRIE_WITH_RECEIPT_COMPACTION)
         || (existingVersionedStorageFormat == FOREST_WITH_VARIABLES
             && runtimeVersion == FOREST_WITH_RECEIPT_COMPACTION)) {
       final DatabaseMetadata metadata = new DatabaseMetadata(runtimeVersion);

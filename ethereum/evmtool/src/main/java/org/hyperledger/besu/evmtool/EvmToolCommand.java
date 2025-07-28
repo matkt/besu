@@ -200,6 +200,13 @@ public class EvmToolCommand implements Runnable {
   final Boolean showJsonAlloc = false;
 
   @Option(
+      names = {"--noeip-3155", "--trace.noeip-3155"},
+      description = "Produce a trace with types strictly compatible with EIP-3155.",
+      scope = INHERIT,
+      negatable = true)
+  final Boolean eip3155strict = true;
+
+  @Option(
       names = {"--memory", "--trace.memory"},
       description =
           "Show the full memory output in tracing for each op. Default is not to show memory.",
@@ -231,6 +238,14 @@ public class EvmToolCommand implements Runnable {
   final Boolean showStorage = false;
 
   @Option(
+      names = {"--trace.statelessaccesswitness"},
+      description =
+          "Show the state of the access witness for stateless. Default is to not show stateless witness.",
+      scope = INHERIT,
+      negatable = true)
+  final Boolean showStatelessAccessWitness = false;
+
+  @Option(
       names = {"--notime"},
       description = "Don't include time data in summary output.",
       scope = INHERIT,
@@ -257,6 +272,10 @@ public class EvmToolCommand implements Runnable {
       versionHelp = true,
       description = "display version info")
   boolean versionInfoRequested;
+
+  Integer getRepeatCount() {
+    return repeat;
+  }
 
   static final Joiner STORAGE_JOINER = Joiner.on(",\n");
   private final EvmToolCommandOptionsModule daggerOptions = new EvmToolCommandOptionsModule();
@@ -413,8 +432,7 @@ public class EvmToolCommand implements Runnable {
         final long intrinsicGasCost =
             protocolSpec
                 .getGasCalculator()
-                .transactionIntrinsicGasCost(
-                    tx.getPayload(), tx.isContractCreation(), accessListCost + delegateCodeCost);
+                .transactionIntrinsicGasCost(tx, accessListCost + delegateCodeCost);
         txGas -= intrinsicGasCost;
       }
 
@@ -422,8 +440,7 @@ public class EvmToolCommand implements Runnable {
       if (codeBytes.isEmpty() && !createTransaction) {
         codeBytes = component.getWorldState().get(receiver).getCode();
       }
-      Code code =
-          createTransaction ? evm.getCodeForCreation(codeBytes) : evm.getCodeUncached(codeBytes);
+      Code code = createTransaction ? evm.wrapCodeForCreation(codeBytes) : evm.wrapCode(codeBytes);
       if (!code.isValid()) {
         out.println(((CodeInvalid) code).getInvalidReason());
         return;
@@ -444,7 +461,14 @@ public class EvmToolCommand implements Runnable {
 
         final OperationTracer tracer = // You should have picked Mercy.
             lastLoop && showJsonResults
-                ? new StandardJsonTracer(out, showMemory, !hideStack, showReturnData, showStorage)
+                ? new StandardJsonTracer(
+                    out,
+                    showMemory,
+                    !hideStack,
+                    showReturnData,
+                    showStorage,
+                    eip3155strict,
+                    showStatelessAccessWitness)
                 : OperationTracer.NO_TRACING;
 
         WorldUpdater updater = component.getWorldUpdater();
@@ -553,7 +577,7 @@ public class EvmToolCommand implements Runnable {
               .put("output", initialMessageFrame.getOutputData().toHexString())
               .put("gasUsed", "0x" + Long.toHexString(evmGas))
               .put("pass", initialMessageFrame.getExceptionalHaltReason().isEmpty())
-              .put("fork", protocolSpec.getName());
+              .put("fork", protocolSpec.getHardforkId().description());
           if (!noTime) {
             resultLine.put("timens", lastTime).put("time", lastTime / 1000);
           }
@@ -615,13 +639,10 @@ public class EvmToolCommand implements Runnable {
                             .toList()));
                 out.println("  },");
               }
-              out.print("  \"balance\": \"" + account.getBalance().toShortHexString() + "\"");
+              out.print("  \"balance\": \"" + account.getBalance().toDecimalString() + "\"");
               if (account.getNonce() != 0) {
                 out.println(",");
-                out.println(
-                    "  \"nonce\": \""
-                        + Bytes.ofUnsignedLong(account.getNonce()).toShortHexString()
-                        + "\"");
+                out.println("  \"nonce\": " + account.getNonce());
               } else {
                 out.println();
               }

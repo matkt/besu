@@ -61,7 +61,7 @@ public class TransactionPoolFactory {
     final TransactionPoolMetrics metrics = new TransactionPoolMetrics(metricsSystem);
 
     final PeerTransactionTracker transactionTracker =
-        new PeerTransactionTracker(ethContext.getEthPeers());
+        new PeerTransactionTracker(transactionPoolConfiguration, ethContext.getEthPeers());
     final TransactionsMessageSender transactionsMessageSender =
         new TransactionsMessageSender(transactionTracker);
 
@@ -183,10 +183,10 @@ public class TransactionPoolFactory {
           if (isInSync == transactionPool.isEnabled()) {
             LOG.info("Node is in sync, enabling transaction handling");
             enableTransactionHandling(
-                    transactionTracker,
-                    transactionPool,
-                    transactionsMessageHandler,
-                    pooledTransactionsMessageHandler);
+                transactionTracker,
+                transactionPool,
+                transactionsMessageHandler,
+                pooledTransactionsMessageHandler);
           }
         });
 

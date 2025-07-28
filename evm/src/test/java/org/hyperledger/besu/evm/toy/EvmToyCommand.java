@@ -15,7 +15,6 @@
 package org.hyperledger.besu.evm.toy;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
@@ -127,6 +126,12 @@ public class EvmToyCommand implements Runnable {
   final Boolean showStorage = false;
 
   @CommandLine.Option(
+      names = {"--trace.statelessaccesswitness"},
+      description = "When tracing, show accesses to the stateless witness.",
+      scope = ScopeType.INHERIT)
+  final Boolean showStatelessAccessWitness = false;
+
+  @CommandLine.Option(
       names = {"--repeat"},
       description = "Number of times to repeat for benchmarking.")
   private final Integer repeat = 0;
@@ -157,7 +162,7 @@ public class EvmToyCommand implements Runnable {
 
     int repeat = this.repeat;
     final EVM evm = MainnetEVMs.berlin(EvmConfiguration.DEFAULT);
-    final Code code = evm.getCode(Hash.hash(codeBytes), codeBytes);
+    final Code code = evm.wrapCode(codeBytes);
     final PrecompileContractRegistry precompileContractRegistry = new PrecompileContractRegistry();
     MainnetPrecompiledContracts.populateForIstanbul(
         precompileContractRegistry, evm.getGasCalculator());
@@ -169,7 +174,12 @@ public class EvmToyCommand implements Runnable {
       final OperationTracer tracer = // You should have picked Mercy.
           lastLoop && showJsonResults
               ? new StandardJsonTracer(
-                  System.out, showMemory, showStack, showReturnData, showStorage)
+                  System.out,
+                  showMemory,
+                  showStack,
+                  showReturnData,
+                  showStorage,
+                  showStatelessAccessWitness)
               : OperationTracer.NO_TRACING;
 
       MessageFrame initialMessageFrame =

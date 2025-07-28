@@ -21,11 +21,13 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedWorldStorageManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -45,7 +47,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
 
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiWorldStateProvider.class);
   private final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
-  private final Supplier<WorldStateHealer> worldStateHealerSupplier;
+  private final Supplier<WorldStateArchive.WorldStateHealer> worldStateHealerSupplier;
 
   public BonsaiWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
@@ -54,7 +56,8 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ServiceManager pluginContext,
       final EvmConfiguration evmConfiguration,
-      final Supplier<WorldStateHealer> worldStateHealerSupplier) {
+      final Supplier<WorldStateArchive.WorldStateHealer> worldStateHealerSupplier,
+      final CodeCache codeCache) {
     super(
         DataStorageFormat.BONSAI,
         worldStateKeyValueStorage,
@@ -63,10 +66,13 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
         pluginContext);
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateHealerSupplier = worldStateHealerSupplier;
+    this.evmConfiguration = evmConfiguration;
     provideCachedWorldStorageManager(
-        new BonsaiCachedWorldStorageManager(this, worldStateKeyValueStorage, worldStateConfig));
+        new BonsaiCachedWorldStorageManager(
+            this, worldStateKeyValueStorage, worldStateConfig, codeCache));
     loadHeadWorldState(
-        new BonsaiWorldState(this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig));
+        new BonsaiWorldState(
+            this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
   }
 
   @VisibleForTesting
@@ -77,13 +83,16 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
       final Blockchain blockchain,
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final EvmConfiguration evmConfiguration,
-      final Supplier<WorldStateHealer> worldStateHealerSupplier) {
+      final Supplier<WorldStateHealer> worldStateHealerSupplier,
+      final CodeCache codeCache) {
     super(DataStorageFormat.BONSAI, worldStateKeyValueStorage, blockchain, trieLogManager);
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateHealerSupplier = worldStateHealerSupplier;
+    this.evmConfiguration = evmConfiguration;
     provideCachedWorldStorageManager(bonsaiCachedWorldStorageManager);
     loadHeadWorldState(
-        new BonsaiWorldState(this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig));
+        new BonsaiWorldState(
+            this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
   }
 
   public BonsaiCachedMerkleTrieLoader getCachedMerkleTrieLoader() {

@@ -20,11 +20,11 @@ import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.proof.WorldStateProof;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.worldstate.WorldState;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -47,32 +47,32 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
       LoggerFactory.getLogger(StateTransitionWorldStateProvider.class);
 
   private final BonsaiWorldStateProvider bonsaiProvider;
-  private final VerkleWorldStateProvider verkleProvider;
+  private final BinTrieWorldStateProvider binTrieProvider;
 
-  private final long verkleMilestone;
+  private final long BinTrieMilestone;
   private final Blockchain blockchain;
 
   public StateTransitionWorldStateProvider(
       final BonsaiWorldStateProvider bonsaiProvider,
-      final VerkleWorldStateProvider verkleProvider,
-      final long verkleMilestone,
+      final BinTrieWorldStateProvider binTrieProvider,
+      final long BinTrieMilestone,
       final Blockchain blockchain) {
     this.bonsaiProvider = bonsaiProvider;
-    this.verkleProvider = verkleProvider;
-    this.verkleMilestone = verkleMilestone;
+    this.binTrieProvider = binTrieProvider;
+    this.BinTrieMilestone = BinTrieMilestone;
     this.blockchain = blockchain;
   }
 
   @Override
   public Optional<WorldState> get(final Hash rootHash, final Hash blockHash) {
-    return verkleProvider
+    return binTrieProvider
         .get(rootHash, blockHash)
         .or(() -> bonsaiProvider.get(rootHash, blockHash));
   }
 
   @Override
   public boolean isWorldStateAvailable(final Hash rootHash, final Hash blockHash) {
-    return verkleProvider.isWorldStateAvailable(rootHash, blockHash)
+    return binTrieProvider.isWorldStateAvailable(rootHash, blockHash)
         || bonsaiProvider.isWorldStateAvailable(rootHash, blockHash);
   }
 
@@ -81,10 +81,10 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
     LOG.debug("Fetching world state for block hash: {}", params.getBlockHash());
 
     final StateMigrationLog migrationLog =
-        verkleProvider
+        binTrieProvider
             .getTrieLogManager()
             .getTrieLogLayer(params.getBlockHash())
-            .filter(log -> log.getDataStorageFormat() == DataStorageFormat.VERKLE)
+            .filter(log -> log.getDataStorageFormat() == DataStorageFormat.BINTRIE)
             .flatMap(TrieLog::getStateMigrationLog)
             .orElse(new StateMigrationLog(params.getBlockHash(), 1500));
 
@@ -99,23 +99,23 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .map(state -> state.getWorldStateBlockHash().equals(params.getBlockHash()))
             .orElse(false);
 
-    final Optional<VerkleWorldState> verkleState =
-        getVerkleTransitionState(params, hasValidBonsaiState, bonsaiTarget);
+    final Optional<BinTrieWorldState> binTrieState =
+        getBinTrieTransitionState(params, hasValidBonsaiState, bonsaiTarget);
 
-    final boolean hasValidVerkleState =
-        verkleState
+    final boolean hasValidBinTrieState =
+        binTrieState
             .map(state -> state.getWorldStateBlockHash().equals(params.getBlockHash()))
             .orElse(false);
 
-    if (hasValidBonsaiState || hasValidVerkleState) {
+    if (hasValidBonsaiState || hasValidBinTrieState) {
       LOG.debug("Matching world state found. Proceeding with state transition.");
       return Optional.of(
           new StateTransitionWorldState(
               bonsaiState.get(),
-              verkleState.get(),
+              binTrieState.get(),
               migrationLog,
-              hasValidVerkleState,
-              verkleMilestone));
+              hasValidBinTrieState,
+              BinTrieMilestone));
     }
 
     LOG.info("No matching world state found for the requested block hash.");
@@ -126,21 +126,21 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
   public MutableWorldState getWorldState() {
     LOG.debug("Fetching current world state.");
 
-    // Retrieve current Bonsai and Verkle states
+    // Retrieve current Bonsai and BinTrie states
     final BonsaiWorldState bonsaiState = (BonsaiWorldState) bonsaiProvider.getWorldState();
-    final VerkleWorldState verkleState = (VerkleWorldState) verkleProvider.getWorldState();
+    final BinTrieWorldState binTrieState = (BinTrieWorldState) binTrieProvider.getWorldState();
 
     // Retrieve the current chain head block header
     final BlockHeader chainHeadHeader = blockchain.getChainHeadHeader();
     LOG.debug("Current chain head block hash: {}", chainHeadHeader.getBlockHash());
 
-    // Check if Verkle is active based on the milestone timestamp
-    final boolean isVerkleActive = chainHeadHeader.getTimestamp() >= verkleMilestone;
-    LOG.debug("Verkle active status: {}", isVerkleActive);
+    // Check if BinTrie is active based on the milestone timestamp
+    final boolean isBinTrieActive = chainHeadHeader.getTimestamp() >= BinTrieMilestone;
+    LOG.debug("BinTrie active status: {}", isBinTrieActive);
 
     // Retrieve state migration log
     final StateMigrationLog stateMigrationLog =
-        verkleProvider
+        binTrieProvider
             .getTrieLogManager()
             .getTrieLogLayer(chainHeadHeader.getBlockHash())
             .flatMap(TrieLog::getStateMigrationLog)
@@ -151,45 +151,46 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
         chainHeadHeader.getBlockHash());
 
     return new StateTransitionWorldState(
-        bonsaiState, verkleState, stateMigrationLog, isVerkleActive, verkleMilestone);
+        bonsaiState, binTrieState, stateMigrationLog, isBinTrieActive, BinTrieMilestone);
   }
 
   private Optional<BonsaiWorldState> getBonsaiTransitionState(final WorldStateQueryParams params) {
     return bonsaiProvider.getWorldState(params).map(BonsaiWorldState.class::cast);
   }
 
-  private Optional<VerkleWorldState> getVerkleTransitionState(
+  private Optional<BinTrieWorldState> getBinTrieTransitionState(
       final WorldStateQueryParams worldStateQueryParams,
       final boolean hasValidBonsaiState,
       final BlockHeader bonsaiTarget) {
-    VerkleWorldState verkleState = (VerkleWorldState) verkleProvider.getWorldState();
+    BinTrieWorldState binTrieState = (BinTrieWorldState) binTrieProvider.getWorldState();
     // If the initial state's block hash is zero, it indicates the chain's head
-    // has not yet passed the Verkle fork (zero block hash does not exist in a valid chain).
-    if (verkleState.getWorldStateBlockHash().isZero()) {
+    // has not yet passed the BinTrie fork (zero block hash does not exist in a valid chain).
+    if (binTrieState.getWorldStateBlockHash().isZero()) {
       if (!worldStateQueryParams.shouldWorldStateUpdateHead()) {
-        verkleState =
-            new VerkleWorldState(
-                verkleProvider,
-                verkleState.getWorldStateStorage(),
-                verkleState.getAccumulator().getEvmConfiguration(),
-                verkleProvider.getWorldStateSharedSpec());
-        verkleState.freezeStorage();
+        binTrieState =
+            new BinTrieWorldState(
+                binTrieProvider,
+                binTrieState.getWorldStateStorage(),
+                binTrieState.getAccumulator().getEvmConfiguration(),
+                binTrieProvider.getWorldStateSharedSpec(),
+                binTrieState.codeCache());
+        binTrieState.freezeStorage();
       }
       if (!hasValidBonsaiState) {
-        verkleState.resetWorldStateTo(bonsaiTarget.getBlockHash(), bonsaiTarget.getStateRoot());
-        verkleProvider.rollFullWorldStateToBlockHash(
-            verkleState, worldStateQueryParams.getBlockHash());
+        binTrieState.resetWorldStateTo(bonsaiTarget.getBlockHash(), bonsaiTarget.getStateRoot());
+        binTrieProvider.rollFullWorldStateToBlockHash(
+            binTrieState, worldStateQueryParams.getBlockHash());
       }
-      return Optional.of(verkleState);
+      return Optional.of(binTrieState);
     }
-    return verkleProvider.getWorldState(worldStateQueryParams).map(VerkleWorldState.class::cast);
+    return binTrieProvider.getWorldState(worldStateQueryParams).map(BinTrieWorldState.class::cast);
   }
 
   @Override
   public void resetArchiveStateTo(final BlockHeader blockHeader) {
-    final boolean isVerkleActive = blockHeader.getTimestamp() >= verkleMilestone;
-    if (isVerkleActive) {
-      verkleProvider.resetArchiveStateTo(blockHeader);
+    final boolean isBinTrieActive = blockHeader.getTimestamp() >= BinTrieMilestone;
+    if (isBinTrieActive) {
+      binTrieProvider.resetArchiveStateTo(blockHeader);
     } else {
       bonsaiProvider.resetArchiveStateTo(blockHeader);
     }
@@ -218,6 +219,6 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
   @Override
   public void close() throws IOException {
     bonsaiProvider.close();
-    verkleProvider.close();
+    binTrieProvider.close();
   }
 }

@@ -14,8 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.referencetests;
 
+import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createStateTransitionInMemoryWorldStateArchive;
-import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createVerkleInMemoryWorldStateArchive;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.HardforkId;
@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.core.ConsensusContextFixture;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
@@ -69,10 +70,10 @@ public class VerkleReferenceTestCaseSpec implements BlockchainReferenceTestCase 
       final BlockHeader genesis,
       final ProtocolSchedule protocolSchedule) {
     final Long verkleMilestone =
-        protocolSchedule.milestoneFor(HardforkId.MainnetHardforkId.VERKLE).get();
+        protocolSchedule.milestoneFor(HardforkId.MainnetHardforkId.BINTRIE).get();
     final WorldStateArchive worldStateArchive;
     if (verkleMilestone == 0) {
-      worldStateArchive = createVerkleInMemoryWorldStateArchive(blockchain);
+      worldStateArchive = createBinTrieInMemoryWorldStateArchive(blockchain);
     } else {
       worldStateArchive =
           createStateTransitionInMemoryWorldStateArchive(blockchain, verkleMilestone);
@@ -118,7 +119,12 @@ public class VerkleReferenceTestCaseSpec implements BlockchainReferenceTestCase 
         buildWorldStateArchive(accounts, this.blockchain, genesisBlockHeader, schedule);
     this.sealEngine = sealEngine;
     this.protocolContext =
-        new ProtocolContext(this.blockchain, this.worldStateArchive, null, new BadBlockManager());
+        new ProtocolContext.Builder()
+            .withBlockchain(blockchain)
+            .withWorldStateArchive(this.worldStateArchive)
+            .withConsensusContext(new ConsensusContextFixture())
+            .withBadBlockManager(new BadBlockManager())
+            .build();
   }
 
   @Override

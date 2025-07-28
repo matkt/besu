@@ -20,10 +20,12 @@ public enum DataStorageFormat {
   FOREST(0),
   /** New format. Store one trie, and trie logs to roll forward and backward */
   BONSAI(1),
+  /** The option for storing archive data e.g. state at any block */
+  X_BONSAI_ARCHIVE(2),
   /** Storage format for stateless clients */
-  VERKLE(2);
+  BINTRIE(3);
 
-  int value;
+  final int value;
 
   DataStorageFormat(final int value) {
     this.value = value;
@@ -40,5 +42,9 @@ public enum DataStorageFormat {
       }
     }
     return BONSAI;
+  }
+
+  public boolean isBonsaiFormat() {
+    return this == BONSAI || this == X_BONSAI_ARCHIVE;
   }
 }

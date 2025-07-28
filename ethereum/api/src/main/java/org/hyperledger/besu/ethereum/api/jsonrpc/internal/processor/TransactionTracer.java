@@ -98,8 +98,13 @@ public class TransactionTracer {
     final boolean showMemory =
         transactionTraceParams
             .map(TransactionTraceParams::traceOptions)
-            .map(TraceOptions::traceMemory)
+            .map(options -> options.opCodeTracerConfig().traceMemory())
             .orElse(true);
+    final boolean showStatelessAccessWitness =
+        transactionTraceParams
+            .map(TransactionTraceParams::traceOptions)
+            .map(traceOptions -> traceOptions.opCodeTracerConfig().traceStatelessAccessWitness())
+            .orElse(TraceOptions.DEFAULT.opCodeTracerConfig().traceStatelessAccessWitness());
 
     if (!Files.isDirectory(traceDir) && !traceDir.toFile().mkdirs()) {
       throw new RuntimeException(
@@ -135,7 +140,14 @@ public class TransactionTracer {
                             stackedUpdater,
                             transaction,
                             transactionProcessor,
-                            new StandardJsonTracer(out, showMemory, true, true, false),
+                            new StandardJsonTracer(
+                                out,
+                                showMemory,
+                                true,
+                                true,
+                                false,
+                                true,
+                                showStatelessAccessWitness),
                             blobGasPrice);
                     out.println(
                         summaryTrace(
@@ -195,7 +207,6 @@ public class TransactionTracer {
             .getProtocolSpec(header)
             .getBlockHashProcessor()
             .createBlockHashLookup(blockchain, header),
-        false,
         ImmutableTransactionValidationParams.builder().isAllowFutureNonce(true).build(),
         blobGasPrice);
   }

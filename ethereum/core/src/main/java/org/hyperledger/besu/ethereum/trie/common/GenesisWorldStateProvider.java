@@ -24,15 +24,15 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.cache.BinTrieNoOpCachedWorldStorageManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.NoOpBonsaiCachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.NoOpTrieLogManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.VerkleNoOpCachedWorldStorageManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.StemPreloader;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -51,26 +51,33 @@ public class GenesisWorldStateProvider {
    * @param dataStorageConfiguration the data storage configuration to use
    * @param protocolSchedule protocolSchedule
    * @param genesisConfig genesisConfig
+   * @param codeCache codeCache
    * @return a mutable world state for the Genesis block
    */
   public static MutableWorldState createGenesisWorldState(
       final DataStorageConfiguration dataStorageConfiguration,
       final ProtocolSchedule protocolSchedule,
-      final GenesisConfig genesisConfig) {
+      final GenesisConfig genesisConfig,
+      final CodeCache codeCache) {
     if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.BONSAI) {
-      return createGenesisBonsaiWorldState();
+      return createGenesisBonsaiWorldState(
+          DataStorageConfiguration.DEFAULT_BONSAI_CONFIG, codeCache);
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
-        == DataStorageFormat.VERKLE) {
+        == DataStorageFormat.X_BONSAI_ARCHIVE) {
+      return createGenesisBonsaiWorldState(
+          DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache);
+    } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
+        == DataStorageFormat.BINTRIE) {
       final boolean isVerkleGenesis =
           protocolSchedule
               .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
               .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
               .isPresent();
       if (isVerkleGenesis) {
-        return createGenesisVerkleWorldState(dataStorageConfiguration);
+        return createGenesisBinTrieWorldState(dataStorageConfiguration, codeCache);
       } else {
-        return createGenesisBonsaiWorldState();
+        return createGenesisBonsaiWorldState(dataStorageConfiguration, codeCache);
       }
     } else {
       return createGenesisForestWorldState();
@@ -82,7 +89,8 @@ public class GenesisWorldStateProvider {
    *
    * @return a mutable world state for the Genesis block
    */
-  private static MutableWorldState createGenesisBonsaiWorldState() {
+  private static MutableWorldState createGenesisBonsaiWorldState(
+      final DataStorageConfiguration storageConfiguration, final CodeCache codeCache) {
     final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader =
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem());
     final BonsaiWorldStateKeyValueStorage bonsaiWorldStateKeyValueStorage =
@@ -92,33 +100,34 @@ public class GenesisWorldStateProvider {
                 new InMemoryKeyValueStorage(),
                 new NoOpMetricsSystem()),
             new NoOpMetricsSystem(),
-            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+            storageConfiguration);
     return new BonsaiWorldState(
         bonsaiWorldStateKeyValueStorage,
         bonsaiCachedMerkleTrieLoader,
-        new NoOpBonsaiCachedWorldStorageManager(bonsaiWorldStateKeyValueStorage),
+        new NoOpBonsaiCachedWorldStorageManager(bonsaiWorldStateKeyValueStorage, codeCache),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
-        createStatefulConfigWithTrie());
+        createStatefulConfigWithTrie(),
+        codeCache);
   }
 
-  private static MutableWorldState createGenesisVerkleWorldState(
-      final DataStorageConfiguration dataStorageConfiguration) {
-    final VerkleWorldStateKeyValueStorage verkleWorldStateKeyValueStorage =
-        new VerkleWorldStateKeyValueStorage(
+  private static MutableWorldState createGenesisBinTrieWorldState(
+      final DataStorageConfiguration dataStorageConfiguration, final CodeCache codeCache) {
+    final BinTrieWorldStateKeyValueStorage binTrieWorldStateKeyValueStorage =
+        new BinTrieWorldStateKeyValueStorage(
             new KeyValueStorageProvider(
                 segmentIdentifiers -> new SegmentedInMemoryKeyValueStorage(),
                 new InMemoryKeyValueStorage(),
                 new NoOpMetricsSystem()),
-            new StemPreloader(),
             dataStorageConfiguration,
             new NoOpMetricsSystem());
-    return new VerkleWorldState(
-        verkleWorldStateKeyValueStorage,
-        new VerkleNoOpCachedWorldStorageManager(verkleWorldStateKeyValueStorage),
+    return new BinTrieWorldState(
+        binTrieWorldStateKeyValueStorage,
+        new BinTrieNoOpCachedWorldStorageManager(binTrieWorldStateKeyValueStorage, codeCache),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
-        createStatefulConfigWithTrie());
+        createStatefulConfigWithTrie(),
+        codeCache);
   }
 
   /**

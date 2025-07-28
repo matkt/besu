@@ -14,9 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.storage.keyvalue;
 
+import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.BINTRIE;
 import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.BONSAI;
 import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.FOREST;
-import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.VERKLE;
+import static org.hyperledger.besu.plugin.services.storage.DataStorageFormat.X_BONSAI_ARCHIVE;
 
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -26,16 +27,34 @@ import java.util.EnumSet;
 
 public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   DEFAULT("default".getBytes(StandardCharsets.UTF_8)),
-  BLOCKCHAIN(new byte[] {1}, true, true),
+  BLOCKCHAIN(new byte[] {1}, EnumSet.allOf(DataStorageFormat.class), true, true, false),
   WORLD_STATE(new byte[] {2}, EnumSet.of(FOREST), false, true, false),
+
+  // No longer used but retained for DB backwards compatibility
   PRIVATE_TRANSACTIONS(new byte[] {3}),
   PRIVATE_STATE(new byte[] {4}),
+
   PRUNING_STATE(new byte[] {5}, EnumSet.of(FOREST)),
-  ACCOUNT_INFO_STATE(new byte[] {6}, EnumSet.of(BONSAI, VERKLE), false, true, false),
-  CODE_STORAGE(new byte[] {7}, EnumSet.of(BONSAI, VERKLE)),
-  ACCOUNT_STORAGE_STORAGE(new byte[] {8}, EnumSet.of(BONSAI, VERKLE), false, true, false),
-  MERKLE_TRIE_BRANCH_STORAGE(new byte[] {9}, EnumSet.of(BONSAI, VERKLE), false, true, false),
-  TRIE_LOG_STORAGE(new byte[] {10}, EnumSet.of(BONSAI, VERKLE), true, false, true),
+  ACCOUNT_INFO_STATE(
+      new byte[] {6}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), false, true, false),
+  CODE_STORAGE(new byte[] {7}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE)),
+  ACCOUNT_STORAGE_STORAGE(
+      new byte[] {8}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), false, true, false),
+  MERKLE_TRIE_BRANCH_STORAGE(new byte[] {9}, EnumSet.of(BONSAI, BINTRIE), false, true, false),
+  TRIE_LOG_STORAGE(
+      new byte[] {10}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINTRIE), true, false, true),
+  ACCOUNT_INFO_STATE_ARCHIVE(
+      "ACCOUNT_INFO_STATE_ARCHIVE".getBytes(StandardCharsets.UTF_8),
+      EnumSet.of(X_BONSAI_ARCHIVE),
+      true,
+      false,
+      true),
+  ACCOUNT_STORAGE_ARCHIVE(
+      "ACCOUNT_STORAGE_ARCHIVE".getBytes(StandardCharsets.UTF_8),
+      EnumSet.of(X_BONSAI_ARCHIVE),
+      true,
+      false,
+      true),
   VARIABLES(new byte[] {11}), // formerly GOQUORUM_PRIVATE_WORLD_STATE
 
   // previously supported GoQuorum private states
@@ -49,7 +68,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   SNAPSYNC_ACCOUNT_TO_FIX(new byte[] {17}),
   CHAIN_PRUNER_STATE(new byte[] {18}),
 
-  VERKLE_TRIE_BRANCH_STORAGE(new byte[] {19}, EnumSet.of(BONSAI, VERKLE), false, true, false);
+  VERKLE_TRIE_BRANCH_STORAGE(new byte[] {19}, EnumSet.of(BONSAI, BINTRIE), false, true, false);
 
   private final byte[] id;
   private final EnumSet<DataStorageFormat> formats;
@@ -59,16 +78,6 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
 
   KeyValueSegmentIdentifier(final byte[] id) {
     this(id, EnumSet.allOf(DataStorageFormat.class));
-  }
-
-  KeyValueSegmentIdentifier(
-      final byte[] id, final boolean containsStaticData, final boolean eligibleToHighSpecFlag) {
-    this(
-        id,
-        EnumSet.allOf(DataStorageFormat.class),
-        containsStaticData,
-        eligibleToHighSpecFlag,
-        false);
   }
 
   KeyValueSegmentIdentifier(final byte[] id, final EnumSet<DataStorageFormat> formats) {

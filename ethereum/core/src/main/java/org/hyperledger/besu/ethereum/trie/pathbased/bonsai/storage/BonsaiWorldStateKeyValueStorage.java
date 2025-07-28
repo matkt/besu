@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateKeyValueStorage;
@@ -67,6 +68,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     this.flatDbStrategyProvider =
         new BonsaiFlatDbStrategyProvider(
             metricsSystem, dataStorageConfiguration, composedWorldStateStorage);
+    this.flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
   }
 
   public BonsaiWorldStateKeyValueStorage(
@@ -181,7 +183,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   @Override
   public BonsaiFlatDbStrategy getFlatDbStrategy() {
-    return (BonsaiFlatDbStrategy) flatDbStrategyProvider.getFlatDbStrategy();
+    return (BonsaiFlatDbStrategy)
+        flatDbStrategyProvider.getFlatDbStrategy(composedWorldStateStorage);
   }
 
   @Override
@@ -189,27 +192,34 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     return new Updater(
         composedWorldStateStorage.startTransaction(),
         trieLogStorage.startTransaction(),
-        getFlatDbStrategy());
+        getFlatDbStrategy(),
+        composedWorldStateStorage);
   }
 
   public static class Updater implements PathBasedWorldStateKeyValueStorage.Updater {
 
     private final SegmentedKeyValueStorageTransaction composedWorldStateTransaction;
     private final KeyValueStorageTransaction trieLogStorageTransaction;
-    private final BonsaiFlatDbStrategy flatDbStrategy;
+    private final FlatDbStrategy flatDbStrategy;
+    private final SegmentedKeyValueStorage worldStorage;
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
-        final BonsaiFlatDbStrategy flatDbStrategy) {
+        final FlatDbStrategy flatDbStrategy,
+        final SegmentedKeyValueStorage worldStorage) {
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
       this.flatDbStrategy = flatDbStrategy;
+      this.worldStorage =
+          worldStorage; // An update could need to read from world storage to decide how to PUT to
+      // it (i.e. Bonsai archive)
     }
 
     public Updater removeCode(final Hash accountHash, final Hash codeHash) {
-      flatDbStrategy.removeFlatCode(composedWorldStateTransaction, accountHash, codeHash);
+      flatDbStrategy.removeFlatCode(
+          worldStorage, composedWorldStateTransaction, accountHash, codeHash);
       return this;
     }
 
@@ -224,12 +234,13 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
         // Don't save empty values
         return this;
       }
-      flatDbStrategy.putFlatCode(composedWorldStateTransaction, accountHash, codeHash, code);
+      flatDbStrategy.putFlatCode(
+          worldStorage, composedWorldStateTransaction, accountHash, codeHash, code);
       return this;
     }
 
     public Updater removeAccountInfoState(final Hash accountHash) {
-      flatDbStrategy.removeFlatAccount(composedWorldStateTransaction, accountHash);
+      flatDbStrategy.removeFlatAccount(worldStorage, composedWorldStateTransaction, accountHash);
       return this;
     }
 
@@ -238,25 +249,31 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
         // Don't save empty values
         return this;
       }
-      flatDbStrategy.putFlatAccount(composedWorldStateTransaction, accountHash, accountValue);
+      flatDbStrategy.putFlatAccount(
+          worldStorage, composedWorldStateTransaction, accountHash, accountValue);
       return this;
     }
 
     @Override
     public Updater saveWorldStateAndRootNode(
-        final Bytes blockHash, final Bytes32 nodeHash, final Bytes node) {
+        final Bytes blockHash, final long blockNumber, final Bytes32 nodeHash, final Bytes node) {
       composedWorldStateTransaction.put(
           MERKLE_TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe(), node.toArrayUnsafe());
-      saveWorldState(blockHash, nodeHash);
+      saveWorldState(blockHash, blockNumber, nodeHash);
       return this;
     }
 
     @Override
-    public Updater saveWorldState(final Bytes blockHash, final Bytes32 nodeHash) {
+    public Updater saveWorldState(
+        final Bytes blockHash, final long blockNumber, final Bytes32 nodeHash) {
       composedWorldStateTransaction.put(
           MERKLE_TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY, nodeHash.toArrayUnsafe());
       composedWorldStateTransaction.put(
           MERKLE_TRIE_BRANCH_STORAGE, WORLD_BLOCK_HASH_KEY, blockHash.toArrayUnsafe());
+      composedWorldStateTransaction.put(
+          MERKLE_TRIE_BRANCH_STORAGE,
+          WORLD_BLOCK_NUMBER_KEY,
+          Bytes.ofUnsignedLong(blockNumber).toArrayUnsafe());
       return this;
     }
 
@@ -290,16 +307,16 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     }
 
     public synchronized Updater putStorageValueBySlotHash(
-        final Hash accountHash, final Hash slotHash, final Bytes storage) {
+        final Hash accountHash, final Hash slotHash, final Bytes storageValue) {
       flatDbStrategy.putFlatAccountStorageValueByStorageSlotHash(
-          composedWorldStateTransaction, accountHash, slotHash, storage);
+          worldStorage, composedWorldStateTransaction, accountHash, slotHash, storageValue);
       return this;
     }
 
     public synchronized void removeStorageValueBySlotHash(
         final Hash accountHash, final Hash slotHash) {
       flatDbStrategy.removeFlatAccountStorageValueByStorageSlotHash(
-          composedWorldStateTransaction, accountHash, slotHash);
+          worldStorage, composedWorldStateTransaction, accountHash, slotHash);
     }
 
     @Override
@@ -316,6 +333,16 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     public void commit() {
       // write the log ahead, then the worldstate
       trieLogStorageTransaction.commit();
+      composedWorldStateTransaction.commit();
+    }
+
+    @Override
+    public void commitTrieLogOnly() {
+      trieLogStorageTransaction.commit();
+    }
+
+    @Override
+    public void commitComposedOnly() {
       composedWorldStateTransaction.commit();
     }
 

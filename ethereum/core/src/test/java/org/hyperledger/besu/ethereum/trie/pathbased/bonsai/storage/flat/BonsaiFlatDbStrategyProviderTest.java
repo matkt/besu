@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.AbstractFlatDbStrategyProviderTest;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.AccountHashCodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeHashCodeStorageStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
@@ -48,8 +49,11 @@ class BonsaiFlatDbStrategyProviderTest extends AbstractFlatDbStrategyProviderTes
 
   @Test
   void loadsPartialFlatDbStrategyWhenNoFlatDbModeStored() {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
     final BonsaiFlatDbStrategyProvider bonsaiFlatDbStrategyProvider =
-        createFlatDbStrategyProvider(DataStorageConfiguration.DEFAULT_CONFIG);
+        createFlatDbStrategyProvider(
+            DataStorageConfiguration.DEFAULT_CONFIG, segmentedKeyValueStorage);
+    bonsaiFlatDbStrategyProvider.loadFlatDbStrategy(segmentedKeyValueStorage);
     assertThat(bonsaiFlatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.FULL);
   }
 
@@ -63,10 +67,14 @@ class BonsaiFlatDbStrategyProviderTest extends AbstractFlatDbStrategyProviderTes
             DataStorageConfiguration.DEFAULT_CONFIG, segmentedKeyValueStorage);
     bonsaiFlatDbStrategyProvider.upgradeToFullFlatDbMode(segmentedKeyValueStorage);
     assertThat(bonsaiFlatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.FULL);
-    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy()).isNotNull();
-    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy())
+    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
+        .isNotNull();
+    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
         .isInstanceOf(BonsaiFullFlatDbStrategy.class);
-    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy().getCodeStorageStrategy())
+    assertThat(
+            bonsaiFlatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
         .isInstanceOf(CodeHashCodeStorageStrategy.class);
   }
 
@@ -81,8 +89,9 @@ class BonsaiFlatDbStrategyProviderTest extends AbstractFlatDbStrategyProviderTes
 
     bonsaiFlatDbStrategyProvider.downgradeToPartialFlatDbMode(segmentedKeyValueStorage);
     assertThat(bonsaiFlatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.PARTIAL);
-    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy()).isNotNull();
-    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy())
+    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
+        .isNotNull();
+    assertThat(bonsaiFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
         .isInstanceOf(BonsaiPartialFlatDbStrategy.class);
   }
 
@@ -109,14 +118,181 @@ class BonsaiFlatDbStrategyProviderTest extends AbstractFlatDbStrategyProviderTes
         new AccountHashCodeStorageStrategy();
     // key representing account hash just needs to not be the code hash
     final Hash accountHash = Hash.wrap(Bytes32.fromHexString("0001"));
-    accountHashCodeStorageStrategy.putFlatCode(transaction, accountHash, null, Bytes.of(2));
+    accountHashCodeStorageStrategy.putFlatCode(
+        segmentedKeyValueStorage, transaction, accountHash, null, Bytes.of(2));
     transaction.commit();
 
     final FlatDbStrategyProvider flatDbStrategyProvider =
         createFlatDbStrategyProvider(dataStorageConfiguration, segmentedKeyValueStorage);
+    flatDbStrategyProvider.loadFlatDbStrategy(segmentedKeyValueStorage);
     assertThat(flatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.FULL);
-    assertThat(flatDbStrategyProvider.getFlatDbStrategy().getCodeStorageStrategy())
+    assertThat(
+            flatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
         .isInstanceOf(AccountHashCodeStorageStrategy.class);
+  }
+
+  @Test
+  void upgradesFlatDbStrategyToArchiveFlatDbMode() {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
+
+    final BonsaiFlatDbStrategyProvider archiveFlatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG,
+            segmentedKeyValueStorage);
+
+    updateFlatDbMode(FlatDbMode.PARTIAL, segmentedKeyValueStorage);
+
+    archiveFlatDbStrategyProvider.upgradeToFullFlatDbMode(segmentedKeyValueStorage);
+    assertThat(archiveFlatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.ARCHIVE);
+    assertThat(archiveFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
+        .isNotNull();
+    assertThat(archiveFlatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
+        .isInstanceOf(BonsaiArchiveFlatDbStrategy.class);
+    assertThat(
+            archiveFlatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
+        .isInstanceOf(CodeHashCodeStorageStrategy.class);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void emptyDbCreatesArchiveFlatDbStrategyUsingCodeByHashConfig(final boolean codeByHashEnabled) {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        ImmutableDataStorageConfiguration.builder()
+            .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
+            .pathBasedExtraStorageConfiguration(
+                ImmutablePathBasedExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(3L)
+                    .limitTrieLogsEnabled(true)
+                    .unstable(
+                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                            .codeStoredByCodeHashEnabled(codeByHashEnabled)
+                            .build())
+                    .build())
+            .build();
+    final FlatDbStrategyProvider flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(
+            new NoOpMetricsSystem(), dataStorageConfiguration, segmentedKeyValueStorage);
+
+    flatDbStrategyProvider.loadFlatDbStrategy(segmentedKeyValueStorage);
+    final Class<? extends CodeStorageStrategy> expectedCodeStorageClass =
+        codeByHashEnabled
+            ? CodeHashCodeStorageStrategy.class
+            : AccountHashCodeStorageStrategy.class;
+    assertThat(flatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.ARCHIVE);
+    assertThat(
+            flatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
+        .isInstanceOf(expectedCodeStorageClass);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void existingAccountHashArchiveDbUsesAccountHash(final boolean codeByHashEnabled) {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        ImmutableDataStorageConfiguration.builder()
+            .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
+            .pathBasedExtraStorageConfiguration(
+                ImmutablePathBasedExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(3L)
+                    .limitTrieLogsEnabled(true)
+                    .unstable(
+                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                            .codeStoredByCodeHashEnabled(codeByHashEnabled)
+                            .build())
+                    .build())
+            .build();
+
+    final FlatDbStrategyProvider flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(
+            new NoOpMetricsSystem(), dataStorageConfiguration, segmentedKeyValueStorage);
+
+    final SegmentedKeyValueStorageTransaction transaction =
+        segmentedKeyValueStorage.startTransaction();
+    final AccountHashCodeStorageStrategy accountHashCodeStorageStrategy =
+        new AccountHashCodeStorageStrategy();
+    // key representing account hash just needs to not be the code hash
+    final Hash accountHash = Hash.wrap(Bytes32.fromHexString("0001"));
+    accountHashCodeStorageStrategy.putFlatCode(
+        segmentedKeyValueStorage, transaction, accountHash, null, Bytes.of(2));
+    transaction.commit();
+
+    flatDbStrategyProvider.loadFlatDbStrategy(segmentedKeyValueStorage);
+    assertThat(flatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.ARCHIVE);
+    assertThat(
+            flatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
+        .isInstanceOf(AccountHashCodeStorageStrategy.class);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void existingCodeHashArchiveDbUsesCodeHash(final boolean codeByHashEnabled) {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        ImmutableDataStorageConfiguration.builder()
+            .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
+            .pathBasedExtraStorageConfiguration(
+                ImmutablePathBasedExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(3L)
+                    .limitTrieLogsEnabled(true)
+                    .unstable(
+                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                            .codeStoredByCodeHashEnabled(codeByHashEnabled)
+                            .build())
+                    .build())
+            .build();
+
+    final FlatDbStrategyProvider flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(
+            new NoOpMetricsSystem(), dataStorageConfiguration, segmentedKeyValueStorage);
+
+    final SegmentedKeyValueStorageTransaction transaction =
+        segmentedKeyValueStorage.startTransaction();
+
+    final CodeHashCodeStorageStrategy codeHashCodeStorageStrategy =
+        new CodeHashCodeStorageStrategy();
+    codeHashCodeStorageStrategy.putFlatCode(
+        segmentedKeyValueStorage, transaction, null, Hash.hash(Bytes.of(1)), Bytes.of(1));
+    transaction.commit();
+
+    flatDbStrategyProvider.loadFlatDbStrategy(segmentedKeyValueStorage);
+    assertThat(flatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.ARCHIVE);
+    assertThat(
+            flatDbStrategyProvider
+                .getFlatDbStrategy(segmentedKeyValueStorage)
+                .getCodeStorageStrategy())
+        .isInstanceOf(CodeHashCodeStorageStrategy.class);
+  }
+
+  @Test
+  void downgradesArchiveFlatDbStrategyToPartiallyFlatDbMode() {
+    final SegmentedKeyValueStorage segmentedKeyValueStorage = createSegmentedKeyValueStorage();
+
+    final BonsaiFlatDbStrategyProvider flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG,
+            segmentedKeyValueStorage);
+
+    updateFlatDbMode(FlatDbMode.ARCHIVE, segmentedKeyValueStorage);
+
+    flatDbStrategyProvider.downgradeToPartialFlatDbMode(segmentedKeyValueStorage);
+    assertThat(flatDbStrategyProvider.getFlatDbMode()).isEqualTo(FlatDbMode.PARTIAL);
+    assertThat(flatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage)).isNotNull();
+    assertThat(flatDbStrategyProvider.getFlatDbStrategy(segmentedKeyValueStorage))
+        .isInstanceOf(BonsaiPartialFlatDbStrategy.class);
   }
 
   @Override

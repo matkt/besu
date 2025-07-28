@@ -14,10 +14,11 @@
  */
 package org.hyperledger.besu.ethereum.vm;
 
+import org.hyperledger.besu.datatypes.AccessEvent;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.debug.OpCodeTracerConfig;
 import org.hyperledger.besu.ethereum.debug.TraceFrame;
-import org.hyperledger.besu.ethereum.debug.TraceOptions;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -39,7 +40,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 public class DebugOperationTracer implements OperationTracer {
 
-  private final TraceOptions options;
+  private final OpCodeTracerConfig options;
 
   /**
    * A flag to indicate if call operations should trace just the operation cost (false, Geth style,
@@ -64,7 +65,7 @@ public class DebugOperationTracer implements OperationTracer {
    * @param recordChildCallGas A flag on whether to produce geth style (true) or parity style
    *     (false) gas amounts for call operations
    */
-  public DebugOperationTracer(final TraceOptions options, final boolean recordChildCallGas) {
+  public DebugOperationTracer(final OpCodeTracerConfig options, final boolean recordChildCallGas) {
     this.options = options;
     this.recordChildCallGas = recordChildCallGas;
   }
@@ -89,6 +90,8 @@ public class DebugOperationTracer implements OperationTracer {
     final Bytes outputData = frame.getOutputData();
     final Optional<Bytes[]> memory = captureMemory(frame);
     final Optional<Bytes[]> stackPostExecution = captureStack(frame);
+    final Optional<List<AccessEvent<?>>> statelessAccessWitness =
+        captureStatelessAccessWitness(frame);
 
     if (lastFrame != null) {
       lastFrame.setGasRemainingPostExecution(gasRemaining);
@@ -118,6 +121,7 @@ public class DebugOperationTracer implements OperationTracer {
             preExecutionStack,
             memory,
             storage,
+            statelessAccessWitness,
             worldUpdater,
             frame.getRevertReason(),
             maybeRefunds,
@@ -149,6 +153,7 @@ public class DebugOperationTracer implements OperationTracer {
               frame.getValue(),
               frame.getInputData().copy(),
               frame.getOutputData(),
+              Optional.empty(),
               Optional.empty(),
               Optional.empty(),
               Optional.empty(),
@@ -196,6 +201,7 @@ public class DebugOperationTracer implements OperationTracer {
                     frame.getValue(),
                     frame.getInputData().copy(),
                     frame.getOutputData(),
+                    Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
@@ -251,6 +257,15 @@ public class DebugOperationTracer implements OperationTracer {
       stackContents[i] = frame.getStackItem(stackContents.length - i - 1);
     }
     return Optional.of(stackContents);
+  }
+
+  private Optional<List<AccessEvent<?>>> captureStatelessAccessWitness(final MessageFrame frame) {
+    List<AccessEvent<?>> leafAccesses = frame.getAccessWitness().getLeafAccesses();
+    if (!options.traceStatelessAccessWitness() || leafAccesses.isEmpty()) {
+      return Optional.empty();
+    }
+
+    return Optional.of(leafAccesses);
   }
 
   public List<TraceFrame> getTraceFrames() {
