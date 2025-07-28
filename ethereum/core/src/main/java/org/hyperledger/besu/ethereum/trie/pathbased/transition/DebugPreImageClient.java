@@ -63,7 +63,6 @@ public class DebugPreImageClient {
       }
     }
     String output = response.toString();
-    System.out.println("output "+output);
     // Parsing de la réponse avec Vert.x
     JsonObject jsonResponse = new JsonObject(output);
     return Bytes.fromHexString(jsonResponse.getString("result"));

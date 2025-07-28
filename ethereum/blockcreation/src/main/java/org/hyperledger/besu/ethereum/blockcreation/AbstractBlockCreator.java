@@ -319,6 +319,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
     } catch (final CancellationException | StorageException ex) {
       throw ex;
     } catch (final Exception ex) {
+      ex.printStackTrace(System.out);
       throw new IllegalStateException(
           "Block creation failed unexpectedly. Will restart on next block added to chain.", ex);
     }
