@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.flat;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 
@@ -20,15 +20,18 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
-import org.hyperledger.besu.ethereum.rlp.RLPInput;
-import org.hyperledger.besu.ethereum.stateless.adapter.TrieKeyUtils;
-import org.hyperledger.besu.ethereum.stateless.util.SuffixTreeDecoder;
+import org.hyperledger.besu.ethereum.stateless.bintrie.BytesBitSequence;
+import org.hyperledger.besu.ethereum.stateless.bintrie.BytesBitSequenceFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.factory.StoredNodeFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.hasher.StemHasher;
+import org.hyperledger.besu.ethereum.stateless.bintrie.node.LeafNode;
+import org.hyperledger.besu.ethereum.stateless.verkle.adapter.TrieKeyUtils;
+import org.hyperledger.besu.ethereum.stateless.verkle.util.SuffixTreeDecoder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.StemPreloader;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
@@ -45,22 +48,27 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * Strategy for managing Verkle accounts in the flat database using a stem-based structure.
+ * Strategy for managing BinTrie accounts in the flat database using a stem-based structure.
  *
  * <p>Unlike the legacy approach of saving by account, slot, and code, this strategy saves by stem
- * and code. This allows direct access to the leaves of the Verkle trie for stems, reducing
+ * and code. This allows direct access to the leaves of the Binary trie for stems, reducing
  * duplication of data.
  */
-public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
+public class BinTrieStemFlatDbStrategy extends FlatDbStrategy {
 
   protected final Counter getAccountNotFoundInFlatDatabaseCounter;
 
   protected final Counter getStorageValueNotFoundInFlatDatabaseCounter;
 
-  public VerkleStemFlatDbStrategy(
+  private static final TrieKeyFactory TRIE_KEY_FACTORY = new TrieKeyFactory(new StemHasher());
+  private static final BytesBitSequenceFactory BIT_SEQ_FACTORY = new BytesBitSequenceFactory();
+  private static final StoredNodeFactory<BytesBitSequence, Bytes> NODE_FACTORY =
+      new StoredNodeFactory<>(
+          (location, hash) -> Optional.empty(), BIT_SEQ_FACTORY, Function.identity());
+
+  public BinTrieStemFlatDbStrategy(
       final MetricsSystem metricsSystem, final CodeStorageStrategy codeStorageStrategy) {
     super(metricsSystem, codeStorageStrategy);
-
     getAccountNotFoundInFlatDatabaseCounter =
         metricsSystem.createCounter(
             BesuMetricCategory.BLOCKCHAIN,
@@ -74,69 +82,89 @@ public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
             "Number of storage slots not found in the flat database");
   }
 
-  public Optional<VerkleAccount> getFlatAccount(
+  private Optional<List<LeafNode<BytesBitSequence, Bytes>>> fetchLeafNodes(
+      final BytesBitSequence stemId, final SegmentedKeyValueStorage storage) {
+
+    return getStem(stemId.encode(), storage)
+        .map(bytes -> NODE_FACTORY.decodeStemNode(stemId, bytes).children);
+  }
+
+  public Optional<BinTrieAccount> getFlatAccount(
       final Address address,
       final PathBasedWorldView context,
-      final StemPreloader stemPreloader,
       final SegmentedKeyValueStorage storage) {
+
     getAccountCounter.inc();
 
-    final Bytes preloadedStemId = stemPreloader.preloadAccountStem(address);
-    final Optional<List<Optional<Bytes32>>> stem =
-        getStem(preloadedStemId, storage).map(this::decodeStemNode);
-    Optional<VerkleAccount> accountFound =
-        stem.flatMap(
-            values ->
-                values
-                    .getFirst()
-                    .map(
-                        basicDataLeaf ->
-                            new VerkleAccount(
-                                context,
-                                address,
-                                address.addressHash(),
-                                SuffixTreeDecoder.decodeNonce(basicDataLeaf),
-                                Wei.of(SuffixTreeDecoder.decodeBalance(basicDataLeaf)),
-                                SuffixTreeDecoder.decodeCodeSize(basicDataLeaf),
-                                Hash.wrap(values.get(1).orElse(Hash.EMPTY)),
-                                true)));
-    if (accountFound.isPresent()) {
+    Optional<BinTrieAccount> account =
+        fetchLeafNodes(TRIE_KEY_FACTORY.getHeaderStem(address), storage)
+            .flatMap(
+                children -> {
+                  LeafNode<BytesBitSequence, Bytes> dataLeaf = children.get(0);
+                  LeafNode<BytesBitSequence, Bytes> codeLeaf = children.get(1);
+                  return dataLeaf
+                      .value
+                      .map(Bytes32::wrap)
+                      .map(
+                          value ->
+                              new BinTrieAccount(
+                                  context,
+                                  address,
+                                  address.addressHash(),
+                                  SuffixTreeDecoder.decodeNonce(value),
+                                  Wei.of(SuffixTreeDecoder.decodeBalance(value)),
+                                  SuffixTreeDecoder.decodeCodeSize(value),
+                                  Hash.wrap(
+                                      codeLeaf
+                                          .value
+                                          .map(Bytes32::wrap)
+                                          .orElse(Hash.EMPTY_TRIE_HASH)),
+                                  true));
+                });
+
+    if (account.isPresent()) {
       getAccountFoundInFlatDatabaseCounter.inc();
     } else {
       getAccountNotFoundInFlatDatabaseCounter.inc();
     }
-    return accountFound;
+    return account;
   }
 
   public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       final Address address,
       final StorageSlotKey storageSlotKey,
-      final StemPreloader stemPreloader,
       final SegmentedKeyValueStorage storage) {
+
     getStorageValueCounter.inc();
-    final Bytes preloadSlotStemId = stemPreloader.preloadSlotStems(address, storageSlotKey);
-    final Optional<List<Optional<Bytes32>>> stem =
-        getStem(preloadSlotStemId, storage).map(this::decodeStemNode);
-    final Optional<Bytes> storageFound =
-        stem.flatMap(
-            values ->
-                values.get(
-                    TrieKeyUtils.getStorageKeySuffix(storageSlotKey.getSlotKey().orElseThrow())
-                        .toInt()));
-    if (storageFound.isPresent()) {
+
+    BytesBitSequence stemId =
+        TRIE_KEY_FACTORY.getStorageStem(address, storageSlotKey.getSlotKey().orElseThrow());
+
+    Optional<Bytes> value =
+        fetchLeafNodes(stemId, storage)
+            .flatMap(
+                children -> {
+                  int idx =
+                      TrieKeyUtils.getStorageKeySuffix(storageSlotKey.getSlotKey().orElseThrow())
+                          .toInt();
+                  return children.get(idx).value.map(Bytes32::wrap);
+                });
+
+    if (value.isPresent()) {
       getStorageValueFlatDatabaseCounter.inc();
     } else {
       getStorageValueNotFoundInFlatDatabaseCounter.inc();
     }
-    return storageFound;
+    return value;
   }
 
-  private Optional<Bytes> getStem(final Bytes stem, final SegmentedKeyValueStorage storage) {
-    return storage.get(VERKLE_TRIE_BRANCH_STORAGE, stem.toArrayUnsafe()).map(Bytes::wrap);
+  private Optional<Bytes> getStem(final byte[] stem, final SegmentedKeyValueStorage storage) {
+    return storage.get(VERKLE_TRIE_BRANCH_STORAGE, stem).map(Bytes::wrap);
   }
 
   @Override
   public void putFlatAccount(
+      final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash,
       final Bytes accountValue) {
@@ -145,21 +173,25 @@ public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
 
   @Override
   public void removeFlatAccount(
-      final SegmentedKeyValueStorageTransaction transaction, final Hash accountHash) {
+      final SegmentedKeyValueStorage storage,
+      final SegmentedKeyValueStorageTransaction transaction,
+      final Hash accountHash) {
     // nothing to do with stem flat db
   }
 
   @Override
   public void putFlatAccountStorageValueByStorageSlotHash(
+      final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash,
       final Hash slotHash,
-      final Bytes storage) {
+      final Bytes storageValue) {
     // nothing to do with stem flat db
   }
 
   @Override
   public void removeFlatAccountStorageValueByStorageSlotHash(
+      final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash,
       final Hash slotHash) {
@@ -169,7 +201,7 @@ public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
   @Override
   public void clearAll(final SegmentedKeyValueStorage storage) {
     // NOOP
-    // we cannot clear flatdb in verkle as we are using directly the trie
+    // we cannot clear flatdb in binary tries as we are using directly the trie
   }
 
   @Override
@@ -207,25 +239,5 @@ public class VerkleStemFlatDbStrategy extends FlatDbStrategy {
   protected Stream<Pair<Bytes32, Bytes>> accountsToPairStream(
       final SegmentedKeyValueStorage storage, final Bytes startKeyHash) {
     return Stream.empty();
-  }
-
-  private List<Optional<Bytes32>> decodeStemNode(final Bytes encodedValues) {
-    RLPInput input = new BytesValueRLPInput(encodedValues, false);
-    input.enterList();
-    input.skipNext(); // depth
-    input.skipNext(); // commitment
-    input.skipNext(); // leftCommitment
-    input.skipNext(); // rightCommitment
-    input.skipNext(); // leftScalar
-    input.skipNext(); // rightScalar
-    return input.readList(
-        rlpInput -> {
-          Bytes bytes = rlpInput.readBytes();
-          if (bytes.isEmpty()) {
-            return Optional.empty();
-          } else {
-            return Optional.of(Bytes32.leftPad(bytes));
-          }
-        });
   }
 }

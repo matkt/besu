@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.trielog;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.trielog;
 
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
@@ -22,13 +22,13 @@ import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
-import org.hyperledger.besu.ethereum.trie.common.VerkleStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.InvalidTrieLogTypeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogFactoryImpl;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.trielogs.StateMigrationLog;
@@ -45,26 +45,26 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
-public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
+public class BinTrieTrieLogFactoryImpl extends TrieLogFactoryImpl {
 
   @Override
   public TrieLogLayer create(
       final TrieLogAccumulator accumulator,
       final DataStorageFormat dataStorageFormat,
       final BlockHeader blockHeader) {
-    final VerkleWorldStateUpdateAccumulator verkleWorldStateUpdateAccumulator =
-        (VerkleWorldStateUpdateAccumulator) accumulator;
+    final BinTrieWorldStateUpdateAccumulator binTrieWorldStateUpdateAccumulator =
+        (BinTrieWorldStateUpdateAccumulator) accumulator;
     TrieLogLayer layer = new TrieLogLayer();
     layer.setBlockHash(blockHeader.getBlockHash());
     layer.setBlockNumber(blockHeader.getNumber());
     layer.setDataStorageFormat(dataStorageFormat);
-    applyStateModification(layer, verkleWorldStateUpdateAccumulator, blockHeader);
-    applyStateMigration(layer, verkleWorldStateUpdateAccumulator);
+    applyStateModification(layer, binTrieWorldStateUpdateAccumulator, blockHeader);
+    applyStateMigration(layer, binTrieWorldStateUpdateAccumulator);
     return layer;
   }
 
   private void applyStateMigration(
-      final TrieLogLayer layer, final VerkleWorldStateUpdateAccumulator accumulator) {
+      final TrieLogLayer layer, final BinTrieWorldStateUpdateAccumulator accumulator) {
     layer.setStateMigrationLog(accumulator.getStateMigrationLog());
   }
 
@@ -136,12 +136,12 @@ public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
             accountChange,
             output,
             (o, sta) -> {
-              if (sta instanceof VerkleAccount verkleAccount) {
-                new VerkleStateTrieAccountValue(
-                        verkleAccount.getNonce(),
-                        verkleAccount.getBalance(),
-                        verkleAccount.getCodeHash(),
-                        verkleAccount.getCodeSize())
+              if (sta instanceof BinTrieAccount account) {
+                new BinaryStateTrieAccountValue(
+                        account.getNonce(),
+                        account.getBalance(),
+                        account.getCodeHash(),
+                        account.getCodeSize())
                     .writeTo(o);
               } else {
                 sta.writeTo(o);
@@ -196,7 +196,7 @@ public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
     }
 
     DataStorageFormat dataStorageFormat = DataStorageFormat.fromValue(input.readInt());
-    if (dataStorageFormat.equals(DataStorageFormat.VERKLE)) {
+    if (dataStorageFormat.equals(DataStorageFormat.BINTRIE)) {
       newLayer.setDataStorageFormat(dataStorageFormat);
     } else {
       return new InvalidTrieLogTypeException(blockHash, dataStorageFormat);
@@ -222,10 +222,10 @@ public class VerkleTrieLogFactoryImpl extends TrieLogFactoryImpl {
         input.skipNext();
       } else {
         input.enterList();
-        final VerkleStateTrieAccountValue oldValue =
-            nullOrValue(input, VerkleStateTrieAccountValue::readFrom);
-        final VerkleStateTrieAccountValue newValue =
-            nullOrValue(input, VerkleStateTrieAccountValue::readFrom);
+        final BinaryStateTrieAccountValue oldValue =
+            nullOrValue(input, BinaryStateTrieAccountValue::readFrom);
+        final BinaryStateTrieAccountValue newValue =
+            nullOrValue(input, BinaryStateTrieAccountValue::readFrom);
         final boolean isCleared = getOptionalIsCleared(input);
         input.leaveList();
         newLayer

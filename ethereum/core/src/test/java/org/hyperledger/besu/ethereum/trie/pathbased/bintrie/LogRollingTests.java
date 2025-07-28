@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig.createStatefulConfigWithTrie;
@@ -29,12 +29,12 @@ import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.trielog.BinTrieTrieLogFactoryImpl;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.StemPreloader;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.trielog.VerkleTrieLogFactoryImpl;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview.VerkleWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -59,7 +59,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class LogRollingTests {
 
-  private VerkleWorldStateProvider archive;
+  private BinTrieWorldStateProvider archive;
 
   private static final BlockHeaderTestFixture blockHeaderTestFixture = new BlockHeaderTestFixture();
   private InMemoryKeyValueStorageProvider provider;
@@ -70,7 +70,7 @@ class LogRollingTests {
   private KeyValueStorage trieLogStorage;
 
   private InMemoryKeyValueStorageProvider secondProvider;
-  private VerkleWorldStateProvider secondArchive;
+  private BinTrieWorldStateProvider secondArchive;
   private KeyValueStorage secondAccountStorage;
   private KeyValueStorage secondCodeStorage;
   private KeyValueStorage secondStorageStorage;
@@ -86,7 +86,7 @@ class LogRollingTests {
           Hash.ZERO,
           Hash.EMPTY_LIST_HASH,
           Address.ZERO,
-          Hash.fromHexString("0x53e60a2f62d8fef81d9e86d494663b8b22474a781473ff25b9fd9a1091e1ab1a"),
+          Hash.fromHexString("0xbd8d4d9416ab946e2e519e4091faf513834d9bf313781003f11da1f356f3f8e4"),
           Hash.EMPTY_TRIE_HASH,
           Hash.EMPTY_LIST_HASH,
           LogsBloomFilter.builder().build(),
@@ -111,7 +111,7 @@ class LogRollingTests {
           headerOne.getHash(),
           Hash.EMPTY_LIST_HASH,
           Address.ZERO,
-          Hash.fromHexString("0x220f34325ea9e65112d550de55af91214b23e74aa01cf23b692d5b63b2a6af1d"),
+          Hash.fromHexString("0x651d5be0881e46d24f6ec37cf74abcd3df12a1076442cfd65ff9c4c9f98f60be"),
           Hash.EMPTY_TRIE_HASH,
           Hash.EMPTY_LIST_HASH,
           LogsBloomFilter.builder().build(),
@@ -136,7 +136,7 @@ class LogRollingTests {
           headerOne.getHash(),
           Hash.EMPTY_LIST_HASH,
           Address.ZERO,
-          Hash.fromHexString("0x2d75bdb04215c65a2b0393293272eedb6d47676c9997e5894dbf3d8be4273f9a"),
+          Hash.fromHexString("0x9c46ac834854f6427420a53f20d051e66839fae5a3e6f765462c9535e69f3453"),
           Hash.EMPTY_TRIE_HASH,
           Hash.EMPTY_LIST_HASH,
           LogsBloomFilter.builder().build(),
@@ -162,7 +162,7 @@ class LogRollingTests {
           headerOne.getHash(),
           Hash.EMPTY_LIST_HASH,
           Address.ZERO,
-          Hash.fromHexString("0x53e60a2f62d8fef81d9e86d494663b8b22474a781473ff25b9fd9a1091e1ab1a"),
+          Hash.fromHexString("0xbd8d4d9416ab946e2e519e4091faf513834d9bf313781003f11da1f356f3f8e4"),
           Hash.EMPTY_TRIE_HASH,
           Hash.EMPTY_LIST_HASH,
           LogsBloomFilter.builder().build(),
@@ -186,7 +186,7 @@ class LogRollingTests {
   @BeforeEach
   void createStorage() {
     provider = new InMemoryKeyValueStorageProvider();
-    archive = InMemoryKeyValueStorageProvider.createVerkleInMemoryWorldStateArchive(blockchain);
+    archive = InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive(blockchain);
     accountStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE);
     codeStorage = provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.CODE_STORAGE);
@@ -200,7 +200,7 @@ class LogRollingTests {
 
     secondProvider = new InMemoryKeyValueStorageProvider();
     secondArchive =
-        InMemoryKeyValueStorageProvider.createVerkleInMemoryWorldStateArchive(blockchain);
+        InMemoryKeyValueStorageProvider.createBinTrieInMemoryWorldStateArchive(blockchain);
     secondAccountStorage =
         secondProvider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE);
     secondCodeStorage =
@@ -218,16 +218,14 @@ class LogRollingTests {
   @Test
   void rollForwardComparedWithTestnet() { // TODO change the name
 
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
-                provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_CONFIG,
-                new NoOpMetricsSystem()),
+            new BinTrieWorldStateKeyValueStorage(
+                provider, DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG, new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
     final WorldUpdater updater = worldState.updater();
 
     final MutableAccount contract =
@@ -249,16 +247,16 @@ class LogRollingTests {
   @Test
   void simpleRollForwardTest() {
 
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
     final WorldUpdater updater = worldState.updater();
 
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -267,23 +265,23 @@ class LogRollingTests {
     updater.commit();
     worldState.persist(headerOne);
 
-    final VerkleWorldState secondWorldState =
-        new VerkleWorldState(
+    final BinTrieWorldState secondWorldState =
+        new BinTrieWorldState(
             secondArchive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
-    final VerkleWorldStateUpdateAccumulator secondUpdater =
-        (VerkleWorldStateUpdateAccumulator) secondWorldState.updater();
+            createStatefulConfigWithTrie(),
+            new CodeCache());
+    final BinTrieWorldStateUpdateAccumulator secondUpdater =
+        (BinTrieWorldStateUpdateAccumulator) secondWorldState.updater();
 
     final Optional<byte[]> value = trieLogStorage.get(headerOne.getHash().toArrayUnsafe());
 
     final TrieLogLayer layer =
-        VerkleTrieLogFactoryImpl.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
+        BinTrieTrieLogFactoryImpl.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
 
     secondUpdater.rollForward(layer);
     secondUpdater.commit();
@@ -293,7 +291,7 @@ class LogRollingTests {
     assertKeyValueStorageEqual(codeStorage, secondCodeStorage);
     assertKeyValueStorageEqual(storageStorage, secondStorageStorage);
     final KeyValueStorageTransaction tx = trieBranchStorage.startTransaction();
-    tx.remove(VerkleWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
+    tx.remove(BinTrieWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
     tx.commit();
     assertKeyValueStorageEqual(trieBranchStorage, secondTrieBranchStorage);
     // trie logs won't be the same, we shouldn't generate logs on rolls.
@@ -303,16 +301,16 @@ class LogRollingTests {
 
   @Test
   void rollForwardTwice() {
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -329,18 +327,18 @@ class LogRollingTests {
 
     worldState.persist(headerTwo);
 
-    final VerkleWorldState secondWorldState =
-        new VerkleWorldState(
+    final BinTrieWorldState secondWorldState =
+        new BinTrieWorldState(
             secondArchive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
-    final VerkleWorldStateUpdateAccumulator secondUpdater =
-        (VerkleWorldStateUpdateAccumulator) secondWorldState.updater();
+            createStatefulConfigWithTrie(),
+            new CodeCache());
+    final BinTrieWorldStateUpdateAccumulator secondUpdater =
+        (BinTrieWorldStateUpdateAccumulator) secondWorldState.updater();
 
     final TrieLogLayer layerOne = getTrieLogLayer(trieLogStorage, headerOne.getHash());
     secondUpdater.rollForward(layerOne);
@@ -356,7 +354,7 @@ class LogRollingTests {
     assertKeyValueStorageEqual(codeStorage, secondCodeStorage);
     assertKeyValueStorageEqual(storageStorage, secondStorageStorage);
     final KeyValueStorageTransaction tx = trieBranchStorage.startTransaction();
-    tx.remove(VerkleWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
+    tx.remove(BinTrieWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
     tx.commit();
     assertKeyValueStorageEqual(trieBranchStorage, secondTrieBranchStorage);
     // trie logs won't be the same, we shouldn't generate logs on rolls.
@@ -366,16 +364,16 @@ class LogRollingTests {
 
   @Test
   void rollBackOnce() {
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -390,25 +388,28 @@ class LogRollingTests {
     mutableAccount2.setStorageValue(UInt256.ONE, UInt256.valueOf(2));
     updater2.commit();
 
+    System.out.println("persist 2");
     worldState.persist(headerTwo);
-    final VerkleWorldStateUpdateAccumulator firstRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator firstRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
 
     final TrieLogLayer layerTwo = getTrieLogLayer(trieLogStorage, headerTwo.getHash());
     firstRollbackUpdater.rollBack(layerTwo);
 
+    System.out.println("rollback  1");
+
     worldState.persist(headerOne);
 
-    final VerkleWorldState secondWorldState =
-        new VerkleWorldState(
+    final BinTrieWorldState secondWorldState =
+        new BinTrieWorldState(
             secondArchive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater secondUpdater = secondWorldState.updater();
     final MutableAccount secondMutableAccount =
@@ -423,7 +424,7 @@ class LogRollingTests {
     assertKeyValueStorageEqual(codeStorage, secondCodeStorage);
     assertKeyValueStorageEqual(storageStorage, secondStorageStorage);
     final KeyValueStorageTransaction tx = trieBranchStorage.startTransaction();
-    tx.remove(VerkleWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
+    tx.remove(BinTrieWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY);
     tx.commit();
     assertKeyValueStorageEqual(trieBranchStorage, secondTrieBranchStorage);
     // trie logs won't be the same, we don't delete the roll back log
@@ -433,16 +434,16 @@ class LogRollingTests {
 
   @Test
   void rollBackTwice() {
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -459,16 +460,16 @@ class LogRollingTests {
     updater2.commit();
 
     worldState.persist(headerTwo);
-    final VerkleWorldStateUpdateAccumulator firstRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator firstRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
 
     final TrieLogLayer layerTwo = getTrieLogLayer(trieLogStorage, headerTwo.getHash());
     firstRollbackUpdater.rollBack(layerTwo);
 
     worldState.persist(headerOne);
 
-    final VerkleWorldStateUpdateAccumulator secondRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator secondRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
     secondRollbackUpdater.rollBack(layerOne);
 
     worldState.persist(null);
@@ -478,16 +479,16 @@ class LogRollingTests {
 
   @Test
   void rollBackFourTimes() {
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -522,27 +523,27 @@ class LogRollingTests {
     worldState.persist(headerFour);
     final TrieLogLayer layerFour = getTrieLogLayer(trieLogStorage, headerFour.getHash());
 
-    final VerkleWorldStateUpdateAccumulator firstRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator firstRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
 
     firstRollbackUpdater.rollBack(layerFour);
 
     worldState.persist(headerThree);
 
-    final VerkleWorldStateUpdateAccumulator secondRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator secondRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
     secondRollbackUpdater.rollBack(layerThree);
 
     worldState.persist(headerTwo);
 
-    final VerkleWorldStateUpdateAccumulator thirdRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator thirdRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
     thirdRollbackUpdater.rollBack(layerTwo);
 
     worldState.persist(headerOne);
 
-    final VerkleWorldStateUpdateAccumulator fourRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator fourRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
     fourRollbackUpdater.rollBack(layerOne);
 
     worldState.persist(null);
@@ -552,16 +553,16 @@ class LogRollingTests {
 
   @Test
   void rollingWithRemovedStorageValue() {
-    final VerkleWorldState worldState =
-        new VerkleWorldState(
+    final BinTrieWorldState worldState =
+        new BinTrieWorldState(
             archive,
-            new VerkleWorldStateKeyValueStorage(
+            new BinTrieWorldStateKeyValueStorage(
                 provider,
-                new StemPreloader(),
-                DataStorageConfiguration.DEFAULT_VERKLE_STEM_DB_CONFIG,
+                DataStorageConfiguration.DEFAULT_BINTRIE_STEM_DB_CONFIG,
                 new NoOpMetricsSystem()),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie());
+            createStatefulConfigWithTrie(),
+            new CodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -579,13 +580,13 @@ class LogRollingTests {
     updater2.commit();
 
     blockHeaderTestFixture.stateRoot(
-        Hash.fromHexString("0x2d75bdb04215c65a2b0393293272eedb6d47676c9997e5894dbf3d8be4273f9a"));
+        Hash.fromHexString("0x9c46ac834854f6427420a53f20d051e66839fae5a3e6f765462c9535e69f3453"));
     blockHeaderTestFixture.number(2);
     final BlockHeader customHeaderTwo = blockHeaderTestFixture.buildHeader();
     worldState.persist(customHeaderTwo);
 
-    final VerkleWorldStateUpdateAccumulator firstRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator firstRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
 
     final TrieLogLayer layerTwo = getTrieLogLayer(trieLogStorage, customHeaderTwo.getBlockHash());
     firstRollbackUpdater.rollBack(layerTwo);
@@ -593,8 +594,8 @@ class LogRollingTests {
     worldState.persist(headerOne);
     assertThat(worldState.rootHash()).isEqualTo(headerOne.getStateRoot());
 
-    final VerkleWorldStateUpdateAccumulator secondRollbackUpdater =
-        (VerkleWorldStateUpdateAccumulator) worldState.updater();
+    final BinTrieWorldStateUpdateAccumulator secondRollbackUpdater =
+        (BinTrieWorldStateUpdateAccumulator) worldState.updater();
 
     secondRollbackUpdater.rollBack(layerOne);
 
@@ -608,7 +609,8 @@ class LogRollingTests {
         .get(key.toArrayUnsafe())
         .map(
             bytes ->
-                VerkleTrieLogFactoryImpl.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
+                BinTrieTrieLogFactoryImpl.readFrom(
+                    new BytesValueRLPInput(Bytes.wrap(bytes), false)))
         .get();
   }
 

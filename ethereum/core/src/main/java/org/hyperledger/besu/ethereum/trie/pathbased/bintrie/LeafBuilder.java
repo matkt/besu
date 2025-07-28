@@ -12,15 +12,16 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.stateless.adapter.TrieKeyFactory;
-import org.hyperledger.besu.ethereum.stateless.adapter.TrieKeyUtils;
-import org.hyperledger.besu.ethereum.stateless.util.SuffixTreeEncoder;
+import org.hyperledger.besu.ethereum.stateless.bintrie.BytesBitSequence;
+import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyUtils;
+import org.hyperledger.besu.ethereum.stateless.bintrie.util.SuffixTreeEncoder;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,9 +37,9 @@ import org.apache.tuweni.units.bigints.UInt256;
 public class LeafBuilder {
 
   private final TrieKeyFactory trieKeyFactory;
-  private final HashSet<Bytes32> keysForRemoval = new HashSet<>();
-  private final HashMap<Bytes32, Bytes32> nonStorageKeyValuesForUpdate = new HashMap<>();
-  private final HashMap<StorageSlotKey, Pair<Bytes32, Bytes32>> storageKeyValuesForUpdate =
+  private final HashSet<BytesBitSequence> keysForRemoval = new HashSet<>();
+  private final HashMap<BytesBitSequence, Bytes32> nonStorageKeyValuesForUpdate = new HashMap<>();
+  private final HashMap<StorageSlotKey, Pair<BytesBitSequence, Bytes32>> storageKeyValuesForUpdate =
       new HashMap<>();
 
   public LeafBuilder(final TrieKeyFactory trieKeyFactory) {
@@ -67,7 +68,7 @@ public class LeafBuilder {
 
   public void generateAccountKeyValueForUpdate(
       final Address address, final long nonce, final Wei balance) {
-    Bytes32 basicDataKey = trieKeyFactory.basicDataKey(address);
+    BytesBitSequence basicDataKey = trieKeyFactory.basicDataKey(address);
     Bytes32 basicDataValue;
     if ((basicDataValue = nonStorageKeyValuesForUpdate.get(basicDataKey)) == null) {
       basicDataValue = Bytes32.ZERO;
@@ -84,7 +85,7 @@ public class LeafBuilder {
   }
 
   public void generateCodeSizeKeyValueForUpdate(final Address address, final long size) {
-    Bytes32 basicDataKey = trieKeyFactory.basicDataKey(address);
+    BytesBitSequence basicDataKey = trieKeyFactory.basicDataKey(address);
     Bytes32 basicDataValue;
     if ((basicDataValue = nonStorageKeyValuesForUpdate.get(basicDataKey)) == null) {
       basicDataValue = Bytes32.ZERO;
@@ -122,15 +123,15 @@ public class LeafBuilder {
             trieKeyFactory.storageKey(address, storageSlotKey.getSlotKey().orElseThrow()), value));
   }
 
-  public Set<Bytes32> getKeysForRemoval() {
+  public Set<BytesBitSequence> getKeysForRemoval() {
     return keysForRemoval;
   }
 
-  public Map<Bytes32, Bytes32> getNonStorageKeyValuesForUpdate() {
+  public Map<BytesBitSequence, Bytes32> getNonStorageKeyValuesForUpdate() {
     return nonStorageKeyValuesForUpdate;
   }
 
-  public Map<StorageSlotKey, Pair<Bytes32, Bytes32>> getStorageKeyValuesForUpdate() {
+  public Map<StorageSlotKey, Pair<BytesBitSequence, Bytes32>> getStorageKeyValuesForUpdate() {
     return storageKeyValuesForUpdate;
   }
 }

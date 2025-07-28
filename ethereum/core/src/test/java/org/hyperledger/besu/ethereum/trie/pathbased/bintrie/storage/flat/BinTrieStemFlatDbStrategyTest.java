@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.flat;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,19 +27,24 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.stateless.node.LeafNode;
-import org.hyperledger.besu.ethereum.stateless.node.StemNode;
-import org.hyperledger.besu.ethereum.stateless.util.Parameters;
-import org.hyperledger.besu.ethereum.stateless.util.SuffixTreeEncoder;
+import org.hyperledger.besu.ethereum.stateless.bintrie.BytesBitSequence;
+import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.hasher.StemHasher;
+import org.hyperledger.besu.ethereum.stateless.bintrie.node.LeafNode;
+import org.hyperledger.besu.ethereum.stateless.bintrie.node.NullLeafNode;
+import org.hyperledger.besu.ethereum.stateless.bintrie.node.StemNode;
+import org.hyperledger.besu.ethereum.stateless.bintrie.node.ValueNode;
+import org.hyperledger.besu.ethereum.stateless.bintrie.util.Parameters;
+import org.hyperledger.besu.ethereum.stateless.bintrie.util.SuffixTreeEncoder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeHashCodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.StemPreloader;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 
+import java.util.ArrayList;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -50,7 +55,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-class VerkleStemFlatDbStrategyTest {
+class BinTrieStemFlatDbStrategyTest {
 
   @Mock private MetricsSystem metricsSystem;
 
@@ -66,25 +71,23 @@ class VerkleStemFlatDbStrategyTest {
 
   @Mock private Counter getStorageValueCounter;
 
-  @Mock private StemPreloader stemPreloader;
-
   @Mock private SegmentedKeyValueStorage storage;
 
   @Mock private PathBasedWorldView context;
 
-  private VerkleStemFlatDbStrategy strategy;
+  private BinTrieStemFlatDbStrategy strategy;
 
   @BeforeEach
   void setUp() {
     MockitoAnnotations.openMocks(this);
     initializeCounters();
-    strategy = new VerkleStemFlatDbStrategy(metricsSystem, new CodeHashCodeStorageStrategy());
+    strategy = new BinTrieStemFlatDbStrategy(metricsSystem, new CodeHashCodeStorageStrategy());
   }
 
   @Test
   void testGetFlatAccountFound() {
     final Address address = Address.fromHexString("0x1");
-    final Bytes stem = prepareStemForAccount(address);
+    final BytesBitSequence stem = prepareStemForAccount(address);
     final Bytes nonce = Bytes.repeat((byte) 0x1, 8);
     final Bytes balance = Bytes.repeat((byte) 0x1, 16);
     final Bytes codeSize = Bytes.repeat((byte) 0x1, 3);
@@ -92,8 +95,7 @@ class VerkleStemFlatDbStrategyTest {
     final Bytes32 suffix = encodeAccountProperties(nonce, balance, codeSize);
     mockStorageWithStemNode(stem, (byte) Parameters.BASIC_DATA_LEAF_KEY.toInt(), suffix);
 
-    final Optional<VerkleAccount> result =
-        strategy.getFlatAccount(address, context, stemPreloader, storage);
+    final Optional<BinTrieAccount> result = strategy.getFlatAccount(address, context, storage);
 
     assertTrue(result.isPresent());
     assertAccountProperties(result.get(), nonce, balance, codeSize);
@@ -103,12 +105,11 @@ class VerkleStemFlatDbStrategyTest {
   @Test
   void testGetFlatAccountNotFound() {
     final Address address = Address.fromHexString("0x1");
-    final Bytes stem = prepareStemForAccount(address);
-    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.toArrayUnsafe())))
+    final BytesBitSequence stem = prepareStemForAccount(address);
+    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.encode())))
         .thenReturn(Optional.empty());
 
-    final Optional<VerkleAccount> result =
-        strategy.getFlatAccount(address, context, stemPreloader, storage);
+    final Optional<BinTrieAccount> result = strategy.getFlatAccount(address, context, storage);
 
     assertFalse(result.isPresent());
     verifyAccountMetrics(false);
@@ -118,13 +119,13 @@ class VerkleStemFlatDbStrategyTest {
   void testGetFlatStorageValueByStorageSlotKeyFound() {
     final Address address = Address.fromHexString("0x1");
     final StorageSlotKey slotKey = createSlotKey();
-    final Bytes stem = prepareStemForSlot(address, slotKey);
+    final BytesBitSequence stem = prepareStemForSlot(address, slotKey);
     final Bytes expectedValue = Bytes32.fromHexString("0x1234");
 
     mockStorageWithStemNode(stem, (byte) Parameters.HEADER_STORAGE_OFFSET.toInt(), expectedValue);
 
     final Optional<Bytes> result =
-        strategy.getFlatStorageValueByStorageSlotKey(address, slotKey, stemPreloader, storage);
+        strategy.getFlatStorageValueByStorageSlotKey(address, slotKey, storage);
 
     assertTrue(result.isPresent());
     assertEquals(expectedValue, result.get());
@@ -135,12 +136,11 @@ class VerkleStemFlatDbStrategyTest {
   void testGetFlatStorageValueByStorageSlotKeyNotFound() {
     final Address address = Address.fromHexString("0x1");
     final StorageSlotKey slotKey = createSlotKey();
-    final Bytes stem = prepareStemForSlot(address, slotKey);
-    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.toArrayUnsafe())))
+    final BytesBitSequence stem = prepareStemForSlot(address, slotKey);
+    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.encode())))
         .thenReturn(Optional.empty());
-
     final Optional<Bytes> result =
-        strategy.getFlatStorageValueByStorageSlotKey(address, slotKey, stemPreloader, storage);
+        strategy.getFlatStorageValueByStorageSlotKey(address, slotKey, storage);
 
     assertFalse(result.isPresent());
     verifyStorageMetrics(false);
@@ -169,31 +169,35 @@ class VerkleStemFlatDbStrategyTest {
     return SuffixTreeEncoder.setCodeSizeInValue(suffix, codeSize);
   }
 
-  private void mockStorageWithStemNode(final Bytes stem, final byte index, final Bytes children) {
-    final StemNode<Object> stemNode = createStemNode(stem, index, children);
-    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.toArrayUnsafe())))
+  private void mockStorageWithStemNode(
+      final BytesBitSequence stem, final byte index, final Bytes value) {
+    final StemNode<BytesBitSequence, Bytes> stemNode = createStemNode(stem, index, value);
+    when(storage.get(eq(VERKLE_TRIE_BRANCH_STORAGE), eq(stem.encode())))
         .thenReturn(Optional.of(stemNode.getEncodedValue().toArrayUnsafe()));
   }
 
-  private StemNode<Object> createStemNode(
-      final Bytes stem, final byte index, final Bytes children) {
-    final StemNode<Object> stemNode = new StemNode<>(Bytes.EMPTY, stem);
-    stemNode.replaceChild(index, new LeafNode<>(Bytes.EMPTY, children));
-    stemNode.replaceHash(
-        Bytes32.ZERO, Bytes.EMPTY, Bytes32.ZERO, Bytes.EMPTY, Bytes32.ZERO, Bytes.EMPTY);
-    return stemNode;
+  private StemNode<BytesBitSequence, Bytes> createStemNode(
+      final BytesBitSequence stem, final byte index, final Bytes value) {
+    final ArrayList<LeafNode<BytesBitSequence, Bytes>> children =
+        new ArrayList<>(StemNode.maxChild());
+    for (int i = 0; i < StemNode.maxChild(); i++) {
+      children.add(NullLeafNode.node());
+    }
+    System.out.println(index + " " + value);
+    children.set(
+        index, new ValueNode<BytesBitSequence, Bytes>(Optional.empty(), Optional.of(value)));
+    return new StemNode<>(
+        Optional.of(BytesBitSequence.empty()), stem, Optional.of(Bytes32.ZERO), children);
   }
 
-  private Bytes prepareStemForAccount(final Address address) {
-    final Bytes stem = Bytes32.random();
-    when(stemPreloader.preloadAccountStem(eq(address))).thenReturn(stem);
-    return stem;
+  private BytesBitSequence prepareStemForAccount(final Address address) {
+    return new TrieKeyFactory(new StemHasher()).getHeaderStem(address);
   }
 
-  private Bytes prepareStemForSlot(final Address address, final StorageSlotKey storageSlotKey) {
-    final Bytes stem = Bytes32.random();
-    when(stemPreloader.preloadSlotStems(eq(address), eq(storageSlotKey))).thenReturn(stem);
-    return stem;
+  private BytesBitSequence prepareStemForSlot(
+      final Address address, final StorageSlotKey storageSlotKey) {
+    return new TrieKeyFactory(new StemHasher())
+        .getStorageStem(address, storageSlotKey.getSlotKey().orElseThrow());
   }
 
   private StorageSlotKey createSlotKey() {
@@ -201,7 +205,7 @@ class VerkleStemFlatDbStrategyTest {
   }
 
   private void assertAccountProperties(
-      final VerkleAccount account, final Bytes nonce, final Bytes balance, final Bytes codeSize) {
+      final BinTrieAccount account, final Bytes nonce, final Bytes balance, final Bytes codeSize) {
     assertEquals(account.getNonce(), nonce.toLong());
     assertEquals(account.getBalance(), Wei.wrap(balance));
     assertEquals(account.getCodeSize(), Optional.of(codeSize.toLong()));

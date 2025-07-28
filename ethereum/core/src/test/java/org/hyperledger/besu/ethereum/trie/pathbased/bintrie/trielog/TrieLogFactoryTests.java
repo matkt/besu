@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.trielog;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.trielog;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
@@ -23,7 +23,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.BlockchainSetupUtil;
-import org.hyperledger.besu.ethereum.trie.common.VerkleStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -41,7 +41,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 public class TrieLogFactoryTests {
 
-  final BlockchainSetupUtil setup = BlockchainSetupUtil.forTesting(DataStorageFormat.VERKLE);
+  final BlockchainSetupUtil setup = BlockchainSetupUtil.forTesting(DataStorageFormat.BINTRIE);
 
   final Address accountFixture = Address.fromHexString("0xdeadbeef");
 
@@ -60,19 +60,19 @@ public class TrieLogFactoryTests {
               accountFixture,
               new PathBasedValue<>(
                   null,
-                  new VerkleStateTrieAccountValue(
+                  new BinaryStateTrieAccountValue(
                       0, Wei.fromEth(1), Hash.hash(code), Optional.of((long) code.size()))))
           .addCodeChange(accountFixture, null, code, headerFixture.getBlockHash())
           .addStorageChange(
               accountFixture,
               new StorageSlotKey(UInt256.ZERO),
               new PathBasedValue<>(null, UInt256.ONE))
-          .setDataStorageFormat(DataStorageFormat.VERKLE);
+          .setDataStorageFormat(DataStorageFormat.BINTRIE);
 
   @Test
   public void testSerializeDeserializeAreEqual() {
 
-    TrieLogFactory factory = new VerkleTrieLogFactoryImpl();
+    TrieLogFactory factory = new BinTrieTrieLogFactoryImpl();
     byte[] rlp = factory.serialize(trieLogFixture);
 
     TrieLog layer = factory.deserialize(rlp);
@@ -82,7 +82,7 @@ public class TrieLogFactoryTests {
   @Test
   public void storesSlotKeyAndHashInTrieLogCorrectly() {
 
-    TrieLogFactory factory = new VerkleTrieLogFactoryImpl();
+    TrieLogFactory factory = new BinTrieTrieLogFactoryImpl();
     byte[] rlp = factory.serialize(trieLogFixture);
 
     TrieLog layer = factory.deserialize(rlp);

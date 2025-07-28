@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.worldview;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 
@@ -21,11 +21,16 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
-import org.hyperledger.besu.ethereum.stateless.adapter.TrieKeyFactory;
-import org.hyperledger.besu.ethereum.stateless.adapter.TrieKeyUtils;
-import org.hyperledger.besu.ethereum.stateless.hasher.StemHasher;
-import org.hyperledger.besu.ethereum.stateless.util.Parameters;
+import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyFactory;
+import org.hyperledger.besu.ethereum.stateless.bintrie.hasher.StemHasher;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.bintrie.BinaryTrie;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.LeafBuilder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieLayeredWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.cache.PathBasedCachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
@@ -35,28 +40,17 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateC
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.ethereum.trie.pathbased.transition.MigratedDiffValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.LeafBuilder;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.VerkleWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.StemPreloader;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.cache.preloader.VerklePreloader;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleLayeredWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.VerkleWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.verkletrie.VerkleTrie;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -66,54 +60,57 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SuppressWarnings({"unused", "MismatchedQueryAndUpdateOfCollection", "ModifiedButNotUsed"})
-public class VerkleWorldState extends PathBasedWorldState {
+public class BinTrieWorldState extends PathBasedWorldState {
 
-  private static final Logger LOG = LoggerFactory.getLogger(VerkleWorldState.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BinTrieWorldState.class);
 
-  private final VerklePreloader verklePreloader;
+  private final CodeCache codeCache;
 
-  public VerkleWorldState(
-      final VerkleWorldStateProvider archive,
-      final VerkleWorldStateKeyValueStorage worldStateKeyValueStorage,
+  public BinTrieWorldState(
+      final BinTrieWorldStateProvider archive,
+      final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage,
       final EvmConfiguration evmConfiguration,
-      final WorldStateConfig worldStateConfig) {
+      final WorldStateConfig worldStateConfig,
+      final CodeCache codeCache) {
     this(
         worldStateKeyValueStorage,
         archive.getCachedWorldStorageManager(),
         archive.getTrieLogManager(),
         evmConfiguration,
-        worldStateConfig);
+        worldStateConfig,
+        codeCache);
   }
 
-  public VerkleWorldState(
-      final VerkleWorldStateKeyValueStorage worldStateKeyValueStorage,
+  public BinTrieWorldState(
+      final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedCachedWorldStorageManager cachedWorldStorageManager,
       final TrieLogManager trieLogManager,
       final EvmConfiguration evmConfiguration,
-      final WorldStateConfig worldStateConfig) {
+      final WorldStateConfig worldStateConfig,
+      final CodeCache codeCache) {
     super(worldStateKeyValueStorage, cachedWorldStorageManager, trieLogManager, worldStateConfig);
-    this.verklePreloader = new VerklePreloader(worldStateKeyValueStorage.getStemPreloader());
-    this.setAccumulator(
-        new VerkleWorldStateUpdateAccumulator(
-            this,
-            (addr, value) -> verklePreloader.preLoadAccount(addr),
-            verklePreloader::preLoadStorageSlot,
-            verklePreloader::preLoadCode,
-            evmConfiguration));
+    this.setAccumulator(new BinTrieWorldStateUpdateAccumulator(this, evmConfiguration, codeCache));
+    this.codeCache = codeCache;
   }
 
-  public VerkleWorldState(
-      final VerkleWorldStateKeyValueStorage worldStateKeyValueStorage,
+  public BinTrieWorldState(
+      final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedCachedWorldStorageManager cachedWorldStorageManager,
       final TrieLogManager trieLogManager,
-      final WorldStateConfig worldStateConfig) {
+      final WorldStateConfig worldStateConfig,
+      final CodeCache codeCache) {
     super(worldStateKeyValueStorage, cachedWorldStorageManager, trieLogManager, worldStateConfig);
-    this.verklePreloader = new VerklePreloader(worldStateKeyValueStorage.getStemPreloader());
+    this.codeCache = codeCache;
   }
 
   @Override
-  public VerkleWorldStateKeyValueStorage getWorldStateStorage() {
-    return (VerkleWorldStateKeyValueStorage) worldStateKeyValueStorage;
+  public BinTrieWorldStateKeyValueStorage getWorldStateStorage() {
+    return (BinTrieWorldStateKeyValueStorage) worldStateKeyValueStorage;
+  }
+
+  @Override
+  public CodeCache codeCache() {
+    return codeCache;
   }
 
   @Override
@@ -160,11 +157,12 @@ public class VerkleWorldState extends PathBasedWorldState {
                 cachedWorldStorageManager.addCachedLayer(blockHeader, calculatedRootHash, this);
               }
             };
-        stateUpdater.saveWorldState(blockHeader.getHash(), calculatedRootHash);
+        stateUpdater.saveWorldState(
+            blockHeader.getHash(), blockHeader.getNumber(), calculatedRootHash);
         worldStateBlockHash = blockHeader.getHash();
         worldStateRootHash = calculatedRootHash;
       } else {
-        stateUpdater.saveWorldState(Hash.ZERO, calculatedRootHash);
+        stateUpdater.saveWorldState(Hash.ZERO, 0L, calculatedRootHash);
         worldStateBlockHash = Hash.ZERO;
         worldStateRootHash = calculatedRootHash;
       }
@@ -186,90 +184,21 @@ public class VerkleWorldState extends PathBasedWorldState {
       final Optional<PathBasedWorldStateKeyValueStorage.Updater> maybeStateUpdater,
       final PathBasedWorldStateUpdateAccumulator<?> worldStateUpdater) {
     return internalCalculateRootHash(
-        maybeStateUpdater.map(VerkleWorldStateKeyValueStorage.Updater.class::cast),
-        (VerkleWorldStateUpdateAccumulator) worldStateUpdater);
+        maybeStateUpdater.map(BinTrieWorldStateKeyValueStorage.Updater.class::cast),
+        (BinTrieWorldStateUpdateAccumulator) worldStateUpdater);
   }
 
   protected Hash internalCalculateRootHash(
-      final Optional<VerkleWorldStateKeyValueStorage.Updater> maybeStateUpdater,
-      final VerkleWorldStateUpdateAccumulator worldStateUpdater) {
+      final Optional<BinTrieWorldStateKeyValueStorage.Updater> maybeStateUpdater,
+      final BinTrieWorldStateUpdateAccumulator worldStateUpdater) {
 
-    final VerkleTrie stateTrie =
-        createTrie(
-            (location, hash) -> worldStateKeyValueStorage.getStateTrieNode(location),
-            worldStateRootHash);
+    final BinaryTrie stateTrie =
+        createTrie((location, hash) -> worldStateKeyValueStorage.getStateTrieNode(location));
 
-    final StemPreloader stemPreloader = verklePreloader.stemPreloader();
-
-    // For each address that needs to be updated in the state, generate all the necessary leaf keys
-    // (basic data leaf, code, code hash, storage slots, etc.). Then, preload the stems in an
-    // optimized
-    // and parallelized manner. These stems will later be used to update the trie. Some stems may
-    // have
-    // already been generated during block processing, so they will not be regenerated here.
     final Set<Address> addressesToPersist = getAddressesToPersist(worldStateUpdater);
-    addressesToPersist.parallelStream()
-        .forEach(
-            accountKey -> {
-              final PathBasedValue<VerkleAccount> accountUpdate =
-                  worldStateUpdater.getAccountsToUpdate().get(accountKey);
-              // Collect all leaf keys (for accounts, storage, and code) for the account
-              final List<Bytes32> leafKeys = new ArrayList<>();
-
-              if (accountUpdate != null && !accountUpdate.isUnchanged()) {
-                leafKeys.add(TrieKeyUtils.getAccountKeyTrieIndex());
-                if (accountUpdate.getPrior() == null) {
-                  leafKeys.add(Parameters.CODE_HASH_LEAF_KEY);
-                }
-              }
-
-              // Process storage updates if needed
-              final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>
-                  storageAccountUpdate = worldStateUpdater.getStorageToUpdate().get(accountKey);
-              if (storageAccountUpdate != null) {
-                final List<Bytes32> storageSlotKeys =
-                    storageAccountUpdate.keySet().stream()
-                        .map(
-                            storageSlotKey ->
-                                storageSlotKey
-                                    .getSlotKey()
-                                    .orElseThrow(
-                                        () -> new IllegalStateException("Slot key is missing")))
-                        .map(Bytes32::wrap) // Correct way to call static method wrap()
-                        .collect(Collectors.toList());
-
-                if (!storageSlotKeys.isEmpty()) {
-                  leafKeys.addAll(TrieKeyUtils.getStorageKeyTrieIndexes(storageSlotKeys));
-                }
-              }
-
-              // Process code updates if needed
-              final PathBasedValue<Bytes> codeUpdate =
-                  worldStateUpdater.getCodeToUpdate().get(accountKey);
-              if (codeUpdate != null && !codeUpdate.isUnchanged()) {
-                final Bytes previousCode = codeUpdate.getPrior();
-                final Bytes updatedCode = codeUpdate.getUpdated();
-
-                // Ensure code is not empty and only update if the code has actually changed
-                if (!(codeIsEmpty(previousCode) && codeIsEmpty(updatedCode))) {
-                  leafKeys.add(Parameters.CODE_HASH_LEAF_KEY);
-                  leafKeys.addAll(
-                      TrieKeyUtils.getCodeChunkKeyTrieIndexes(
-                          updatedCode == null ? previousCode : updatedCode));
-                }
-              }
-              stemPreloader.preloadStems(accountKey, leafKeys);
-            });
-
     int updateCount = 0;
     for (final Address accountKey : addressesToPersist) {
-      updateCount +=
-          updateState(
-              accountKey,
-              stateTrie,
-              maybeStateUpdater,
-              stemPreloader.getStemHasherByAddress(accountKey),
-              worldStateUpdater);
+      updateCount += updateState(accountKey, stateTrie, maybeStateUpdater, worldStateUpdater);
     }
 
     System.out.println("Total updates: " + updateCount);
@@ -278,21 +207,21 @@ public class VerkleWorldState extends PathBasedWorldState {
     long startTime = System.currentTimeMillis();
 
     maybeStateUpdater.ifPresent(
-        verkleUpdater ->
+        binTrieUpdater ->
             stateTrie.commit(
                 (location, hash, value) -> {
                   if (value == null) {
                     removeTrieNode(
                         VERKLE_TRIE_BRANCH_STORAGE,
-                        verkleUpdater.getWorldStateTransaction(),
+                        binTrieUpdater.getWorldStateTransaction(),
                         location);
-                  } else {
-                    writeTrieNode(
-                        VERKLE_TRIE_BRANCH_STORAGE,
-                        verkleUpdater.getWorldStateTransaction(),
-                        location,
-                        value);
+                    return;
                   }
+                  writeTrieNode(
+                      VERKLE_TRIE_BRANCH_STORAGE,
+                      binTrieUpdater.getWorldStateTransaction(),
+                      location,
+                      value);
                 }));
 
     // LOG.info(stateTrie.toDotTree());
@@ -312,8 +241,8 @@ public class VerkleWorldState extends PathBasedWorldState {
       final LeafBuilder leafBuilder,
       final boolean hasStorageUpdate,
       final boolean hasCodeUpdate,
-      final Optional<VerkleWorldStateKeyValueStorage.Updater> optionalStateUpdater,
-      final VerkleWorldStateUpdateAccumulator worldStateUpdater) {
+      final Optional<BinTrieWorldStateKeyValueStorage.Updater> maybeStateUpdater,
+      final BinTrieWorldStateUpdateAccumulator worldStateUpdater) {
 
     // Retrieve the account update for the given account
     var accountUpdate = worldStateUpdater.getAccountsToUpdate().get(accountAddress);
@@ -324,23 +253,23 @@ public class VerkleWorldState extends PathBasedWorldState {
             || (accountUpdate.isUnchanged() && !hasStorageUpdate && !hasCodeUpdate);
 
     /*System.out.println(
-        "add basic key "
-            + accountAddress
-            + " "
-            + (accountUpdate != null)
-            + " "
-            + new TrieKeyFactory(new StemPreloader().getStemHasherByAddress(accountAddress))
-                .basicDataKey(accountAddress)
-            + " "
-            + shouldSkipAccount);*/
+    "add basic key "
+        + accountAddress
+        + " "
+        + (accountUpdate != null)
+        + " "
+        + new TrieKeyFactory(new StemPreloader().getStemHasherByAddress(accountAddress))
+            .basicDataKey(accountAddress)
+        + " "
+        + shouldSkipAccount);*/
 
     // System.out.println("skip "+accountKey+" "+skipAccount+" "+((accountUpdate !=
     // null)?accountUpdate.getClass().toString():"null"));
     // Handling the migration of the account if it is a migrated diff (this is only necessary during
     // the transition period)
     // Handle migration for the account if it's a migrated diff (used during the transition period)
-    if (accountUpdate instanceof MigratedDiffValue<VerkleAccount> migratedAccount) {
-      final PathBasedValue<VerkleAccount> replacement =
+    if (accountUpdate instanceof MigratedDiffValue<BinTrieAccount> migratedAccount) {
+      final PathBasedValue<BinTrieAccount> replacement =
           new PathBasedValue<>(
               shouldSkipAccount ? migratedAccount.getUpdated() : migratedAccount.getPrior(),
               migratedAccount.getUpdated(),
@@ -354,14 +283,10 @@ public class VerkleWorldState extends PathBasedWorldState {
 
     // If the updated account is null, it means the account is being removed
     if (accountUpdate.getUpdated() == null) {
-      // Generate removal keys for the account and code hash
       leafBuilder.generateAccountKeyForRemoval(accountAddress);
       leafBuilder.generateCodeHashKeyForRemoval(accountAddress);
-
-      // Hash and save the pre-image for the account key, and remove the account info from the state
-      final Hash accountHash = hashAndSavePreImage(accountAddress);
-      optionalStateUpdater.ifPresent(
-          stateUpdater -> stateUpdater.removeAccountInfoState(accountHash));
+      final Hash addressHash = hashAndSavePreImage(accountAddress);
+      maybeStateUpdater.ifPresent(updater -> updater.removeAccountInfoState(addressHash));
       return true;
     }
 
@@ -369,12 +294,12 @@ public class VerkleWorldState extends PathBasedWorldState {
     handleCoupledCodeAccountUpdates(accountAddress, leafBuilder, accountUpdate, worldStateUpdater);
 
     // Get the updated account data and generate the key-value update for the account
-    final VerkleAccount updatedAccount = accountUpdate.getUpdated();
+    final BinTrieAccount updatedAccount = accountUpdate.getUpdated();
     leafBuilder.generateAccountKeyValueForUpdate(
         accountAddress, updatedAccount.getNonce(), updatedAccount.getBalance());
 
     // If the state updater is available, update the account information in the state
-    optionalStateUpdater.ifPresent(
+    maybeStateUpdater.ifPresent(
         stateUpdater ->
             stateUpdater.putAccountInfoState(
                 hashAndSavePreImage(accountAddress), updatedAccount.serializeAccount()));
@@ -385,13 +310,12 @@ public class VerkleWorldState extends PathBasedWorldState {
   private void handleCoupledCodeAccountUpdates(
       final Address accountKey,
       final LeafBuilder leafBuilder,
-      final PathBasedValue<VerkleAccount> accountUpdate,
-      final VerkleWorldStateUpdateAccumulator worldStateUpdater) {
-    // Retrieve the prior and updated account details from the account update object
-    final VerkleAccount priorAccount = accountUpdate.getPrior();
-    final VerkleAccount updatedAccount = accountUpdate.getUpdated();
-    // If the account is being created (no prior account), we need to add the code hash and code
-    // size for the new account
+      final PathBasedValue<BinTrieAccount> accountUpdate,
+      final BinTrieWorldStateUpdateAccumulator worldStateUpdater) {
+    final BinTrieAccount priorAccount = accountUpdate.getPrior();
+    final BinTrieAccount updatedAccount = accountUpdate.getUpdated();
+
+    // creating new account adds in codehash as well
     if (priorAccount == null) {
       // Add code hash key-value for the new account
       leafBuilder.generateCodeHashKeyValueForUpdate(accountKey, updatedAccount.getCodeHash());
@@ -410,7 +334,7 @@ public class VerkleWorldState extends PathBasedWorldState {
   private boolean processCodeUpdates(
       final Address accountAddress,
       final LeafBuilder leafBuilder,
-      final Optional<VerkleWorldStateKeyValueStorage.Updater> optionalStateUpdater,
+      final Optional<BinTrieWorldStateKeyValueStorage.Updater> maybeStateUpdater,
       final PathBasedValue<Bytes> codeUpdate) {
 
     // If there is no update, or if the code hasn't changed, or if both prior and updated code are
@@ -427,7 +351,7 @@ public class VerkleWorldState extends PathBasedWorldState {
       // Remove the code and its associated keys from the state
       leafBuilder.generateCodeKeysForRemoval(accountAddress, codeUpdate.getPrior());
       final Hash accountAddressHash = accountAddress.addressHash();
-      optionalStateUpdater.ifPresent(
+      maybeStateUpdater.ifPresent(
           stateUpdater -> stateUpdater.removeCode(accountAddressHash, priorCodeHash));
       return true;
     }
@@ -439,11 +363,11 @@ public class VerkleWorldState extends PathBasedWorldState {
 
     // The code is empty, so we store it as empty in the state
     if (codeUpdate.getUpdated().isEmpty()) {
-      optionalStateUpdater.ifPresent(
+      maybeStateUpdater.ifPresent(
           stateUpdater -> stateUpdater.removeCode(accountAddressHash, codeHash));
     } else {
       // Otherwise, add the updated code to the state
-      optionalStateUpdater.ifPresent(
+      maybeStateUpdater.ifPresent(
           stateUpdater ->
               stateUpdater.putCode(accountAddressHash, codeHash, codeUpdate.getUpdated()));
     }
@@ -454,8 +378,8 @@ public class VerkleWorldState extends PathBasedWorldState {
   private boolean generateStorageValues(
       final Address accountAddress,
       final LeafBuilder leafBuilder,
-      final Optional<VerkleWorldStateKeyValueStorage.Updater> optionalStateUpdater,
-      final VerkleWorldStateUpdateAccumulator worldStateAccumulator) {
+      final Optional<BinTrieWorldStateKeyValueStorage.Updater> optionalStateUpdater,
+      final BinTrieWorldStateUpdateAccumulator worldStateAccumulator) {
 
     // Get the storage updates for the given account
     final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageUpdates =
@@ -517,12 +441,11 @@ public class VerkleWorldState extends PathBasedWorldState {
 
   private int updateState(
       final Address accountKey,
-      final VerkleTrie stateTrie,
-      final Optional<VerkleWorldStateKeyValueStorage.Updater> maybeStateUpdater,
-      final StemHasher stemHasher,
-      final VerkleWorldStateUpdateAccumulator worldStateUpdater) {
+      final BinaryTrie stateTrie,
+      final Optional<BinTrieWorldStateKeyValueStorage.Updater> maybeStateUpdater,
+      final BinTrieWorldStateUpdateAccumulator worldStateUpdater) {
 
-    final LeafBuilder leafBuilder = new LeafBuilder(new TrieKeyFactory(stemHasher));
+    final LeafBuilder leafBuilder = new LeafBuilder(new TrieKeyFactory(new StemHasher()));
 
     final boolean hasCodeUpdate =
         processCodeUpdates(
@@ -534,7 +457,7 @@ public class VerkleWorldState extends PathBasedWorldState {
     final boolean hasStorageUpdate =
         generateStorageValues(accountKey, leafBuilder, maybeStateUpdater, worldStateUpdater);
 
-    //System.out.println("has ?" + accountKey + " " + hasStorageUpdate + " " + hasCodeUpdate);
+    // System.out.println("has ?" + accountKey + " " + hasStorageUpdate + " " + hasCodeUpdate);
     processAccountUpdates(
         accountKey,
         leafBuilder,
@@ -547,14 +470,14 @@ public class VerkleWorldState extends PathBasedWorldState {
         .getKeysForRemoval()
         .forEach(
             key -> {
-              //System.out.println("remove key " + key);
+              // System.out.println("remove key " + key);
               stateTrie.remove(key);
             });
     leafBuilder
         .getNonStorageKeyValuesForUpdate()
         .forEach(
             (key, value) -> {
-              //System.out.println("add key " + key + " leaf value " + value);
+              // System.out.println("add key " + key + " leaf value " + value);
               stateTrie.put(key, value);
             });
     leafBuilder
@@ -565,7 +488,7 @@ public class VerkleWorldState extends PathBasedWorldState {
               if (storageAccountUpdate == null) {
                 return;
               }
-              //System.out.println(
+              // System.out.println(
               //    "add storage key " + pair.getFirst() + "  value " + pair.getSecond());
 
               Optional<PathBasedValue<UInt256>> storageUpdate =
@@ -598,7 +521,7 @@ public class VerkleWorldState extends PathBasedWorldState {
   public MutableWorldState freezeStorage() {
     this.isStorageFrozen = true;
     this.worldStateKeyValueStorage =
-        new VerkleLayeredWorldStateKeyValueStorage(getWorldStateStorage());
+        new BinTrieLayeredWorldStateKeyValueStorage(getWorldStateStorage());
     return this;
   }
 
@@ -634,8 +557,8 @@ public class VerkleWorldState extends PathBasedWorldState {
     return Collections.emptyMap();
   }
 
-  private VerkleTrie createTrie(final NodeLoader nodeLoader, final Hash worldStateRootHash) {
-    return new VerkleTrie(nodeLoader);
+  private BinaryTrie createTrie(final NodeLoader nodeLoader) {
+    return new BinaryTrie(nodeLoader);
   }
 
   protected void removeTrieNode(
@@ -662,8 +585,11 @@ public class VerkleWorldState extends PathBasedWorldState {
   public Hash frontierRootHash() {
     return calculateRootHash(
         Optional.of(
-            new VerkleWorldStateKeyValueStorage.Updater(
-                noOpSegmentedTx, noOpTx, worldStateKeyValueStorage.getFlatDbStrategy())),
+            new BinTrieWorldStateKeyValueStorage.Updater(
+                noOpSegmentedTx,
+                noOpTx,
+                worldStateKeyValueStorage.getFlatDbStrategy(),
+                worldStateKeyValueStorage.getComposedWorldStateStorage())),
         accumulator.copy());
   }
 
@@ -672,12 +598,8 @@ public class VerkleWorldState extends PathBasedWorldState {
     return Hash.wrap(Bytes32.ZERO);
   }
 
-  public VerklePreloader getVerklePreloader() {
-    return verklePreloader;
-  }
-
   @Override
-  public VerkleWorldStateUpdateAccumulator getAccumulator() {
-    return (VerkleWorldStateUpdateAccumulator) super.getAccumulator();
+  public BinTrieWorldStateUpdateAccumulator getAccumulator() {
+    return (BinTrieWorldStateUpdateAccumulator) super.getAccumulator();
   }
 }

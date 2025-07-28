@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.verkle.storage.flat;
+package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
@@ -30,11 +30,11 @@ import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class VerkleFlatDbStrategyProvider extends FlatDbStrategyProvider {
+public class BinTrieFlatDbStrategyProvider extends FlatDbStrategyProvider {
 
-  private static final Logger LOG = LoggerFactory.getLogger(VerkleFlatDbStrategyProvider.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BinTrieFlatDbStrategyProvider.class);
 
-  public VerkleFlatDbStrategyProvider(
+  public BinTrieFlatDbStrategyProvider(
       final MetricsSystem metricsSystem,
       final DataStorageConfiguration dataStorageConfiguration,
       final SegmentedKeyValueStorage segmentedKeyValueStorage) {
@@ -90,7 +90,7 @@ public class VerkleFlatDbStrategyProvider extends FlatDbStrategyProvider {
                     }));
     LOG.debug("Flat db mode found {}", flatDbMode);
 
-    return FlatDbMode.STEM;
+    return FlatDbMode.STEM; // TODO go back to return flatDbMode after transition test
   }
 
   @Override
@@ -99,9 +99,9 @@ public class VerkleFlatDbStrategyProvider extends FlatDbStrategyProvider {
       final MetricsSystem metricsSystem,
       final CodeStorageStrategy codeStorageStrategy) {
     if (flatDbMode == FlatDbMode.FULL) {
-      return new VerkleLegacyFlatDbStrategy(metricsSystem, codeStorageStrategy);
+      return new BinTrieLegacyFlatDbStrategy(metricsSystem, codeStorageStrategy);
     } else {
-      return new VerkleStemFlatDbStrategy(metricsSystem, codeStorageStrategy);
+      return new BinTrieStemFlatDbStrategy(metricsSystem, codeStorageStrategy);
     }
   }
 }
