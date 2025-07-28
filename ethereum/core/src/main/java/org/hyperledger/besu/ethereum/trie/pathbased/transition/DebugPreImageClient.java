@@ -29,7 +29,7 @@ import org.apache.tuweni.bytes.Bytes;
 
 public class DebugPreImageClient {
 
-  private static final String NODE_URL = "http://10.0.0.19:8545";
+  private static final String NODE_URL = "http://10.0.34.178:8545";
 
   public static Bytes getPreImage(final Hash hash) throws Exception {
     // Construction de la requête JSON avec Vert.x
