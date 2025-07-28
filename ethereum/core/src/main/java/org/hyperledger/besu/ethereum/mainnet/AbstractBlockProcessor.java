@@ -336,6 +336,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
           ex.getActualRoot().toHexString());
       return new BlockProcessingResult(Optional.empty(), ex.getMessage());
     } catch (Exception e) {
+      e.printStackTrace(System.out);
       LOG.error("failed persisting block", e);
       return new BlockProcessingResult(Optional.empty(), e);
     }

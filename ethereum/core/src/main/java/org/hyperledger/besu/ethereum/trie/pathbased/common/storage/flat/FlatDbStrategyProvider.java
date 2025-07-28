@@ -80,7 +80,7 @@ public abstract class FlatDbStrategyProvider {
                   return dbCodeUsingHash;
                 })
             .orElse(configCodeUsingHash);
-    LOG.info("DB mode with code stored using code hash enabled = {}", codeUsingCodeByHash);
+    LOG.debug("DB mode with code stored using code hash enabled = {}", codeUsingCodeByHash);
     return codeUsingCodeByHash;
   }
 
