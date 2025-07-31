@@ -876,6 +876,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
     final boolean isBinTrieGenesis = true;
 
     if (isBinTrieGenesis) {
+      System.out.println("Test storage format "+dataStorageConfiguration.getDataStorageFormat());
       return new WorldStateStorageCoordinator(
           storageProvider.createWorldStateStorage(dataStorageConfiguration));
     }
