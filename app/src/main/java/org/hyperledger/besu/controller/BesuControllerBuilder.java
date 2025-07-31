@@ -1255,7 +1255,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             codeCache);
       }
       case BINTRIE -> {
-        final Optional<Long> binTrieMilestone = Optional.of(1753960552L);
+        final Optional<Long> binTrieMilestone = Optional.of(1753967276L);
         if (binTrieMilestone.isEmpty()) {
           final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage =
               worldStateStorageCoordinator.getStrategy(BinTrieWorldStateKeyValueStorage.class);
