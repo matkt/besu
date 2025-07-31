@@ -257,6 +257,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
 
   public Optional<MutableWorldState> rollFullWorldStateToBlockHash(
       final PathBasedWorldState mutableState, final Hash blockHash) {
+    System.out.println("rollFullWorldStateToBlockHash "+mutableState.getClass()+" "+mutableState.getWorldStateBlockHash()+" "+blockHash);
     if (blockHash.equals(mutableState.blockHash())) {
       return Optional.of(mutableState);
     } else {
