@@ -89,6 +89,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
       final WorldStateConfig worldStateConfig,
       final CodeCache codeCache) {
     super(worldStateKeyValueStorage, cachedWorldStorageManager, trieLogManager, worldStateConfig);
+    System.out.println("bintrie "+worldStateBlockHash);
     this.setAccumulator(new BinTrieWorldStateUpdateAccumulator(this, evmConfiguration, codeCache));
     this.codeCache = codeCache;
   }
@@ -204,6 +205,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
     System.out.println("Total updates: " + updateCount);
 
     LOG.info("Starting commit...");
+    new Throwable().printStackTrace(System.out);
     long startTime = System.currentTimeMillis();
 
     maybeStateUpdater.ifPresent(
