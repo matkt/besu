@@ -132,6 +132,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The Besu controller builder that builds Besu Controller. */
+@SuppressWarnings("unused")
 public abstract class BesuControllerBuilder implements MiningParameterOverrides {
   private static final Logger LOG = LoggerFactory.getLogger(BesuControllerBuilder.class);
 
@@ -872,11 +873,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
           storageProvider.createWorldStateStorage(dataStorageConfiguration));
     }
 
-    final boolean isBinTrieGenesis =
-        protocolSchedule
-            .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
-            .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
-            .isPresent();
+    final boolean isBinTrieGenesis = true;
 
     if (isBinTrieGenesis) {
       return new WorldStateStorageCoordinator(
@@ -1256,7 +1253,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
       case BINTRIE -> {
         final Optional<Long> binTrieMilestone =
             protocolSchedule
-                .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
+                .milestoneFor(HardforkId.MainnetHardforkId.PRAGUE)
                 .filter(milestone -> milestone != 0 && genesisConfig.getTimestamp() < milestone);
         if (binTrieMilestone.isEmpty()) {
           final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage =
