@@ -183,6 +183,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
    * @return the stateful world state, if available
    */
   protected Optional<MutableWorldState> getFullWorldState(final WorldStateQueryParams queryParams) {
+    System.out.println("getFullWorldState "+queryParams.shouldWorldStateUpdateHead()+" "+queryParams.getBlockHash());
     return queryParams.shouldWorldStateUpdateHead()
         ? getFullWorldStateFromHead(queryParams.getBlockHash())
         : getFullWorldStateFromCache(queryParams.getBlockHeader());
