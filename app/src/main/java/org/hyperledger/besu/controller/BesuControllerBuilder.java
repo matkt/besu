@@ -876,7 +876,6 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
     final boolean isBinTrieGenesis = true;
 
     if (isBinTrieGenesis) {
-      System.out.println("Test storage format "+dataStorageConfiguration.getDataStorageFormat());
       return new WorldStateStorageCoordinator(
           storageProvider.createWorldStateStorage(dataStorageConfiguration));
     }
@@ -1252,10 +1251,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             codeCache);
       }
       case BINTRIE -> {
-        final Optional<Long> binTrieMilestone =
-            protocolSchedule
-                .milestoneFor(HardforkId.MainnetHardforkId.PRAGUE)
-                .filter(milestone -> milestone != 0 && genesisConfig.getTimestamp() < milestone);
+        final Optional<Long> binTrieMilestone = Optional.empty();
         if (binTrieMilestone.isEmpty()) {
           final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage =
               worldStateStorageCoordinator.getStrategy(BinTrieWorldStateKeyValueStorage.class);
