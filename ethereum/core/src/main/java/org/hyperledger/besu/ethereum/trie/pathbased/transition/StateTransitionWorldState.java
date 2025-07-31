@@ -80,7 +80,6 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   public void announceBlockToImport(final BlockHeader blockToImport) {
     // Determine if BinTrie should be activated based on the fork timestamp.
     this.isBinTrieActive = blockToImport.getTimestamp() >= verkleForkTimeStamp;
-    System.out.println(blockToImport.getTimestamp()+" "+verkleForkTimeStamp);
     // Load the appropriate state accumulator.
     this.accumulator = loadAccumulator();
   }
