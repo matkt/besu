@@ -491,7 +491,7 @@ public class TransactionPool implements BlockAddedObserver {
     }
 
     // TODO reactivate before merge
-    try (final var worldState =
+    /*try (final var worldState =
         protocolContext
             .getWorldStateArchive()
             .getWorldState(withBlockHeaderAndNoUpdateNodeHead(chainHeadBlockHeader))
@@ -512,7 +512,8 @@ public class TransactionPool implements BlockAddedObserver {
       return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
     } catch (Exception ex) {
       return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
-    }
+    }*/
+    return ValidationResultAndAccount.invalid(CHAIN_HEAD_WORLD_STATE_NOT_AVAILABLE);
   }
 
   private TransactionInvalidReason validatePrice(
