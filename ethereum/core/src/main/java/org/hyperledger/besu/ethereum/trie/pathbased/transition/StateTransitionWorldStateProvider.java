@@ -165,7 +165,9 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
     BinTrieWorldState binTrieState = (BinTrieWorldState) binTrieProvider.getWorldState();
     // If the initial state's block hash is zero, it indicates the chain's head
     // has not yet passed the BinTrie fork (zero block hash does not exist in a valid chain).
+    System.out.println("binTrieState.getWorldStateBlockHash().isZero() "+binTrieState.getWorldStateBlockHash().isZero());
     if (binTrieState.getWorldStateBlockHash().isZero()) {
+      System.out.println("worldStateQueryParams.shouldWorldStateUpdateHead() "+worldStateQueryParams.shouldWorldStateUpdateHead());
       if (!worldStateQueryParams.shouldWorldStateUpdateHead()) {
         binTrieState =
             new BinTrieWorldState(
@@ -176,6 +178,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
                 binTrieState.codeCache());
         binTrieState.freezeStorage();
       }
+      System.out.println("hasValidBonsaiState "+hasValidBonsaiState);
       if (!hasValidBonsaiState) {
         binTrieState.resetWorldStateTo(bonsaiTarget.getBlockHash(), bonsaiTarget.getStateRoot());
         binTrieProvider.rollFullWorldStateToBlockHash(
