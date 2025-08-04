@@ -330,4 +330,9 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
   private PathBasedWorldStateUpdateAccumulator<?> getAccumulator() {
     return this.accumulator;
   }
+
+  @Override
+  public void preload() {
+    PatriciaToBinTrieConverter.preloadImage(bonsaiWorldState, migrationProgress);
+  }
 }
