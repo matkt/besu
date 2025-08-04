@@ -183,7 +183,13 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
    * @return the stateful world state, if available
    */
   protected Optional<MutableWorldState> getFullWorldState(final WorldStateQueryParams queryParams) {
-    System.out.println("getFullWorldState "+queryParams.shouldWorldStateUpdateHead()+" "+queryParams.getBlockHash());
+    System.out.println(
+        "getFullWorldState "
+            + getClass()
+            + " "
+            + queryParams.shouldWorldStateUpdateHead()
+            + " "
+            + queryParams.getBlockHash());
     return queryParams.shouldWorldStateUpdateHead()
         ? getFullWorldStateFromHead(queryParams.getBlockHash())
         : getFullWorldStateFromCache(queryParams.getBlockHeader());
@@ -258,7 +264,13 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
 
   public Optional<MutableWorldState> rollFullWorldStateToBlockHash(
       final PathBasedWorldState mutableState, final Hash blockHash) {
-    System.out.println("rollFullWorldStateToBlockHash "+mutableState.getClass()+" "+mutableState.getWorldStateBlockHash()+" "+blockHash);
+    System.out.println(
+        "rollFullWorldStateToBlockHash "
+            + mutableState.getClass()
+            + " "
+            + mutableState.getWorldStateBlockHash()
+            + " "
+            + blockHash);
     if (blockHash.equals(mutableState.blockHash())) {
       return Optional.of(mutableState);
     } else {

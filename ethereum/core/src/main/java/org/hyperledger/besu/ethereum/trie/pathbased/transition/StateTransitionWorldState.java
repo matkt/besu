@@ -151,14 +151,16 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
         // diff based value
         maybeSlot.ifPresent(
             slot -> {
-              System.out.println("fallback "+address+" "+storageSlotKey.getSlotKey().get()+" "+slot);
+              System.out.println(
+                  "fallback " + address + " " + storageSlotKey.getSlotKey().get() + " " + slot);
               verkleWorldState
                   .getAccumulator()
                   .maybeCreateStorageMap(address)
                   .put(storageSlotKey, new MigratedDiffValue<>(slot, slot));
             });
-      }  else {
-        System.out.println("found "+address+" "+storageSlotKey.getSlotKey().get()+" "+maybeSlot.get());
+      } else {
+        System.out.println(
+            "found " + address + " " + storageSlotKey.getSlotKey().get() + " " + maybeSlot.get());
       }
       return maybeSlot;
     } else {

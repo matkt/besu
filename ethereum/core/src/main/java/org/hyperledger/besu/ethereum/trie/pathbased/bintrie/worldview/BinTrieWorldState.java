@@ -89,7 +89,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
       final WorldStateConfig worldStateConfig,
       final CodeCache codeCache) {
     super(worldStateKeyValueStorage, cachedWorldStorageManager, trieLogManager, worldStateConfig);
-    System.out.println("bintrie "+worldStateBlockHash);
+    System.out.println("bintrie " + worldStateBlockHash);
     this.setAccumulator(new BinTrieWorldStateUpdateAccumulator(this, evmConfiguration, codeCache));
     this.codeCache = codeCache;
   }

@@ -28,12 +28,15 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator
 import org.hyperledger.besu.evm.code.CodeV0;
 import org.hyperledger.besu.plugin.services.trielogs.StateMigrationLog;
 
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
@@ -49,11 +52,88 @@ public class PatriciaToBinTrieConverter {
 
   private static final Logger LOG = LoggerFactory.getLogger(PatriciaToBinTrieConverter.class);
 
-  private static final Map<Bytes, Bytes> PRE_IMAGES = new ConcurrentHashMap<>();
+  private static final Cache<Bytes, Bytes> PRE_IMAGES =
+      CacheBuilder.newBuilder().recordStats().maximumSize(2_000).build();
 
   public static void addPreImage(final Bytes hash, final Bytes key) {
     System.out.println("PREIMAGE " + key + " " + hash);
     PRE_IMAGES.put(hash, key);
+  }
+
+  public static void preloadImage(
+      final BonsaiWorldState bonsaiWorldState, final StateMigrationLog migrationProgress) {
+    CompletableFuture.runAsync(
+        () -> {
+          final AtomicInteger convertedEntriesCount = new AtomicInteger(0);
+
+          final StateMigrationLog localLog =
+              new StateMigrationLog(
+                  migrationProgress.getFirstBlockHash(),
+                  Optional.ofNullable(migrationProgress.getNextAccount()),
+                  Optional.ofNullable(migrationProgress.getNextStorageKey()),
+                  migrationProgress.getMaxToConvert());
+
+          LOG.atInfo()
+              .setMessage("Preloading preimages from Bonsai world state (without migration)...")
+              .log();
+
+          bonsaiWorldState
+              .getWorldStateStorage()
+              .streamFlatAccounts(
+                  localLog.getNextAccountAndReset(),
+                  account -> {
+                    final Hash accountHash = Hash.wrap(account.getFirst());
+
+                    if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
+                      return false;
+                    }
+
+                    final Address address = Address.wrap(getPreimage(accountHash));
+
+                    final BonsaiAccount merkleAccount =
+                        BonsaiAccount.fromRLP(
+                            bonsaiWorldState, address, account.getSecond(), false);
+
+                    convertedEntriesCount.incrementAndGet();
+
+                    if (!merkleAccount.isStorageEmpty()
+                        && !localLog.isStorageAccountFullyMigrated()) {
+
+                      final NavigableMap<Bytes32, Bytes> storages =
+                          bonsaiWorldState
+                              .getWorldStateStorage()
+                              .streamFlatStorages(
+                                  accountHash,
+                                  localLog.getNextStorageKeyAndReset(),
+                                  storage -> {
+                                    if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
+                                      localLog.setNextStorageKey(storage.getFirst());
+                                      return false;
+                                    }
+                                    convertedEntriesCount.incrementAndGet();
+                                    return true;
+                                  });
+
+                      storages.entrySet().parallelStream()
+                          .forEach(
+                              entry -> {
+                                final Hash slotHash = Hash.wrap(entry.getKey());
+                                getPreimage(slotHash);
+                              });
+
+                      if (!localLog.hasNextStorage()) {
+                        localLog.markStorageAccountFullyMigrated();
+                      }
+                    }
+
+                    return convertedEntriesCount.get() < localLog.getMaxToConvert();
+                  });
+
+          LOG.atInfo()
+              .setMessage("Preimage preloading completed. Total entries loaded: {}")
+              .addArgument(convertedEntriesCount.get())
+              .log();
+        });
   }
 
   /**
@@ -83,21 +163,7 @@ public class PatriciaToBinTrieConverter {
               final Hash accountHash = Hash.wrap(account.getFirst());
               final Address address;
 
-              address =
-                  Address.wrap(
-                      PRE_IMAGES.computeIfAbsent(
-                          accountHash,
-                          __ -> {
-                            try {
-                              return DebugPreImageClient.getPreImage(accountHash);
-                            } catch (Exception e) {
-                              LOG.atError()
-                                  .setMessage("Error retrieving preimage for account: {}")
-                                  .addArgument(accountHash)
-                                  .log();
-                              throw new RuntimeException(e);
-                            }
-                          }));
+              address = Address.wrap(getPreimage(accountHash));
 
               final BonsaiAccount merkleAccount =
                   BonsaiAccount.fromRLP(bonsaiWorldState, address, account.getSecond(), false);
@@ -199,22 +265,7 @@ public class PatriciaToBinTrieConverter {
 
               storageSlotKey =
                   new StorageSlotKey(
-                      slotHash,
-                      Optional.of(
-                          UInt256.fromBytes(
-                              PRE_IMAGES.computeIfAbsent(
-                                  slotHash,
-                                  __ -> {
-                                    try {
-                                      return DebugPreImageClient.getPreImage(slotHash);
-                                    } catch (Exception e) {
-                                      LOG.atError()
-                                          .setMessage("Error retrieving preimage for storage: {}")
-                                          .addArgument(slotHash)
-                                          .log();
-                                      throw new RuntimeException(e);
-                                    }
-                                  }))));
+                      slotHash, Optional.of(UInt256.fromBytes(getPreimage(slotHash))));
 
               if (binTrieWorldState
                   .getStorageValueByStorageSlotKey(merkleAccount.getAddress(), storageSlotKey)
@@ -329,5 +380,25 @@ public class PatriciaToBinTrieConverter {
         .log();
 
     return false;
+  }
+
+  private static Bytes getPreimage(final Hash hash) {
+    try {
+      return PRE_IMAGES.get(
+          hash,
+          () -> {
+            try {
+              return DebugPreImageClient.getPreImage(hash);
+            } catch (Exception e) {
+              LOG.atError()
+                  .setMessage("Error retrieving preimage for hash: {}")
+                  .addArgument(hash)
+                  .log();
+              throw new RuntimeException(e);
+            }
+          });
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
   }
 }

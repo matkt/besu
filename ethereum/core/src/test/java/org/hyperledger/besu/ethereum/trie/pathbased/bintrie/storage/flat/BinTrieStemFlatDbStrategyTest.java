@@ -183,9 +183,10 @@ class BinTrieStemFlatDbStrategyTest {
     for (int i = 0; i < StemNode.maxChild(); i++) {
       children.add(NullLeafNode.node());
     }
-    System.out.println(index + " " + value);
     children.set(
-        index, new ValueNode<BytesBitSequence, Bytes>(Optional.empty(), Optional.of(value)));
+        index,
+        new ValueNode<BytesBitSequence, Bytes>(
+            Optional.empty(), Optional.of(value), Optional.of(value)));
     return new StemNode<>(
         Optional.of(BytesBitSequence.empty()), stem, Optional.of(Bytes32.ZERO), children);
   }
