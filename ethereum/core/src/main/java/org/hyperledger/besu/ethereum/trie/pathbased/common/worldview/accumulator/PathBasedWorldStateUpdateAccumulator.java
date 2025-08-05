@@ -716,7 +716,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       final Address address,
       final AccountValue expectedValue,
       final AccountValue replacementValue) {
-      System.out.println(address+" "+expectedValue+" "+replacementValue);
     if (shouldIgnoreIdenticalValuesDuringAccountRollingUpdate()
         && Objects.equals(expectedValue, replacementValue)) {
       // non-change, a cached read.
@@ -729,8 +728,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     }
     if (accountValue == null) {
       if (expectedValue == null && replacementValue != null) {
-          System.out.println(null+" "+" "+expectedValue+" "+replacementValue);
-          accountsToUpdate.put(
+        accountsToUpdate.put(
             address,
             new PathBasedValue<>(null, createAccount(this, address, replacementValue, true)));
       } else {
@@ -739,8 +737,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                 "Expected to update account, but the account does not exist. Address=%s", address));
       }
     } else {
-        System.out.println(accountValue.getPrior()+" "+accountValue.getUpdated()+" "+expectedValue+" "+replacementValue);
-        if (expectedValue == null) {
+      if (expectedValue == null) {
         if (accountValue.getUpdated() != null) {
           throw new IllegalStateException(
               String.format(

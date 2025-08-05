@@ -147,9 +147,7 @@ public class RocksDbIterator implements Iterator<Pair<byte[], byte[]>>, AutoClos
   }
 
   private void assertOpen() {
-    checkState(
-        !closed.get(),
-        String.format("Attempt to read from a closed %s", getClass().getSimpleName()));
+    checkState(!closed.get(), "Attempt to read from a closed %s");
   }
 
   @Override
