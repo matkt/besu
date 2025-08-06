@@ -114,11 +114,7 @@ public class BinTrieStemFlatDbStrategy extends FlatDbStrategy {
                                   SuffixTreeDecoder.decodeNonce(value),
                                   Wei.of(SuffixTreeDecoder.decodeBalance(value)),
                                   SuffixTreeDecoder.decodeCodeSize(value),
-                                  Hash.wrap(
-                                      codeLeaf
-                                          .value
-                                          .map(Bytes32::wrap)
-                                          .orElse(Hash.EMPTY_TRIE_HASH)),
+                                  Hash.wrap(codeLeaf.value.map(Bytes32::wrap).orElse(Hash.EMPTY)),
                                   true));
                 });
 

@@ -559,7 +559,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     final PathBasedValue<Bytes> localCode = codeToUpdate.get(address);
     if (localCode == null) {
       final Optional<Bytes> code = wrappedWorldView().getCode(address, codeHash);
-        System.out.println("code "+address+" "+codeHash+" "+code.isEmpty());
       if (code.isEmpty() && !codeHash.equals(Hash.EMPTY)) {
         throw new MerkleTrieException(
             "invalid account code", Optional.of(address), codeHash, Bytes.EMPTY);
@@ -717,7 +716,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       final Address address,
       final AccountValue expectedValue,
       final AccountValue replacementValue) {
-    System.out.println(address + " " + expectedValue + " " + replacementValue);
     if (shouldIgnoreIdenticalValuesDuringAccountRollingUpdate()
         && Objects.equals(expectedValue, replacementValue)) {
       // non-change, a cached read.
