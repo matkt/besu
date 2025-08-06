@@ -95,9 +95,7 @@ public class PatriciaToBinTrieConverter {
         .streamFlatAccounts(
             localLog.getNextAccountAndReset(),
             account -> {
-              if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
-                return false;
-              }
+                System.out.println("preloading account "+account+" "+convertedEntriesCount.get());
 
               final Hash accountHash = Hash.wrap(account.getFirst());
               final Bytes preimage;
