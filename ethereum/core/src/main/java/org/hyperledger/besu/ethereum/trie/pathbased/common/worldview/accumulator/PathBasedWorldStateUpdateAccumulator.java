@@ -716,6 +716,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       final Address address,
       final AccountValue expectedValue,
       final AccountValue replacementValue) {
+    System.out.println(address + " " + expectedValue + " " + replacementValue);
     if (shouldIgnoreIdenticalValuesDuringAccountRollingUpdate()
         && Objects.equals(expectedValue, replacementValue)) {
       // non-change, a cached read.

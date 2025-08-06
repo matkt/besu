@@ -203,6 +203,7 @@ public class BinTrieAccount extends PathBasedAccount {
       if (!Objects.equals(source.balance, account.getBalance())) {
         throw new IllegalStateException(context + ": balances differ");
       }
+      System.out.println(source.codeSize + " " + account.getCodeSize());
       if (source.codeSize != account.getCodeSize().orElse(0L)) {
         throw new IllegalStateException(context + ": codeSize differ");
       }
