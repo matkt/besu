@@ -80,7 +80,7 @@ public class PatriciaToBinTrieConverter {
 
     final StateMigrationLog localLog =
         new StateMigrationLog(
-            blockHash,
+            migrationProgress.getFirstBlockHash(),
             Optional.ofNullable(migrationProgress.getNextAccount()),
             Optional.ofNullable(migrationProgress.getNextStorageKey()),
             migrationProgress.getMaxToConvert());
@@ -256,6 +256,7 @@ public class PatriciaToBinTrieConverter {
 
               migrateAccount(merkleAccount, binTrieWorldState, binTrieUpdateAccumulator);
             });
+    migrationProgress.apply(preloadedWorldStateData.getMigrationLog());
   }
 
   private static void migrateAccount(

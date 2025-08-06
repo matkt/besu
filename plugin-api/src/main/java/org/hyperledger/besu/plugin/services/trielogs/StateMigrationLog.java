@@ -30,10 +30,10 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public final class StateMigrationLog {
 
-  private final Hash firstBlockHash;
+  private Hash firstBlockHash;
   private Optional<Bytes> nextAccount;
   private Optional<Bytes> nextStorageKey;
-  private final long maxToConvert;
+  private long maxToConvert;
 
   /**
    * Initializes the migration log with specific progress tracking parameters.
@@ -210,5 +210,12 @@ public final class StateMigrationLog {
    */
   public boolean isMigrationInProgress() {
     return !isAccountsFullyMigrated();
+  }
+
+  public void apply(final StateMigrationLog migrationLog) {
+    firstBlockHash = migrationLog.getFirstBlockHash();
+    nextAccount = migrationLog.nextAccount;
+    nextStorageKey =  migrationLog.nextStorageKey;
+    maxToConvert = migrationLog.getMaxToConvert();
   }
 }
