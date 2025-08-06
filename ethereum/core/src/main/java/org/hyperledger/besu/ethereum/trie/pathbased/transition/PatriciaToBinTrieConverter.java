@@ -113,7 +113,6 @@ public class PatriciaToBinTrieConverter {
 
               preloaded.addPreimage(accountHash, preimage);
               preloaded.addAccount(address, merkleAccount);
-              convertedEntriesCount.incrementAndGet();
 
               if (!merkleAccount.isStorageEmpty() && !localLog.isStorageAccountFullyMigrated()) {
 
@@ -216,13 +215,13 @@ public class PatriciaToBinTrieConverter {
         .getAccounts()
         .forEach(
             (address, merkleAccount) -> {
-              LOG.atTrace().setMessage("Migrating account: {}").addArgument(address).log();
+              LOG.atInfo().setMessage("Migrating account: {}").addArgument(address).log();
 
               preloadedWorldStateData
                   .getStorage(address)
                   .forEach(
                       (storageSlotKey, value) -> {
-                        LOG.atTrace()
+                        LOG.atInfo()
                             .setMessage("Migrating storage for account: {}")
                             .addArgument(address)
                             .log();
