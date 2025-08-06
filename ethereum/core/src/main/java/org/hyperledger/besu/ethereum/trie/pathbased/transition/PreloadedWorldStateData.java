@@ -40,19 +40,19 @@ public class PreloadedWorldStateData {
     this.migrationLog = migrationLog;
   }
 
-  public void addPreimage(Hash hash, Bytes key) {
+  public void addPreimage(final Hash hash, final Bytes key) {
     preimages.put(hash, key);
   }
 
-  public Bytes getPreimage(Hash hash) {
+  public Bytes getPreimage(final Hash hash) {
     return preimages.get(hash);
   }
 
-  public void addAccount(Address address, BonsaiAccount account) {
+  public void addAccount(final Address address, final BonsaiAccount account) {
     accounts.put(address, account);
   }
 
-  public void addStorage(Address address, StorageSlotKey key, Bytes value) {
+  public void addStorage(final Address address, final StorageSlotKey key, final Bytes value) {
     storage.computeIfAbsent(address, k -> new ConcurrentHashMap<>()).put(key, value);
   }
 
@@ -60,7 +60,7 @@ public class PreloadedWorldStateData {
     return accounts;
   }
 
-  public Map<StorageSlotKey, Bytes> getStorage(Address address) {
+  public Map<StorageSlotKey, Bytes> getStorage(final Address address) {
     return storage.getOrDefault(address, Collections.emptyMap());
   }
 }

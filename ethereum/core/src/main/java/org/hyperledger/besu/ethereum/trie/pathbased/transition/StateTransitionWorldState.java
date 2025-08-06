@@ -333,6 +333,6 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   @Override
   public void preload() {
-    PatriciaToBinTrieConverter.preloadImage(bonsaiWorldState, migrationProgress);
+    PatriciaToBinTrieConverter.preloadImage(verkleWorldState.blockHash(), bonsaiWorldState, migrationProgress);
   }
 }
