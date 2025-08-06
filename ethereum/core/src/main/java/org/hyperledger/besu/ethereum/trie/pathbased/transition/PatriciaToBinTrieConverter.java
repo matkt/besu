@@ -28,7 +28,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator
 import org.hyperledger.besu.evm.code.CodeV0;
 import org.hyperledger.besu.plugin.services.trielogs.StateMigrationLog;
 
-import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +37,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
@@ -52,88 +50,134 @@ public class PatriciaToBinTrieConverter {
 
   private static final Logger LOG = LoggerFactory.getLogger(PatriciaToBinTrieConverter.class);
 
-  private static final Cache<Bytes, Bytes> PRE_IMAGES =
+  private static final Cache<Bytes, PreloadedWorldStateData> PRELOADED_TRANSITION_DATA =
       CacheBuilder.newBuilder().recordStats().maximumSize(2_000).build();
 
   public static void addPreImage(final Bytes hash, final Bytes key) {
     System.out.println("PREIMAGE " + key + " " + hash);
-    PRE_IMAGES.put(hash, key);
+    // PRELOADED_TRANSITION_DATA.put(hash, key);
   }
 
   public static void preloadImage(
-      final BonsaiWorldState bonsaiWorldState, final StateMigrationLog migrationProgress) {
+      final Hash blockHash,
+      final BonsaiWorldState bonsaiWorldState,
+      final StateMigrationLog migrationProgress) {
     CompletableFuture.runAsync(
         () -> {
-          final AtomicInteger convertedEntriesCount = new AtomicInteger(0);
-
-          final StateMigrationLog localLog =
-              new StateMigrationLog(
-                  migrationProgress.getFirstBlockHash(),
-                  Optional.ofNullable(migrationProgress.getNextAccount()),
-                  Optional.ofNullable(migrationProgress.getNextStorageKey()),
-                  migrationProgress.getMaxToConvert());
-
-          LOG.atInfo()
-              .setMessage("Preloading preimages from Bonsai world state (without migration)...")
-              .log();
-
-          bonsaiWorldState
-              .getWorldStateStorage()
-              .streamFlatAccounts(
-                  localLog.getNextAccountAndReset(),
-                  account -> {
-                    final Hash accountHash = Hash.wrap(account.getFirst());
-
-                    if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
-                      return false;
-                    }
-
-                    final Address address = Address.wrap(getPreimage(accountHash));
-
-                    final BonsaiAccount merkleAccount =
-                        BonsaiAccount.fromRLP(
-                            bonsaiWorldState, address, account.getSecond(), false);
-
-                    convertedEntriesCount.incrementAndGet();
-
-                    if (!merkleAccount.isStorageEmpty()
-                        && !localLog.isStorageAccountFullyMigrated()) {
-
-                      final NavigableMap<Bytes32, Bytes> storages =
-                          bonsaiWorldState
-                              .getWorldStateStorage()
-                              .streamFlatStorages(
-                                  accountHash,
-                                  localLog.getNextStorageKeyAndReset(),
-                                  storage -> {
-                                    if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
-                                      localLog.setNextStorageKey(storage.getFirst());
-                                      return false;
-                                    }
-                                    convertedEntriesCount.incrementAndGet();
-                                    return true;
-                                  });
-
-                      storages.entrySet().parallelStream()
-                          .forEach(
-                              entry -> {
-                                final Hash slotHash = Hash.wrap(entry.getKey());
-                                getPreimage(slotHash);
-                              });
-
-                      if (!localLog.hasNextStorage()) {
-                        localLog.markStorageAccountFullyMigrated();
-                      }
-                    }
-
-                    return convertedEntriesCount.get() < localLog.getMaxToConvert();
-                  });
-
-          LOG.atInfo()
-              .setMessage("Preimage preloading completed. Total entries loaded: {}")
-              .addArgument(convertedEntriesCount.get())
-              .log();
+          PRELOADED_TRANSITION_DATA.put(
+              blockHash,
+              generatePreloadedWorldStateData(blockHash, bonsaiWorldState, migrationProgress));
         });
+  }
+
+  private static PreloadedWorldStateData generatePreloadedWorldStateData(
+      final Hash blockHash,
+      final BonsaiWorldState bonsaiWorldState,
+      final StateMigrationLog migrationProgress) {
+    final PreloadedWorldStateData preloaded = new PreloadedWorldStateData();
+
+    final AtomicInteger convertedEntriesCount = new AtomicInteger(0);
+
+    final StateMigrationLog localLog =
+        new StateMigrationLog(
+            blockHash,
+            Optional.ofNullable(migrationProgress.getNextAccount()),
+            Optional.ofNullable(migrationProgress.getNextStorageKey()),
+            migrationProgress.getMaxToConvert());
+
+    LOG.atInfo()
+        .setMessage("Preloading preimages and data from Bonsai world state (block: {})...")
+        .addArgument(blockHash)
+        .log();
+
+    bonsaiWorldState
+        .getWorldStateStorage()
+        .streamFlatAccounts(
+            localLog.getNextAccountAndReset(),
+            account -> {
+              if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
+                return false;
+              }
+
+              final Hash accountHash = Hash.wrap(account.getFirst());
+              final Bytes preimage;
+              try {
+                preimage = DebugPreImageClient.getPreImage(accountHash);
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+
+              final Address address = Address.wrap(preimage);
+              final BonsaiAccount merkleAccount =
+                  BonsaiAccount.fromRLP(bonsaiWorldState, address, account.getSecond(), false);
+
+              preloaded.addPreimage(accountHash, preimage);
+              preloaded.addAccount(address, merkleAccount);
+              convertedEntriesCount.incrementAndGet();
+
+              if (!merkleAccount.isStorageEmpty() && !localLog.isStorageAccountFullyMigrated()) {
+
+                bonsaiWorldState
+                    .getWorldStateStorage()
+                    .streamFlatStorages(
+                        accountHash,
+                        localLog.getNextStorageKeyAndReset(),
+                        storage -> {
+                          if (convertedEntriesCount.get() >= localLog.getMaxToConvert()) {
+                            localLog.setNextStorageKey(storage.getFirst());
+                            return false;
+                          }
+
+                          final Hash slotHash = Hash.wrap(storage.getFirst());
+                          final Bytes slotPreimage;
+                          try {
+                            slotPreimage = DebugPreImageClient.getPreImage(slotHash);
+                          } catch (Exception e) {
+                            throw new RuntimeException(e);
+                          }
+
+                          final StorageSlotKey slotKey =
+                              new StorageSlotKey(
+                                  slotHash, Optional.of(UInt256.fromBytes(slotPreimage)));
+
+                          preloaded.addPreimage(slotHash, slotPreimage);
+                          preloaded.addStorage(address, slotKey, storage.getSecond());
+
+                          convertedEntriesCount.incrementAndGet();
+                          return true;
+                        });
+
+                if (!localLog.hasNextStorage()) {
+                  localLog.markStorageAccountFullyMigrated();
+                }
+              }
+
+              if (convertedEntriesCount.get() < localLog.getMaxToConvert()) {
+                localLog.clearNextStorageKey();
+                if (merkleAccount.hasCode()) {
+                  // Adjust conversion count based on the code chunkification process
+                  convertedEntriesCount.addAndGet(
+                      TrieKeyUtils.chunkifyCode(merkleAccount.getCode()).size());
+                }
+                convertedEntriesCount.incrementAndGet();
+                return true;
+              } else {
+                localLog.setNextAccount(accountHash);
+                return false;
+              }
+            });
+    if (!localLog.hasNextAccount()) {
+      localLog.markAccountsFullyMigrated();
+      LOG.atInfo().setMessage("All accounts have been fully migrated.").log();
+    }
+    preloaded.setMigrationLog(localLog);
+
+    LOG.atInfo()
+        .setMessage("Preimage and data preloading completed for block {}. Total entries loaded: {}")
+        .addArgument(blockHash)
+        .addArgument(convertedEntriesCount.get())
+        .log();
+    return preloaded;
   }
 
   /**
@@ -149,256 +193,127 @@ public class PatriciaToBinTrieConverter {
       final BinTrieWorldState binTrieWorldState,
       final StateMigrationLog migrationProgress) {
 
-    final BinTrieWorldStateUpdateAccumulator binTrieUpdateAccumulator =
-        binTrieWorldState.getAccumulator();
-    final AtomicInteger convertedEntriesCount = new AtomicInteger(0);
-
-    LOG.atDebug().setMessage("Running migration from Bonsai to BinTrie...").log();
-
-    bonsaiWorldState
-        .getWorldStateStorage()
-        .streamFlatAccounts(
-            migrationProgress.getNextAccountAndReset(),
-            account -> {
-              final Hash accountHash = Hash.wrap(account.getFirst());
-              final Address address;
-
-              address = Address.wrap(getPreimage(accountHash));
-
-              final BonsaiAccount merkleAccount =
-                  BonsaiAccount.fromRLP(bonsaiWorldState, address, account.getSecond(), false);
-              LOG.atTrace().setMessage("Migrating account: {}").addArgument(address).log();
-              if (!merkleAccount.isStorageEmpty()
-                  && !migrationProgress.isStorageAccountFullyMigrated()) {
-                migrateStorage(
-                    bonsaiWorldState,
-                    binTrieWorldState,
-                    binTrieUpdateAccumulator,
-                    merkleAccount,
-                    migrationProgress,
-                    convertedEntriesCount,
-                    accountHash);
-              }
-
-              return migrateAccount(
-                  merkleAccount,
-                  binTrieWorldState,
-                  binTrieUpdateAccumulator,
-                  migrationProgress,
-                  convertedEntriesCount,
-                  accountHash);
-            });
-
-    if (!migrationProgress.hasNextAccount()) {
-      migrationProgress.markAccountsFullyMigrated();
-      LOG.atInfo().setMessage("All accounts have been fully migrated.").log();
-    }
-  }
-
-  /**
-   * Migrates the storage slots of an account from Bonsai to BinTrie. This method ensures storage
-   * migration does not exceed the predefined conversion limit.
-   *
-   * @param bonsaiWorldState The source Bonsai world state.
-   * @param binTrieWorldState The target BinTrie world state.
-   * @param binTrieUpdateAccumulator Accumulator for BinTrie state updates.
-   * @param merkleAccount The Bonsai account being migrated.
-   * @param migrationProgress Progress tracker for storage migration.
-   * @param convertedEntriesCount Counter for converted storage entries.
-   * @param accountHash The hash of the account being migrated.
-   */
-  private static void migrateStorage(
-      final BonsaiWorldState bonsaiWorldState,
-      final BinTrieWorldState binTrieWorldState,
-      final BinTrieWorldStateUpdateAccumulator binTrieUpdateAccumulator,
-      final BonsaiAccount merkleAccount,
-      final StateMigrationLog migrationProgress,
-      final AtomicInteger convertedEntriesCount,
-      final Hash accountHash) {
-
-    LOG.atTrace()
-        .setMessage("Migrating storage for account: {}")
-        .addArgument(merkleAccount.getAddress())
-        .log();
-
-    final NavigableMap<Bytes32, Bytes> storages =
-        bonsaiWorldState
-            .getWorldStateStorage()
-            .streamFlatStorages(
-                accountHash,
-                migrationProgress.getNextStorageKeyAndReset(),
-                storage -> {
-                  if (convertedEntriesCount.get() >= migrationProgress.getMaxToConvert()) {
-                    migrationProgress.setNextStorageKey(storage.getFirst());
-                    return false;
-                  }
-                  convertedEntriesCount.incrementAndGet();
-                  return true;
-                });
-
-    if (!migrationProgress.hasNextStorage()) {
-      migrationProgress.markStorageAccountFullyMigrated();
-      LOG.atInfo()
-          .setMessage("Storage migration completed for account: {}")
-          .addArgument(merkleAccount.getAddress())
-          .log();
-    } else {
-      LOG.atInfo()
-          .setMessage("Storage migration not completed for account: {} ({})")
-          .addArgument(merkleAccount.getAddress())
-          .addArgument(migrationProgress.getNextStorageKey())
-          .log();
-    }
-
-    final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageMap =
-        binTrieUpdateAccumulator
-            .getStorageToUpdate()
-            .computeIfAbsent(
-                merkleAccount.getAddress(),
-                addr -> new StorageConsumingMap<>(addr, new ConcurrentHashMap<>(), (a, v) -> {}));
-
-    storages.entrySet().parallelStream()
-        .forEach(
-            (entry) -> {
-              final Hash slotHash = Hash.wrap(entry.getKey());
-              final StorageSlotKey storageSlotKey;
-
-              storageSlotKey =
-                  new StorageSlotKey(
-                      slotHash, Optional.of(UInt256.fromBytes(getPreimage(slotHash))));
-
-              if (binTrieWorldState
-                  .getStorageValueByStorageSlotKey(merkleAccount.getAddress(), storageSlotKey)
-                  .isEmpty()) {
-                LOG.atTrace()
-                    .setMessage("Migrating storage slot: {}")
-                    .addArgument(storageSlotKey)
-                    .log();
-                storageMap.compute(
-                    storageSlotKey,
-                    (slotKey, existing) ->
-                        existing != null
-                            ? new PathBasedValue<>(
-                                null, existing.getUpdated(), existing.isLastStepCleared())
-                            : new PathBasedValue<>(
-                                null, UInt256.fromBytes(RLP.decodeValue(entry.getValue()))));
-              }
-            });
-  }
-
-  /**
-   * Migrates an individual account from Bonsai to BinTrie. If the migration limit is reached, the
-   * migration is paused and the account is marked for resumption.
-   *
-   * @param merkleAccount The Bonsai account being migrated.
-   * @param binTrieWorldState The target BinTrie world state.
-   * @param binTrieUpdateAccumulator Accumulator for BinTrie updates.
-   * @param migrationProgress Migration progress tracker.
-   * @param convertedEntriesCount Counter for converted accounts.
-   * @param accountHash Hash of the account being processed.
-   * @return true if migration can continue, false if the limit is reached.
-   */
-  private static boolean migrateAccount(
-      final BonsaiAccount merkleAccount,
-      final BinTrieWorldState binTrieWorldState,
-      final BinTrieWorldStateUpdateAccumulator binTrieUpdateAccumulator,
-      final StateMigrationLog migrationProgress,
-      final AtomicInteger convertedEntriesCount,
-      final Hash accountHash) {
-
-    if (convertedEntriesCount.get() < migrationProgress.getMaxToConvert()) {
-      migrationProgress.clearNextStorageKey();
-
-      LOG.atDebug()
-          .setMessage("Processing account: {}")
-          .addArgument(merkleAccount.getAddress())
-          .log();
-
-      final BinTrieAccount binTrieAccount =
-          Optional.ofNullable((BinTrieAccount) binTrieWorldState.get(merkleAccount.getAddress()))
-              .map(
-                  existingAccount -> {
-                    binTrieUpdateAccumulator
-                        .getAccountsToUpdate()
-                        .putIfAbsent(
-                            existingAccount.getAddress(),
-                            new PathBasedValue<>(existingAccount, existingAccount));
-                    return existingAccount;
-                  })
-              .orElseGet(
-                  () -> {
-                    BinTrieAccount toMigrateAccount =
-                        new BinTrieAccount(
-                            binTrieUpdateAccumulator,
-                            merkleAccount.getAddress(),
-                            merkleAccount.getAddressHash(),
-                            merkleAccount.getNonce(),
-                            merkleAccount.getBalance(),
-                            merkleAccount.getCodeSize().orElse(0L),
-                            new CodeV0(merkleAccount.getCode()),
-                            merkleAccount.getCodeHash(),
-                            false);
-
-                    binTrieUpdateAccumulator
-                        .getAccountsToUpdate()
-                        .compute(
-                            toMigrateAccount.getAddress(),
-                            (address, existing) ->
-                                existing != null
-                                    ? new PathBasedValue<>(
-                                        null, existing.getUpdated(), existing.isLastStepCleared())
-                                    : new PathBasedValue<>(null, toMigrateAccount));
-                    return toMigrateAccount;
-                  });
-
-      if (binTrieAccount.hasCode()) {
-        if (merkleAccount.getCodeHash().equals(binTrieAccount.getCodeHash())) {
-          binTrieUpdateAccumulator
-              .getCodeToUpdate()
-              .putIfAbsent(
-                  binTrieAccount.getAddress(),
-                  new PathBasedValue<>(null, binTrieAccount.getCode()));
-        }
-        // Adjust conversion count based on the code chunkification process
-        convertedEntriesCount.addAndGet(TrieKeyUtils.chunkifyCode(binTrieAccount.getCode()).size());
-      }
-
-      convertedEntriesCount.incrementAndGet();
-      LOG.atTrace()
-          .setMessage("Migrated account: {}")
-          .addArgument(merkleAccount.getAddress())
-          .log();
-
-      return true;
-    }
-
-    migrationProgress.setNextAccount(accountHash);
-
-    LOG.atInfo()
-        .setMessage("Reached migration limit, pausing at account: {}")
-        .addArgument(accountHash)
-        .log();
-
-    return false;
-  }
-
-  private static Bytes getPreimage(final Hash hash) {
+    final PreloadedWorldStateData preloadedWorldStateData;
     try {
-      return PRE_IMAGES.get(
-          hash,
-          () -> {
-            try {
-              return DebugPreImageClient.getPreImage(hash);
-            } catch (Exception e) {
-              LOG.atError()
-                  .setMessage("Error retrieving preimage for hash: {}")
-                  .addArgument(hash)
-                  .log();
-              throw new RuntimeException(e);
-            }
-          });
+      preloadedWorldStateData =
+          PRELOADED_TRANSITION_DATA.get(
+              binTrieWorldState.getWorldStateBlockHash(),
+              () ->
+                  generatePreloadedWorldStateData(
+                      binTrieWorldState.getWorldStateBlockHash(),
+                      bonsaiWorldState,
+                      migrationProgress));
     } catch (ExecutionException e) {
       throw new RuntimeException(e);
     }
+
+    final BinTrieWorldStateUpdateAccumulator binTrieUpdateAccumulator =
+        binTrieWorldState.getAccumulator();
+
+    LOG.atDebug().setMessage("Running migration from Bonsai to BinTrie...").log();
+
+    preloadedWorldStateData
+        .getAccounts()
+        .forEach(
+            (address, merkleAccount) -> {
+              LOG.atTrace().setMessage("Migrating account: {}").addArgument(address).log();
+
+              preloadedWorldStateData
+                  .getStorage(address)
+                  .forEach(
+                      (storageSlotKey, value) -> {
+                        LOG.atTrace()
+                            .setMessage("Migrating storage for account: {}")
+                            .addArgument(address)
+                            .log();
+                        final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>
+                            storageMap =
+                                binTrieUpdateAccumulator
+                                    .getStorageToUpdate()
+                                    .computeIfAbsent(
+                                        merkleAccount.getAddress(),
+                                        addr ->
+                                            new StorageConsumingMap<>(
+                                                addr, new ConcurrentHashMap<>(), (a, v) -> {}));
+
+                        if (binTrieWorldState
+                            .getStorageValueByStorageSlotKey(
+                                merkleAccount.getAddress(), storageSlotKey)
+                            .isEmpty()) {
+                          LOG.atTrace()
+                              .setMessage("Migrating storage slot: {}")
+                              .addArgument(storageSlotKey)
+                              .log();
+                          storageMap.compute(
+                              storageSlotKey,
+                              (slotKey, existing) ->
+                                  existing != null
+                                      ? new PathBasedValue<>(
+                                          null, existing.getUpdated(), existing.isLastStepCleared())
+                                      : new PathBasedValue<>(
+                                          null, UInt256.fromBytes(RLP.decodeValue(value))));
+                        }
+                      });
+
+              migrateAccount(merkleAccount, binTrieWorldState, binTrieUpdateAccumulator);
+            });
+  }
+
+  private static void migrateAccount(
+      final BonsaiAccount merkleAccount,
+      final BinTrieWorldState binTrieWorldState,
+      final BinTrieWorldStateUpdateAccumulator binTrieUpdateAccumulator) {
+
+    LOG.atDebug()
+        .setMessage("Processing account: {}")
+        .addArgument(merkleAccount.getAddress())
+        .log();
+
+    final BinTrieAccount binTrieAccount =
+        Optional.ofNullable((BinTrieAccount) binTrieWorldState.get(merkleAccount.getAddress()))
+            .map(
+                existingAccount -> {
+                  binTrieUpdateAccumulator
+                      .getAccountsToUpdate()
+                      .putIfAbsent(
+                          existingAccount.getAddress(),
+                          new PathBasedValue<>(existingAccount, existingAccount));
+                  return existingAccount;
+                })
+            .orElseGet(
+                () -> {
+                  BinTrieAccount toMigrateAccount =
+                      new BinTrieAccount(
+                          binTrieUpdateAccumulator,
+                          merkleAccount.getAddress(),
+                          merkleAccount.getAddressHash(),
+                          merkleAccount.getNonce(),
+                          merkleAccount.getBalance(),
+                          merkleAccount.getCodeSize().orElse(0L),
+                          new CodeV0(merkleAccount.getCode()),
+                          merkleAccount.getCodeHash(),
+                          false);
+
+                  binTrieUpdateAccumulator
+                      .getAccountsToUpdate()
+                      .compute(
+                          toMigrateAccount.getAddress(),
+                          (address, existing) ->
+                              existing != null
+                                  ? new PathBasedValue<>(
+                                      null, existing.getUpdated(), existing.isLastStepCleared())
+                                  : new PathBasedValue<>(null, toMigrateAccount));
+                  return toMigrateAccount;
+                });
+
+    if (binTrieAccount.hasCode()) {
+      if (merkleAccount.getCodeHash().equals(binTrieAccount.getCodeHash())) {
+        binTrieUpdateAccumulator
+            .getCodeToUpdate()
+            .putIfAbsent(
+                binTrieAccount.getAddress(), new PathBasedValue<>(null, binTrieAccount.getCode()));
+      }
+    }
+    LOG.atTrace().setMessage("Migrated account: {}").addArgument(merkleAccount.getAddress()).log();
   }
 }
