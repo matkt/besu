@@ -215,7 +215,7 @@ public final class StateMigrationLog {
   public void apply(final StateMigrationLog migrationLog) {
     firstBlockHash = migrationLog.getFirstBlockHash();
     nextAccount = migrationLog.nextAccount;
-    nextStorageKey =  migrationLog.nextStorageKey;
+    nextStorageKey = migrationLog.nextStorageKey;
     maxToConvert = migrationLog.getMaxToConvert();
   }
 }

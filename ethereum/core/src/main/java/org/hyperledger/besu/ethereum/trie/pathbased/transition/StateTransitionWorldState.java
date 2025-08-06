@@ -151,16 +151,11 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
         // diff based value
         maybeSlot.ifPresent(
             slot -> {
-              System.out.println(
-                  "fallback " + address + " " + storageSlotKey.getSlotKey().get() + " " + slot);
               verkleWorldState
                   .getAccumulator()
                   .maybeCreateStorageMap(address)
                   .put(storageSlotKey, new MigratedDiffValue<>(slot, slot));
             });
-      } else {
-        System.out.println(
-            "found " + address + " " + storageSlotKey.getSlotKey().get() + " " + maybeSlot.get());
       }
       return maybeSlot;
     } else {
@@ -200,7 +195,8 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
       // If migration is in progress, perform conversion from Bonsai to BinTrie
       if (migrationProgress.isMigrationInProgress()) {
-        PatriciaToBinTrieConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
+        PatriciaToBinTrieConverter.migrateState(
+            bonsaiWorldState, verkleWorldState, migrationProgress);
       }
       if (migrationProgress.isMigrationInProgress()
           || migrationProgress.isAccountsFullyMigrated()) {
@@ -241,7 +237,8 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
         // If migration is in progress, perform conversion from Bonsai to BinTrie
         if (migrationProgress.isMigrationInProgress()) {
-          PatriciaToBinTrieConverter.convert(bonsaiWorldState, verkleWorldState, migrationProgress);
+          PatriciaToBinTrieConverter.migrateState(
+              bonsaiWorldState, verkleWorldState, migrationProgress);
         }
       }
       worldStateRootHash = verkleWorldState.rootHash();
@@ -268,7 +265,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
    */
   @SuppressWarnings("unused")
   private void generatePreImagesForBonsai() {
-    bonsaiWorldState
+    /*bonsaiWorldState
         .getAccumulator()
         .getAccountsToUpdate()
         .forEach(
@@ -284,7 +281,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
                     (storageSlotKey, value) ->
                         PatriciaToBinTrieConverter.addPreImage(
                             storageSlotKey.getSlotHash(),
-                            storageSlotKey.getSlotKey().orElseThrow())));
+                            storageSlotKey.getSlotKey().orElseThrow())));*/
   }
 
   @Override
@@ -333,6 +330,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   @Override
   public void preload() {
-    PatriciaToBinTrieConverter.preloadImage(verkleWorldState.blockHash(), bonsaiWorldState, migrationProgress);
+    PatriciaToBinTrieConverter.preloadStateData(
+        verkleWorldState.blockHash(), bonsaiWorldState, migrationProgress);
   }
 }
