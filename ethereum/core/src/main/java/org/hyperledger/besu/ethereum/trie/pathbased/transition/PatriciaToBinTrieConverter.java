@@ -51,22 +51,20 @@ public class PatriciaToBinTrieConverter {
 
   private static final Logger LOG = LoggerFactory.getLogger(PatriciaToBinTrieConverter.class);
 
-  private static final Cache<Bytes, PreloadedWorldStateData> preloadedStateCache =
-      CacheBuilder.newBuilder().recordStats().maximumSize(2000).build();
+  private static final Cache<Bytes, CompletableFuture<PreloadedWorldStateData>>
+      preloadedStateCache = CacheBuilder.newBuilder().recordStats().maximumSize(512).build();
 
   public static void preloadStateData(
       final Hash blockHash,
       final BonsaiWorldState sourceWorldState,
       final StateMigrationLog migrationLog) {
-
-    if (preloadedStateCache.getIfPresent(blockHash) == null) {
-      CompletableFuture.runAsync(
-          () -> {
-            PreloadedWorldStateData data =
-                generatePreloadedStateData(blockHash, sourceWorldState, migrationLog);
-            preloadedStateCache.put(blockHash, data);
-          });
-    }
+    preloadedStateCache
+        .asMap()
+        .computeIfAbsent(
+            blockHash,
+            h ->
+                CompletableFuture.supplyAsync(
+                    () -> generatePreloadedStateData(blockHash, sourceWorldState, migrationLog)));
   }
 
   private static PreloadedWorldStateData generatePreloadedStateData(
@@ -188,13 +186,20 @@ public class PatriciaToBinTrieConverter {
     PreloadedWorldStateData data;
     try {
       data =
-          preloadedStateCache.get(
-              targetWorldState.getWorldStateBlockHash(),
-              () ->
-                  generatePreloadedStateData(
-                      targetWorldState.getWorldStateBlockHash(), sourceWorldState, migrationLog));
-    } catch (ExecutionException e) {
-      throw new RuntimeException("Failed to load preloaded state data.", e);
+          preloadedStateCache
+              .get(
+                  targetWorldState.getWorldStateBlockHash(),
+                  () -> {
+                    return CompletableFuture.supplyAsync(
+                        () ->
+                            generatePreloadedStateData(
+                                targetWorldState.getWorldStateBlockHash(),
+                                sourceWorldState,
+                                migrationLog));
+                  })
+              .get();
+    } catch (InterruptedException | ExecutionException e) {
+      throw new RuntimeException(e);
     }
 
     BinTrieWorldStateUpdateAccumulator accumulator = targetWorldState.getAccumulator();
