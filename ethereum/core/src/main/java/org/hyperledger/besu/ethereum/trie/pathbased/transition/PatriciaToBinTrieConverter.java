@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator
 import org.hyperledger.besu.evm.code.CodeV0;
 import org.hyperledger.besu.plugin.services.trielogs.StateMigrationLog;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -203,38 +204,42 @@ public class PatriciaToBinTrieConverter {
     data.getAccounts()
         .forEach(
             (address, account) -> {
-              LOG.atInfo().setMessage("Migrating account: {}...").addArgument(address).log();
+              final Map<StorageSlotKey, Bytes> storage = data.getStorage(address);
+              LOG.atInfo()
+                  .setMessage("Migrating account: {}({} slots)...")
+                  .addArgument(address)
+                  .addArgument(storage.size())
+                  .log();
 
-              data.getStorage(address)
-                  .forEach(
-                      (slotKey, value) -> {
-                        StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageMap =
-                            accumulator
-                                .getStorageToUpdate()
-                                .computeIfAbsent(
-                                    address,
-                                    addr ->
-                                        new StorageConsumingMap<>(
-                                            addr, new ConcurrentHashMap<>(), (a, v) -> {}));
+              storage.forEach(
+                  (slotKey, value) -> {
+                    StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageMap =
+                        accumulator
+                            .getStorageToUpdate()
+                            .computeIfAbsent(
+                                address,
+                                addr ->
+                                    new StorageConsumingMap<>(
+                                        addr, new ConcurrentHashMap<>(), (a, v) -> {}));
 
-                        if (targetWorldState
-                            .getStorageValueByStorageSlotKey(address, slotKey)
-                            .isEmpty()) {
-                          LOG.atTrace()
-                              .setMessage("Migrating storage slot: {}")
-                              .addArgument(slotKey)
-                              .log();
+                    if (targetWorldState
+                        .getStorageValueByStorageSlotKey(address, slotKey)
+                        .isEmpty()) {
+                      LOG.atTrace()
+                          .setMessage("Migrating storage slot: {}")
+                          .addArgument(slotKey)
+                          .log();
 
-                          storageMap.compute(
-                              slotKey,
-                              (key, existing) ->
-                                  existing != null
-                                      ? new PathBasedValue<>(
-                                          null, existing.getUpdated(), existing.isLastStepCleared())
-                                      : new PathBasedValue<>(
-                                          null, UInt256.fromBytes(RLP.decodeValue(value))));
-                        }
-                      });
+                      storageMap.compute(
+                          slotKey,
+                          (key, existing) ->
+                              existing != null
+                                  ? new PathBasedValue<>(
+                                      null, existing.getUpdated(), existing.isLastStepCleared())
+                                  : new PathBasedValue<>(
+                                      null, UInt256.fromBytes(RLP.decodeValue(value))));
+                    }
+                  });
 
               migrateAccount(account, targetWorldState, accumulator);
             });
