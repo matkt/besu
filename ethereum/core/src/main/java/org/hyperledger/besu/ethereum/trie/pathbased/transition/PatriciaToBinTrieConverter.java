@@ -205,7 +205,7 @@ public class PatriciaToBinTrieConverter {
         .forEach(
             (address, account) -> {
               final Map<StorageSlotKey, Bytes> storage = data.getStorage(address);
-              LOG.atInfo()
+              LOG.atTrace()
                   .setMessage("Migrating account: {}({} slots)...")
                   .addArgument(address)
                   .addArgument(storage.size())
@@ -287,7 +287,7 @@ public class PatriciaToBinTrieConverter {
                                       null, existing.getUpdated(), existing.isLastStepCleared())
                                   : new PathBasedValue<>(null, newAccount));
 
-                  LOG.atInfo()
+                  LOG.atTrace()
                       .setMessage("Created new BinTrie account: {}")
                       .addArgument(newAccount.getAddress())
                       .log();
