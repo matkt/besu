@@ -86,7 +86,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .getTrieLogLayer(params.getBlockHash())
             .filter(log -> log.getDataStorageFormat() == DataStorageFormat.BINTRIE)
             .flatMap(TrieLog::getStateMigrationLog)
-            .orElse(new StateMigrationLog(params.getBlockHash(), 1500));
+            .orElse(new StateMigrationLog(params.getBlockHash(), 7000));
 
     final BlockHeader bonsaiTarget =
         blockchain.getBlockHeader(migrationLog.getFirstBlockHash()).orElseThrow();
@@ -144,7 +144,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             .getTrieLogManager()
             .getTrieLogLayer(chainHeadHeader.getBlockHash())
             .flatMap(TrieLog::getStateMigrationLog)
-            .orElse(new StateMigrationLog(chainHeadHeader.getBlockHash(), 1500));
+            .orElse(new StateMigrationLog(chainHeadHeader.getBlockHash(), 700));
 
     LOG.debug(
         "State migration log retrieved for chain head block hash: {}",
