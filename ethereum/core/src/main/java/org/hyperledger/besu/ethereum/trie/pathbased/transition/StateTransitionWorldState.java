@@ -205,6 +205,10 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
       // Persist BinTrie world state
       verkleWorldState.persist(blockHeader);
+
+      if (migrationProgress.isMigrationInProgress()) {
+        PatriciaToBinTrieConverter.preloadStateData(bonsaiWorldState, migrationProgress);
+      }
     } else {
       // Import state changes into the Bonsai accumulator
       bonsaiWorldState
@@ -326,11 +330,5 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   private PathBasedWorldStateUpdateAccumulator<?> getAccumulator() {
     return this.accumulator;
-  }
-
-  @Override
-  public void preload() {
-    PatriciaToBinTrieConverter.preloadStateData(
-        verkleWorldState.blockHash(), bonsaiWorldState, migrationProgress);
   }
 }

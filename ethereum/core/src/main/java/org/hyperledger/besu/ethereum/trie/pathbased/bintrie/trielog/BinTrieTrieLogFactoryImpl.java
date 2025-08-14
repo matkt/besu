@@ -91,6 +91,7 @@ public class BinTrieTrieLogFactoryImpl extends TrieLogFactoryImpl {
     maybeMigrationProgress.ifPresent(
         stateMigrationLog -> {
           output.writeBytes(stateMigrationLog.getFirstBlockHash());
+          output.writeLong(stateMigrationLog.getLastMigratedBlockNumber());
           output.writeBytes(stateMigrationLog.getNextAccount());
           output.writeBytes(stateMigrationLog.getNextStorageKey());
           output.writeLong(stateMigrationLog.getMaxToConvert());
@@ -207,6 +208,7 @@ public class BinTrieTrieLogFactoryImpl extends TrieLogFactoryImpl {
       StateMigrationLog migrationProgress =
           new StateMigrationLog(
               input.readBytes(bytes -> Hash.wrap(Bytes32.wrap(bytes))),
+              Optional.of(input.readLong()),
               Optional.of(input.readBytes(Bytes::wrap)),
               Optional.of(input.readBytes(Bytes::wrap)),
               input.readLong());

@@ -320,7 +320,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
     try {
       worldState.persist(blockHeader);
-      worldState.preload();
     } catch (MerkleTrieException e) {
       LOG.info("Merkle trie exception during Transaction processing ", e);
       if (worldState instanceof PathBasedWorldState) {

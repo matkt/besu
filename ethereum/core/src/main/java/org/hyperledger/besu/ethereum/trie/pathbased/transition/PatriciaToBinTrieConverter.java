@@ -51,26 +51,22 @@ public class PatriciaToBinTrieConverter {
 
   private static final Logger LOG = LoggerFactory.getLogger(PatriciaToBinTrieConverter.class);
 
-  private static final Cache<Bytes, CompletableFuture<PreloadedWorldStateData>>
-      preloadedStateCache = CacheBuilder.newBuilder().recordStats().maximumSize(512).build();
+  private static final Cache<Long, CompletableFuture<PreloadedWorldStateData>> preloadedStateCache =
+      CacheBuilder.newBuilder().recordStats().maximumSize(512).build();
 
   public static void preloadStateData(
-      final Hash blockHash,
-      final BonsaiWorldState sourceWorldState,
-      final StateMigrationLog migrationLog) {
+      final BonsaiWorldState sourceWorldState, final StateMigrationLog migrationLog) {
     preloadedStateCache
         .asMap()
         .computeIfAbsent(
-            blockHash,
+            migrationLog.getLastMigratedBlockNumber(),
             h ->
                 CompletableFuture.supplyAsync(
-                    () -> generatePreloadedStateData(blockHash, sourceWorldState, migrationLog)));
+                    () -> generatePreloadedStateData(sourceWorldState, migrationLog)));
   }
 
   private static PreloadedWorldStateData generatePreloadedStateData(
-      final Hash blockHash,
-      final BonsaiWorldState sourceWorldState,
-      final StateMigrationLog migrationLog) {
+      final BonsaiWorldState sourceWorldState, final StateMigrationLog migrationLog) {
 
     PreloadedWorldStateData preloadedData = new PreloadedWorldStateData();
     AtomicInteger entryCounter = new AtomicInteger(0);
@@ -78,15 +74,10 @@ public class PatriciaToBinTrieConverter {
     StateMigrationLog localLog =
         new StateMigrationLog(
             migrationLog.getFirstBlockHash(),
+            Optional.of(migrationLog.getLastMigratedBlockNumber() + 1),
             Optional.ofNullable(migrationLog.getNextAccount()),
             Optional.ofNullable(migrationLog.getNextStorageKey()),
             migrationLog.getMaxToConvert());
-
-    LOG.atInfo()
-        .setMessage("Preloading Bonsai world state for block {}...")
-        .addArgument(blockHash)
-        .log();
-
     sourceWorldState
         .getWorldStateStorage()
         .streamFlatAccounts(
@@ -161,12 +152,6 @@ public class PatriciaToBinTrieConverter {
 
     preloadedData.setMigrationLog(localLog);
 
-    LOG.atInfo()
-        .setMessage("Preloading completed for block {}. Entries loaded: {}")
-        .addArgument(blockHash)
-        .addArgument(entryCounter.get())
-        .log();
-
     return preloadedData;
   }
 
@@ -188,14 +173,10 @@ public class PatriciaToBinTrieConverter {
       data =
           preloadedStateCache
               .get(
-                  targetWorldState.getWorldStateBlockHash(),
+                  migrationLog.getLastMigratedBlockNumber(),
                   () -> {
                     return CompletableFuture.supplyAsync(
-                        () ->
-                            generatePreloadedStateData(
-                                targetWorldState.getWorldStateBlockHash(),
-                                sourceWorldState,
-                                migrationLog));
+                        () -> generatePreloadedStateData(sourceWorldState, migrationLog));
                   })
               .get();
     } catch (InterruptedException | ExecutionException e) {

@@ -31,6 +31,7 @@ import org.apache.tuweni.bytes.Bytes32;
 public final class StateMigrationLog {
 
   private Hash firstBlockHash;
+  private Optional<Long> lastMigratedBlockNumber;
   private Optional<Bytes> nextAccount;
   private Optional<Bytes> nextStorageKey;
   private long maxToConvert;
@@ -45,6 +46,7 @@ public final class StateMigrationLog {
    */
   public StateMigrationLog(
       final Hash firstBlockHash,
+      final Optional<Long> lastMigratedBlockNumber,
       final Optional<Bytes> nextAccount,
       final Optional<Bytes> nextStorageKey,
       final long maxToConvert) {
@@ -54,13 +56,8 @@ public final class StateMigrationLog {
     this.maxToConvert = maxToConvert;
   }
 
-  /**
-   * Initializes a new migration log with an empty state.
-   *
-   * @param maxToConvert The maximum number of elements to migrate per batch.
-   */
   public StateMigrationLog(final Hash firstBlockHash, final long maxToConvert) {
-    this(firstBlockHash, Optional.empty(), Optional.empty(), maxToConvert);
+    this(firstBlockHash, Optional.empty(), Optional.empty(), Optional.empty(), maxToConvert);
   }
 
   /**
@@ -79,6 +76,10 @@ public final class StateMigrationLog {
    */
   public Hash getFirstBlockHash() {
     return firstBlockHash;
+  }
+
+  public Long getLastMigratedBlockNumber() {
+    return lastMigratedBlockNumber.orElse(0L);
   }
 
   /**
@@ -214,6 +215,7 @@ public final class StateMigrationLog {
 
   public void apply(final StateMigrationLog migrationLog) {
     firstBlockHash = migrationLog.getFirstBlockHash();
+    lastMigratedBlockNumber = migrationLog.lastMigratedBlockNumber;
     nextAccount = migrationLog.nextAccount;
     nextStorageKey = migrationLog.nextStorageKey;
     maxToConvert = migrationLog.getMaxToConvert();
