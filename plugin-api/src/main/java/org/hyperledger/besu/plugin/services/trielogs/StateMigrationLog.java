@@ -51,6 +51,7 @@ public final class StateMigrationLog {
       final Optional<Bytes> nextStorageKey,
       final long maxToConvert) {
     this.firstBlockHash = firstBlockHash;
+    this.lastMigratedBlockNumber = lastMigratedBlockNumber;
     this.nextAccount = nextAccount;
     this.nextStorageKey = nextStorageKey;
     this.maxToConvert = maxToConvert;
