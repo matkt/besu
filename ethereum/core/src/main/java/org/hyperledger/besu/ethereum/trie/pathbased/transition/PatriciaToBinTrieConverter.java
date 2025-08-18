@@ -52,7 +52,7 @@ public class PatriciaToBinTrieConverter {
   private static final Logger LOG = LoggerFactory.getLogger(PatriciaToBinTrieConverter.class);
 
   private static final Cache<Long, CompletableFuture<PreloadedWorldStateData>> preloadedStateCache =
-      CacheBuilder.newBuilder().recordStats().maximumSize(512).build();
+      CacheBuilder.newBuilder().recordStats().maximumSize(5).build();
 
   public static void preloadStateData(
       final BonsaiWorldState sourceWorldState, final StateMigrationLog migrationLog) {
