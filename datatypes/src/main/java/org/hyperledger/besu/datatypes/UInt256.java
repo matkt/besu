@@ -84,6 +84,7 @@ public final class UInt256 {
     this.limbs = limbs;
     this.length = length;
   }
+
   /**
    * Instantiates a new UInt256 from int[].
    *
@@ -335,7 +336,7 @@ public final class UInt256 {
 
     // Unnormalize remainder
     int[] remLimbs = Arrays.copyOf(uLimbs, n);
-      return fromLimbs(remLimbs).shiftRight(shift);
+    return fromLimbs(remLimbs).shiftRight(shift);
   }
 
   @Override

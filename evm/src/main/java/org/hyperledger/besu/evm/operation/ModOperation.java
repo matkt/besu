@@ -19,11 +19,11 @@ import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 
 /** The Mod operation. */
 @SuppressWarnings("unused")
@@ -59,12 +59,11 @@ public class ModOperation extends AbstractFixedCostOperation {
       frame.pushStackItem(Bytes32.ZERO);
     } else {
 
-      int [] limbs0 = new int[8];
-      int [] limbs1 = new int[8];
+      int[] limbs0 = new int[8];
+      int[] limbs1 = new int[8];
 
       final byte[] bytes0 = value0.toArrayUnsafe();
       final byte[] bytes1 = value1.toArrayUnsafe();
-
 
       byte[] padded0 = bytes0.length == Bytes32.SIZE ? bytes0 : padTo32Bytes(bytes0);
       byte[] padded1 = bytes1.length == Bytes32.SIZE ? bytes1 : padTo32Bytes(bytes1);
@@ -107,6 +106,4 @@ public class ModOperation extends AbstractFixedCostOperation {
     System.arraycopy(input, 0, padded, Bytes32.SIZE - input.length, input.length);
     return padded;
   }
-
-
 }
