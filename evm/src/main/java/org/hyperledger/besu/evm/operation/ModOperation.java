@@ -80,14 +80,14 @@ public class ModOperation extends AbstractFixedCostOperation {
       limbs0[6] = buffer0.getInt(24);
       limbs0[7] = buffer0.getInt(28);
 
-      limbs1[0] = buffer0.getInt(0);
-      limbs1[1] = buffer0.getInt(4);
-      limbs1[2] = buffer0.getInt(8);
-      limbs1[3] = buffer0.getInt(12);
-      limbs1[4] = buffer0.getInt(16);
-      limbs1[5] = buffer0.getInt(20);
-      limbs1[6] = buffer0.getInt(24);
-      limbs1[7] = buffer0.getInt(28);
+      limbs1[0] = buffer1.getInt(0);
+      limbs1[1] = buffer1.getInt(4);
+      limbs1[2] = buffer1.getInt(8);
+      limbs1[3] = buffer1.getInt(12);
+      limbs1[4] = buffer1.getInt(16);
+      limbs1[5] = buffer1.getInt(20);
+      limbs1[6] = buffer1.getInt(24);
+      limbs1[7] = buffer1.getInt(28);
 
       final UInt256 b1 = new UInt256(limbs0);
       final UInt256 b2 = new UInt256(limbs1);
