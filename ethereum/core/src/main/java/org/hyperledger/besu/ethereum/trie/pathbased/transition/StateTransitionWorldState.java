@@ -186,46 +186,49 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
 
   @Override
   public void persist(final BlockHeader blockHeader) {
-    if (isBinTrieActive) {
-      // Import state changes into the BinTrie accumulator
-      verkleWorldState
-          .getAccumulator()
-          .importStateChangesFromSource(
-              (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
+    try {
+      if (isBinTrieActive) {
+        // Import state changes into the BinTrie accumulator
+        verkleWorldState
+                .getAccumulator()
+                .importStateChangesFromSource(
+                        (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
 
-      // If migration is in progress, perform conversion from Bonsai to BinTrie
-      if (migrationProgress.isMigrationInProgress()) {
-        PatriciaToBinTrieConverter.migrateState(
-            bonsaiWorldState, verkleWorldState, migrationProgress);
+        // If migration is in progress, perform conversion from Bonsai to BinTrie
+        if (migrationProgress.isMigrationInProgress()) {
+          PatriciaToBinTrieConverter.migrateState(
+                  bonsaiWorldState, verkleWorldState, migrationProgress);
+        }
+        if (migrationProgress.isMigrationInProgress()
+                || migrationProgress.isAccountsFullyMigrated()) {
+          verkleWorldState.getAccumulator().setStateMigrationLog(Optional.of(migrationProgress));
+        }
+
+        // Persist BinTrie world state
+        verkleWorldState.persist(blockHeader);
+
+        if (migrationProgress.isMigrationInProgress()) {
+          PatriciaToBinTrieConverter.preloadStateData(bonsaiWorldState, migrationProgress);
+        }
+      } else {
+        // Import state changes into the Bonsai accumulator
+        bonsaiWorldState
+                .getAccumulator()
+                .importStateChangesFromSource(
+                        (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
+
+        // Generate pre-images for Bonsai state transition
+        // TODO (this should be removed in final version)
+        // generatePreImagesForBonsai();
+
+        // Persist Bonsai world state
+        bonsaiWorldState.persist(blockHeader);
       }
-      if (migrationProgress.isMigrationInProgress()
-          || migrationProgress.isAccountsFullyMigrated()) {
-        verkleWorldState.getAccumulator().setStateMigrationLog(Optional.of(migrationProgress));
-      }
 
-      // Persist BinTrie world state
-      verkleWorldState.persist(blockHeader);
-
-      if (migrationProgress.isMigrationInProgress()) {
-        PatriciaToBinTrieConverter.preloadStateData(bonsaiWorldState, migrationProgress);
-      }
-    } else {
-      // Import state changes into the Bonsai accumulator
-      bonsaiWorldState
-          .getAccumulator()
-          .importStateChangesFromSource(
-              (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
-
-      // Generate pre-images for Bonsai state transition
-      // TODO (this should be removed in final version)
-      // generatePreImagesForBonsai();
-
-      // Persist Bonsai world state
-      bonsaiWorldState.persist(blockHeader);
+    }finally {
+      // Reset the accumulator after persisting state
+      accumulator.reset();
     }
-
-    // Reset the accumulator after persisting state
-    accumulator.reset();
   }
 
   @Override
