@@ -180,7 +180,7 @@ public class PatriciaToBinTrieConverter {
                     return CompletableFuture.supplyAsync(
                         () -> generatePreloadedStateData(sourceWorldState, migrationLog));
                   })
-              .get(1, TimeUnit.SECONDS);
+              .get(60, TimeUnit.SECONDS);
     } catch (InterruptedException | ExecutionException | TimeoutException e) {
       throw new RuntimeException(e);
     }
