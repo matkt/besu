@@ -33,6 +33,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.cache.Cache;
@@ -178,12 +180,12 @@ public class PatriciaToBinTrieConverter {
                     return CompletableFuture.supplyAsync(
                         () -> generatePreloadedStateData(sourceWorldState, migrationLog));
                   })
-              .get();
-    } catch (InterruptedException | ExecutionException e) {
+              .get(1, TimeUnit.SECONDS);
+    } catch (InterruptedException | ExecutionException | TimeoutException e) {
       throw new RuntimeException(e);
     }
 
-    BinTrieWorldStateUpdateAccumulator accumulator = targetWorldState.getAccumulator();
+      BinTrieWorldStateUpdateAccumulator accumulator = targetWorldState.getAccumulator();
 
     LOG.atDebug().setMessage("Starting migration from Bonsai to BinTrie...").log();
 
