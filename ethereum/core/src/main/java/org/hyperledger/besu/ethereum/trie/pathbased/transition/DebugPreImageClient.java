@@ -53,6 +53,8 @@ public class DebugPreImageClient {
       os.write(input, 0, input.length);
     }
 
+    conn.disconnect();
+
     // Lecture de la réponse
     StringBuilder response = new StringBuilder();
     try (BufferedReader br =
