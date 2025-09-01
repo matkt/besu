@@ -358,7 +358,7 @@ public final class GenesisState {
     if (pragueTimestamp.isPresent()) {
       return genesis.getTimestamp() >= pragueTimestamp.getAsLong();
     }
-    return isBinTrieAtGenesis(genesis);
+    return isOsakaAtGenesis(genesis);
   }
 
   private static boolean isOsakaAtGenesis(final GenesisConfig genesis) {
