@@ -875,7 +875,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
 
     final boolean isBinTrieGenesis =
         protocolSchedule
-            .milestoneFor(HardforkId.MainnetHardforkId.OSAKA)
+            .milestoneFor(HardforkId.MainnetHardforkId.BINTRIE)
             .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
             .isPresent();
 
@@ -1255,8 +1255,13 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             codeCache);
       }
       case BINTRIE -> {
-        final Optional<Long> binTrieMilestone = Optional.of(1753967276L);
-        if (binTrieMilestone.isEmpty()) {
+
+        final Optional<Long> binTrieMilestone = protocolSchedule.milestoneFor(HardforkId.MainnetHardforkId.BINTRIE);
+        final boolean isBinTrieGenesis =
+                binTrieMilestone
+                        .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)
+                        .isPresent();
+        if (isBinTrieGenesis) {
           final BinTrieWorldStateKeyValueStorage worldStateKeyValueStorage =
               worldStateStorageCoordinator.getStrategy(BinTrieWorldStateKeyValueStorage.class);
           yield new BinTrieWorldStateProvider(
