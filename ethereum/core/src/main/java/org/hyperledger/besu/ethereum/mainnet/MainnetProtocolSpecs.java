@@ -67,7 +67,6 @@ import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.core.feemarket.CoinbaseFeePriceCalculator;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.CancunBlockHashProcessor;
-import org.hyperledger.besu.ethereum.mainnet.blockhash.Eip7709BlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.FrontierBlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.blockhash.PragueBlockHashProcessor;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.BaseFeeMarket;
@@ -688,10 +687,7 @@ public abstract class MainnetProtocolSpecs {
       final MiningConfiguration miningConfiguration,
       final boolean isParallelTxProcessingEnabled,
       final MetricsSystem metricsSystem) {
-    final ClearEmptyAccountStrategy clearEmptyAccountStrategy =
-        new ClearEmptyAccountStrategy.ClearEmptyAccountWithException(
-            List.of(Eip7709BlockHashProcessor.EIP_7709_HISTORY_STORAGE_ADDRESS));
-    return shanghaiDefinition(
+    return pragueDefinition(
             chainId,
             enableRevertReason,
             genesisConfigOptions,
@@ -704,27 +700,7 @@ public abstract class MainnetProtocolSpecs {
             (gasCalculator, jdCacheConfig) ->
                 MainnetEVMs.bintrie(
                     gasCalculator, chainId.orElse(BigInteger.ZERO), evmConfiguration))
-        .transactionProcessorBuilder(
-            (gasCalculator,
-                feeMarket,
-                transactionValidatorFactory,
-                contractCreationProcessor,
-                messageCallProcessor) ->
-                MainnetTransactionProcessor.builder()
-                    .gasCalculator(gasCalculator)
-                    .transactionValidatorFactory(transactionValidatorFactory)
-                    .contractCreationProcessor(contractCreationProcessor)
-                    .messageCallProcessor(messageCallProcessor)
-                    .clearEmptyAccountStrategy(clearEmptyAccountStrategy)
-                    .warmCoinbase(true)
-                    .maxStackSize(evmConfiguration.evmStackSize())
-                    .feeMarket(feeMarket)
-                    .coinbaseFeePriceCalculator(CoinbaseFeePriceCalculator.eip1559())
-                    .build())
-        .withdrawalsProcessor(new WithdrawalsProcessor(clearEmptyAccountStrategy))
         .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
-        .blockHashProcessor(new Eip7709BlockHashProcessor())
-        .blockHeaderFunctions(new BinTrieDevnetBlockHeaderFunctions())
         .hardforkId(BINTRIE);
   }
 

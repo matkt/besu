@@ -36,7 +36,7 @@ import org.apache.tuweni.units.bigints.UInt256;
  *   <LI>Gas costs for EIP-4762 (Stateless trie)
  * </UL>
  */
-public class Eip4762GasCalculator extends CancunGasCalculator {
+public class Eip4762GasCalculator extends PragueGasCalculator {
   private static final Address HISTORY_STORAGE_ADDRESS =
       Address.fromHexString("0xfffffffffffffffffffffffffffffffffffffffe");
   private static final long CREATE_OPERATION_GAS_COST = 1_000L;

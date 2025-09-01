@@ -1448,9 +1448,7 @@ public class MainnetEVMs {
       final GasCalculator gasCalculator,
       final BigInteger chainID) {
     // basing off of shanghai for devnet-7
-    registerShanghaiOperations(registry, gasCalculator, chainID);
-    // EIP-6780 nerf self destruct
-    registry.put(new SelfDestructOperation(gasCalculator, true));
+    registerPragueOperations(registry, gasCalculator, chainID);
     // mimic a weird behavior by geth that ignores eip-1706
     registry.put(new SStoreOperation(gasCalculator, 272L));
   }

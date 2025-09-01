@@ -190,17 +190,17 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
       if (isBinTrieActive) {
         // Import state changes into the BinTrie accumulator
         verkleWorldState
-                .getAccumulator()
-                .importStateChangesFromSource(
-                        (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
+            .getAccumulator()
+            .importStateChangesFromSource(
+                (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
 
         // If migration is in progress, perform conversion from Bonsai to BinTrie
         if (migrationProgress.isMigrationInProgress()) {
           PatriciaToBinTrieConverter.migrateState(
-                  bonsaiWorldState, verkleWorldState, migrationProgress);
+              bonsaiWorldState, verkleWorldState, migrationProgress);
         }
         if (migrationProgress.isMigrationInProgress()
-                || migrationProgress.isAccountsFullyMigrated()) {
+            || migrationProgress.isAccountsFullyMigrated()) {
           verkleWorldState.getAccumulator().setStateMigrationLog(Optional.of(migrationProgress));
         }
 
@@ -213,9 +213,9 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
       } else {
         // Import state changes into the Bonsai accumulator
         bonsaiWorldState
-                .getAccumulator()
-                .importStateChangesFromSource(
-                        (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
+            .getAccumulator()
+            .importStateChangesFromSource(
+                (PathBasedWorldStateUpdateAccumulator<BonsaiAccount>) accumulator);
 
         // Generate pre-images for Bonsai state transition
         // TODO (this should be removed in final version)
@@ -225,7 +225,7 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
         bonsaiWorldState.persist(blockHeader);
       }
 
-    }finally {
+    } finally {
       // Reset the accumulator after persisting state
       accumulator.reset();
     }

@@ -185,7 +185,7 @@ public class PatriciaToBinTrieConverter {
       throw new RuntimeException(e);
     }
 
-      BinTrieWorldStateUpdateAccumulator accumulator = targetWorldState.getAccumulator();
+    BinTrieWorldStateUpdateAccumulator accumulator = targetWorldState.getAccumulator();
 
     LOG.atDebug().setMessage("Starting migration from Bonsai to BinTrie...").log();
 
