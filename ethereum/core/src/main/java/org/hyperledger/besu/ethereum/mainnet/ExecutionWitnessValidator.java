@@ -41,6 +41,7 @@ public interface ExecutionWitnessValidator {
     }
   }
 
+  @SuppressWarnings("unused")
   class AllowedExecutionWitness implements ExecutionWitnessValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(AllowedExecutionWitness.class);

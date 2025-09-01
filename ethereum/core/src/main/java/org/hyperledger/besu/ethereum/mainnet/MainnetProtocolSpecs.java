@@ -700,7 +700,7 @@ public abstract class MainnetProtocolSpecs {
             (gasCalculator, jdCacheConfig) ->
                 MainnetEVMs.bintrie(
                     gasCalculator, chainId.orElse(BigInteger.ZERO), evmConfiguration))
-        .executionWitnessValidator(new ExecutionWitnessValidator.AllowedExecutionWitness())
+        .executionWitnessValidator(new ExecutionWitnessValidator.ProhibitedExecutionWitness())
         .hardforkId(BINTRIE);
   }
 
