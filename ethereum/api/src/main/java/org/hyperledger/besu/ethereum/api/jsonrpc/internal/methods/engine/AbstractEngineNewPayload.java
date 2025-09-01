@@ -383,8 +383,8 @@ public abstract class AbstractEngineNewPayload extends ExecutionEngineJsonRpcMet
           lastExecutionTime / 1000.0,
           executionResult.getNbParallelizedTransactions());
       // TODO WARNING Added this line to accelerate block import, should be removed later
-      mergeCoordinator.updateForkChoice(
-          newBlockHeader, newBlockHeader.getBlockHash(), newBlockHeader.getBlockHash());
+      //mergeCoordinator.updateForkChoice(
+      //    newBlockHeader, newBlockHeader.getBlockHash(), newBlockHeader.getBlockHash());
       return respondWith(reqId, blockParam, newBlockHeader.getHash(), VALID);
     } else {
       if (executionResult.causedBy().isPresent()) {
