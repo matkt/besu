@@ -14,6 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 
+import okhttp3.ConnectionPool;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.hyperledger.besu.datatypes.Hash;
 
 import java.io.IOException;
@@ -21,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import okhttp3.*;
 import org.apache.tuweni.bytes.Bytes;
 
 public class DebugPreImageClient {
