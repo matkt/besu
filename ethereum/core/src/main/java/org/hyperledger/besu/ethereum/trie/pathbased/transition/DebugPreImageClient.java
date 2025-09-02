@@ -46,27 +46,25 @@ public class DebugPreImageClient {
     conn.setRequestMethod("POST");
     conn.setRequestProperty("Content-Type", "application/json");
     conn.setDoOutput(true);
-
-    // Envoi de la requête
-    try (OutputStream os = conn.getOutputStream()) {
-      byte[] input = request.encode().getBytes(StandardCharsets.UTF_8);
-      os.write(input, 0, input.length);
-    }
-
-    conn.disconnect();
-
-    // Lecture de la réponse
-    StringBuilder response = new StringBuilder();
-    try (BufferedReader br =
-        new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"))) {
-      String line;
-      while ((line = br.readLine()) != null) {
-        response.append(line.trim());
+    try {
+      try (OutputStream os = conn.getOutputStream()) {
+        byte[] input = request.encode().getBytes(StandardCharsets.UTF_8);
+        os.write(input, 0, input.length);
       }
+
+      StringBuilder response = new StringBuilder();
+      try (BufferedReader br =
+          new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"))) {
+        String line;
+        while ((line = br.readLine()) != null) {
+          response.append(line.trim());
+        }
+      }
+      String output = response.toString();
+      JsonObject jsonResponse = new JsonObject(output);
+      return Bytes.fromHexString(jsonResponse.getString("result"));
+    } finally {
+      conn.disconnect();
     }
-    String output = response.toString();
-    // Parsing de la réponse avec Vert.x
-    JsonObject jsonResponse = new JsonObject(output);
-    return Bytes.fromHexString(jsonResponse.getString("result"));
   }
 }

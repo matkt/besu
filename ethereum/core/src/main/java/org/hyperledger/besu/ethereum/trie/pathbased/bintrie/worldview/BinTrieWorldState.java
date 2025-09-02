@@ -205,7 +205,6 @@ public class BinTrieWorldState extends PathBasedWorldState {
     System.out.println("Total updates: " + updateCount);
 
     LOG.info("Starting commit...");
-    new Throwable().printStackTrace(System.out);
     long startTime = System.currentTimeMillis();
 
     maybeStateUpdater.ifPresent(
