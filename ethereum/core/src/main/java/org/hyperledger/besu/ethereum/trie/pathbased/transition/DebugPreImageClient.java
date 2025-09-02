@@ -16,23 +16,27 @@ package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 
 import org.hyperledger.besu.datatypes.Hash;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import okhttp3.*;
 import org.apache.tuweni.bytes.Bytes;
 
 public class DebugPreImageClient {
 
   private static final String NODE_URL = "http://10.0.34.178:8545";
 
+  private static final OkHttpClient client =
+      new OkHttpClient.Builder()
+          .connectionPool(new ConnectionPool(50, 5, TimeUnit.MINUTES))
+          .connectTimeout(10, TimeUnit.SECONDS)
+          .readTimeout(10, TimeUnit.SECONDS)
+          .writeTimeout(10, TimeUnit.SECONDS)
+          .build();
+
   public static Bytes getPreImage(final Hash hash) throws Exception {
-    // Construction de la requête JSON avec Vert.x
     JsonObject request =
         new JsonObject()
             .put("jsonrpc", "2.0")
@@ -40,31 +44,30 @@ public class DebugPreImageClient {
             .put("params", new JsonArray().add(hash.toHexString()))
             .put("id", 1);
 
-    // Connexion HTTP
-    URL url = new URL(NODE_URL);
-    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-    conn.setRequestMethod("POST");
-    conn.setRequestProperty("Content-Type", "application/json");
-    conn.setDoOutput(true);
-    try {
-      try (OutputStream os = conn.getOutputStream()) {
-        byte[] input = request.encode().getBytes(StandardCharsets.UTF_8);
-        os.write(input, 0, input.length);
+    Request postRequest =
+        new Request.Builder()
+            .url(NODE_URL)
+            .post(
+                RequestBody.create(
+                    request.encode(), MediaType.get("application/json; charset=utf-8")))
+            .build();
+
+    try (Response response = client.newCall(postRequest).execute()) {
+      if (!response.isSuccessful()) {
+        throw new RuntimeException("HTTP error, code: " + response.code());
       }
 
-      StringBuilder response = new StringBuilder();
-      try (BufferedReader br =
-          new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"))) {
-        String line;
-        while ((line = br.readLine()) != null) {
-          response.append(line.trim());
-        }
+      String responseBody = response.body().string();
+      JsonObject jsonResponse = new JsonObject(responseBody);
+
+      String result = jsonResponse.getString("result");
+      if (result == null) {
+        throw new RuntimeException("Invalid response: " + responseBody);
       }
-      String output = response.toString();
-      JsonObject jsonResponse = new JsonObject(output);
-      return Bytes.fromHexString(jsonResponse.getString("result"));
-    } finally {
-      conn.disconnect();
+      return Bytes.fromHexString(result);
+
+    } catch (IOException e) {
+      throw new RuntimeException("Error during HTTP request", e);
     }
   }
 }
