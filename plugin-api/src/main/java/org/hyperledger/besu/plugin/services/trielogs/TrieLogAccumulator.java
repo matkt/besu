@@ -16,6 +16,7 @@ package org.hyperledger.besu.plugin.services.trielogs;
 
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 
 import java.util.Map;
