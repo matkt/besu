@@ -18,6 +18,7 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.MERKLE_TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.PREIMAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -25,6 +26,7 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
@@ -63,7 +65,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
                 ACCOUNT_INFO_STATE,
                 CODE_STORAGE,
                 ACCOUNT_STORAGE_STORAGE,
-                MERKLE_TRIE_BRANCH_STORAGE)),
+                MERKLE_TRIE_BRANCH_STORAGE,
+                    PREIMAGE)),
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
     this.flatDbStrategyProvider =
         new BonsaiFlatDbStrategyProvider(
@@ -241,6 +244,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     public Updater removeAccountInfoState(final Hash accountHash) {
       flatDbStrategy.removeFlatAccount(worldStorage, composedWorldStateTransaction, accountHash);
+      return this;
+    }
+
+    public Updater addPreImage(final Hash hash, final Bytes preImage) {
+      composedWorldStateTransaction.put(PREIMAGE,hash.toArrayUnsafe(), preImage.toArrayUnsafe());
       return this;
     }
 

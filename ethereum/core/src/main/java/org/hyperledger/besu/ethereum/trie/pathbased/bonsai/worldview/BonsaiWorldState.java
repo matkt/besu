@@ -193,8 +193,10 @@ public class BonsaiWorldState extends PathBasedWorldState {
           final Hash addressHash = updatedAccount.getAddressHash();
           final Bytes accountValue = updatedAccount.serializeAccount();
           maybeStateUpdater.ifPresent(
-              bonsaiUpdater ->
-                  bonsaiUpdater.putAccountInfoState(hashAndSavePreImage(accountKey), accountValue));
+              bonsaiUpdater -> {
+                  bonsaiUpdater.addPreImage(hashAndSavePreImage(accountKey), accountKey);
+                  bonsaiUpdater.putAccountInfoState(hashAndSavePreImage(accountKey), accountValue);
+              });
           accountTrie.put(addressHash, accountValue);
         }
       } catch (MerkleTrieException e) {
@@ -274,9 +276,11 @@ public class BonsaiWorldState extends PathBasedWorldState {
             storageTrie.remove(slotHash);
           } else {
             maybeStateUpdater.ifPresent(
-                bonsaiUpdater ->
-                    bonsaiUpdater.putStorageValueBySlotHash(
-                        updatedAddressHash, slotHash, updatedStorage));
+                bonsaiUpdater -> {
+                  bonsaiUpdater.addPreImage(slotHash, storageUpdate.getKey().getSlotKey().orElseThrow());
+                  bonsaiUpdater.putStorageValueBySlotHash(
+                        updatedAddressHash, slotHash, updatedStorage);
+                });
             storageTrie.put(slotHash, encodeTrieValue(updatedStorage));
           }
         } catch (MerkleTrieException e) {

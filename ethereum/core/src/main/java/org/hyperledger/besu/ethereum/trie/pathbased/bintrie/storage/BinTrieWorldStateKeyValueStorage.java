@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.PREIMAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Address;
@@ -60,7 +61,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
       final DataStorageConfiguration dataStorageConfiguration,
       final MetricsSystem metricsSystem) {
     super(
-        provider.getStorageBySegmentIdentifiers(List.of(CODE_STORAGE, VERKLE_TRIE_BRANCH_STORAGE)),
+        provider.getStorageBySegmentIdentifiers(List.of(CODE_STORAGE, VERKLE_TRIE_BRANCH_STORAGE, PREIMAGE)),
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
     this.metricsSystem = metricsSystem;
     this.dataStorageConfiguration = dataStorageConfiguration;
@@ -197,6 +198,11 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
 
     public Updater removeAccountInfoState(final Hash accountHash) {
       flatDbStrategy.removeFlatAccount(worldStorage, composedWorldStateTransaction, accountHash);
+      return this;
+    }
+
+    public Updater addPreImage(final Hash hash, final Bytes preImage) {
+      composedWorldStateTransaction.put(PREIMAGE,hash.toArrayUnsafe(), preImage.toArrayUnsafe());
       return this;
     }
 
