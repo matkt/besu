@@ -906,7 +906,8 @@ task testDocker {
 
 task dockerUpload {
   dependsOn distDocker
-  def architecture = System.getenv('architecture')
+  def architecture = System.getProperty("os.arch")
+
   def image = "${dockerImageName}:${dockerBuildVersion}"
   def additionalTags = []
 
