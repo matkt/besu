@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 
-import org.apache.tuweni.bytes.Bytes32;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
@@ -30,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,24 +39,24 @@ public class PreImageDownloader {
 
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-  private static final Bytes NEXT_ACCOUNT_PRE_IMAGE = Bytes.wrap("nextAccount".getBytes(StandardCharsets.UTF_8));
+  private static final Bytes NEXT_ACCOUNT_PRE_IMAGE =
+      Bytes.wrap("nextAccount".getBytes(StandardCharsets.UTF_8));
 
-    public PreImageDownloader() {}
+  public PreImageDownloader() {}
 
   public CompletableFuture<Void> downloadLoop(
-          final BonsaiWorldState sourceWorldState,
-      final int maxAccount,
-          final long delayInMillis) {
+      final BonsaiWorldState sourceWorldState, final int maxAccount, final long delayInMillis) {
 
+    final BonsaiWorldStateKeyValueStorage worldStateStorage =
+        sourceWorldState.getWorldStateStorage();
+    final Optional<Bytes32> nextAccount =
+        worldStateStorage.getPreImage(NEXT_ACCOUNT_PRE_IMAGE).map(Bytes32::wrap);
+    if (nextAccount.isEmpty() && worldStateStorage.getPreImage().stream().findFirst().isPresent()) {
+      return CompletableFuture.completedFuture(null);
+    }
 
-      final BonsaiWorldStateKeyValueStorage worldStateStorage = sourceWorldState.getWorldStateStorage();
-      final Optional<Bytes32> nextAccount = worldStateStorage.getPreImage(NEXT_ACCOUNT_PRE_IMAGE).map(Bytes32::wrap);
-      if(nextAccount.isEmpty() && worldStateStorage.getPreImage().stream().findFirst().isPresent()){
-          return CompletableFuture.completedFuture(null);
-      }
-
-      CompletableFuture<Void> future = new CompletableFuture<>();
-      download(sourceWorldState,nextAccount.orElse(Bytes32.ZERO), maxAccount)
+    CompletableFuture<Void> future = new CompletableFuture<>();
+    download(sourceWorldState, nextAccount.orElse(Bytes32.ZERO), maxAccount)
         .thenRunAsync(
             () -> {
               scheduler.schedule(
@@ -80,16 +80,17 @@ public class PreImageDownloader {
   }
 
   public CompletableFuture<Void> download(
-          final BonsaiWorldState sourceWorldState, final Bytes32 nextAccount, final int maxAccount) {
+      final BonsaiWorldState sourceWorldState, final Bytes32 nextAccount, final int maxAccount) {
 
     return CompletableFuture.runAsync(
         () -> {
           AtomicInteger index = new AtomicInteger(0);
 
-            final BonsaiWorldStateKeyValueStorage worldStateStorage = sourceWorldState.getWorldStateStorage();
-            final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
+          final BonsaiWorldStateKeyValueStorage worldStateStorage =
+              sourceWorldState.getWorldStateStorage();
+          final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
 
-            sourceWorldState
+          sourceWorldState
               .getWorldStateStorage()
               .streamFlatAccounts(
                   nextAccount,
@@ -130,10 +131,10 @@ public class PreImageDownloader {
                     }
                     return true;
                   });
-            if(index.get()==0){
-                updater.removePreImage(NEXT_ACCOUNT_PRE_IMAGE);
-            }
-            updater.commit();
+          if (index.get() == 0) {
+            updater.removePreImage(NEXT_ACCOUNT_PRE_IMAGE);
+          }
+          updater.commit();
         });
   }
 

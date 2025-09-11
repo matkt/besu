@@ -16,8 +16,6 @@ package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.chain.BlockAddedEvent;
-import org.hyperledger.besu.ethereum.chain.BlockAddedObserver;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
@@ -36,7 +34,7 @@ import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -51,9 +49,9 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
 
   private final BonsaiWorldStateProvider bonsaiProvider;
   private final BinTrieWorldStateProvider binTrieProvider;
-  private Optional<CompletableFuture<Void>> preImageProcess;
+  private final AtomicBoolean isPreImageLoading = new AtomicBoolean(false);
 
-  private final long BinTrieMilestone;
+  private final long binTrieMilestone;
   private final Blockchain blockchain;
 
   public StateTransitionWorldStateProvider(
@@ -63,18 +61,18 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
       final Blockchain blockchain) {
     this.bonsaiProvider = bonsaiProvider;
     this.binTrieProvider = binTrieProvider;
-    this.BinTrieMilestone = binTrieMilestone;
+    this.binTrieMilestone = binTrieMilestone;
     this.blockchain = blockchain;
-    this.preImageProcess = Optional.empty();
-    this.blockchain.observeBlockAdded(new BlockAddedObserver() {
-      @Override
-      public void onBlockAdded(final BlockAddedEvent event) {
-        if(preImageProcess.isEmpty() && event.getBlock().getHeader().getTimestamp()>binTrieMilestone){
-          System.out.println("Start image transition for block "+event.getBlock().getHeader().getNumber());
-          new PreImageDownloader().downloadLoop((BonsaiWorldState) bonsaiProvider.getWorldState(), 10, 25);
-        }
-      }
-    });
+    this.blockchain.observeBlockAdded(
+        event -> {
+          if (event.getBlock().getHeader().getTimestamp() > binTrieMilestone
+              && !isPreImageLoading.getAndSet(true)) {
+            System.out.println(
+                "Start image transition for block " + event.getBlock().getHeader().getNumber());
+            new PreImageDownloader()
+                .downloadLoop((BonsaiWorldState) bonsaiProvider.getWorldState(), 10, 25);
+          }
+        });
   }
 
   @Override
@@ -129,7 +127,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
               binTrieState.get(),
               migrationLog,
               hasValidBinTrieState,
-              BinTrieMilestone));
+              binTrieMilestone));
     }
 
     LOG.info("No matching world state found for the requested block hash.");
@@ -149,7 +147,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
     LOG.debug("Current chain head block hash: {}", chainHeadHeader.getBlockHash());
 
     // Check if BinTrie is active based on the milestone timestamp
-    final boolean isBinTrieActive = chainHeadHeader.getTimestamp() >= BinTrieMilestone;
+    final boolean isBinTrieActive = chainHeadHeader.getTimestamp() >= binTrieMilestone;
     LOG.debug("BinTrie active status: {}", isBinTrieActive);
 
     // Retrieve state migration log
@@ -165,7 +163,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
         chainHeadHeader.getBlockHash());
 
     return new StateTransitionWorldState(
-        bonsaiState, binTrieState, stateMigrationLog, isBinTrieActive, BinTrieMilestone);
+        bonsaiState, binTrieState, stateMigrationLog, isBinTrieActive, binTrieMilestone);
   }
 
   private Optional<BonsaiWorldState> getBonsaiTransitionState(final WorldStateQueryParams params) {
@@ -209,7 +207,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
 
   @Override
   public void resetArchiveStateTo(final BlockHeader blockHeader) {
-    final boolean isBinTrieActive = blockHeader.getTimestamp() >= BinTrieMilestone;
+    final boolean isBinTrieActive = blockHeader.getTimestamp() >= binTrieMilestone;
     if (isBinTrieActive) {
       binTrieProvider.resetArchiveStateTo(blockHeader);
     } else {

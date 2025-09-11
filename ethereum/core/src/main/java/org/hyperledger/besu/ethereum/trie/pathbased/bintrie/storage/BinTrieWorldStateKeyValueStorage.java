@@ -26,7 +26,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieLegacyFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieStemFlatDbStrategy;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategyProvider;
@@ -63,7 +62,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     super(
         provider.getStorageBySegmentIdentifiers(List.of(CODE_STORAGE, VERKLE_TRIE_BRANCH_STORAGE)),
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE),
-            provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.PREIMAGE));
+        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.PREIMAGE));
     this.metricsSystem = metricsSystem;
     this.dataStorageConfiguration = dataStorageConfiguration;
     this.flatDbStrategyProvider =
@@ -169,8 +168,8 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
-         final KeyValueStorageTransaction preImageStorageTransaction,
-    final FlatDbStrategy flatDbStrategy,
+        final KeyValueStorageTransaction preImageStorageTransaction,
+        final FlatDbStrategy flatDbStrategy,
         final SegmentedKeyValueStorage worldStorage) {
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;

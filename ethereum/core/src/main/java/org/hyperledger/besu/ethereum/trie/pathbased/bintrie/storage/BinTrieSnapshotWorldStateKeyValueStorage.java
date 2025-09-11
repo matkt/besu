@@ -59,7 +59,7 @@ public class BinTrieSnapshotWorldStateKeyValueStorage extends BinTrieWorldStateK
         ((SnappableKeyValueStorage) worldStateKeyValueStorage.getComposedWorldStateStorage())
             .takeSnapshot(),
         worldStateKeyValueStorage.getTrieLogStorage(),
-            worldStateKeyValueStorage.getPreImage());
+        worldStateKeyValueStorage.getPreImage());
   }
 
   private boolean isClosedGet() {

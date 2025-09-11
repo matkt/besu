@@ -26,7 +26,6 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
@@ -67,7 +66,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
                 ACCOUNT_STORAGE_STORAGE,
                 MERKLE_TRIE_BRANCH_STORAGE)),
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE),
-            provider.getStorageBySegmentIdentifier(PREIMAGE));
+        provider.getStorageBySegmentIdentifier(PREIMAGE));
     this.flatDbStrategyProvider =
         new BonsaiFlatDbStrategyProvider(
             metricsSystem, dataStorageConfiguration, composedWorldStateStorage);
@@ -209,8 +208,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     private final SegmentedKeyValueStorageTransaction composedWorldStateTransaction;
     private final KeyValueStorageTransaction trieLogStorageTransaction;
-      private final KeyValueStorageTransaction preImageStorageTransaction;
-      private final FlatDbStrategy flatDbStrategy;
+    private final KeyValueStorageTransaction preImageStorageTransaction;
+    private final FlatDbStrategy flatDbStrategy;
     private final SegmentedKeyValueStorage worldStorage;
 
     public Updater(
@@ -222,8 +221,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
-        this.preImageStorageTransaction = preImageStorageTransaction;
-        this.flatDbStrategy = flatDbStrategy;
+      this.preImageStorageTransaction = preImageStorageTransaction;
+      this.flatDbStrategy = flatDbStrategy;
       this.worldStorage =
           worldStorage; // An update could need to read from world storage to decide how to PUT to
       // it (i.e. Bonsai archive)
@@ -260,7 +259,6 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       preImageStorageTransaction.remove(hash.toArrayUnsafe());
       return this;
     }
-
 
     public Updater addPreImage(final Bytes hash, final Bytes preImage) {
       preImageStorageTransaction.put(hash.toArrayUnsafe(), preImage.toArrayUnsafe());
