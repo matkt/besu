@@ -40,10 +40,12 @@ public class BinTrieSnapshotWorldStateKeyValueStorage extends BinTrieWorldStateK
   public BinTrieSnapshotWorldStateKeyValueStorage(
       final BinTrieWorldStateKeyValueStorage parentWorldStateStorage,
       final SnappedKeyValueStorage segmentedWorldStateStorage,
-      final KeyValueStorage trieLogStorage) {
+      final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage) {
     super(
         segmentedWorldStateStorage,
         trieLogStorage,
+        preImage,
         parentWorldStateStorage.dataStorageConfiguration,
         parentWorldStateStorage.metricsSystem);
     this.parentWorldStateStorage = parentWorldStateStorage;
@@ -56,7 +58,8 @@ public class BinTrieSnapshotWorldStateKeyValueStorage extends BinTrieWorldStateK
         worldStateKeyValueStorage,
         ((SnappableKeyValueStorage) worldStateKeyValueStorage.getComposedWorldStateStorage())
             .takeSnapshot(),
-        worldStateKeyValueStorage.getTrieLogStorage());
+        worldStateKeyValueStorage.getTrieLogStorage(),
+            worldStateKeyValueStorage.getPreImage());
   }
 
   private boolean isClosedGet() {
@@ -72,6 +75,7 @@ public class BinTrieSnapshotWorldStateKeyValueStorage extends BinTrieWorldStateK
     return new Updater(
         ((SnappedKeyValueStorage) composedWorldStateStorage).getSnapshotTransaction(),
         trieLogStorage.startTransaction(),
+        preImage.startTransaction(),
         getFlatDbStrategy(),
         composedWorldStateStorage);
   }

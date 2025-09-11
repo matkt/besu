@@ -65,9 +65,9 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
                 ACCOUNT_INFO_STATE,
                 CODE_STORAGE,
                 ACCOUNT_STORAGE_STORAGE,
-                MERKLE_TRIE_BRANCH_STORAGE,
-                    PREIMAGE)),
-        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
+                MERKLE_TRIE_BRANCH_STORAGE)),
+        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE),
+            provider.getStorageBySegmentIdentifier(PREIMAGE));
     this.flatDbStrategyProvider =
         new BonsaiFlatDbStrategyProvider(
             metricsSystem, dataStorageConfiguration, composedWorldStateStorage);
@@ -77,8 +77,9 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   public BonsaiWorldStateKeyValueStorage(
       final BonsaiFlatDbStrategyProvider flatDbStrategyProvider,
       final SegmentedKeyValueStorage composedWorldStateStorage,
-      final KeyValueStorage trieLogStorage) {
-    super(composedWorldStateStorage, trieLogStorage);
+      final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage) {
+    super(composedWorldStateStorage, trieLogStorage, preImage);
     this.flatDbStrategyProvider = flatDbStrategyProvider;
   }
 
@@ -125,6 +126,10 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       return getStateTrieNode(Bytes.concatenate(accountHash, location).toArrayUnsafe())
           .filter(b -> Hash.hash(b).equals(nodeHash));
     }
+  }
+
+  public Optional<Bytes> getPreImage(final Bytes hash) {
+    return preImage.get(hash.toArrayUnsafe()).map(Bytes::wrap);
   }
 
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
@@ -195,6 +200,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     return new Updater(
         composedWorldStateStorage.startTransaction(),
         trieLogStorage.startTransaction(),
+        preImage.startTransaction(),
         getFlatDbStrategy(),
         composedWorldStateStorage);
   }
@@ -203,18 +209,21 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     private final SegmentedKeyValueStorageTransaction composedWorldStateTransaction;
     private final KeyValueStorageTransaction trieLogStorageTransaction;
-    private final FlatDbStrategy flatDbStrategy;
+      private final KeyValueStorageTransaction preImageStorageTransaction;
+      private final FlatDbStrategy flatDbStrategy;
     private final SegmentedKeyValueStorage worldStorage;
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
+        final KeyValueStorageTransaction preImageStorageTransaction,
         final FlatDbStrategy flatDbStrategy,
         final SegmentedKeyValueStorage worldStorage) {
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
-      this.flatDbStrategy = flatDbStrategy;
+        this.preImageStorageTransaction = preImageStorageTransaction;
+        this.flatDbStrategy = flatDbStrategy;
       this.worldStorage =
           worldStorage; // An update could need to read from world storage to decide how to PUT to
       // it (i.e. Bonsai archive)
@@ -247,8 +256,14 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       return this;
     }
 
-    public Updater addPreImage(final Hash hash, final Bytes preImage) {
-      composedWorldStateTransaction.put(PREIMAGE,hash.toArrayUnsafe(), preImage.toArrayUnsafe());
+    public Updater removePreImage(final Bytes hash) {
+      preImageStorageTransaction.remove(hash.toArrayUnsafe());
+      return this;
+    }
+
+
+    public Updater addPreImage(final Bytes hash, final Bytes preImage) {
+      preImageStorageTransaction.put(hash.toArrayUnsafe(), preImage.toArrayUnsafe());
       return this;
     }
 

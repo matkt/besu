@@ -42,9 +42,10 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   public BonsaiSnapshotWorldStateKeyValueStorage(
       final BonsaiWorldStateKeyValueStorage parentWorldStateStorage,
       final SnappedKeyValueStorage segmentedWorldStateStorage,
-      final KeyValueStorage trieLogStorage) {
+      final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage) {
     super(
-        parentWorldStateStorage.flatDbStrategyProvider, segmentedWorldStateStorage, trieLogStorage);
+        parentWorldStateStorage.flatDbStrategyProvider, segmentedWorldStateStorage, trieLogStorage, preImage);
     this.parentWorldStateStorage = parentWorldStateStorage;
     this.subscribeParentId = parentWorldStateStorage.subscribe(this);
   }
@@ -55,7 +56,8 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
         worldStateStorageKeyValueStorage,
         ((SnappableKeyValueStorage) worldStateStorageKeyValueStorage.getComposedWorldStateStorage())
             .takeSnapshot(),
-        worldStateStorageKeyValueStorage.getTrieLogStorage());
+        worldStateStorageKeyValueStorage.getTrieLogStorage(),
+            worldStateStorageKeyValueStorage.getPreImage());
   }
 
   private boolean isClosedGet() {
@@ -71,6 +73,7 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
     return new Updater(
         ((SnappedKeyValueStorage) composedWorldStateStorage).getSnapshotTransaction(),
         trieLogStorage.startTransaction(),
+        preImage.startTransaction(),
         getFlatDbStrategy(),
         composedWorldStateStorage);
   }

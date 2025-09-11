@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.PREIMAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.VERKLE_TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Address;
@@ -27,6 +26,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.BinTrieAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieLegacyFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat.BinTrieStemFlatDbStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategyProvider;
@@ -61,8 +61,9 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
       final DataStorageConfiguration dataStorageConfiguration,
       final MetricsSystem metricsSystem) {
     super(
-        provider.getStorageBySegmentIdentifiers(List.of(CODE_STORAGE, VERKLE_TRIE_BRANCH_STORAGE, PREIMAGE)),
-        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
+        provider.getStorageBySegmentIdentifiers(List.of(CODE_STORAGE, VERKLE_TRIE_BRANCH_STORAGE)),
+        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE),
+            provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.PREIMAGE));
     this.metricsSystem = metricsSystem;
     this.dataStorageConfiguration = dataStorageConfiguration;
     this.flatDbStrategyProvider =
@@ -74,9 +75,10 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
   public BinTrieWorldStateKeyValueStorage(
       final SegmentedKeyValueStorage composedWorldStateStorage,
       final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage,
       final DataStorageConfiguration dataStorageConfiguration,
       final MetricsSystem metricsSystem) {
-    super(composedWorldStateStorage, trieLogStorage);
+    super(composedWorldStateStorage, trieLogStorage, preImage);
     this.metricsSystem = metricsSystem;
     this.dataStorageConfiguration = dataStorageConfiguration;
     this.flatDbStrategyProvider =
@@ -151,6 +153,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     return new Updater(
         composedWorldStateStorage.startTransaction(),
         trieLogStorage.startTransaction(),
+        preImage.startTransaction(),
         getFlatDbStrategy(),
         composedWorldStateStorage);
   }
@@ -159,17 +162,20 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
 
     private final SegmentedKeyValueStorageTransaction composedWorldStateTransaction;
     private final KeyValueStorageTransaction trieLogStorageTransaction;
+    private final KeyValueStorageTransaction preImageStorageTransaction;
     private final FlatDbStrategy flatDbStrategy;
     private final SegmentedKeyValueStorage worldStorage;
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
-        final FlatDbStrategy flatDbStrategy,
+         final KeyValueStorageTransaction preImageStorageTransaction,
+    final FlatDbStrategy flatDbStrategy,
         final SegmentedKeyValueStorage worldStorage) {
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
+      this.preImageStorageTransaction = preImageStorageTransaction;
       this.flatDbStrategy = flatDbStrategy;
       this.worldStorage = worldStorage;
     }
@@ -202,7 +208,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     }
 
     public Updater addPreImage(final Hash hash, final Bytes preImage) {
-      composedWorldStateTransaction.put(PREIMAGE,hash.toArrayUnsafe(), preImage.toArrayUnsafe());
+      preImageStorageTransaction.put(hash.toArrayUnsafe(), preImage.toArrayUnsafe());
       return this;
     }
 

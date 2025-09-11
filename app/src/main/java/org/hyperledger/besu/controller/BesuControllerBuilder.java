@@ -1255,8 +1255,7 @@ public abstract class BesuControllerBuilder implements MiningParameterOverrides 
             codeCache);
       }
       case BINTRIE -> {
-        final Optional<Long> binTrieMilestone =
-            protocolSchedule.milestoneFor(HardforkId.MainnetHardforkId.BINTRIE);
+        final Optional<Long> binTrieMilestone = Optional.of(1742212810L);
         final boolean isBinTrieGenesis =
             binTrieMilestone
                 .filter(milestone -> milestone == 0 || genesisConfig.getTimestamp() >= milestone)

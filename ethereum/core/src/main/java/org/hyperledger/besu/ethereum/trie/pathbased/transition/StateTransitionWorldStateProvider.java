@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.chain.BlockAddedEvent;
+import org.hyperledger.besu.ethereum.chain.BlockAddedObserver;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
@@ -34,6 +36,7 @@ import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -48,6 +51,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
 
   private final BonsaiWorldStateProvider bonsaiProvider;
   private final BinTrieWorldStateProvider binTrieProvider;
+  private Optional<CompletableFuture<Void>> preImageProcess;
 
   private final long BinTrieMilestone;
   private final Blockchain blockchain;
@@ -55,12 +59,22 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
   public StateTransitionWorldStateProvider(
       final BonsaiWorldStateProvider bonsaiProvider,
       final BinTrieWorldStateProvider binTrieProvider,
-      final long BinTrieMilestone,
+      final long binTrieMilestone,
       final Blockchain blockchain) {
     this.bonsaiProvider = bonsaiProvider;
     this.binTrieProvider = binTrieProvider;
-    this.BinTrieMilestone = BinTrieMilestone;
+    this.BinTrieMilestone = binTrieMilestone;
     this.blockchain = blockchain;
+    this.preImageProcess = Optional.empty();
+    this.blockchain.observeBlockAdded(new BlockAddedObserver() {
+      @Override
+      public void onBlockAdded(final BlockAddedEvent event) {
+        if(preImageProcess.isEmpty() && event.getBlock().getHeader().getTimestamp()>binTrieMilestone){
+          System.out.println("Start image transition for block "+event.getBlock().getHeader().getNumber());
+          new PreImageDownloader().downloadLoop((BonsaiWorldState) bonsaiProvider.getWorldState(), 10, 25);
+        }
+      }
+    });
   }
 
   @Override

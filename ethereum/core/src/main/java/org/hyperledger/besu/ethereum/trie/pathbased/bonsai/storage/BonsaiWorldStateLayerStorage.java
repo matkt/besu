@@ -28,14 +28,16 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
     this(
         new LayeredKeyValueStorage(parent.getComposedWorldStateStorage()),
         parent.getTrieLogStorage(),
+        parent.getPreImage(),
         parent);
   }
 
   public BonsaiWorldStateLayerStorage(
       final SnappedKeyValueStorage composedWorldStateStorage,
       final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage,
       final BonsaiWorldStateKeyValueStorage parent) {
-    super(parent, composedWorldStateStorage, trieLogStorage);
+    super(parent, composedWorldStateStorage, trieLogStorage, preImage);
   }
 
   @Override
@@ -48,6 +50,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
     return new BonsaiWorldStateLayerStorage(
         ((LayeredKeyValueStorage) composedWorldStateStorage).clone(),
         trieLogStorage,
+        preImage,
         parentWorldStateStorage);
   }
 }

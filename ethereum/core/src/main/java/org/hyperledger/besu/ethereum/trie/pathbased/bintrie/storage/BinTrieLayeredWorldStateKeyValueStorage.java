@@ -28,14 +28,16 @@ public class BinTrieLayeredWorldStateKeyValueStorage
     this(
         new LayeredKeyValueStorage(parent.getComposedWorldStateStorage()),
         parent.getTrieLogStorage(),
+        parent.getPreImage(),
         parent);
   }
 
   public BinTrieLayeredWorldStateKeyValueStorage(
       final SnappedKeyValueStorage composedWorldStateStorage,
       final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage,
       final BinTrieWorldStateKeyValueStorage parent) {
-    super(parent, composedWorldStateStorage, trieLogStorage);
+    super(parent, composedWorldStateStorage, trieLogStorage, preImage);
   }
 
   @Override
@@ -43,6 +45,7 @@ public class BinTrieLayeredWorldStateKeyValueStorage
     return new BinTrieLayeredWorldStateKeyValueStorage(
         ((LayeredKeyValueStorage) composedWorldStateStorage).clone(),
         trieLogStorage,
+        preImage,
         parentWorldStateStorage);
   }
 }

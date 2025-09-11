@@ -304,7 +304,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
         stateUpdater -> {
           stateUpdater.addPreImage(hashAndSavePreImage(accountAddress), accountAddress);
           stateUpdater.putAccountInfoState(
-                  hashAndSavePreImage(accountAddress), updatedAccount.serializeAccount());
+              hashAndSavePreImage(accountAddress), updatedAccount.serializeAccount());
         });
     return true;
   }
@@ -433,10 +433,11 @@ public class BinTrieWorldState extends PathBasedWorldState {
             accountAddress, storageEntry.getKey(), newStorageValue);
         optionalStateUpdater.ifPresent(
             stateUpdater -> {
-              stateUpdater.addPreImage(hashAndSavePreImage(storageSlotHash),
-                      storageEntry.getKey().getSlotKey().orElseThrow());
+              stateUpdater.addPreImage(
+                  hashAndSavePreImage(storageSlotHash),
+                  storageEntry.getKey().getSlotKey().orElseThrow());
               stateUpdater.putStorageValueBySlotHash(
-                    accountAddressHash, storageSlotHash, newStorageValue);
+                  accountAddressHash, storageSlotHash, newStorageValue);
             });
       }
     }
@@ -592,6 +593,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
         Optional.of(
             new BinTrieWorldStateKeyValueStorage.Updater(
                 noOpSegmentedTx,
+                noOpTx,
                 noOpTx,
                 worldStateKeyValueStorage.getFlatDbStrategy(),
                 worldStateKeyValueStorage.getComposedWorldStateStorage())),

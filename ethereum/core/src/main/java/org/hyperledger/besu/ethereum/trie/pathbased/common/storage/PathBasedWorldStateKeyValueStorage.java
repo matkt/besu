@@ -74,12 +74,15 @@ public abstract class PathBasedWorldStateKeyValueStorage
   protected final Subscribers<StorageSubscriber> subscribers = Subscribers.create();
   protected final SegmentedKeyValueStorage composedWorldStateStorage;
   protected final KeyValueStorage trieLogStorage;
+  protected final KeyValueStorage preImage;
 
   public PathBasedWorldStateKeyValueStorage(
       final SegmentedKeyValueStorage composedWorldStateStorage,
-      final KeyValueStorage trieLogStorage) {
+      final KeyValueStorage trieLogStorage,
+      final KeyValueStorage preImage) {
     this.composedWorldStateStorage = composedWorldStateStorage;
     this.trieLogStorage = trieLogStorage;
+    this.preImage = preImage;
   }
 
   public abstract FlatDbMode getFlatDbMode();
@@ -95,6 +98,10 @@ public abstract class PathBasedWorldStateKeyValueStorage
 
   public KeyValueStorage getTrieLogStorage() {
     return trieLogStorage;
+  }
+
+  public KeyValueStorage getPreImage() {
+    return preImage;
   }
 
   public Optional<byte[]> getTrieLog(final Hash blockHash) {
