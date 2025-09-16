@@ -99,7 +99,7 @@ public class PreImageDownloader {
                       return false;
                     }
 
-                    updater.addPreImage(NEXT_ACCOUNT_PRE_IMAGE, nextAccount);
+                    updater.addPreImage(NEXT_ACCOUNT_PRE_IMAGE, accountEntry.getFirst());
 
                     LOG.atInfo()
                         .setMessage("Reached migration for account: {}")

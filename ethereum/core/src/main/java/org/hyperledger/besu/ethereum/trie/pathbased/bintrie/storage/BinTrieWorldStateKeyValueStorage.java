@@ -267,6 +267,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
       // write the log ahead, then the worldstate
       trieLogStorageTransaction.commit();
       composedWorldStateTransaction.commit();
+      preImageStorageTransaction.commit();
     }
 
     @Override
@@ -283,6 +284,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     public void rollback() {
       composedWorldStateTransaction.rollback();
       trieLogStorageTransaction.rollback();
+      preImageStorageTransaction.rollback();
     }
   }
 }

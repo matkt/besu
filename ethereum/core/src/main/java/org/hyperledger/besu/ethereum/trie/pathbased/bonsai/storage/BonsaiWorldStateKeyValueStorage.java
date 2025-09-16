@@ -355,6 +355,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       // write the log ahead, then the worldstate
       trieLogStorageTransaction.commit();
       composedWorldStateTransaction.commit();
+      preImageStorageTransaction.commit();
     }
 
     @Override
@@ -371,6 +372,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     public void rollback() {
       composedWorldStateTransaction.rollback();
       trieLogStorageTransaction.rollback();
+      preImageStorageTransaction.rollback();
     }
   }
 }

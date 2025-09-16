@@ -172,6 +172,7 @@ public abstract class PathBasedWorldStateKeyValueStorage
     getFlatDbStrategy().clearAll(composedWorldStateStorage);
     composedWorldStateStorage.clear(getTrieBranchSegmentIdentifier());
     trieLogStorage.clear();
+    preImage.clear();
   }
 
   public void clearTrieLog() {
