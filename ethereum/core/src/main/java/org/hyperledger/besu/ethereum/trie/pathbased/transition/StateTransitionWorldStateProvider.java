@@ -69,8 +69,9 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
               && !isPreImageLoading.getAndSet(true)) {
             System.out.println(
                 "Start image transition for block " + event.getBlock().getHeader().getNumber());
-            new PreImageDownloader()
-                .downloadLoop((BonsaiWorldState) bonsaiProvider.getWorldState(), 10, 25);
+            PreImageDownloaderV2.generatePreloadedStateData(
+                    (BonsaiWorldState) bonsaiProvider.getWorldState(), 5000)
+                .whenComplete((unused, throwable) -> isPreImageLoading.set(false));
           }
         });
   }

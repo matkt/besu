@@ -277,10 +277,13 @@ public class BonsaiWorldState extends PathBasedWorldState {
           } else {
             maybeStateUpdater.ifPresent(
                 bonsaiUpdater -> {
-                  storageUpdate.getKey().getSlotKey().ifPresent(slotKey -> {
-                    bonsaiUpdater.addPreImage(
-                            slotHash, slotKey);
-                  });
+                  storageUpdate
+                      .getKey()
+                      .getSlotKey()
+                      .ifPresent(
+                          slotKey -> {
+                            bonsaiUpdater.addPreImage(slotHash, slotKey);
+                          });
                   bonsaiUpdater.putStorageValueBySlotHash(
                       updatedAddressHash, slotHash, updatedStorage);
                 });
