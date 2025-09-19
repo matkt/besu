@@ -302,7 +302,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
     // If the state updater is available, update the account information in the state
     maybeStateUpdater.ifPresent(
         stateUpdater -> {
-          stateUpdater.addPreImage(hashAndSavePreImage(accountAddress), accountAddress);
+          //stateUpdater.addPreImage(hashAndSavePreImage(accountAddress), accountAddress);
           stateUpdater.putAccountInfoState(
               hashAndSavePreImage(accountAddress), updatedAccount.serializeAccount());
         });
@@ -433,9 +433,10 @@ public class BinTrieWorldState extends PathBasedWorldState {
             accountAddress, storageEntry.getKey(), newStorageValue);
         optionalStateUpdater.ifPresent(
             stateUpdater -> {
-              stateUpdater.addPreImage(
+              /*stateUpdater.addPreImage(
                   hashAndSavePreImage(storageSlotHash),
                   storageEntry.getKey().getSlotKey().orElseThrow());
+              */
               stateUpdater.putStorageValueBySlotHash(
                   accountAddressHash, storageSlotHash, newStorageValue);
             });

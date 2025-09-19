@@ -17,8 +17,6 @@ package org.hyperledger.besu.ethereum.trie.pathbased.transition;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.stateless.bintrie.adapter.TrieKeyUtils;
-import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -43,13 +41,13 @@ public class PreImageDownloaderV2 {
       Bytes.wrap("nextSlot".getBytes(StandardCharsets.UTF_8));
 
   public static CompletableFuture<Void> generatePreloadedStateData(
-          final BonsaiWorldState sourceWorldState, final BinTrieWorldState binTrieWorldState, final int maxToConvert) {
+      final BonsaiWorldState sourceWorldState, final int maxToConvert) {
     return CompletableFuture.runAsync(
         () -> {
           AtomicInteger entryCounter = new AtomicInteger(0);
 
-          final BinTrieWorldStateKeyValueStorage worldStateStorage =
-                  binTrieWorldState.getWorldStateStorage();
+          final BonsaiWorldStateKeyValueStorage worldStateStorage =
+              sourceWorldState.getWorldStateStorage();
 
           StateMigrationLog localLog =
               new StateMigrationLog(
@@ -60,7 +58,7 @@ public class PreImageDownloaderV2 {
                   maxToConvert);
 
             System.out.println("Starting preloading of state data "+localLog.getNextAccount()+" "+localLog.getNextStorageKey());
-          final BinTrieWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
+          final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
             System.out.println(worldStateStorage);
 
           sourceWorldState

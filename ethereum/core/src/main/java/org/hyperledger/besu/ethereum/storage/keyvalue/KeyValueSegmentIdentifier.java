@@ -69,7 +69,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   CHAIN_PRUNER_STATE(new byte[] {18}),
 
   VERKLE_TRIE_BRANCH_STORAGE(new byte[] {19}, EnumSet.of(BONSAI, BINTRIE), false, true, false),
-  PREIMAGE(new byte[] {20}, EnumSet.of(BONSAI, BINTRIE), false, true, false);
+    PREIMAGE(new byte[] {20}, EnumSet.of(BONSAI, BINTRIE), false, true, false);
 
   private final byte[] id;
   private final EnumSet<DataStorageFormat> formats;
