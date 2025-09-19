@@ -51,11 +51,13 @@ public class PreImageDownloader {
         sourceWorldState.getWorldStateStorage();
     final Optional<Bytes32> nextAccount =
         worldStateStorage.getPreImage(NEXT_ACCOUNT_PRE_IMAGE).map(Bytes32::wrap);
+    System.out.println("Found next account " + nextAccount + " " + worldStateStorage);
     if (nextAccount.isEmpty() && worldStateStorage.getPreImage().stream().findFirst().isPresent()) {
       return CompletableFuture.completedFuture(null);
     }
 
     CompletableFuture<Void> future = new CompletableFuture<>();
+
     download(sourceWorldState, nextAccount.orElse(Bytes32.ZERO), maxAccount)
         .thenRunAsync(
             () -> {
@@ -88,7 +90,6 @@ public class PreImageDownloader {
 
           final BonsaiWorldStateKeyValueStorage worldStateStorage =
               sourceWorldState.getWorldStateStorage();
-          final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
 
           sourceWorldState
               .getWorldStateStorage()
@@ -98,6 +99,8 @@ public class PreImageDownloader {
                     if (index.incrementAndGet() > maxAccount) {
                       return false;
                     }
+                    final BonsaiWorldStateKeyValueStorage.Updater updater =
+                        worldStateStorage.updater();
 
                     updater.addPreImage(NEXT_ACCOUNT_PRE_IMAGE, accountEntry.getFirst());
 
@@ -129,12 +132,14 @@ public class PreImageDownloader {
                                 return true;
                               });
                     }
+                    updater.commit();
                     return true;
                   });
           if (index.get() == 0) {
+            final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
             updater.removePreImage(NEXT_ACCOUNT_PRE_IMAGE);
+            updater.commit();
           }
-          updater.commit();
         });
   }
 

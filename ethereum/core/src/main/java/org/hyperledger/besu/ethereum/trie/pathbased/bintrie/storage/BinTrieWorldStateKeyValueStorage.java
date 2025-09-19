@@ -270,7 +270,12 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
       preImageStorageTransaction.commit();
     }
 
-    @Override
+      @Override
+      public void commitPreImageOnly() {
+          preImageStorageTransaction.commit();
+      }
+
+      @Override
     public void commitTrieLogOnly() {
       trieLogStorageTransaction.commit();
     }

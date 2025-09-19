@@ -195,10 +195,10 @@ public class StateTransitionWorldState implements MutableWorldState, PathBasedWo
                 (PathBasedWorldStateUpdateAccumulator<BinTrieAccount>) accumulator);
 
         // If migration is in progress, perform conversion from Bonsai to BinTrie
-        if (migrationProgress.isMigrationInProgress()) {
+        /*if (migrationProgress.isMigrationInProgress()) {
           PatriciaToBinTrieConverter.migrateState(
               bonsaiWorldState, verkleWorldState, migrationProgress);
-        }
+        }*/
         if (migrationProgress.isMigrationInProgress()
             || migrationProgress.isAccountsFullyMigrated()) {
           verkleWorldState.getAccumulator().setStateMigrationLog(Optional.of(migrationProgress));

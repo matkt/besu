@@ -358,6 +358,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       preImageStorageTransaction.commit();
     }
 
+      @Override
+      public void commitPreImageOnly() {
+          preImageStorageTransaction.commit();
+      }
+
     @Override
     public void commitTrieLogOnly() {
       trieLogStorageTransaction.commit();

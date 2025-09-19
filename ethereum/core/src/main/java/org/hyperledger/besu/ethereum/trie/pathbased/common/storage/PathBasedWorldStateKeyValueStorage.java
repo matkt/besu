@@ -459,7 +459,9 @@ public abstract class PathBasedWorldStateKeyValueStorage
     @Override
     void commit();
 
-    void commitTrieLogOnly();
+      void commitPreImageOnly();
+
+      void commitTrieLogOnly();
 
     void commitComposedOnly();
 

@@ -57,7 +57,9 @@ public class PreImageDownloaderV2 {
                   worldStateStorage.getPreImage(NEXT_SLOT_PRE_IMAGE),
                   maxToConvert);
 
+            System.out.println("Starting preloading of state data "+localLog.getNextAccount()+" "+localLog.getNextStorageKey());
           final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
+            System.out.println(worldStateStorage);
 
           sourceWorldState
               .getWorldStateStorage()
@@ -83,6 +85,7 @@ public class PreImageDownloaderV2 {
                               storageEntry -> {
                                 if (entryCounter.get() >= localLog.getMaxToConvert()) {
                                   localLog.setNextStorageKey(storageEntry.getFirst());
+                                    System.out.println("Pausing at storage entry " + storageEntry);
                                   return false;
                                 }
 
@@ -118,13 +121,18 @@ public class PreImageDownloaderV2 {
             LOG.atInfo().setMessage("All accounts have been fully migrated.").log();
           } else {
             LOG.atInfo()
-                .setMessage("Reached migration limit, pausing at account: {}")
+                .setMessage("Reached migration limit, pausing at account: {} slot: {}")
                 .addArgument(localLog.getNextAccount())
+                    .addArgument(localLog.getNextStorageKey())
                 .log();
           }
-          updater.addPreImage(NEXT_ACCOUNT_PRE_IMAGE, localLog.getNextAccount());
-          updater.addPreImage(NEXT_SLOT_PRE_IMAGE, localLog.getNextStorageKey());
-          updater.commit();
+          try {
+              updater.addPreImage(NEXT_ACCOUNT_PRE_IMAGE, localLog.getNextAccount());
+              updater.addPreImage(NEXT_SLOT_PRE_IMAGE, localLog.getNextStorageKey());
+              updater.commitPreImageOnly();
+          }catch (RuntimeException e){
+              System.out.println(e.getMessage());
+          }
         });
   }
 
