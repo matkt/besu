@@ -136,7 +136,12 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
     return Optional.empty();
   }
 
-  @Override
+    public Optional<Bytes> getPreImage(final Bytes hash) {
+        return preImage.get(hash.toArrayUnsafe()).map(Bytes::wrap);
+    }
+
+
+    @Override
   public void clear() {
     super.clear();
     this.flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
@@ -206,7 +211,7 @@ public class BinTrieWorldStateKeyValueStorage extends PathBasedWorldStateKeyValu
       return this;
     }
 
-    public Updater addPreImage(final Hash hash, final Bytes preImage) {
+    public Updater addPreImage(final Bytes hash, final Bytes preImage) {
       preImageStorageTransaction.put(hash.toArrayUnsafe(), preImage.toArrayUnsafe());
       return this;
     }
