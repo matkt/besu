@@ -57,6 +57,11 @@ public class PreImageDownloaderV2 {
                   worldStateStorage.getPreImage(NEXT_SLOT_PRE_IMAGE),
                   maxToConvert);
 
+          if(localLog.isAccountsFullyMigrated()){
+              System.out.println("Migration terminated");
+            return;
+          }
+
             System.out.println("Starting preloading of state data "+localLog.getNextAccount()+" "+localLog.getNextStorageKey());
           final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
             System.out.println(worldStateStorage);

@@ -87,7 +87,7 @@ public class PatriciaToBinTrieConverter {
             accountEntry -> {
               Hash accountHash = Hash.wrap(accountEntry.getFirst());
 
-              Bytes accountPreimage = fetchPreimage(accountHash);
+              Bytes accountPreimage = fetchPreimage(accountHash, sourceWorldState);
               Address accountAddress = Address.wrap(accountPreimage);
 
               BonsaiAccount account =
@@ -110,7 +110,7 @@ public class PatriciaToBinTrieConverter {
                           }
 
                           Hash storageHash = Hash.wrap(storageEntry.getFirst());
-                          Bytes storagePreimage = fetchPreimage(storageHash);
+                          Bytes storagePreimage = fetchPreimage(storageHash, sourceWorldState);
 
                           StorageSlotKey slotKey =
                               new StorageSlotKey(
@@ -157,9 +157,9 @@ public class PatriciaToBinTrieConverter {
     return preloadedData;
   }
 
-  private static Bytes fetchPreimage(final Hash hash) {
+  private static Bytes fetchPreimage(final Hash hash,  final BonsaiWorldState sourceWorldState) {
     try {
-      return DebugPreImageClient.getPreImage(hash);
+        return sourceWorldState.getWorldStateStorage().getPreImage(hash).orElse(DebugPreImageClient.getPreImage(hash));
     } catch (Exception e) {
       throw new RuntimeException("Error fetching preimage for hash: " + hash, e);
     }
