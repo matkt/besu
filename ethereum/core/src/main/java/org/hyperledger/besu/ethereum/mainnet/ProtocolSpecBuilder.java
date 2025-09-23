@@ -374,6 +374,10 @@ public class ProtocolSpecBuilder {
       }
     }
 
+    if (finalBalFactory != null) {
+      System.out.println("BALs active");
+    }
+
     return new ProtocolSpec(
         hardforkId,
         evm,

@@ -390,6 +390,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
             return new BlockProcessingResult(Optional.empty(), errorMessage);
           }
         }
+        LOG.info("BAL is correct");
         maybeBlockAccessList = Optional.of(bal);
       } else {
         maybeBlockAccessList = Optional.empty();
