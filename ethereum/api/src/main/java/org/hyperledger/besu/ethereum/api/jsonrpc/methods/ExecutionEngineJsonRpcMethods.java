@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.methods;
 
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.CANCUN;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.FUTURE_EIPS;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.OSAKA;
@@ -230,7 +231,7 @@ public class ExecutionEngineJsonRpcMethods extends ApiGroupJsonRpcMethods {
                 metricsSystem));
       }
 
-      if (protocolSchedule.milestoneFor(FUTURE_EIPS).isPresent()) {
+      if (protocolSchedule.milestoneFor(AMSTERDAM).isPresent()) {
         executionEngineApisSupported.add(
             new EngineGetPayloadV6(
                 consensusEngineServer,
