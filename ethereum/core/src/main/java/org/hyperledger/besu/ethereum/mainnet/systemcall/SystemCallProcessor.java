@@ -20,7 +20,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.TransactionAccessList;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.PendingBlockAccessList;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
@@ -29,7 +29,6 @@ import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.processor.AbstractMessageProcessor;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
-import org.hyperledger.besu.evm.worldstate.StackedUpdater;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
 import java.util.Deque;
@@ -71,7 +70,7 @@ public class SystemCallProcessor {
       final Address callAddress,
       final BlockProcessingContext context,
       final Bytes inputData,
-      final Optional<TransactionAccessList> transactionAccessList) {
+      final Optional<PendingBlockAccessList> partialBlockAccessList) {
     WorldUpdater blockUpdater = context.getWorldState().updater();
     WorldUpdater systemCallUpdater = blockUpdater.updater();
     final Account maybeContract = systemCallUpdater.get(callAddress);
@@ -94,7 +93,7 @@ public class SystemCallProcessor {
             context.getBlockHeader(),
             context.getBlockHashLookup(),
             inputData,
-            transactionAccessList);
+            partialBlockAccessList);
 
     if (!frame.getCode().isValid()) {
       throw new RuntimeException(
@@ -106,12 +105,12 @@ public class SystemCallProcessor {
       processor.process(stack.peekFirst(), OperationTracer.NO_TRACING);
     }
 
-    transactionAccessList.ifPresent(
-        t ->
+    partialBlockAccessList.ifPresent(
+        pending ->
             context
                 .getBlockAccessListBuilder()
                 .ifPresent(
-                    b -> b.addTransactionAccessList(t, (StackedUpdater<?, ?>) systemCallUpdater)));
+                    bal -> bal.generateAndApplyPendingBlockAccessList(pending, systemCallUpdater)));
 
     if (frame.getState() == MessageFrame.State.COMPLETED_SUCCESS) {
       systemCallUpdater.commit();
@@ -139,7 +138,7 @@ public class SystemCallProcessor {
       final ProcessableBlockHeader blockHeader,
       final BlockHashLookup blockHashLookup,
       final Bytes inputData,
-      final Optional<TransactionAccessList> transactionAccessList) {
+      final Optional<PendingBlockAccessList> partialBlockAccessList) {
 
     final AbstractMessageProcessor processor =
         mainnetTransactionProcessor.getMessageProcessor(MessageFrame.Type.MESSAGE_CALL);
@@ -165,8 +164,8 @@ public class SystemCallProcessor {
             .blockHashLookup(blockHashLookup)
             .code(getCode(worldUpdater.get(callAddress), processor));
 
-    if (transactionAccessList.isPresent()) {
-      builder.eip7928AccessList(transactionAccessList.get());
+    if (partialBlockAccessList.isPresent()) {
+      builder.eip7928AccessList(partialBlockAccessList.get());
     }
 
     return builder.build();
