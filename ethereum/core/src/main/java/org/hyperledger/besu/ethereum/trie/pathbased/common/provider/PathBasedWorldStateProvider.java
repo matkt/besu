@@ -210,22 +210,34 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
    * @return the full world state, if available
    */
   private Optional<MutableWorldState> getFullWorldStateFromHead(final Hash blockHash) {
-    /* // TODO begin remove rolling tests before merging on main
+     // TODO begin remove rolling tests before merging on main
     Optional<BlockHeader> blockHeader = blockchain.getBlockHeader(blockHash);
     if (blockHeader.isPresent()) {
-      Optional<BlockHeader> parentHeader =
+        Optional<BlockHeader> parentHeader =
           blockchain.getBlockHeader(blockHeader.get().getParentHash());
-      if (parentHeader.isPresent()) {
-        Optional<MutableWorldState> worldState =
-            rollFullWorldStateToBlockHash(headWorldState, parentHeader.get().getBlockHash());
-        if (worldState.isEmpty()) {
-          System.out.println("failed rollback to " + parentHeader.get().getNumber());
-          throw new RuntimeException("invalid trielog");
-        }
-        System.out.println("rollback to " + parentHeader.get().getNumber());
+      if (parentHeader.isPresent() && headWorldState.getWorldStateStorage().getTrieLog(blockHeader.get().getParentHash()).isPresent()) {
+          final Optional<MutableWorldState> rollbackParentWorldState =
+                  rollFullWorldStateToBlockHash(headWorldState, parentHeader.get().getBlockHash());
+          final Optional<MutableWorldState> cachedParentWorldState = getWorldState(WorldStateQueryParams.newBuilder().withShouldWorldStateUpdateHead(false).withBlockHeader(parentHeader.get()).build());
+          if (rollbackParentWorldState.isPresent() && cachedParentWorldState.isPresent() && !rollbackParentWorldState.get().rootHash().equals(cachedParentWorldState.get().rootHash())) {
+              System.out.println("failed rollback to " + parentHeader.get().getNumber());
+              throw new RuntimeException("invalid trielog");
+          }
+          System.out.println("valid rollback to " + parentHeader.get().getNumber() + " " + cachedParentWorldState.isPresent());
+
+          final Optional<MutableWorldState> mutableWorldState = rollFullWorldStateToBlockHash(headWorldState, blockHash);
+          final Optional<MutableWorldState> cachedmutableWorldState = getWorldState(WorldStateQueryParams.newBuilder().withShouldWorldStateUpdateHead(false).withBlockHeader(blockHeader.get()).build());
+          if (mutableWorldState.isPresent() && cachedmutableWorldState.isPresent() && !mutableWorldState.get().rootHash().equals(cachedmutableWorldState.get().rootHash())) {
+              System.out.println("failed rollback to " + parentHeader.get().getNumber());
+              throw new RuntimeException("invalid trielog");
+          }
+          System.out.println("valid rollforward to " + parentHeader.get().getNumber() + " " + cachedmutableWorldState.isPresent());
+          return rollFullWorldStateToBlockHash(headWorldState, blockHash);
       }
     }
-    // TODO end remove before merging on main*/
+
+
+      // TODO end remove before merging on main*/
     return rollFullWorldStateToBlockHash(headWorldState, blockHash);
   }
 

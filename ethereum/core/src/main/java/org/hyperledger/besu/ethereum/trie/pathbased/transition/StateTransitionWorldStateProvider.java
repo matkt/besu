@@ -70,7 +70,7 @@ public class StateTransitionWorldStateProvider implements WorldStateArchive {
             System.out.println(
                 "Start image transition for block " + event.getBlock().getHeader().getNumber());
             PreImageDownloaderV2.generatePreloadedStateData(
-                    (BonsaiWorldState) bonsaiProvider.getWorldState(), 15000)
+                    (BonsaiWorldState) bonsaiProvider.getWorldState(), 7500)
                 .whenComplete((unused, throwable) -> isPreImageLoading.set(false));
           }
         });
