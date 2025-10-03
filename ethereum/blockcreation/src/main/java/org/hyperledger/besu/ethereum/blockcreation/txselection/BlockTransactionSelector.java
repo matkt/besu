@@ -47,12 +47,11 @@ import org.hyperledger.besu.ethereum.mainnet.AbstractBlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.PendingBlockAccessList;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
-import org.hyperledger.besu.evm.worldstate.StackedUpdater;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.data.TransactionSelectionResult;
 import org.hyperledger.besu.plugin.services.TransactionSelectionService;
@@ -605,9 +604,11 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
         blockSelectionContext
             .preExecutionProcessor()
             .createBlockHashLookup(blockchain, blockSelectionContext.pendingBlockHeader());
-    final Optional<PendingBlockAccessList> pendingBlockAccessList =
+    final Optional<AccessLocationTracker> transactionLocationTracker =
         maybeBlockAccessListBuilder.map(
-            b -> BlockAccessListBuilder.createPendingBlockAccessList(currentTxnLocation.get()));
+            b ->
+                BlockAccessListBuilder.createTransactionAccessLocationTracker(
+                    currentTxnLocation.get()));
     final TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             txWorldStateUpdater,
@@ -618,9 +619,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
             blockHashLookup,
             TransactionValidationParams.mining(),
             blockSelectionContext.blobGasPrice(),
-            pendingBlockAccessList);
-    pendingBlockAccessList.ifPresent(
-        pending -> pending.generateBlockAccessList((StackedUpdater<?, ?>) txWorldStateUpdater));
+            transactionLocationTracker);
     return result;
   }
 
@@ -655,8 +654,8 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
           maybeBlockAccessListBuilder.ifPresent(
               blockAccessListBuilder ->
                   processingResult
-                      .getPendingBlockAccessList()
-                      .ifPresent(blockAccessListBuilder::applyPendingBlockAccessList));
+                      .getPartialBlockAccessView()
+                      .ifPresent(blockAccessListBuilder::apply));
 
           transactionSelectionResults.updateSelected(transaction, receipt, gasUsedByTransaction);
 
