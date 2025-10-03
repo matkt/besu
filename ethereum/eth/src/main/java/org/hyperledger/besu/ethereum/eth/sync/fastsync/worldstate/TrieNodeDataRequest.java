@@ -42,7 +42,7 @@ abstract class TrieNodeDataRequest extends NodeDataRequest {
     }
 
     final List<Node<Bytes>> nodes =
-        TrieNodeDecoder.decodeNodes(getLocation().orElse(Bytes.EMPTY), getData());
+        TrieNodeDecoder.decodeNodes(getLocation().orElse(Bytes.EMPTY), getHash(), getData());
     return nodes.stream()
         .flatMap(
             node -> {

@@ -26,6 +26,7 @@ public class StoredNode<V> implements Node<V> {
   private final NodeFactory<V> nodeFactory;
   private final Bytes location;
   private final Bytes32 hash;
+  private Bytes encodedBytesRef;
   private Node<V> loaded;
 
   public StoredNode(final NodeFactory<V> nodeFactory, final Bytes location, final Bytes32 hash) {
@@ -33,6 +34,13 @@ public class StoredNode<V> implements Node<V> {
     this.location = location;
     this.hash = hash;
   }
+
+    public StoredNode(final NodeFactory<V> nodeFactory, final Bytes location, final Bytes32 hash, final Bytes encodedBytesRef) {
+        this.nodeFactory = nodeFactory;
+        this.location = location;
+        this.hash = hash;
+        this.encodedBytesRef = encodedBytesRef;
+    }
 
   /**
    * @return True if the node needs to be persisted.
@@ -106,7 +114,10 @@ public class StoredNode<V> implements Node<V> {
   @Override
   public Bytes getEncodedBytesRef() {
     // If this node was stored, then it must have a rlp larger than a hash
-    return RLP.encodeOne(hash);
+      if(encodedBytesRef == null) {
+          encodedBytesRef = RLP.encodeOne(hash);
+      }
+      return encodedBytesRef;
   }
 
   @Override
@@ -120,7 +131,7 @@ public class StoredNode<V> implements Node<V> {
     return hash;
   }
 
-  @Override
+    @Override
   public Node<V> replacePath(final Bytes path) {
     return load().replacePath(path);
   }

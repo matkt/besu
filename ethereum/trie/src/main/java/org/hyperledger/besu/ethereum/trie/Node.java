@@ -83,4 +83,12 @@ public interface Node<V> {
    * Marking a node as need heal means that one of its children is not yet present in the storage
    */
   void markHealNeeded();
+
+  default void setHash(final Bytes32 hash){
+
+  }
+
+  default void setEncodedBytes(final Bytes rlp){
+
+  }
 }

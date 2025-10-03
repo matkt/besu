@@ -108,7 +108,9 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
         .map(
             rlp -> {
               final Node<V> node =
-                  decode(location, rlp, () -> format("Invalid RLP value for hash %s", hash));
+                  decode(location, hash, rlp, () -> format("Invalid RLP value for hash %s", hash));
+              node.setHash(hash);
+              node.setEncodedBytes(rlp);
               // recalculating the node.hash() is expensive, so we only do this as an assertion
               assert (hash.equals(node.getHash()))
                   : "Node hash " + node.getHash() + " not equal to expected " + hash;
@@ -116,21 +118,21 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
             });
   }
 
-  public Node<V> decode(final Bytes location, final Bytes rlp) {
-    return decode(location, rlp, () -> String.format("Failed to decode value %s", rlp.toString()));
+  public Node<V> decode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+    return decode(location,hash, rlp, () -> String.format("Failed to decode value %s", rlp.toString()));
   }
 
-  private Node<V> decode(final Bytes location, final Bytes rlp, final Supplier<String> errMessage)
+  private Node<V> decode(final Bytes location, final Bytes32 hash, final Bytes rlp, final Supplier<String> errMessage)
       throws MerkleTrieException {
     try {
-      return decode(location, RLP.input(rlp), errMessage);
+      return decode(location, hash, RLP.input(rlp), errMessage);
     } catch (final RLPException ex) {
       throw new MerkleTrieException(errMessage.get(), ex);
     }
   }
 
   private Node<V> decode(
-      final Bytes location, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
+      final Bytes location, final Bytes32 hash, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
     final int nodesCount = nodeRLPs.enterList();
     switch (nodesCount) {
       case 1:
@@ -149,17 +151,17 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
 
         final int size = path.size();
         if (size > 0 && path.get(size - 1) == CompactEncoding.LEAF_TERMINATOR) {
-          final LeafNode<V> leafNode = decodeLeaf(location, path, nodeRLPs, errMessage);
+          final LeafNode<V> leafNode = decodeLeaf(location, hash,path, nodeRLPs, errMessage);
           nodeRLPs.leaveList();
           return leafNode;
         } else {
-          final Node<V> extensionNode = decodeExtension(location, path, nodeRLPs, errMessage);
+          final Node<V> extensionNode = decodeExtension(location, hash,path, nodeRLPs, errMessage);
           nodeRLPs.leaveList();
           return extensionNode;
         }
 
       case (RADIX + 1):
-        final BranchNode<V> branchNode = decodeBranch(location, nodeRLPs, errMessage);
+        final BranchNode<V> branchNode = decodeBranch(location, hash,nodeRLPs, errMessage);
         nodeRLPs.leaveList();
         return branchNode;
 
@@ -171,61 +173,66 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
 
   protected Node<V> decodeExtension(
       final Bytes location,
+      final Bytes32 hash,
       final Bytes path,
       final RLPInput valueRlp,
       final Supplier<String> errMessage) {
-    final RLPInput childRlp = valueRlp.readAsRlp();
-    if (childRlp.nextIsList()) {
+    final RLPInput extensionRlp = valueRlp.readAsRlp();
+    if (extensionRlp.nextIsList()) {
       final Node<V> childNode =
-          decode(location == null ? null : Bytes.concatenate(location, path), childRlp, errMessage);
+          decode(location == null ? null : Bytes.concatenate(location, path), hash, extensionRlp, errMessage);
       return new ExtensionNode<>(location, path, childNode, this);
     } else {
-      final Bytes32 childHash = childRlp.readBytes32();
+        final RLPInput childRlp = extensionRlp.readAsRlp();
+        final Bytes32 childHash = childRlp.readBytes32();
       final StoredNode<V> childNode =
           new StoredNode<>(
-              this, location == null ? null : Bytes.concatenate(location, path), childHash);
-      return new ExtensionNode<>(location, path, childNode, this);
+              this, location == null ? null : Bytes.concatenate(location, path), childHash, childRlp.raw());
+      return new ExtensionNode<>(location, hash, path, extensionRlp.raw(), childNode, this);
     }
   }
 
   @SuppressWarnings("unchecked")
   protected BranchNode<V> decodeBranch(
-      final Bytes location, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
+      final Bytes location, final Bytes32 hash, final RLPInput branchRLP, final Supplier<String> errMessage) {
     final ArrayList<Node<V>> children = new ArrayList<>(RADIX);
     for (int i = 0; i < RADIX; ++i) {
-      if (nodeRLPs.nextIsNull()) {
-        nodeRLPs.skipNext();
+      if (branchRLP.nextIsNull()) {
+        branchRLP.skipNext();
         children.add(NULL_NODE);
-      } else if (nodeRLPs.nextIsList()) {
+      } else if (branchRLP.nextIsList()) {
         final Node<V> child =
             decode(
                 location == null ? null : Bytes.concatenate(location, Bytes.of((byte) i)),
-                nodeRLPs,
+                hash,
+                branchRLP,
                 errMessage);
         children.add(child);
       } else {
-        final Bytes32 childHash = nodeRLPs.readBytes32();
+          final RLPInput childRlP = branchRLP.readAsRlp();
+          final Bytes32 childHash = childRlP.readBytes32();
         children.add(
             new StoredNode<>(
                 this,
                 location == null ? null : Bytes.concatenate(location, Bytes.of((byte) i)),
-                childHash));
+                childHash, childRlP.raw()));
       }
     }
 
     final Optional<V> value;
-    if (nodeRLPs.nextIsNull()) {
-      nodeRLPs.skipNext();
+    if (branchRLP.nextIsNull()) {
+      branchRLP.skipNext();
       value = Optional.empty();
     } else {
-      value = Optional.of(decodeValue(nodeRLPs, errMessage));
+      value = Optional.of(decodeValue(branchRLP, errMessage));
     }
 
-    return new BranchNode<>(location, children, value, this, valueSerializer);
+    return new BranchNode<>(location, hash , children, value, branchRLP.raw(), this, valueSerializer);
   }
 
   protected LeafNode<V> decodeLeaf(
       final Bytes location,
+      final Bytes32 hash,
       final Bytes path,
       final RLPInput valueRlp,
       final Supplier<String> errMessage) {
@@ -233,7 +240,7 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
       throw new MerkleTrieException(errMessage.get() + ": leaf has null value");
     }
     final V value = decodeValue(valueRlp, errMessage);
-    return new LeafNode<>(location, path, value, this, valueSerializer);
+    return new LeafNode<>(location, hash, path, value,valueRlp.raw(), this, valueSerializer);
   }
 
   @SuppressWarnings("unchecked")

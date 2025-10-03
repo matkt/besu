@@ -59,6 +59,24 @@ public class ExtensionNode<V> implements Node<V> {
     this.nodeFactory = nodeFactory;
   }
 
+    public ExtensionNode(
+            final Bytes location,
+            final Bytes32 hash,
+            final Bytes path,
+            final Bytes rlp,
+            final Node<V> child,
+            final NodeFactory<V> nodeFactory) {
+        assert (path.size() > 0);
+        assert (path.get(path.size() - 1) != CompactEncoding.LEAF_TERMINATOR)
+                : "Extension path ends in a leaf terminator";
+        this.location = Optional.ofNullable(location);
+        this.hash = new SoftReference<>(hash);
+        this.rlp = new WeakReference<>(rlp);
+        this.path = path;
+        this.child = child;
+        this.nodeFactory = nodeFactory;
+    }
+
   public ExtensionNode(final Bytes path, final Node<V> child, final NodeFactory<V> nodeFactory) {
     assert (path.size() > 0);
     assert (path.get(path.size() - 1) != CompactEncoding.LEAF_TERMINATOR)
@@ -137,7 +155,9 @@ public class ExtensionNode<V> implements Node<V> {
 
   @Override
   public Bytes32 getHash() {
-    if (hash != null) {
+      System.out.println("getHash "+hash+" "+isDirty());
+
+      if (hash != null) {
       final Bytes32 hashed = hash.get();
       if (hashed != null) {
         return hashed;
@@ -184,6 +204,8 @@ public class ExtensionNode<V> implements Node<V> {
 
   @Override
   public void markDirty() {
+      hash = null;
+      rlp = null;
     dirty = true;
   }
 
@@ -196,4 +218,5 @@ public class ExtensionNode<V> implements Node<V> {
   public void markHealNeeded() {
     this.needHeal = true;
   }
+
 }

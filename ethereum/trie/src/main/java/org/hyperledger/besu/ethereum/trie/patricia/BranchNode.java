@@ -80,6 +80,24 @@ public class BranchNode<V> implements Node<V> {
     this.valueSerializer = valueSerializer;
   }
 
+    public BranchNode(
+            final Bytes location,
+            final Bytes32 hash,
+            final List<Node<V>> children,
+            final Optional<V> value,
+            final Bytes rlp,
+            final NodeFactory<V> nodeFactory,
+            final Function<V, Bytes> valueSerializer) {
+        assert (children.size() == maxChild());
+        this.location = Optional.ofNullable(location);
+        this.hash = new SoftReference<>(hash);
+        this.children = children;
+        this.value = value;
+        this.encodedBytes = new WeakReference<>(rlp);
+        this.nodeFactory = nodeFactory;
+        this.valueSerializer = valueSerializer;
+    }
+
   @Override
   public Node<V> accept(final PathNodeVisitor<V> visitor, final Bytes path) {
     return visitor.visit(this, path);
@@ -262,6 +280,8 @@ public class BranchNode<V> implements Node<V> {
 
   @Override
   public void markDirty() {
+      hash = null;
+      encodedBytes = null;
     dirty = true;
   }
 
@@ -275,7 +295,7 @@ public class BranchNode<V> implements Node<V> {
     this.needHeal = true;
   }
 
-  public int maxChild() {
+    public int maxChild() {
     return 16;
   }
 }
