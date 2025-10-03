@@ -84,11 +84,7 @@ public interface Node<V> {
    */
   void markHealNeeded();
 
-  default void setHash(final Bytes32 hash){
+  default void setHash(final Bytes32 hash) {}
 
-  }
-
-  default void setEncodedBytes(final Bytes rlp){
-
-  }
+  default void setEncodedBytes(final Bytes rlp) {}
 }

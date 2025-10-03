@@ -70,22 +70,22 @@ public class LeafNode<V> implements Node<V> {
     this.valueSerializer = valueSerializer;
   }
 
-    public LeafNode(
-            final Bytes location,
-            final Bytes32 hash,
-            final Bytes path,
-            final V value,
-            final Bytes rlp,
-            final NodeFactory<V> nodeFactory,
-            final Function<V, Bytes> valueSerializer) {
-        this.location = Optional.ofNullable(location);
-        this.hash = new SoftReference<>(hash);
-        this.path = path;
-        this.value = value;
-        this.encodedBytes = new WeakReference<>(rlp);
-        this.nodeFactory = nodeFactory;
-        this.valueSerializer = valueSerializer;
-    }
+  public LeafNode(
+      final Bytes location,
+      final Bytes32 hash,
+      final Bytes path,
+      final V value,
+      final Bytes rlp,
+      final NodeFactory<V> nodeFactory,
+      final Function<V, Bytes> valueSerializer) {
+    this.location = Optional.ofNullable(location);
+    this.hash = new SoftReference<>(hash);
+    this.path = path;
+    this.value = value;
+    this.encodedBytes = new WeakReference<>(rlp);
+    this.nodeFactory = nodeFactory;
+    this.valueSerializer = valueSerializer;
+  }
 
   @Override
   public Node<V> accept(final PathNodeVisitor<V> visitor, final Bytes path) {
@@ -152,7 +152,7 @@ public class LeafNode<V> implements Node<V> {
 
   @Override
   public Bytes32 getHash() {
-      if (hash != null) {
+    if (hash != null) {
       final Bytes32 hashed = hash.get();
       if (hashed != null) {
         return hashed;
@@ -186,8 +186,8 @@ public class LeafNode<V> implements Node<V> {
 
   @Override
   public void markDirty() {
-      hash = null;
-      encodedBytes = null;
+    hash = null;
+    encodedBytes = null;
     dirty = true;
   }
 
@@ -200,5 +200,4 @@ public class LeafNode<V> implements Node<V> {
   public void markHealNeeded() {
     // nothing to do a leaf don't have child
   }
-
 }

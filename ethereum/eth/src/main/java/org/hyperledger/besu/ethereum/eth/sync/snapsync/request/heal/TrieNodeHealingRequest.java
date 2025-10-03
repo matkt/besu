@@ -100,7 +100,7 @@ public abstract class TrieNodeHealingRequest extends SnapDataRequest
       return Stream.empty();
     }
 
-    final List<Node<Bytes>> nodes = TrieNodeDecoder.decodeNodes(location,nodeHash, data);
+    final List<Node<Bytes>> nodes = TrieNodeDecoder.decodeNodes(location, nodeHash, data);
     return nodes.stream()
         .flatMap(
             node -> {

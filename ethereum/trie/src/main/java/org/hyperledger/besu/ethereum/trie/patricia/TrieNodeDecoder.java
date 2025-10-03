@@ -46,7 +46,7 @@ public class TrieNodeDecoder {
    *
    * @param location The location in the trie.
    * @param hash The hash of the trie node.
-   * @param rlp      The rlp-encoded node
+   * @param rlp The rlp-encoded node
    * @return A {@code Node} representation of the rlp data
    */
   public static Node<Bytes> decode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
@@ -60,7 +60,8 @@ public class TrieNodeDecoder {
    * @param nodeRlp The bytes of the trie node to be decoded.
    * @return A list of nodes and node references embedded in the given rlp.
    */
-  public static List<Node<Bytes>> decodeNodes(final Bytes location, final Bytes32 hash, final Bytes nodeRlp) {
+  public static List<Node<Bytes>> decodeNodes(
+      final Bytes location, final Bytes32 hash, final Bytes nodeRlp) {
     if (nodeRlp.equals(MerkleTrie.EMPTY_TRIE_NODE)) {
       return new ArrayList<>();
     }

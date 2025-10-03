@@ -64,7 +64,7 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
       final RLPInput valueRlp,
       final Supplier<String> errMessage) {
     final ExtensionNode<V> vNode =
-        (ExtensionNode<V>) super.decodeExtension(location,hash, path, valueRlp, errMessage);
+        (ExtensionNode<V>) super.decodeExtension(location, hash, path, valueRlp, errMessage);
     if (isInRange(Bytes.concatenate(location, Bytes.of(0)), startKeyPath, endKeyPath)) {
       innerNodes.add(
           ImmutableInnerNode.builder()
@@ -77,8 +77,11 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
 
   @Override
   protected BranchNode<V> decodeBranch(
-          final Bytes location, final Bytes32 hash, final RLPInput branchRLP, final Supplier<String> errMessage) {
-    final BranchNode<V> vBranchNode = super.decodeBranch(location,hash, branchRLP, errMessage);
+      final Bytes location,
+      final Bytes32 hash,
+      final RLPInput branchRLP,
+      final Supplier<String> errMessage) {
+    final BranchNode<V> vBranchNode = super.decodeBranch(location, hash, branchRLP, errMessage);
     final List<Node<V>> children = vBranchNode.getChildren();
     for (int i = 0; i < children.size(); i++) {
       if (isInRange(Bytes.concatenate(location, Bytes.of(i)), startKeyPath, endKeyPath)) {
@@ -99,7 +102,7 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
       final Bytes path,
       final RLPInput valueRlp,
       final Supplier<String> errMessage) {
-    final LeafNode<V> vLeafNode = super.decodeLeaf(location, hash,path, valueRlp, errMessage);
+    final LeafNode<V> vLeafNode = super.decodeLeaf(location, hash, path, valueRlp, errMessage);
     final Bytes concatenatePath = Bytes.concatenate(location, path);
     if (isInRange(concatenatePath.slice(0, concatenatePath.size() - 1), startKeyPath, endKeyPath)) {
       innerNodes.add(ImmutableInnerNode.builder().location(location).path(path).build());
