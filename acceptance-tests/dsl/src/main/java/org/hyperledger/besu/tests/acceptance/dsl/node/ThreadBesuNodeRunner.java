@@ -289,6 +289,7 @@ public class ThreadBesuNodeRunner implements BesuNodeRunner {
     besuPluginContext.addService(
         WorldStateService.class,
         new WorldStateServiceImpl(
+            besuController.getProtocolSchedule(),
             besuController.getProtocolContext().getWorldStateArchive(),
             besuController.getProtocolContext().getBlockchain()));
   }

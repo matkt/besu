@@ -18,9 +18,16 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.World
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.cache.PathBasedCachedWorldStorageManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.Unstable;
+import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.WorldStateService;
 
 import java.util.Optional;
@@ -33,19 +40,24 @@ import java.util.Optional;
  */
 @Unstable
 public class WorldStateServiceImpl implements WorldStateService {
+  private final BlockHeaderFunctions blockHeaderFunctions;
   private final WorldStateArchive worldStateArchive;
   private final Blockchain blockchain;
 
   /**
    * Constructs a new WorldStateServiceImpl.
    *
+   * @param protocolSchedule The protocol schedule used
    * @param worldStateArchive The world state archive that provides access to world state data
    * @param blockchain The blockchain instance used to retrieve block headers
    */
   public WorldStateServiceImpl(
-      final WorldStateArchive worldStateArchive, final Blockchain blockchain) {
+      final ProtocolSchedule protocolSchedule,
+      final WorldStateArchive worldStateArchive,
+      final Blockchain blockchain) {
     this.worldStateArchive = worldStateArchive;
     this.blockchain = blockchain;
+    this.blockHeaderFunctions = ScheduleBasedBlockHeaderFunctions.create(protocolSchedule);
   }
 
   /**
@@ -76,5 +88,19 @@ public class WorldStateServiceImpl implements WorldStateService {
         .getBlockHeader(blockHash)
         .flatMap(
             header -> worldStateArchive.getWorldState(withBlockHeaderAndNoUpdateNodeHead(header)));
+  }
+
+  @Override
+  public void cacheWorldView(final BlockHeader blockHeader, final WorldView worldView) {
+    if (worldStateArchive instanceof PathBasedWorldStateProvider pathBasedWorldStateProvider) {
+      PathBasedCachedWorldStorageManager cachedWorldStorageManager =
+          pathBasedWorldStateProvider.getCachedWorldStorageManager();
+      org.hyperledger.besu.ethereum.core.BlockHeader header =
+          org.hyperledger.besu.ethereum.core.BlockHeader.convertPluginBlockHeader(
+              blockHeader, blockHeaderFunctions);
+      cachedWorldStorageManager.removeCachedLayer(header);
+      cachedWorldStorageManager.addCachedLayer(
+          header, header.getStateRoot(), (PathBasedWorldState) worldView);
+    }
   }
 }

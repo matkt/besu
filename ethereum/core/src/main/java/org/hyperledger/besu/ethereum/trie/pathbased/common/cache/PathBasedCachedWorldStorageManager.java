@@ -119,6 +119,11 @@ public abstract class PathBasedCachedWorldStorageManager implements StorageSubsc
     scrubCachedLayers(blockHeader.getNumber());
   }
 
+  public synchronized void removeCachedLayer(final BlockHeader blockHeader) {
+    cachedWorldStatesByHash.remove(blockHeader.getBlockHash());
+    stateRootToBlockHeaderCache.invalidate(blockHeader.getStateRoot());
+  }
+
   private synchronized void scrubCachedLayers(final long newMaxHeight) {
     if (cachedWorldStatesByHash.size() > RETAINED_LAYERS) {
       final long waterline = newMaxHeight - RETAINED_LAYERS;

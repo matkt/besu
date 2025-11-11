@@ -21,9 +21,11 @@ import org.hyperledger.besu.datatypes.StateOverrideMap;
 import org.hyperledger.besu.datatypes.Transaction;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.core.MiningConfiguration;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.transaction.BlockSimulationParameter;
 import org.hyperledger.besu.ethereum.transaction.BlockSimulationResult;
 import org.hyperledger.besu.ethereum.transaction.BlockSimulator;
@@ -32,6 +34,7 @@ import org.hyperledger.besu.ethereum.transaction.CallParameter;
 import org.hyperledger.besu.ethereum.transaction.TransactionSimulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
+import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.Unstable;
 import org.hyperledger.besu.plugin.data.BlockOverrides;
 import org.hyperledger.besu.plugin.data.PluginBlockSimulationResult;
@@ -48,6 +51,7 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
   private final BlockSimulator blockSimulator;
   private final WorldStateArchive worldStateArchive;
   private final Blockchain blockchain;
+  private final BlockHeaderFunctions blockHeaderFunctions;
 
   private static final Supplier<SignatureAlgorithm> SIGNATURE_ALGORITHM =
       Suppliers.memoize(SignatureAlgorithmFactory::getInstance);
@@ -76,6 +80,7 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
       final ProtocolSchedule protocolSchedule,
       final Blockchain blockchain) {
     this.blockchain = blockchain;
+    this.blockHeaderFunctions = ScheduleBasedBlockHeaderFunctions.create(protocolSchedule);
     blockSimulator =
         new BlockSimulator(
             worldStateArchive,
@@ -90,12 +95,32 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
   /**
    * Simulate the processing of a block given a header, a list of transactions, and blockOverrides.
    *
-   * @param blockNumber the block number
+   * @param header the block header
+   * @param worldView the worldview to use during block processing
    * @param transactions the transactions to include in the block
    * @param blockOverrides the blockSimulationOverride of the block
    * @param stateOverrides state overrides of the block
    * @return the block context
    */
+  @Override
+  public PluginBlockSimulationResult simulate(
+      final org.hyperledger.besu.plugin.data.BlockHeader header,
+      final WorldView worldView,
+      final List<? extends Transaction> transactions,
+      final BlockOverrides blockOverrides,
+      final StateOverrideMap stateOverrides) {
+    if (worldView instanceof MutableWorldState mutableWorldState) {
+      return processSimulation(
+          BlockHeader.convertPluginBlockHeader(header, blockHeaderFunctions),
+          mutableWorldState,
+          transactions,
+          blockOverrides,
+          stateOverrides,
+          false);
+    }
+    throw new IllegalArgumentException("invalid worldview");
+  }
+
   @Override
   public PluginBlockSimulationResult simulate(
       final long blockNumber,
@@ -131,12 +156,27 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
       final BlockOverrides blockOverrides,
       final StateOverrideMap stateOverrides,
       final boolean persistWorldState) {
-    BlockHeader header = getBlockHeader(blockNumber);
+    final BlockHeader header = getBlockHeader(blockNumber);
+    try (final MutableWorldState ws = getWorldState(header, persistWorldState)) {
+      return processSimulation(
+          header, ws, transactions, blockOverrides, stateOverrides, persistWorldState);
+    } catch (final Exception e) {
+      throw new RuntimeException("Error simulating block", e);
+    }
+  }
+
+  private PluginBlockSimulationResult processSimulation(
+      final BlockHeader header,
+      final MutableWorldState worldstate,
+      final List<? extends Transaction> transactions,
+      final BlockOverrides blockOverrides,
+      final StateOverrideMap stateOverrides,
+      final boolean persistWorldState) {
     List<CallParameter> callParameters =
         transactions.stream().map(CallParameter::fromTransaction).toList();
     BlockStateCall blockStateCall =
         new BlockStateCall(callParameters, blockOverrides, stateOverrides);
-    try (final MutableWorldState ws = getWorldState(header, persistWorldState)) {
+    try (final MutableWorldState ws = worldstate) {
       BlockSimulationParameter blockSimulationParameter =
           new BlockSimulationParameter.BlockSimulationParameterBuilder()
               .blockStateCalls(List.of(blockStateCall))

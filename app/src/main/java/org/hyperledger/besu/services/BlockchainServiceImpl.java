@@ -170,6 +170,14 @@ public class BlockchainServiceImpl implements BlockchainService {
   }
 
   @Override
+  public void storeHeader(final BlockHeader blockHeader) {
+    final org.hyperledger.besu.ethereum.core.BlockHeader coreHeader =
+        (org.hyperledger.besu.ethereum.core.BlockHeader) blockHeader;
+    blockchain.unsafeStoreHeader(
+        coreHeader, blockchain.calculateTotalDifficulty(coreHeader), false);
+  }
+
+  @Override
   public Optional<Hash> getSafeBlock() {
     return blockchain.getSafeBlock();
   }

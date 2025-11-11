@@ -17,6 +17,7 @@ package org.hyperledger.besu.plugin.services;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.Unstable;
+import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import java.util.Optional;
 
@@ -38,4 +39,12 @@ public interface WorldStateService extends BesuService {
    * @return the world view at the specified block header
    */
   Optional<WorldView> getWorldView(final Hash blockHash);
+
+  /**
+   * Cache a worldview given a a specific block header
+   *
+   * @param blockHeader the block header to cache the world view for
+   * @param worldView the worldview to cache
+   */
+  void cacheWorldView(final BlockHeader blockHeader, final WorldView worldView);
 }

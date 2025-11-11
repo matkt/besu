@@ -49,6 +49,14 @@ public interface RlpConverterService extends BesuService {
   TransactionReceipt buildReceiptFromRlp(final Bytes rlp);
 
   /**
+   * Builds a transaction from RLP.
+   *
+   * @param rlp the RLP to build the transaction from.
+   * @return the transaction.
+   */
+  org.hyperledger.besu.datatypes.Transaction buildTransactionFromRlp(final Bytes rlp);
+
+  /**
    * RLP encodes a block header.
    *
    * @param blockHeader the block header to build RLP from.

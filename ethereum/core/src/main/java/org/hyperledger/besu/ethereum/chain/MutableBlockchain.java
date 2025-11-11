@@ -110,6 +110,16 @@ public interface MutableBlockchain extends Blockchain {
    * Store a block header to the blockchain, updating the chain state.
    *
    * @param blockHeader The block header to store.
+   * @param totalDifficulty The block total difficulty.
+   * @param setHead is the head should be this new header.
+   */
+  void unsafeStoreHeader(BlockHeader blockHeader, Difficulty totalDifficulty, boolean setHead);
+
+  /**
+   * Store a block header to the blockchain, updating the chain state.
+   *
+   * @param blockHeader The block header to store.
+   * @param totalDifficulty The block total difficulty.
    */
   void unsafeStoreHeader(BlockHeader blockHeader, Difficulty totalDifficulty);
 

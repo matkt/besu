@@ -87,6 +87,13 @@ public interface BlockchainService extends BesuService {
   Optional<List<TransactionReceipt>> getReceiptsByBlockHash(Hash blockHash);
 
   /**
+   * Store a block header
+   *
+   * @param blockHeader the block header
+   */
+  void storeHeader(BlockHeader blockHeader);
+
+  /**
    * Store a block
    *
    * @param blockHeader the block header

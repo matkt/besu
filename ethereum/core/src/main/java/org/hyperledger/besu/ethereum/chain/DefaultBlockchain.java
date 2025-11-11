@@ -524,7 +524,8 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
-  public void unsafeStoreHeader(final BlockHeader blockHeader, final Difficulty totalDifficulty) {
+  public void unsafeStoreHeader(
+      final BlockHeader blockHeader, final Difficulty totalDifficulty, final boolean setHead) {
     // as this is used only to store premerge block headers, we don't cache the header in this case
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
     updater.putBlockHeader(blockHeader.getHash(), blockHeader);
@@ -532,8 +533,15 @@ public class DefaultBlockchain implements MutableBlockchain {
     updater.putTotalDifficulty(blockHeader.getHash(), totalDifficulty);
     this.chainHeader = blockHeader;
     this.totalDifficulty = totalDifficulty;
-    updater.setChainHead(blockHeader.getBlockHash());
+    if (setHead) {
+      updater.setChainHead(blockHeader.getBlockHash());
+    }
     updater.commit();
+  }
+
+  @Override
+  public void unsafeStoreHeader(final BlockHeader blockHeader, final Difficulty totalDifficulty) {
+    unsafeStoreHeader(blockHeader, totalDifficulty, true);
   }
 
   private void cacheBlockData(
