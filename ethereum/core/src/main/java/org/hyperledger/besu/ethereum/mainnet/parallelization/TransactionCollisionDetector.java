@@ -213,12 +213,6 @@ public class TransactionCollisionDetector {
             map.forEach(
                 (storageSlotKey, slot) -> {
                   if (!slot.isUnchanged()) {
-                    if (slot.getPrior().isZero() && slot.getUpdated() == null) {
-                      System.out.println("invalid conflict");
-                    }
-                    if (slot.getPrior() == null && slot.getUpdated().isZero()) {
-                      System.out.println("invalid conflict");
-                    }
                     slots.add(storageSlotKey);
                   }
                 });
