@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.cache.PathBasedCachedWorldStorageManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.Unstable;
@@ -92,7 +91,16 @@ public class WorldStateServiceImpl implements WorldStateService {
   }
 
   @Override
-  public void cacheWorldView(final BlockHeader blockHeader, final WorldView worldView) {
+  public void pruneTrieLog(final BlockHeader blockHeader) {
+    if (worldStateArchive instanceof PathBasedWorldStateProvider pathBasedWorldStateProvider) {
+      pathBasedWorldStateProvider
+          .getWorldStateKeyValueStorage()
+          .pruneTrieLog(blockHeader.getBlockHash());
+    }
+  }
+
+  @Override
+  public void pruneCachedWorldState(final BlockHeader blockHeader) {
     if (worldStateArchive instanceof PathBasedWorldStateProvider pathBasedWorldStateProvider) {
       PathBasedCachedWorldStorageManager cachedWorldStorageManager =
           pathBasedWorldStateProvider.getCachedWorldStorageManager();
@@ -101,8 +109,9 @@ public class WorldStateServiceImpl implements WorldStateService {
               blockHeader,
               new BlockHeaderFunctions() {
                 @Override
-                public Hash hash(org.hyperledger.besu.ethereum.core.BlockHeader header) {
-                  return Hash.ZERO;
+                public Hash hash(final org.hyperledger.besu.ethereum.core.BlockHeader header) {
+                  return blockHeader
+                      .getBlockHash(); // force hash of the passed block (needed for pending blocks)
                 }
 
                 @Override
@@ -112,8 +121,6 @@ public class WorldStateServiceImpl implements WorldStateService {
                 }
               });
       cachedWorldStorageManager.removeCachedLayer(header);
-      cachedWorldStorageManager.addCachedLayer(
-          header, header.getStateRoot(), (PathBasedWorldState) worldView);
     }
   }
 }

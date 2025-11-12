@@ -41,10 +41,16 @@ public interface WorldStateService extends BesuService {
   Optional<WorldView> getWorldView(final Hash blockHash);
 
   /**
-   * Cache a worldview given a a specific block header
+   * Prune trielog for a specific header
    *
-   * @param blockHeader the block header to cache the world view for
-   * @param worldView the worldview to cache
+   * @param blockHeader the block header to remove from the trielog storage
    */
-  void cacheWorldView(final BlockHeader blockHeader, final WorldView worldView);
+  void pruneTrieLog(BlockHeader blockHeader);
+
+  /**
+   * Prune cached worldstate for a specific header
+   *
+   * @param blockHeader the block header to remove from the cache
+   */
+  void pruneCachedWorldState(BlockHeader blockHeader);
 }
