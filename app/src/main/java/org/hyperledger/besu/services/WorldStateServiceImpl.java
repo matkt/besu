@@ -19,6 +19,7 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.World
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.core.ParsedExtraData;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.cache.PathBasedCachedWorldStorageManager;
@@ -97,7 +98,19 @@ public class WorldStateServiceImpl implements WorldStateService {
           pathBasedWorldStateProvider.getCachedWorldStorageManager();
       org.hyperledger.besu.ethereum.core.BlockHeader header =
           org.hyperledger.besu.ethereum.core.BlockHeader.convertPluginBlockHeader(
-              blockHeader, blockHeaderFunctions);
+              blockHeader,
+              new BlockHeaderFunctions() {
+                @Override
+                public Hash hash(org.hyperledger.besu.ethereum.core.BlockHeader header) {
+                  return Hash.ZERO;
+                }
+
+                @Override
+                public ParsedExtraData parseExtraData(
+                    org.hyperledger.besu.ethereum.core.BlockHeader header) {
+                  return blockHeaderFunctions.parseExtraData(header);
+                }
+              });
       cachedWorldStorageManager.removeCachedLayer(header);
       cachedWorldStorageManager.addCachedLayer(
           header, header.getStateRoot(), (PathBasedWorldState) worldView);
