@@ -176,24 +176,20 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
         transactions.stream().map(CallParameter::fromTransaction).toList();
     BlockStateCall blockStateCall =
         new BlockStateCall(callParameters, blockOverrides, stateOverrides);
-    try (final MutableWorldState ws = worldstate) {
-      BlockSimulationParameter blockSimulationParameter =
-          new BlockSimulationParameter.BlockSimulationParameterBuilder()
-              .blockStateCalls(List.of(blockStateCall))
-              .validation(true)
-              .fakeSignature(FAKE_SIGNATURE)
-              .build();
+    BlockSimulationParameter blockSimulationParameter =
+        new BlockSimulationParameter.BlockSimulationParameterBuilder()
+            .blockStateCalls(List.of(blockStateCall))
+            .validation(true)
+            .fakeSignature(FAKE_SIGNATURE)
+            .build();
 
-      List<BlockSimulationResult> results =
-          blockSimulator.process(header, blockSimulationParameter, ws);
-      BlockSimulationResult result = results.getFirst();
-      if (persistWorldState) {
-        ws.persist(result.getBlock().getHeader());
-      }
-      return response(result);
-    } catch (final Exception e) {
-      throw new RuntimeException("Error simulating block", e);
+    List<BlockSimulationResult> results =
+        blockSimulator.process(header, blockSimulationParameter, worldstate);
+    BlockSimulationResult result = results.getFirst();
+    if (persistWorldState) {
+      worldstate.persist(result.getBlock().getHeader());
     }
+    return response(result);
   }
 
   private BlockHeader getBlockHeader(final long blockNumber) {
