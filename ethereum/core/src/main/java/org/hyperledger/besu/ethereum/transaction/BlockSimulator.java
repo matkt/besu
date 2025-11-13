@@ -474,7 +474,7 @@ public class BlockSimulator {
     // We don't throw an exception if coinbase is not configured.
     BlockHeaderBuilder builder =
         BlockHeaderBuilder.createDefault()
-            .parentHash(header.getHash())
+            .parentHash(header.getParentHash())
             .timestamp(timestamp)
             .number(blockNumber)
             .coinbase(
