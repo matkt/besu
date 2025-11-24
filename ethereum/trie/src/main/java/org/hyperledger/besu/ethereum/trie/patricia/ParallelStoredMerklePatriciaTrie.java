@@ -72,7 +72,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       try {
         List<Node<V>> dirtyNodes =
             root.getChildren().stream().filter(Node::isDirty).collect(Collectors.toList());
-
+        System.out.println(dirtyNodes.size());
         if (dirtyNodes.size() > 3) {
           dirtyNodes.removeFirst();
           CompletableFuture.runAsync(
