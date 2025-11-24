@@ -145,13 +145,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
     clearStorage(maybeStateUpdater, worldStateUpdater);
 
-    worldStateUpdater
-        .getStorageToClear()
-        .forEach(
-            address -> {
-              updateTheAccount(address, maybeStateUpdater, worldStateUpdater, accountTrie);
-            });
-
     // This must be done before updating the accounts so
     // that we can get the storage state hash
     Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>>
@@ -168,6 +161,13 @@ public class BonsaiWorldState extends PathBasedWorldState {
           updateTheAccount(
               addressMapEntry.getKey(), maybeStateUpdater, worldStateUpdater, accountTrie);
         });
+
+    worldStateUpdater
+        .getStorageToClear()
+        .forEach(
+            address -> {
+              updateTheAccount(address, maybeStateUpdater, worldStateUpdater, accountTrie);
+            });
 
     // TODO write to a cache and then generate a layer update from that and the
     // DB tx updates.  Right now it is just DB updates.
