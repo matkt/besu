@@ -68,7 +68,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     if (root.isDirty()) {
       List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
       final int size = dirtyNodes.size();
-      if (size >= 8) {
+      if (size >= 4) {
         dirtyNodes.parallelStream().forEach(vNode -> Objects.requireNonNull(vNode.getHash()));
       }
     }

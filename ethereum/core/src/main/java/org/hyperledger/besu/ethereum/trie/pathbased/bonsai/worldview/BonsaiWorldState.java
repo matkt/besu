@@ -138,7 +138,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
     // next walk the account trie
     final MerkleTrie<Bytes, Bytes> accountTrie =
-        createTrie(
+        createParallelTrie(
             (location, hash) ->
                 bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
                     getWorldStateStorage(), location, hash),
@@ -149,7 +149,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     final Set<Address> updateAddresses = worldStateUpdater.getAccountsToUpdate().keySet();
     Stream<Address> addressStream = updateAddresses.stream();
     if (maybeStateUpdater.isEmpty()) {
-      addressStream = updateAddresses.stream().parallel();
+      addressStream = updateAddresses.parallelStream();
     }
     addressStream.forEach(
         address -> {
