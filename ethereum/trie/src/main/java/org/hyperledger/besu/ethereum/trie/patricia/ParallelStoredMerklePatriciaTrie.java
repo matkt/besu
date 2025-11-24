@@ -24,7 +24,6 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -74,29 +73,34 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   @SuppressWarnings("resource")
   @Override
   public Bytes32 getRootHash() {
-      if (root.isDirty()) {
-          try {
-              List<Node<V>> dirtyNodes = root.getChildren().stream()
-                      .filter(Node::isDirty)
-                      .collect(Collectors.toList());
+    if (root.isDirty()) {
+      try {
+        List<Node<V>> dirtyNodes =
+            root.getChildren().stream().filter(Node::isDirty).collect(Collectors.toList());
 
-              if (!dirtyNodes.isEmpty()) {
-                  dirtyNodes.removeFirst();
-                  ForkJoinPool.commonPool().submit(() ->
-                          dirtyNodes.parallelStream().forEach(node -> {
-                              try {
-                                  Bytes32 hash = node.getHash();
-                                  Objects.requireNonNull(hash);
-                              } catch (Exception e) {
-                                  //no op
-                              }
-                          })
-                  );
-              }
-          } catch (Exception e) {
-              //no op
-          }
+        if (dirtyNodes.size() > 3) {
+          dirtyNodes.removeFirst();
+          CompletableFuture.runAsync(
+              new Runnable() {
+                @Override
+                public void run() {
+                  dirtyNodes.parallelStream()
+                      .forEach(
+                          node -> {
+                            try {
+                              Bytes32 hash = node.getHash();
+                              Objects.requireNonNull(hash);
+                            } catch (Exception e) {
+                              // no op
+                            }
+                          });
+                }
+              });
+        }
+      } catch (Exception e) {
+        // no op
       }
+    }
     return root.getHash();
   }
 }
