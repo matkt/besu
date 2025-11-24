@@ -21,9 +21,6 @@ import org.hyperledger.besu.ethereum.trie.NodeLoader;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -36,9 +33,6 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
-
-  private static final int NCPU = Runtime.getRuntime().availableProcessors();
-  private static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,
@@ -71,13 +65,13 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
   @Override
   public Bytes32 getRootHash() {
-      if (root.isDirty()) {
-          List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
-          final int size = dirtyNodes.size();
-          if(size >= 8) {
-            dirtyNodes.parallelStream().forEach(vNode -> Objects.requireNonNull(vNode.getHash()));
-          }
+    if (root.isDirty()) {
+      List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
+      final int size = dirtyNodes.size();
+      if (size >= 8) {
+        dirtyNodes.parallelStream().forEach(vNode -> Objects.requireNonNull(vNode.getHash()));
       }
+    }
     return root.getHash();
   }
 }
