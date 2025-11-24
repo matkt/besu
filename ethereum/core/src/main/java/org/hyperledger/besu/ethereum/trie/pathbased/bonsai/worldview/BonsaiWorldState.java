@@ -40,6 +40,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWo
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
+import org.hyperledger.besu.ethereum.trie.patricia.ParallelStoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -150,7 +151,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
     // next walk the account trie
     final MerkleTrie<Bytes, Bytes> accountTrie =
-        createTrie(
+        createParallelTrie(
             (location, hash) ->
                 bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
                     getWorldStateStorage(), location, hash),
@@ -471,6 +472,16 @@ public class BonsaiWorldState extends PathBasedWorldState {
       return new NoOpMerkleTrie<>();
     } else {
       return new StoredMerklePatriciaTrie<>(
+          nodeLoader, rootHash, Function.identity(), Function.identity());
+    }
+  }
+
+  private MerkleTrie<Bytes, Bytes> createParallelTrie(
+      final NodeLoader nodeLoader, final Bytes32 rootHash) {
+    if (worldStateConfig.isTrieDisabled()) {
+      return new NoOpMerkleTrie<>();
+    } else {
+      return new ParallelStoredMerklePatriciaTrie<>(
           nodeLoader, rootHash, Function.identity(), Function.identity());
     }
   }
