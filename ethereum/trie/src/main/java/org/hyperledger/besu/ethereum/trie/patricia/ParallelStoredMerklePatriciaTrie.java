@@ -71,36 +71,13 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
   @Override
   public Bytes32 getRootHash() {
-    if (root.isDirty()) {
-      try {
-        List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
-        final int size = dirtyNodes.size();
-        if (dirtyNodes.size() >= 8) {
-          for (int i = size - 1; i >= 1; i--) {
-            try {
-              int finalI = i;
-              CompletableFuture.runAsync(
-                  new Runnable() {
-                    @Override
-                    public void run() {
-                      try {
-                        Bytes32 hash = dirtyNodes.get(finalI).getHash();
-                        Objects.requireNonNull(hash);
-                      } catch (Exception e) {
-                        System.out.println(e.getMessage());
-                      }
-                    }
-                  },
-                  executor);
-            } catch (Exception e) {
-              // Ignorer les erreurs
-            }
+      if (root.isDirty()) {
+          List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
+          final int size = dirtyNodes.size();
+          if(size >= 8) {
+            dirtyNodes.parallelStream().forEach(vNode -> Objects.requireNonNull(vNode.getHash()));
           }
-        }
-      } catch (Exception e) {
-        System.out.println(e.getMessage());
       }
-    }
     return root.getHash();
   }
 }
