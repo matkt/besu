@@ -90,6 +90,7 @@ public class ParallelizedConcurrentTransactionProcessor {
    * state, ensuring that the original world state passed as a parameter remains unmodified during
    * this process.
    *
+   * @param updater test
    * @param protocolContext the current context of the protocol
    * @param blockHeader Header of the current block containing the transactions.
    * @param transactions List of transactions to be processed.
@@ -100,6 +101,7 @@ public class ParallelizedConcurrentTransactionProcessor {
    * @param blockAccessListBuilder BAL builder.
    */
   public void runAsyncBlock(
+      final PathBasedWorldStateUpdateAccumulator updater,
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final List<Transaction> transactions,
@@ -119,6 +121,7 @@ public class ParallelizedConcurrentTransactionProcessor {
       CompletableFuture.runAsync(
           () ->
               runTransaction(
+                  updater,
                   protocolContext,
                   blockHeader,
                   transactionLocation,
@@ -133,6 +136,7 @@ public class ParallelizedConcurrentTransactionProcessor {
 
   @VisibleForTesting
   public void runTransaction(
+      PathBasedWorldStateUpdateAccumulator updater,
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final int transactionLocation,
@@ -152,6 +156,7 @@ public class ParallelizedConcurrentTransactionProcessor {
                   .orElse(null)) {
         if (ws != null) {
           ws.disableCacheMerkleTrieLoader();
+          ws.getAccumulator().importStateChangesFromSource(updater);
           final ParallelizedTransactionContext.Builder contextBuilder =
               new ParallelizedTransactionContext.Builder();
           final PathBasedWorldStateUpdateAccumulator<?> roundWorldStateUpdater =

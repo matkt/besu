@@ -132,6 +132,7 @@ class ParallelizedConcurrentTransactionProcessorTest {
                 ValidationResult.valid()));
 
     processor.runTransaction(
+        updater,
         protocolContext,
         blockHeader,
         0,
@@ -179,6 +180,7 @@ class ParallelizedConcurrentTransactionProcessorTest {
                 Optional.empty()));
 
     processor.runTransaction(
+        updater,
         protocolContext,
         blockHeader,
         0,
@@ -213,6 +215,7 @@ class ParallelizedConcurrentTransactionProcessorTest {
                 ValidationResult.valid()));
 
     processor.runTransaction(
+        updater,
         protocolContext,
         blockHeader,
         0,
@@ -268,6 +271,7 @@ class ParallelizedConcurrentTransactionProcessorTest {
     BlockAccessListBuilder balBuilder = mock(BlockAccessListBuilder.class);
 
     processor.runTransaction(
+        updater,
         protocolContext,
         blockHeader,
         0,

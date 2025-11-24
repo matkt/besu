@@ -223,6 +223,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
       final Optional<PreprocessingContext> preProcessingContext =
           preprocessingBlockFunction.run(
+              worldState.updater(),
               protocolContext,
               blockHeader,
               transactions,
@@ -544,6 +545,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   public interface PreprocessingFunction {
     Optional<PreprocessingContext> run(
+        WorldUpdater updater,
         final ProtocolContext protocolContext,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
@@ -556,6 +558,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
       @Override
       public Optional<PreprocessingContext> run(
+          WorldUpdater updater,
           final ProtocolContext protocolContext,
           final BlockHeader blockHeader,
           final List<Transaction> transactions,

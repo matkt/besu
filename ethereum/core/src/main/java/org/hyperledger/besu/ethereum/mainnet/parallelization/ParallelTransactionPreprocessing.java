@@ -25,12 +25,15 @@ import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.MainnetParallelBlockProcessor.ParallelizedPreProcessingContext;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
+import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 
+@SuppressWarnings("rawtypes")
 public class ParallelTransactionPreprocessing implements PreprocessingFunction {
 
   private final MainnetTransactionProcessor transactionProcessor;
@@ -44,6 +47,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
 
   @Override
   public Optional<PreprocessingContext> run(
+      final WorldUpdater updater,
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final List<Transaction> transactions,
@@ -57,6 +61,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       // runAsyncBlock, if activated, facilitates the non-blocking parallel execution
       // of transactions in the background through an optimistic strategy.
       parallelizedConcurrentTransactionProcessor.runAsyncBlock(
+          (PathBasedWorldStateUpdateAccumulator) updater,
           protocolContext,
           blockHeader,
           transactions,
