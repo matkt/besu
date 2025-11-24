@@ -24,7 +24,9 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -69,32 +71,32 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     super(nodeFactory, rootHash);
   }
 
+  @SuppressWarnings("resource")
   @Override
   public Bytes32 getRootHash() {
-    if (root.isDirty()) {
-      try {
-        List<Node<V>> children = root.getChildren();
-        boolean ignoredTheFirstChild = false;
-        for (int i = 0; i < children.size(); i++) {
-          Node<V> vNode = children.get(i);
-          if (vNode.isDirty()) {
-            if (!ignoredTheFirstChild) {
-              ignoredTheFirstChild = true;
-            } else {
-              CompletableFuture.runAsync(
-                  () -> {
-                    Bytes32 hash = vNode.getHash();
-                    Objects.requireNonNull(hash); // to be sure it's not removed by the compiler
-                  },
-                  executor);
-            }
+      if (root.isDirty()) {
+          try {
+              List<Node<V>> dirtyNodes = root.getChildren().stream()
+                      .filter(Node::isDirty)
+                      .collect(Collectors.toList());
+
+              if (!dirtyNodes.isEmpty()) {
+                  dirtyNodes.removeFirst();
+                  ForkJoinPool.commonPool().submit(() ->
+                          dirtyNodes.parallelStream().forEach(node -> {
+                              try {
+                                  Bytes32 hash = node.getHash();
+                                  Objects.requireNonNull(hash);
+                              } catch (Exception e) {
+                                  //no op
+                              }
+                          })
+                  );
+              }
+          } catch (Exception e) {
+              //no op
           }
-        }
-      } catch (Exception e) {
-        System.out.println(e.getMessage());
-        // ingore background issue
       }
-    }
     return root.getHash();
   }
 }
