@@ -39,30 +39,31 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   private static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   public ParallelStoredMerklePatriciaTrie(
-      NodeLoader nodeLoader,
-      Function<V, Bytes> valueSerializer,
-      Function<Bytes, V> valueDeserializer) {
+      final NodeLoader nodeLoader,
+      final Function<V, Bytes> valueSerializer,
+      final Function<Bytes, V> valueDeserializer) {
     super(nodeLoader, valueSerializer, valueDeserializer);
   }
 
   public ParallelStoredMerklePatriciaTrie(
-      NodeLoader nodeLoader,
-      Bytes32 rootHash,
-      Bytes rootLocation,
-      Function<V, Bytes> valueSerializer,
-      Function<Bytes, V> valueDeserializer) {
+      final NodeLoader nodeLoader,
+      final Bytes32 rootHash,
+      final Bytes rootLocation,
+      final Function<V, Bytes> valueSerializer,
+      final Function<Bytes, V> valueDeserializer) {
     super(nodeLoader, rootHash, rootLocation, valueSerializer, valueDeserializer);
   }
 
   public ParallelStoredMerklePatriciaTrie(
-      NodeLoader nodeLoader,
-      Bytes32 rootHash,
-      Function<V, Bytes> valueSerializer,
-      Function<Bytes, V> valueDeserializer) {
+      final NodeLoader nodeLoader,
+      final Bytes32 rootHash,
+      final Function<V, Bytes> valueSerializer,
+      final Function<Bytes, V> valueDeserializer) {
     super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
   }
 
-  public ParallelStoredMerklePatriciaTrie(StoredNodeFactory<V> nodeFactory, Bytes32 rootHash) {
+  public ParallelStoredMerklePatriciaTrie(
+      final StoredNodeFactory<V> nodeFactory, final Bytes32 rootHash) {
     super(nodeFactory, rootHash);
   }
 
