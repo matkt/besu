@@ -16,8 +16,10 @@ package org.hyperledger.besu.ethereum.trie.patricia;
 
 import org.hyperledger.besu.ethereum.trie.MerkleStorage;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -69,26 +71,30 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
   @Override
   public Bytes32 getRootHash() {
-      if(root.isDirty()) {
-          try {
-              root.getChildren()
-                      .forEach(
-                              vNode -> {
-                                  if (vNode.isDirty()) {
-                                      CompletableFuture.runAsync(
-                                              () -> {
-                                                  Bytes32 hash = vNode.getHash();
-                                                  Objects.requireNonNull(hash); // to be sure it's not removed by the compiler
-                                              },
-                                              executor);
-                                  }
-                              });
-          } catch (Exception e) {
-              System.out.println(e.getMessage());
-              e.printStackTrace(System.out);
-              // ingore background issue
+    if (root.isDirty()) {
+      try {
+        List<Node<V>> children = root.getChildren();
+        boolean ignoredTheFirstChild = false;
+        for (int i = 0; i < children.size(); i++) {
+          Node<V> vNode = children.get(i);
+          if (vNode.isDirty()) {
+            if (!ignoredTheFirstChild) {
+              ignoredTheFirstChild = true;
+            } else {
+              CompletableFuture.runAsync(
+                  () -> {
+                    Bytes32 hash = vNode.getHash();
+                    Objects.requireNonNull(hash); // to be sure it's not removed by the compiler
+                  },
+                  executor);
+            }
           }
+        }
+      } catch (Exception e) {
+        System.out.println(e.getMessage());
+        // ingore background issue
       }
+    }
     return root.getHash();
   }
 }
