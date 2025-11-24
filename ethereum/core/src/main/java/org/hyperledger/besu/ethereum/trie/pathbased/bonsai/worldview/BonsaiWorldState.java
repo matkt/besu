@@ -62,6 +62,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
 
+@SuppressWarnings("unused")
 public class BonsaiWorldState extends PathBasedWorldState {
 
   protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
@@ -131,8 +132,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final Optional<BonsaiWorldStateKeyValueStorage.Updater> maybeStateUpdater,
       final BonsaiWorldStateUpdateAccumulator worldStateUpdater) {
 
-    clearStorage(maybeStateUpdater, worldStateUpdater);
-
     // Third update the code.  This has the side effect of ensuring a code hash is calculated.
     updateCode(maybeStateUpdater, worldStateUpdater);
 
@@ -143,6 +142,15 @@ public class BonsaiWorldState extends PathBasedWorldState {
                 bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
                     getWorldStateStorage(), location, hash),
             worldStateRootHash);
+
+    clearStorage(maybeStateUpdater, worldStateUpdater);
+
+    worldStateUpdater
+        .getStorageToClear()
+        .forEach(
+            address -> {
+              updateTheAccount(address, maybeStateUpdater, worldStateUpdater, accountTrie);
+            });
 
     // This must be done before updating the accounts so
     // that we can get the storage state hash
