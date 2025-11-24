@@ -22,8 +22,9 @@ import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -35,6 +36,9 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
+
+  private static final int NCPU = Runtime.getRuntime().availableProcessors();
+  private static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,
@@ -65,35 +69,36 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     super(nodeFactory, rootHash);
   }
 
-  @SuppressWarnings("resource")
   @Override
   public Bytes32 getRootHash() {
     if (root.isDirty()) {
       try {
-        List<Node<V>> dirtyNodes =
-            root.getChildren().stream().filter(Node::isDirty).collect(Collectors.toList());
-        System.out.println(dirtyNodes.size());
-        if (dirtyNodes.size() > 3) {
-          dirtyNodes.removeFirst();
-          CompletableFuture.runAsync(
-              new Runnable() {
-                @Override
-                public void run() {
-                  dirtyNodes.parallelStream()
-                      .forEach(
-                          node -> {
-                            try {
-                              Bytes32 hash = node.getHash();
-                              Objects.requireNonNull(hash);
-                            } catch (Exception e) {
-                              // no op
-                            }
-                          });
-                }
-              });
+        List<Node<V>> dirtyNodes = root.getChildren().stream().filter(Node::isDirty).toList();
+        final int size = dirtyNodes.size();
+        if (dirtyNodes.size() >= 8) {
+          for (int i = size - 1; i >= 1; i--) {
+            try {
+              int finalI = i;
+              CompletableFuture.runAsync(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      try {
+                        Bytes32 hash = dirtyNodes.get(finalI).getHash();
+                        Objects.requireNonNull(hash);
+                      } catch (Exception e) {
+                        System.out.println(e.getMessage());
+                      }
+                    }
+                  },
+                  executor);
+            } catch (Exception e) {
+              // Ignorer les erreurs
+            }
+          }
         }
       } catch (Exception e) {
-        // no op
+        System.out.println(e.getMessage());
       }
     }
     return root.getHash();
