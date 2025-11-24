@@ -256,7 +256,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
               ? Hash.EMPTY_TRIE_HASH
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
-          createTrie(
+          createParallelTrie(
               (location, key) ->
                   bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
                       getWorldStateStorage(), updatedAddressHash, location, key),

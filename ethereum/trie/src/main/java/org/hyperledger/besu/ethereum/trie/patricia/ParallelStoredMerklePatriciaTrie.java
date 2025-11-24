@@ -35,7 +35,7 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-  private static final int NCPU = Runtime.getRuntime().availableProcessors() * 2;
+  private static final int NCPU = Runtime.getRuntime().availableProcessors();
   private static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   public ParallelStoredMerklePatriciaTrie(
@@ -69,22 +69,23 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
   @Override
   public Bytes32 getRootHash() {
-      try {
-          root.getChildren()
-                  .forEach(
-                          vNode -> {
-                              if (vNode.isDirty()) {
-                                  CompletableFuture.runAsync(
-                                          () -> {
-                                              Bytes32 hash = vNode.getHash();
-                                              Objects.requireNonNull(hash); // to be sure it's not removed by the compiler
-                                          },
-                                          executor);
-                              }
-                          });
-      }catch (Exception e) {
-          // ingore background issue
-      }
+    try {
+      root.getChildren()
+          .forEach(
+              vNode -> {
+                if (vNode.isDirty()) {
+                  CompletableFuture.runAsync(
+                      () -> {
+                        Bytes32 hash = vNode.getHash();
+                        Objects.requireNonNull(hash); // to be sure it's not removed by the compiler
+                      },
+                      executor);
+                }
+              });
+    } catch (Exception e) {
+      System.out.println(e.getMessage());
+      // ingore background issue
+    }
     return root.getHash();
   }
 }
