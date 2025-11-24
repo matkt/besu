@@ -50,6 +50,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTran
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -145,29 +146,18 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
     clearStorage(maybeStateUpdater, worldStateUpdater);
 
-    // This must be done before updating the accounts so
-    // that we can get the storage state hash
-    Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>>
-        storageStream = worldStateUpdater.getStorageToUpdate().entrySet().stream();
+    final Set<Address> updateAddresses = worldStateUpdater.getAccountsToUpdate().keySet();
+    Stream<Address> addressStream = updateAddresses.stream();
     if (maybeStateUpdater.isEmpty()) {
-      storageStream =
-          storageStream
-              .parallel(); // if we are not updating the state updater we can use parallel stream
+      addressStream = updateAddresses.stream().parallel();
     }
-    storageStream.forEach(
-        addressMapEntry -> {
-          updateAccountStorageState(maybeStateUpdater, worldStateUpdater, addressMapEntry);
-          // for manicured tries and composting, collect branches here (not implemented)
-          updateTheAccount(
-              addressMapEntry.getKey(), maybeStateUpdater, worldStateUpdater, accountTrie);
+    addressStream.forEach(
+        address -> {
+          if (worldStateUpdater.getStorageToUpdate().containsKey(address)) {
+            updateAccountStorageState(address, maybeStateUpdater, worldStateUpdater);
+          }
+          updateTheAccount(address, maybeStateUpdater, worldStateUpdater, accountTrie);
         });
-
-    worldStateUpdater
-        .getStorageToClear()
-        .forEach(
-            address -> {
-              updateTheAccount(address, maybeStateUpdater, worldStateUpdater, accountTrie);
-            });
 
     // TODO write to a cache and then generate a layer update from that and the
     // DB tx updates.  Right now it is just DB updates.
@@ -250,19 +240,18 @@ public class BonsaiWorldState extends PathBasedWorldState {
   }
 
   private void updateAccountStorageState(
+      final Address address,
       final Optional<BonsaiWorldStateKeyValueStorage.Updater> maybeStateUpdater,
-      final BonsaiWorldStateUpdateAccumulator worldStateUpdater,
-      final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>
-          storageAccountUpdate) {
-    final Address updatedAddress = storageAccountUpdate.getKey();
-    final Hash updatedAddressHash = updatedAddress.addressHash();
-    if (worldStateUpdater.getAccountsToUpdate().containsKey(updatedAddress)) {
+      final BonsaiWorldStateUpdateAccumulator worldStateUpdater) {
+    Map<StorageSlotKey, PathBasedValue<UInt256>> updatedStorages =
+        worldStateUpdater.getStorageToUpdate().get(address);
+    final Hash updatedAddressHash = address.addressHash();
+    if (worldStateUpdater.getAccountsToUpdate().containsKey(address)) {
       final PathBasedValue<BonsaiAccount> accountValue =
-          worldStateUpdater.getAccountsToUpdate().get(updatedAddress);
+          worldStateUpdater.getAccountsToUpdate().get(address);
       final BonsaiAccount accountOriginal = accountValue.getPrior();
       final Hash storageRoot =
-          (accountOriginal == null
-                  || worldStateUpdater.getStorageToClear().contains(updatedAddress))
+          (accountOriginal == null || worldStateUpdater.getStorageToClear().contains(address))
               ? Hash.EMPTY_TRIE_HASH
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
@@ -274,7 +263,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
       // for manicured tries and composting, collect branches here (not implemented)
       for (final Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> storageUpdate :
-          storageAccountUpdate.getValue().entrySet()) {
+          updatedStorages.entrySet()) {
         final Hash slotHash = storageUpdate.getKey().getSlotHash();
         final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
         try {
@@ -293,10 +282,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
         } catch (MerkleTrieException e) {
           // need to throw to trigger the heal
           throw new MerkleTrieException(
-              e.getMessage(),
-              Optional.of(Address.wrap(updatedAddress)),
-              e.getHash(),
-              e.getLocation());
+              e.getMessage(), Optional.of(Address.wrap(address)), e.getHash(), e.getLocation());
         }
       }
 
