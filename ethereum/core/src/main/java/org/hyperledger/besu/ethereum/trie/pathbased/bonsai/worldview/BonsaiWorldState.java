@@ -180,29 +180,33 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final Optional<BonsaiWorldStateKeyValueStorage.Updater> maybeStateUpdater,
       final BonsaiWorldStateUpdateAccumulator worldStateUpdater,
       final MerkleTrie<Bytes, Bytes> accountTrie) {
-    synchronized (accountTrie) {
-      final PathBasedValue<BonsaiAccount> bonsaiValue =
-          worldStateUpdater.getAccountsToUpdate().get(address);
-      final BonsaiAccount updatedAccount = bonsaiValue.getUpdated();
-      try {
-        if (updatedAccount == null) {
-          final Hash addressHash = hashAndSavePreImage(address);
+    final PathBasedValue<BonsaiAccount> bonsaiValue =
+        worldStateUpdater.getAccountsToUpdate().get(address);
+    final BonsaiAccount updatedAccount = bonsaiValue.getUpdated();
+    try {
+      if (updatedAccount == null) {
+        final Hash addressHash = hashAndSavePreImage(address);
+        Objects.requireNonNull(accountTrie.get(addressHash));
+        synchronized (accountTrie) {
           accountTrie.remove(addressHash);
-          maybeStateUpdater.ifPresent(
-              bonsaiUpdater -> bonsaiUpdater.removeAccountInfoState(addressHash));
-        } else {
-          final Hash addressHash = updatedAccount.getAddressHash();
-          final Bytes accountValue = updatedAccount.serializeAccount();
-          maybeStateUpdater.ifPresent(
-              bonsaiUpdater ->
-                  bonsaiUpdater.putAccountInfoState(hashAndSavePreImage(address), accountValue));
+        }
+        maybeStateUpdater.ifPresent(
+            bonsaiUpdater -> bonsaiUpdater.removeAccountInfoState(addressHash));
+      } else {
+        final Hash addressHash = updatedAccount.getAddressHash();
+        final Bytes accountValue = updatedAccount.serializeAccount();
+        maybeStateUpdater.ifPresent(
+            bonsaiUpdater ->
+                bonsaiUpdater.putAccountInfoState(hashAndSavePreImage(address), accountValue));
+        Objects.requireNonNull(accountTrie.get(addressHash));
+        synchronized (accountTrie) {
           accountTrie.put(addressHash, accountValue);
         }
-      } catch (MerkleTrieException e) {
-        // need to throw to trigger the heal
-        throw new MerkleTrieException(
-            e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
       }
+    } catch (MerkleTrieException e) {
+      // need to throw to trigger the heal
+      throw new MerkleTrieException(
+          e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
     }
   }
 
@@ -261,7 +265,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
                       getWorldStateStorage(), updatedAddressHash, location, key),
               storageRoot);
 
-      // for manicured tries and composting, collect branches here (not implemented)
       for (final Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> storageUpdate :
           updatedStorages.entrySet()) {
         final Hash slotHash = storageUpdate.getKey().getSlotHash();
@@ -301,7 +304,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
         }
       }
     }
-    // for manicured tries and composting, trim and compost here
   }
 
   private void clearStorage(
