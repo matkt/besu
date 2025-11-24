@@ -22,8 +22,6 @@ import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,9 +35,6 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
-
-  private static final int NCPU = Runtime.getRuntime().availableProcessors();
-  private static final Executor executor = Executors.newFixedThreadPool(NCPU);
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,
