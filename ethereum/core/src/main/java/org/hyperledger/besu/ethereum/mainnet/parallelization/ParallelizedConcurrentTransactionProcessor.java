@@ -136,7 +136,7 @@ public class ParallelizedConcurrentTransactionProcessor {
 
   @VisibleForTesting
   public void runTransaction(
-      PathBasedWorldStateUpdateAccumulator updater,
+      final PathBasedWorldStateUpdateAccumulator updater,
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final int transactionLocation,
