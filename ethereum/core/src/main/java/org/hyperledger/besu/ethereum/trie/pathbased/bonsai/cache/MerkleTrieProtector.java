@@ -29,7 +29,7 @@ public class MerkleTrieProtector<K, V> {
     this.trie = trie;
   }
 
-  public Optional<V> get(K key) {
+  public Optional<V> get(final K key) {
     if (frozen.get()) {
       return Optional.empty();
     }
