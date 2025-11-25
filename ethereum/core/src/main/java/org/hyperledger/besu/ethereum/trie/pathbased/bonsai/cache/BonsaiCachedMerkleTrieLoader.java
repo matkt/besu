@@ -20,7 +20,6 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
-import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -45,6 +44,9 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
   private final Cache<Bytes, Bytes> storageNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(STORAGE_CACHE_SIZE).build();
 
+  private final Cache<Bytes, MerkleTrieProtector<Bytes, Bytes>> tries =
+      CacheBuilder.newBuilder().recordStats().maximumSize(1000).build();
+
   public BonsaiCachedMerkleTrieLoader(final ObservableMetricsSystem metricsSystem) {
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "accountsNodes", accountNodes);
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "storageNodes", storageNodes);
@@ -65,19 +67,24 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Address account) {
     final long storageSubscriberId = worldStateKeyValueStorage.subscribe(this);
     try {
-      final StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
-          new StoredMerklePatriciaTrie<>(
-              (location, hash) -> {
-                Optional<Bytes> node =
-                    getAccountStateTrieNode(worldStateKeyValueStorage, location, hash);
-                node.ifPresent(bytes -> accountNodes.put(Hash.hash(bytes), bytes));
-                return node;
-              },
+      final MerkleTrieProtector<Bytes, Bytes> accountTrie =
+          tries.get(
               worldStateRootHash,
-              Function.identity(),
-              Function.identity());
+              () -> {
+                return new MerkleTrieProtector<>(
+                    new StoredMerklePatriciaTrie<>(
+                        (location, hash) -> {
+                          Optional<Bytes> node =
+                              getAccountStateTrieNode(worldStateKeyValueStorage, location, hash);
+                          node.ifPresent(bytes -> accountNodes.put(Hash.hash(bytes), bytes));
+                          return node;
+                        },
+                        worldStateRootHash,
+                        Function.identity(),
+                        Function.identity()));
+              });
       accountTrie.get(account.addressHash());
-    } catch (MerkleTrieException e) {
+    } catch (Exception e) {
       // ignore exception for the cache
     } finally {
       worldStateKeyValueStorage.unSubscribe(storageSubscriberId);
@@ -105,26 +112,45 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
           .ifPresent(
               storageRoot -> {
                 try {
-                  final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
-                      new StoredMerklePatriciaTrie<>(
-                          (location, hash) -> {
-                            Optional<Bytes> node =
-                                getAccountStorageTrieNode(
-                                    worldStateKeyValueStorage, accountHash, location, hash);
-                            node.ifPresent(bytes -> storageNodes.put(Hash.hash(bytes), bytes));
-                            return node;
-                          },
+                  final MerkleTrieProtector<Bytes, Bytes> storageTrie =
+                      tries.get(
                           Hash.hash(storageRoot),
-                          Function.identity(),
-                          Function.identity());
+                          () -> {
+                            return new MerkleTrieProtector<>(
+                                new StoredMerklePatriciaTrie<>(
+                                    (location, hash) -> {
+                                      Optional<Bytes> node =
+                                          getAccountStorageTrieNode(
+                                              worldStateKeyValueStorage,
+                                              accountHash,
+                                              location,
+                                              hash);
+                                      node.ifPresent(
+                                          bytes -> storageNodes.put(Hash.hash(bytes), bytes));
+                                      return node;
+                                    },
+                                    Hash.hash(storageRoot),
+                                    Function.identity(),
+                                    Function.identity()));
+                          });
+
                   storageTrie.get(slotKey.getSlotHash());
-                } catch (MerkleTrieException e) {
+                } catch (Exception e) {
                   // ignore exception for the cache
                 }
               });
     } finally {
       worldStateKeyValueStorage.unSubscribe(storageSubscriberId);
     }
+  }
+
+  public Optional<MerkleTrie<Bytes, Bytes>> getTrie(final Bytes32 rootHash) {
+    Optional<MerkleTrie<Bytes, Bytes>> maybeTrie =
+        Optional.ofNullable(tries.getIfPresent(rootHash)).map(MerkleTrieProtector::getTrie);
+    if (maybeTrie.isPresent()) {
+      tries.invalidate(rootHash);
+    }
+    return maybeTrie;
   }
 
   public Optional<Bytes> getAccountStateTrieNode(
