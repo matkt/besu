@@ -95,6 +95,9 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       return root.getHash();
     }
 
+    pendingUpdates.forEach((k, v) -> {
+        System.out.println(root.getHash()+" "+k+" "+v);
+    });
     try {
       Objects.requireNonNull(root.getChildren()); // force load children
       if (root.getChildren().size()==150) {
