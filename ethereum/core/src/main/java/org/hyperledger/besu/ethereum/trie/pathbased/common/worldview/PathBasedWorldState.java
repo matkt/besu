@@ -257,6 +257,10 @@ public abstract class PathBasedWorldState
                   .toArrayUnsafe());
       worldStateRootHash = calculatedRootHash;
       success = true;
+    } catch (final Exception e) {
+      System.out.println(e.getMessage());
+      e.printStackTrace(System.out);
+      throw e;
     } finally {
       if (success) {
         // commit the trielog transaction ahead of the state, in case of an abnormal shutdown:
