@@ -119,7 +119,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
     try {
       loadRootNode();
-      if (root instanceof BranchNode<V>) {
+      if (pendingUpdates.size()>10 && root instanceof BranchNode<V>) {
         processUpdatesInParallel(Optional.empty());
       } else {
         processUpdatesSequentially(Optional.empty());
