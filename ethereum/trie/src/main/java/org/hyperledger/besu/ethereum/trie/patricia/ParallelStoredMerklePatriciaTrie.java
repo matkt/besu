@@ -33,10 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -52,8 +49,6 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-  private static final int NCPU = Runtime.getRuntime().availableProcessors();
-  private static final ExecutorService executorService = Executors.newFixedThreadPool(NCPU * 2);
   private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
@@ -100,7 +95,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     if (!pendingUpdates.isEmpty()) {
       try {
         loadRootNode();
-        if (pendingUpdates.size()>3 && root instanceof BranchNode<V>) {
+        if (root instanceof BranchNode<V>) {
           processUpdatesInParallel(Optional.of(nodeUpdater));
         } else {
           processUpdatesSequentially(Optional.of(nodeUpdater));
@@ -119,7 +114,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
     try {
       loadRootNode();
-      if (pendingUpdates.size()>3 && root instanceof BranchNode<V>) {
+      if (root instanceof BranchNode<V>) {
         processUpdatesInParallel(Optional.empty());
       } else {
         processUpdatesSequentially(Optional.empty());
@@ -138,23 +133,14 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             .collect(Collectors.groupingBy(entry -> getFirstNibble(entry.getKey())));
 
     final RootBranchNodeWrapper nodeWrapper = new RootBranchNodeWrapper((BranchNode<V>) root);
-    final List<CompletableFuture<Void>> futures = new ArrayList<>(groupedByNibble.size());
 
-    for (final Map.Entry<Byte, List<Map.Entry<K, Optional<V>>>> group :
-        groupedByNibble.entrySet()) {
-      final byte nibble = group.getKey();
-      final List<Map.Entry<K, Optional<V>>> updates = group.getValue();
-
-      final CompletableFuture<Void> future =
-          CompletableFuture.runAsync(
-              () -> processGroupUpdates(nodeWrapper, nibble, updates, maybeNodeUpdater),
-              executorService);
-
-      futures.add(future);
-    }
-
-    // Wait for all parallel tasks to complete
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    groupedByNibble.entrySet().parallelStream()
+        .forEach(
+            group -> {
+              final byte nibble = group.getKey();
+              final List<Map.Entry<K, Optional<V>>> updates = group.getValue();
+              processGroupUpdates(nodeWrapper, nibble, updates, maybeNodeUpdater);
+            });
 
     this.root = nodeWrapper.applyUpdates();
     if (maybeNodeUpdater.isPresent()) {
@@ -179,9 +165,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       }
     }
 
-    if (maybeNodeUpdater.isPresent()) {
-      super.commit(maybeNodeUpdater.get());
-    }
+    maybeNodeUpdater.ifPresent(super::commit);
   }
 
   private void processGroupUpdates(
