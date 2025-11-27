@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
+import org.hyperledger.besu.ethereum.trie.StoredNode;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,7 +41,6 @@ import java.util.stream.Collectors;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.hyperledger.besu.ethereum.trie.StoredNode;
 
 /**
  * A {@link MerkleTrie} that persists trie nodes to a {@link MerkleStorage} key/value store.
@@ -51,7 +51,8 @@ import org.hyperledger.besu.ethereum.trie.StoredNode;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-  private static final ExecutorService executorService = Executors.newFixedThreadPool(16);
+  private static final int NCPU = Runtime.getRuntime().availableProcessors();
+  private static final ExecutorService executorService = Executors.newFixedThreadPool(NCPU * 2);
   private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
@@ -93,35 +94,34 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     pendingUpdates.put(key, Optional.empty());
   }
 
-    @Override
-    public void commit(final NodeUpdater nodeUpdater) {
+  @Override
+  public void commit(final NodeUpdater nodeUpdater) {
 
-        if (!pendingUpdates.isEmpty()) {
-            try {
-                Objects.requireNonNull(root.getChildren()); // force load children
-                if (root instanceof BranchNode) {
-                    System.out.println("Committing branch node in parallel mode");
-                    processUpdatesInParallel(Optional.of(nodeUpdater));
-                } else {
-                    System.out.println("Committing node in sequential mode");
-                    processUpdatesSequentially(Optional.of(nodeUpdater));
-                }
-            } catch (InterruptedException | ExecutionException e) {
-                throw new RuntimeException("Failed to process parallel updates", e);
-            }
-            pendingUpdates.clear();
+    if (!pendingUpdates.isEmpty()) {
+      try {
+        loadRootNode();
+        if (root instanceof BranchNode<V>) {
+          processUpdatesInParallel(Optional.of(nodeUpdater));
+        } else {
+          System.out.println("Committing node in sequential mode");
+          processUpdatesSequentially(Optional.of(nodeUpdater));
         }
+      } catch (InterruptedException | ExecutionException e) {
+        throw new RuntimeException("Failed to process parallel updates", e);
+      }
+      pendingUpdates.clear();
     }
+  }
 
-    @Override
+  @Override
   public Bytes32 getRootHash() {
     if (pendingUpdates.isEmpty()) {
       return root.getHash();
     }
 
     try {
-      Objects.requireNonNull(root.getChildren()); // force load children
-      if (root instanceof BranchNode) {
+      loadRootNode();
+      if (root instanceof BranchNode<V>) {
         processUpdatesInParallel(Optional.empty());
       } else {
         processUpdatesSequentially(Optional.empty());
@@ -133,7 +133,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     return root.getHash();
   }
 
-  private void processUpdatesInParallel(final Optional<NodeUpdater> maybeNodeUpdater) throws InterruptedException, ExecutionException {
+  private void processUpdatesInParallel(final Optional<NodeUpdater> maybeNodeUpdater)
+      throws InterruptedException, ExecutionException {
     final Map<Byte, List<Map.Entry<K, Optional<V>>>> groupedByNibble =
         pendingUpdates.entrySet().stream()
             .collect(Collectors.groupingBy(entry -> getFirstNibble(entry.getKey())));
@@ -146,32 +147,26 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final List<Map.Entry<K, Optional<V>>> updates = group.getValue();
 
       final CompletableFuture<Void> future =
-          CompletableFuture.runAsync(() -> processGroupUpdates(nibble, updates, maybeNodeUpdater), executorService);
+          CompletableFuture.runAsync(
+              () -> processGroupUpdates(nibble, updates, maybeNodeUpdater), executorService);
 
       futures.add(future);
     }
 
     // Wait for all parallel tasks to complete
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
-    final BranchNode<V> branchRoot = (BranchNode<V>) root;
-    List<Node<V>> children = root.getChildren();
-    for (int i = 0; i < branchRoot.maxChild(); i++) {
-      root = ((BranchNode<V>) root).replaceChild((byte) i, children.get(i));
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    if (maybeNodeUpdater.isPresent()) {
+      // Make sure root node was stored
+      final Bytes32 rootHash = root.getHash();
+      if (root.isDirty()) {
+        maybeNodeUpdater.get().store(Bytes.EMPTY, rootHash, root.getEncodedBytesRef());
+      }
+      // Reset root so dirty nodes can be garbage collected
+      this.root =
+          rootHash.equals(EMPTY_TRIE_NODE_HASH)
+              ? NullNode.instance()
+              : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
     }
-    if(maybeNodeUpdater.isPresent()) {
-        // Make sure root node was stored
-        final Bytes32 rootHash = root.getHash();
-        if (root.isDirty() && root.getEncodedBytesRef().size() < 32) {
-            maybeNodeUpdater.get().store(Bytes.EMPTY, rootHash, root.getEncodedBytesRef());
-        }
-        // Reset root so dirty nodes can be garbage collected
-        this.root =
-                rootHash.equals(EMPTY_TRIE_NODE_HASH)
-                        ? NullNode.instance()
-                        : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
-
-    }
-
   }
 
   private void processUpdatesSequentially(final Optional<NodeUpdater> maybeNodeUpdater) {
@@ -183,13 +178,15 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         super.remove(entry.getKey());
       }
     }
-    if(maybeNodeUpdater.isPresent()){
-        super.commit(maybeNodeUpdater.get());
+    if (maybeNodeUpdater.isPresent()) {
+      super.commit(maybeNodeUpdater.get());
     }
   }
 
   private void processGroupUpdates(
-      final byte nibble, final List<Map.Entry<K, Optional<V>>> updates, final Optional<NodeUpdater> maybeNodeUpdater) {
+      final byte nibble,
+      final List<Map.Entry<K, Optional<V>>> updates,
+      final Optional<NodeUpdater> maybeNodeUpdater) {
 
     Node<V> child = root.getChildren().get(nibble);
 
@@ -203,15 +200,16 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       child = child.accept(visitor, path);
     }
 
-
-    if(maybeNodeUpdater.isPresent()){
-        child.accept(Bytes.of(nibble), new CommitVisitor<>(maybeNodeUpdater.get()));
+    if (maybeNodeUpdater.isPresent()) {
+      child.accept(Bytes.of(nibble), new CommitVisitor<>(maybeNodeUpdater.get()));
     } else {
-        Objects.requireNonNull(child.getHash()); // force getHash
+      Objects.requireNonNull(child.getHash()); // force getHash
     }
 
     final BranchNode<V> branchRoot = (BranchNode<V>) root;
-    branchRoot.getChildren().set(nibble, child);
+    synchronized (this) {
+      root = branchRoot.replaceChild(nibble, child);
+    }
   }
 
   private byte getFirstNibble(final K key) {
@@ -220,5 +218,32 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       return 0;
     }
     return (byte) (path.get(0) & 0xFF);
+  }
+
+  private void loadRootNode() {
+    root =
+        root.accept(
+            new PathNodeVisitor<V>() {
+              @Override
+              public Node<V> visit(ExtensionNode<V> extensionNode, Bytes path) {
+                return extensionNode;
+              }
+
+              @Override
+              public Node<V> visit(BranchNode<V> branchNode, Bytes path) {
+                return branchNode;
+              }
+
+              @Override
+              public Node<V> visit(LeafNode<V> leafNode, Bytes path) {
+                return leafNode;
+              }
+
+              @Override
+              public Node<V> visit(NullNode<V> nullNode, Bytes path) {
+                return nullNode;
+              }
+            },
+            Bytes.EMPTY);
   }
 }

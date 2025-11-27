@@ -22,9 +22,8 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTran
 import java.util.function.Function;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
-import org.rocksdb.WriteBatch;
+import org.rocksdb.Transaction;
 import org.rocksdb.WriteOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,35 +34,33 @@ public class RocksDBTransaction implements SegmentedKeyValueStorageTransaction {
   private static final String NO_SPACE_LEFT_ON_DEVICE = "No space left on device";
 
   private final RocksDBMetrics metrics;
-  private final RocksDB db;
+  private final Transaction innerTx;
   private final WriteOptions options;
   private final Function<SegmentIdentifier, ColumnFamilyHandle> columnFamilyMapper;
-  private final WriteBatch batch;
 
   /**
    * Instantiates a new RocksDb transaction.
    *
    * @param columnFamilyMapper mapper from segment identifier to column family handle
-   * @param db the database
+   * @param innerTx the inner tx
    * @param options the options
    * @param metrics the metrics
    */
   public RocksDBTransaction(
       final Function<SegmentIdentifier, ColumnFamilyHandle> columnFamilyMapper,
-      final RocksDB db,
+      final Transaction innerTx,
       final WriteOptions options,
       final RocksDBMetrics metrics) {
     this.columnFamilyMapper = columnFamilyMapper;
-    this.db = db;
+    this.innerTx = innerTx;
     this.options = options;
     this.metrics = metrics;
-    this.batch = new WriteBatch();
   }
 
   @Override
   public void put(final SegmentIdentifier segmentId, final byte[] key, final byte[] value) {
     try (final OperationTimer.TimingContext ignored = metrics.getWriteLatency().startTimer()) {
-      batch.put(columnFamilyMapper.apply(segmentId), key, value);
+      innerTx.put(columnFamilyMapper.apply(segmentId), key, value);
     } catch (final RocksDBException e) {
       if (e.getMessage().contains(NO_SPACE_LEFT_ON_DEVICE)) {
         logger.error(e.getMessage());
@@ -76,7 +73,7 @@ public class RocksDBTransaction implements SegmentedKeyValueStorageTransaction {
   @Override
   public void remove(final SegmentIdentifier segmentId, final byte[] key) {
     try (final OperationTimer.TimingContext ignored = metrics.getRemoveLatency().startTimer()) {
-      batch.delete(columnFamilyMapper.apply(segmentId), key);
+      innerTx.delete(columnFamilyMapper.apply(segmentId), key);
     } catch (final RocksDBException e) {
       if (e.getMessage().contains(NO_SPACE_LEFT_ON_DEVICE)) {
         logger.error(e.getMessage());
@@ -89,7 +86,7 @@ public class RocksDBTransaction implements SegmentedKeyValueStorageTransaction {
   @Override
   public void commit() throws StorageException {
     try (final OperationTimer.TimingContext ignored = metrics.getCommitLatency().startTimer()) {
-      db.write(options, batch);
+      innerTx.commit();
     } catch (final RocksDBException e) {
       if (e.getMessage().contains(NO_SPACE_LEFT_ON_DEVICE)) {
         logger.error(e.getMessage());
@@ -104,7 +101,8 @@ public class RocksDBTransaction implements SegmentedKeyValueStorageTransaction {
   @Override
   public void rollback() {
     try {
-      batch.rollbackToSavePoint();
+      innerTx.rollback();
+      metrics.getRollbackCount().inc();
     } catch (final RocksDBException e) {
       if (e.getMessage().contains(NO_SPACE_LEFT_ON_DEVICE)) {
         logger.error(e.getMessage());
@@ -118,7 +116,7 @@ public class RocksDBTransaction implements SegmentedKeyValueStorageTransaction {
 
   @Override
   public void close() {
-    batch.close();
+    innerTx.close();
     options.close();
   }
 }

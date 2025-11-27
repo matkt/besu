@@ -87,7 +87,8 @@ public class TransactionDBRocksDBColumnarKeyValueStorage extends RocksDBColumnar
     final WriteOptions writeOptions = new WriteOptions();
     writeOptions.setIgnoreMissingColumnFamilies(true);
     return new SegmentedKeyValueStorageTransactionValidatorDecorator(
-        new RocksDBTransaction(this::safeColumnHandle, db, writeOptions, metrics),
+        new RocksDBTransaction(
+            this::safeColumnHandle, db.beginTransaction(writeOptions), writeOptions, metrics),
         this.closed::get);
   }
 }
