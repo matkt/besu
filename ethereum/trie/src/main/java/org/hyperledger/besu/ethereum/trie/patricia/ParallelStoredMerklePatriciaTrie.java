@@ -100,7 +100,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     if (!pendingUpdates.isEmpty()) {
       try {
         loadRootNode();
-        if (root instanceof StoredNode<V>) {
+        if (root instanceof BranchNode<V>) {
           processUpdatesInParallel(Optional.of(nodeUpdater));
         } else {
           System.out.println("Committing node in sequential mode");
