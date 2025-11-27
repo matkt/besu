@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 import org.hyperledger.besu.ethereum.trie.StoredNode;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,11 +97,10 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
   @Override
   public void commit(final NodeUpdater nodeUpdater) {
-
     if (!pendingUpdates.isEmpty()) {
       try {
         loadRootNode();
-        if (root instanceof BranchNode<V>) {
+        if (root instanceof StoredNode<V>) {
           processUpdatesInParallel(Optional.of(nodeUpdater));
         } else {
           System.out.println("Committing node in sequential mode");
@@ -118,7 +118,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     if (pendingUpdates.isEmpty()) {
       return root.getHash();
     }
-
     try {
       loadRootNode();
       if (root instanceof BranchNode<V>) {
@@ -139,6 +138,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         pendingUpdates.entrySet().stream()
             .collect(Collectors.groupingBy(entry -> getFirstNibble(entry.getKey())));
 
+    final RootBranchNodeWrapper nodeWrapper = new RootBranchNodeWrapper((BranchNode<V>) root);
     final List<CompletableFuture<Void>> futures = new ArrayList<>(groupedByNibble.size());
 
     for (final Map.Entry<Byte, List<Map.Entry<K, Optional<V>>>> group :
@@ -148,19 +148,20 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
       final CompletableFuture<Void> future =
           CompletableFuture.runAsync(
-              () -> processGroupUpdates(nibble, updates, maybeNodeUpdater), executorService);
+              () -> processGroupUpdates(nodeWrapper, nibble, updates, maybeNodeUpdater),
+              executorService);
 
       futures.add(future);
     }
 
     // Wait for all parallel tasks to complete
     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+    this.root = nodeWrapper.applyUpdates();
     if (maybeNodeUpdater.isPresent()) {
       // Make sure root node was stored
       final Bytes32 rootHash = root.getHash();
-      if (root.isDirty()) {
-        maybeNodeUpdater.get().store(Bytes.EMPTY, rootHash, root.getEncodedBytesRef());
-      }
+      maybeNodeUpdater.get().store(Bytes.EMPTY, rootHash, root.getEncodedBytes());
       // Reset root so dirty nodes can be garbage collected
       this.root =
           rootHash.equals(EMPTY_TRIE_NODE_HASH)
@@ -178,17 +179,19 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         super.remove(entry.getKey());
       }
     }
+
     if (maybeNodeUpdater.isPresent()) {
       super.commit(maybeNodeUpdater.get());
     }
   }
 
   private void processGroupUpdates(
+      final RootBranchNodeWrapper nodeWrapper,
       final byte nibble,
       final List<Map.Entry<K, Optional<V>>> updates,
       final Optional<NodeUpdater> maybeNodeUpdater) {
 
-    Node<V> child = root.getChildren().get(nibble);
+    Node<V> child = nodeWrapper.getPendingChildren().get(nibble);
 
     for (final Map.Entry<K, Optional<V>> entry : updates) {
       final Bytes path = bytesToPath(entry.getKey()).slice(1); // Remove first nibble
@@ -206,10 +209,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       Objects.requireNonNull(child.getHash()); // force getHash
     }
 
-    final BranchNode<V> branchRoot = (BranchNode<V>) root;
-    synchronized (this) {
-      root = branchRoot.replaceChild(nibble, child);
-    }
+    nodeWrapper.setChildren(nibble, child);
   }
 
   private byte getFirstNibble(final K key) {
@@ -221,8 +221,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   }
 
   private void loadRootNode() {
-    root =
-        root.accept(
+    this.root =
+        this.root.accept(
             new PathNodeVisitor<V>() {
               @Override
               public Node<V> visit(ExtensionNode<V> extensionNode, Bytes path) {
@@ -245,5 +245,28 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
               }
             },
             Bytes.EMPTY);
+  }
+
+  class RootBranchNodeWrapper {
+    private final BranchNode<V> root;
+    private final List<Node<V>> pendingChildren;
+
+    public RootBranchNodeWrapper(final BranchNode<V> root) {
+      this.root = root;
+      loadRootNode();
+      this.pendingChildren = Collections.synchronizedList(new ArrayList<>(root.getChildren()));
+    }
+
+    public List<Node<V>> getPendingChildren() {
+      return pendingChildren;
+    }
+
+    public void setChildren(final byte index, final Node<V> children) {
+      this.pendingChildren.set(index, children);
+    }
+
+    public Node<V> applyUpdates() {
+      return this.root.replaceAllChildren(pendingChildren, true);
+    }
   }
 }
