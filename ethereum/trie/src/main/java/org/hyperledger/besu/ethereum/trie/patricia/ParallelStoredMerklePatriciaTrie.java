@@ -103,7 +103,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         if (root instanceof BranchNode<V>) {
           processUpdatesInParallel(Optional.of(nodeUpdater));
         } else {
-          System.out.println("Committing node in sequential mode");
           processUpdatesSequentially(Optional.of(nodeUpdater));
         }
       } catch (InterruptedException | ExecutionException e) {
