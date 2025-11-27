@@ -471,7 +471,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     if (worldStateConfig.isTrieDisabled()) {
       return new NoOpMerkleTrie<>();
     } else {
-      return new StoredMerklePatriciaTrie<>(
+      return new ParallelStoredMerklePatriciaTrie<>(
           nodeLoader, rootHash, Function.identity(), Function.identity());
     }
   }
