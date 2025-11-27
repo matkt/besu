@@ -55,6 +55,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   private static final int NCPU = Runtime.getRuntime().availableProcessors();
   private static final ExecutorService executorService = Executors.newFixedThreadPool(NCPU * 2);
   private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
+    private final Map<K, Optional<V>> trieNodesToPersist = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,

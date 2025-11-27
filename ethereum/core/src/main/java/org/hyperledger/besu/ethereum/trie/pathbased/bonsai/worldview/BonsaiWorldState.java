@@ -164,12 +164,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     maybeStateUpdater.ifPresent(
         bonsaiUpdater ->
             accountTrie.commit(
-                (location, hash, value) ->
-                    writeTrieNode(
-                        TRIE_BRANCH_STORAGE,
-                        bonsaiUpdater.getWorldStateTransaction(),
-                        location,
-                        value)));
+                    bonsaiUpdater::putAccountStateTrieNode));
     final Bytes32 rootHash = accountTrie.getRootHash();
     return Hash.wrap(rootHash);
   }
@@ -294,9 +289,9 @@ public class BonsaiWorldState extends PathBasedWorldState {
         maybeStateUpdater.ifPresent(
             bonsaiUpdater ->
                 storageTrie.commit(
-                    (location, key, value) ->
+                    (location, nodeHash, value) ->
                         writeStorageTrieNode(
-                            bonsaiUpdater, updatedAddressHash, location, key, value)));
+                            bonsaiUpdater, updatedAddressHash, location, nodeHash, value)));
         // only use storage root of the trie when trie is enabled
         if (!worldStateConfig.isTrieDisabled()) {
           final Hash newStorageRoot = Hash.wrap(storageTrie.getRootHash());
@@ -395,14 +390,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   protected Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
     return getWorldStateStorage().getAccountStateTrieNode(location, nodeHash);
-  }
-
-  private void writeTrieNode(
-      final SegmentIdentifier segmentId,
-      final SegmentedKeyValueStorageTransaction tx,
-      final Bytes location,
-      final Bytes value) {
-    tx.put(segmentId, location.toArrayUnsafe(), value.toArrayUnsafe());
   }
 
   protected Optional<Bytes> getStorageTrieNode(

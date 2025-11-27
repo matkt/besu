@@ -260,7 +260,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       return this;
     }
 
-    public Updater putAccountStateTrieNode(
+    public synchronized Updater putAccountStateTrieNode(
         final Bytes location, final Bytes32 nodeHash, final Bytes node) {
       if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         // Don't save empty nodes
@@ -271,7 +271,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       return this;
     }
 
-    public Updater removeAccountStateTrieNode(final Bytes location) {
+    public synchronized Updater removeAccountStateTrieNode(final Bytes location) {
       composedWorldStateTransaction.remove(TRIE_BRANCH_STORAGE, location.toArrayUnsafe());
       return this;
     }
