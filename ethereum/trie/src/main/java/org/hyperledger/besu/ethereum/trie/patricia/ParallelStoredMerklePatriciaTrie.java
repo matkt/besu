@@ -117,7 +117,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
 
     try {
-      loadRootNode();
       if (pendingUpdates.size() >= MIN_UPDATES_FOR_PARALLEL && loadRootNode() instanceof BranchNode<V>) {
         processUpdatesInParallel(maybeNodeUpdater);
       } else {
