@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,11 +43,34 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 
+/**
+ * A parallel implementation of StoredMerklePatriciaTrie that processes updates in parallel
+ * recursively descending to any depth where BranchNodes exist and updates are sufficient.
+ * Uses a deferred commit strategy to avoid synchronization bottlenecks.
+ *
+ * This implementation uses both CompletableFuture for top-level coordination and
+ * StructuredTaskScope for nested parallel operations
+ *
+ * @param <K> The type of keys
+ * @param <V> The type of values stored by this trie
+ */
 @SuppressWarnings("rawtypes")
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-    private static final ExecutorService EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    private static final ExecutorService PLATFORM_POOL =
+            Executors.newFixedThreadPool(
+                    Math.max(4, Runtime.getRuntime().availableProcessors()* 2),
+                    r -> {
+                        Thread t = new Thread(r);
+                        t.setName("trie-worker-" + t.getId());
+                        t.setDaemon(true);
+                        return t;
+                    });
+    private static final ExecutorService VIRTUAL_POOL =
+            Executors.newVirtualThreadPerTaskExecutor();
+
+    private static final int DEPTH_THRESHOLD_FOR_VIRTUAL = 2;
 
     private static final int MIN_UPDATES_FOR_PARALLEL = 5;
 
@@ -137,6 +161,9 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     private void processUpdatesInParallel(final Optional<NodeUpdater> maybeNodeUpdater)
             throws InterruptedException, ExecutionException {
+
+        final NodeCommitCache commitCache = new NodeCommitCache();
+
         final List<UpdateEntry<V>> updateEntries = pendingUpdates.entrySet().stream()
                 .map(entry -> new UpdateEntry<>(bytesToPath(entry.getKey()), entry.getValue()))
                 .toList();
@@ -153,14 +180,23 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             final List<UpdateEntry<V>> updates = entry.getValue();
 
             futures.add(CompletableFuture.runAsync(
-                    () -> processGroupRecursively(rootWrapper, nibble, Bytes.of(nibble), updates, 1, maybeNodeUpdater),
-                    EXECUTOR));
+                    () -> processGroupRecursively(
+                            rootWrapper,
+                            nibble,
+                            Bytes.of(nibble),
+                            updates,
+                            1,
+                            maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty()),
+                    PLATFORM_POOL));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         this.root = rootWrapper.applyUpdates();
-        maybeNodeUpdater.ifPresent(this::storeAndResetRoot);
+        if (maybeNodeUpdater.isPresent()) {
+            commitCache.flushTo(maybeNodeUpdater.get());
+            storeAndResetRoot(maybeNodeUpdater.get());
+        }
     }
 
     private void processGroupRecursively(
@@ -169,7 +205,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             final Bytes location,
             final List<UpdateEntry<V>> updates,
             final int depth,
-            final Optional<NodeUpdater> maybeNodeUpdater) {
+            final Optional<NodeCommitCache> maybeCommitCache) {
         final Node<V> currentNode = parentWrapper.getPendingChildren().get(nibbleIndex);
         if (currentNode instanceof BranchNode && updates.size() >= MIN_UPDATES_FOR_DESCENT) {
             processParallelDescent(
@@ -179,7 +215,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                     location,
                     updates,
                     depth,
-                    maybeNodeUpdater);
+                    maybeCommitCache);
         } else {
             processNodeUpdatesSequentially(
                     parentWrapper,
@@ -188,7 +224,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                     location,
                     updates,
                     depth,
-                    maybeNodeUpdater);
+                    maybeCommitCache);
         }
     }
 
@@ -199,7 +235,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             final Bytes location,
             final List<UpdateEntry<V>> updates,
             final int depth,
-            final Optional<NodeUpdater> maybeNodeUpdater) {
+            final Optional<NodeCommitCache> maybeCommitCache) {
 
         final Map<Byte, List<UpdateEntry<V>>> groupedByNextNibble =
                 updates.stream()
@@ -221,10 +257,14 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                     location,
                     updatesAtThisLevel,
                     depth,
-                    maybeNodeUpdater);
+                    maybeCommitCache);
         }
 
         final List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        final ExecutorService executor = depth >= DEPTH_THRESHOLD_FOR_VIRTUAL
+                ? VIRTUAL_POOL
+                : PLATFORM_POOL;
 
         for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNextNibble.entrySet()) {
             final byte nibble = entry.getKey();
@@ -238,8 +278,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                                 childLocation,
                                 childUpdates,
                                 depth + 1,
-                                maybeNodeUpdater),
-                        EXECUTOR));
+                                maybeCommitCache),
+                        executor));
             } else {
                 processGroupRecursively(
                         branchWrapper,
@@ -247,7 +287,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                         childLocation,
                         childUpdates,
                         depth + 1,
-                        maybeNodeUpdater);
+                        maybeCommitCache);
             }
         }
         if (!futures.isEmpty()) {
@@ -263,7 +303,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             final Bytes location,
             final List<UpdateEntry<V>> updates,
             final int pathSliceOffset,
-            final Optional<NodeUpdater> maybeNodeUpdater) {
+            final Optional<NodeCommitCache> maybeCommitCache) {
 
         Node<V> tmpNode = node;
         for (final UpdateEntry<V> entry : updates) {
@@ -282,8 +322,13 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                 tmpNode = tmpNode.accept(visitor, Bytes.EMPTY);
             }
         }
-        if (maybeNodeUpdater.isPresent()) {
-            tmpNode.accept(location, new CommitVisitor<>(maybeNodeUpdater.get()));
+        if (maybeCommitCache.isPresent()) {
+            tmpNode.accept(location, new CommitVisitor<>(new NodeUpdater() {
+                @Override
+                public void store(final Bytes location, final  Bytes32 hash, final Bytes value) {
+                    maybeCommitCache.get().put(location, hash, value);
+                }
+            }));
         } else {
             Objects.requireNonNull(tmpNode.getHash());
         }
@@ -361,5 +406,27 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
   }
 
+    private static class NodeCommitCache {
+        private final Map<Bytes, NodeData> cache = new ConcurrentHashMap<>();
+
+        void put(final Bytes location, final Bytes32 hash, final Bytes encodedBytes) {
+            cache.put(location, new NodeData(hash, encodedBytes));
+        }
+
+        void flushTo(final NodeUpdater nodeUpdater) {
+            cache.forEach((location, nodeData) ->
+                    nodeUpdater.store(location, nodeData.hash, nodeData.encodedBytes));
+        }
+
+        private static class NodeData {
+            final Bytes32 hash;
+            final Bytes encodedBytes;
+
+            NodeData(final Bytes32 hash, final Bytes encodedBytes) {
+                this.hash = hash;
+                this.encodedBytes = encodedBytes;
+            }
+        }
+    }
 
 }
