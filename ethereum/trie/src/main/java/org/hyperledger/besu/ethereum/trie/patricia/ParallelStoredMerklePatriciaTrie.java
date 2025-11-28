@@ -52,7 +52,7 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-    ExecutorService executor = Executors.newWorkStealingPool(32);
+    private static final ExecutorService executor = Executors.newWorkStealingPool(32);
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
