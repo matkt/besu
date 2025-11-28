@@ -58,19 +58,8 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-    private static final ExecutorService PLATFORM_POOL =
-            Executors.newFixedThreadPool(
-                    Math.max(4, Runtime.getRuntime().availableProcessors()* 2),
-                    r -> {
-                        Thread t = new Thread(r);
-                        t.setName("trie-worker-" + t.getId());
-                        t.setDaemon(true);
-                        return t;
-                    });
     private static final ExecutorService VIRTUAL_POOL =
             Executors.newVirtualThreadPerTaskExecutor();
-
-    private static final int DEPTH_THRESHOLD_FOR_VIRTUAL = 2;
 
     private static final int MIN_UPDATES_FOR_PARALLEL = 5;
 
@@ -187,7 +176,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                             updates,
                             1,
                             maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty()),
-                    PLATFORM_POOL));
+                    VIRTUAL_POOL));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -239,32 +228,11 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
         final Map<Byte, List<UpdateEntry<V>>> groupedByNextNibble =
                 updates.stream()
-                        .filter(entry -> entry.path.size() > depth)
                         .collect(Collectors.groupingBy(entry -> entry.getNibble(depth)));
-
-        final List<UpdateEntry<V>> updatesAtThisLevel =
-                updates.stream()
-                        .filter(entry -> entry.path.size() == depth)
-                        .collect(Collectors.toList());
 
         final BranchNodeWrapper branchWrapper = new BranchNodeWrapper(branchNode);
 
-        if (!updatesAtThisLevel.isEmpty()) {
-            processNodeUpdatesSequentially(
-                    branchWrapper,
-                    (byte) 16,
-                    branchNode,
-                    location,
-                    updatesAtThisLevel,
-                    depth,
-                    maybeCommitCache);
-        }
-
         final List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-        final ExecutorService executor = depth >= DEPTH_THRESHOLD_FOR_VIRTUAL
-                ? VIRTUAL_POOL
-                : PLATFORM_POOL;
 
         for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNextNibble.entrySet()) {
             final byte nibble = entry.getKey();
@@ -279,7 +247,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                                 childUpdates,
                                 depth + 1,
                                 maybeCommitCache),
-                        executor));
+                        VIRTUAL_POOL));
             } else {
                 processGroupRecursively(
                         branchWrapper,
