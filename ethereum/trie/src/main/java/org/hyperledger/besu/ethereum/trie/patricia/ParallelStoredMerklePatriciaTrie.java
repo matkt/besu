@@ -33,7 +33,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -49,7 +52,9 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-  private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
+    ExecutorService executor = Executors.newWorkStealingPool(32);
+
+    private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,
@@ -132,7 +137,15 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         pendingUpdates.entrySet().stream()
             .collect(Collectors.groupingBy(entry -> getFirstNibble(entry.getKey())));
 
-    final RootBranchNodeWrapper nodeWrapper = new RootBranchNodeWrapper((BranchNode<V>) root);
+    final BranchNodeWrapper nodeWrapper = new BranchNodeWrapper((BranchNode<V>) root);
+
+      List<CompletableFuture<Void>> futures = groupedByNibble.entrySet().stream()
+              .map(entry -> CompletableFuture.runAsync(() -> {
+                  final byte nibble = entry.getKey();
+                  final List<Map.Entry<K, Optional<V>>> updates = entry.getValue();
+                  processGroupWithSecondLevelParallelism(nodeWrapper, nibble, updates, maybeNodeUpdater);
+              }, executor)).toList();
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
     groupedByNibble.entrySet().parallelStream()
         .forEach(
@@ -168,8 +181,57 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     maybeNodeUpdater.ifPresent(super::commit);
   }
 
+    private void processGroupWithSecondLevelParallelism(
+            final BranchNodeWrapper nodeWrapper,
+            final byte nibble,
+            final List<Map.Entry<K, Optional<V>>> updates,
+            final Optional<NodeUpdater> maybeNodeUpdater) {
+
+        final Map<Byte, List<Map.Entry<K, Optional<V>>>> secondLevel =
+                updates.stream()
+                        .collect(Collectors.groupingBy(entry -> getSecondNibble(entry.getKey())));
+
+        Node<V> child = nodeWrapper.getPendingChildren().get(nibble);
+
+        if (child instanceof BranchNode) {
+            BranchNodeWrapper branchWrapper = new BranchNodeWrapper((BranchNode<V>) child);
+
+            List<CompletableFuture<Void>> secondLevelFutures = secondLevel.entrySet().stream()
+                    .map(entry -> CompletableFuture.runAsync(() -> {
+                        final byte secondNibble = entry.getKey();
+                        final List<Map.Entry<K, Optional<V>>> secondUpdates = entry.getValue();
+
+                        Node<V> subChild = branchWrapper.getPendingChildren().get(secondNibble);
+                        for (final Map.Entry<K, Optional<V>> entry2 : secondUpdates) {
+                            final Bytes path = bytesToPath(entry2.getKey()).slice(2); // Remove first two nibbles
+                            final Optional<V> value = entry2.getValue();
+                            final PathNodeVisitor<V> visitor =
+                                    value.isPresent() ? getPutVisitor(value.get()) : getRemoveVisitor();
+                            subChild = subChild.accept(visitor, path);
+                        }
+
+                        if (maybeNodeUpdater.isPresent()) {
+                            subChild.accept(Bytes.of(nibble,secondNibble), new CommitVisitor<>(maybeNodeUpdater.get()));
+                        } else {
+                            Objects.requireNonNull(subChild.getHash()); // force getHash
+                        }
+                        branchWrapper.setChildren(secondNibble, subChild);
+                    }, executor))
+                    .toList();
+
+            CompletableFuture.allOf(secondLevelFutures.toArray(new CompletableFuture[0])).join();
+            child = branchWrapper.applyUpdates();
+        } else {
+            // If child is not a branch node, fall back to sequential processing
+            processGroupUpdates(nodeWrapper, nibble, updates, maybeNodeUpdater);
+            return;
+        }
+
+        nodeWrapper.setChildren(nibble, child);
+    }
+
   private void processGroupUpdates(
-      final RootBranchNodeWrapper nodeWrapper,
+      final BranchNodeWrapper nodeWrapper,
       final byte nibble,
       final List<Map.Entry<K, Optional<V>>> updates,
       final Optional<NodeUpdater> maybeNodeUpdater) {
@@ -195,15 +257,22 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     nodeWrapper.setChildren(nibble, child);
   }
 
-  private byte getFirstNibble(final K key) {
-    final Bytes path = bytesToPath(key);
-    if (path.isEmpty()) {
-      return 0;
+    private byte getFirstNibble(final K key) {
+        if (key.isEmpty()) {
+            return 0;
+        }
+        return (byte) ((key.get(0) >> 4) & 0x0F);
     }
-    return (byte) (path.get(0) & 0xFF);
-  }
 
-  private void loadRootNode() {
+    private byte getSecondNibble(final K key) {
+        if (key.isEmpty()) {
+            return 0;
+        }
+        return (byte) (key.get(0) & 0x0F);
+    }
+
+
+    private void loadRootNode() {
     this.root =
         this.root.accept(
             new PathNodeVisitor<V>() {
@@ -230,11 +299,11 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             Bytes.EMPTY);
   }
 
-  class RootBranchNodeWrapper {
+  class BranchNodeWrapper {
     private final BranchNode<V> root;
     private final List<Node<V>> pendingChildren;
 
-    public RootBranchNodeWrapper(final BranchNode<V> root) {
+    public BranchNodeWrapper(final BranchNode<V> root) {
       this.root = root;
       loadRootNode();
       this.pendingChildren = Collections.synchronizedList(new ArrayList<>(root.getChildren()));
