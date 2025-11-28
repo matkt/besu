@@ -53,9 +53,10 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-  private static final ExecutorService EXECUTOR = Executors.newWorkStealingPool(32);
-  private static final int SMALL_GROUP_THRESHOLD = 10;
-  private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
+  private static final ExecutorService EXECUTOR = Executors.newWorkStealingPool(16);
+  private static final int SMALL_GROUP_THRESHOLD = 50;
+    private static final int MIN_UPDATES_FOR_PARALLEL = 100;
+    private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
       final NodeLoader nodeLoader,
@@ -117,7 +118,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     try {
       loadRootNode();
-      if (root instanceof BranchNode<V>) {
+      if (pendingUpdates.size() >= MIN_UPDATES_FOR_PARALLEL && loadRootNode() instanceof BranchNode<V>) {
         processUpdatesInParallel(maybeNodeUpdater);
       } else {
         processUpdatesSequentially(maybeNodeUpdater);
@@ -290,7 +291,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     return index == 0 ? (byte) ((key.get(0) >> 4) & 0x0F) : (byte) (key.get(0) & 0x0F);
   }
 
-  private void loadRootNode() {
+  private Node<V> loadRootNode() {
     this.root =
         this.root.accept(
             new PathNodeVisitor<V>() {
@@ -315,6 +316,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
               }
             },
             Bytes.EMPTY);
+    return this.root;
   }
 
   class BranchNodeWrapper {
@@ -338,4 +340,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       return this.root.replaceAllChildren(pendingChildren, true);
     }
   }
+
+
 }
