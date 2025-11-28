@@ -54,8 +54,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
   private static final ExecutorService EXECUTOR = Executors.newWorkStealingPool(16);
-  private static final int SMALL_GROUP_THRESHOLD = 50;
-    private static final int MIN_UPDATES_FOR_PARALLEL = 100;
+  private static final int SMALL_GROUP_THRESHOLD = 5;
+    private static final int MIN_UPDATES_FOR_PARALLEL = 10;
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
   public ParallelStoredMerklePatriciaTrie(
