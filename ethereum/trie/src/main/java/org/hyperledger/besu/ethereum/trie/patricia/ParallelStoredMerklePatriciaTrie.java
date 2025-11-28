@@ -63,7 +63,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     private static final int MIN_UPDATES_FOR_PARALLEL = 10;
 
-    private static final int MIN_UPDATES_FOR_DESCENT = 20;
+    private static final int MIN_UPDATES_FOR_DESCENT = 50;
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
