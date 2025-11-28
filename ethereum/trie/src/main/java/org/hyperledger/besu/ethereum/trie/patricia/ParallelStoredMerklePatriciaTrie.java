@@ -454,7 +454,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     // Commit to cache or just compute hash
     if (maybeCommitCache.isPresent()) {
-      node.accept(
+        updatedNode.accept(
           nodeLocation,
           new CommitVisitor<>(
               new NodeUpdater() {
@@ -464,7 +464,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                 }
               }));
     } else {
-      Objects.requireNonNull(node.getHash());
+      Objects.requireNonNull(updatedNode.getHash());
     }
 
     // Update parent with modified node
