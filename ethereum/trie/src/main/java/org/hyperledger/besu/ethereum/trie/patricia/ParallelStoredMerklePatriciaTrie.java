@@ -105,7 +105,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
    * Minimum number of updates required to trigger parallel processing. Below this threshold,
    * sequential processing is more efficient due to overhead.
    */
-  private static final int MINIMUM_UPDATES_FOR_PARALLEL_PROCESSING = 5;
+  private static final int MINIMUM_UPDATES_FOR_PARALLEL_PROCESSING = 10;
 
   /**
    * Buffer for pending updates that will be batch-processed on commit or getRootHash. Key: The trie
@@ -236,7 +236,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         pendingUpdates.entrySet().stream()
             .map(entry -> new UpdateEntry<>(bytesToPath(entry.getKey()), entry.getValue()))
             .toList();
-    ;
 
     // Group updates by first nibble for root branch distribution
     final Map<Byte, List<UpdateEntry<V>>> updatesByFirstNibble =
