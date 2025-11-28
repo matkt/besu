@@ -35,7 +35,6 @@ import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
-import org.hyperledger.besu.plugin.services.tracer.InterruptibleOperationTracer;
 
 import java.util.List;
 import java.util.Map;
@@ -169,28 +168,27 @@ public class ParallelizedConcurrentTransactionProcessor {
                   blockHeader,
                   transaction.detachedCopy(),
                   miningBeneficiary,
-                  new InterruptibleOperationTracer(
-                      new BlockAwareOperationTracer() {
-                        @Override
-                        public void traceBeforeRewardTransaction(
-                            final WorldView worldView,
-                            final org.hyperledger.besu.datatypes.Transaction tx,
-                            final Wei miningReward) {
-                          /*
-                           * This part checks if the mining beneficiary's account was accessed before increasing its balance for rewards.
-                           * Indeed, if the transaction has interacted with the address to read or modify it,
-                           * it means that the value is necessary for the proper execution of the transaction and will therefore be considered in collision detection.
-                           * If this is not the case, we can ignore this address during conflict detection.
-                           */
-                          if (transactionCollisionDetector
-                              .getAddressesTouchedByTransaction(
-                                  transaction, Optional.of(roundWorldStateUpdater))
-                              .contains(miningBeneficiary)) {
-                            contextBuilder.isMiningBeneficiaryTouchedPreRewardByTransaction(true);
-                          }
-                          contextBuilder.miningBeneficiaryReward(miningReward);
-                        }
-                      }),
+                  new BlockAwareOperationTracer() {
+                    @Override
+                    public void traceBeforeRewardTransaction(
+                        final WorldView worldView,
+                        final org.hyperledger.besu.datatypes.Transaction tx,
+                        final Wei miningReward) {
+                      /*
+                       * This part checks if the mining beneficiary's account was accessed before increasing its balance for rewards.
+                       * Indeed, if the transaction has interacted with the address to read or modify it,
+                       * it means that the value is necessary for the proper execution of the transaction and will therefore be considered in collision detection.
+                       * If this is not the case, we can ignore this address during conflict detection.
+                       */
+                      if (transactionCollisionDetector
+                          .getAddressesTouchedByTransaction(
+                              transaction, Optional.of(roundWorldStateUpdater))
+                          .contains(miningBeneficiary)) {
+                        contextBuilder.isMiningBeneficiaryTouchedPreRewardByTransaction(true);
+                      }
+                      contextBuilder.miningBeneficiaryReward(miningReward);
+                    }
+                  },
                   blockHashLookup,
                   TransactionValidationParams.processingBlock(),
                   blobGasPrice,
