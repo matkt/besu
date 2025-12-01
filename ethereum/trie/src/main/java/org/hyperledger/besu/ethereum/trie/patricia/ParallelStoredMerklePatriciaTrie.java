@@ -43,12 +43,6 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
-    // Minimum threshold to enable parallel processing
-    private static final int MIN_UPDATES_FOR_PARALLEL = 2;
-
-    // Minimum threshold to descend into deeper nodes
-    private static final int MIN_UPDATES_FOR_DESCENT = 2;
-
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
     // Constructors
@@ -123,7 +117,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         }
 
         try {
-            if (pendingUpdates.size() >= MIN_UPDATES_FOR_PARALLEL && loadRootNode() instanceof BranchNode<V>) {
+            if (pendingUpdates.size() > 1 && loadRootNode() instanceof BranchNode<V>) {
                 processUpdatesInParallel(maybeNodeUpdater);
             } else {
                 processUpdatesSequentially(maybeNodeUpdater);
@@ -182,15 +176,16 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
         Node<V> currentNode = parentWrapper.getPendingChildren().get(nibbleIndex);
 
-        // Descend through ExtensionNodes if we have enough updates
+        boolean hasEnoughUpdate = updates.size() > 1;
+
         NodeInfo<V> nodeInfo = null;
-        if (updates.size() >= MIN_UPDATES_FOR_DESCENT && currentNode instanceof ExtensionNode<V>) {
-            nodeInfo = descendThroughExtensions(currentNode, location, depth);
+        if (hasEnoughUpdate && currentNode instanceof ExtensionNode<V>) {
+            nodeInfo = descendThroughExtensions((ExtensionNode<V>) currentNode, location, depth);
             currentNode = nodeInfo.node;
         }
 
         // Process based on node type
-        if (currentNode instanceof BranchNode<V> branchNode && updates.size() >= MIN_UPDATES_FOR_DESCENT) {
+        if (hasEnoughUpdate && currentNode instanceof BranchNode<V> branchNode ) {
             // Parallel descent into BranchNode
             final Bytes actualLocation = nodeInfo != null ? nodeInfo.location : location;
             final int actualDepth = nodeInfo != null ? nodeInfo.depth : depth;
@@ -217,20 +212,13 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
 
     private NodeInfo<V> descendThroughExtensions(
-            final Node<V> startNode,
+            final ExtensionNode<V> startNode,
             final Bytes startLocation,
             final int startDepth) {
 
-        Node<V> currentNode = startNode;
-        Bytes currentLocation = startLocation;
-        int currentDepth = startDepth;
-
-        // Keep descending while we encounter ExtensionNodes
-        while (currentNode instanceof ExtensionNode<V> ext) {
-            currentLocation = Bytes.concatenate(currentLocation, ext.getPath());
-            currentDepth += ext.getPath().size();
-            currentNode = ext.getChild();
-        }
+        Bytes currentLocation = Bytes.concatenate(startLocation, startNode.getPath());
+        int currentDepth =startDepth+startNode.getPath().size();
+        Node<V> currentNode = startNode.getChild();
 
         return new NodeInfo<>(currentNode, currentLocation, currentDepth);
     }
@@ -256,7 +244,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
             final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
 
             // Always parallelize if we have enough updates
-            if (childUpdates.size() >= MIN_UPDATES_FOR_PARALLEL) {
+            if (childUpdates.size() > 1) {
                 futures.add(CompletableFuture.runAsync(
                         () -> processGroupRecursively(
                                 branchWrapper,
