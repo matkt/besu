@@ -44,10 +44,10 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
     // Minimum threshold to enable parallel processing
-    private static final int MIN_UPDATES_FOR_PARALLEL = 5;
+    private static final int MIN_UPDATES_FOR_PARALLEL = 2;
 
     // Minimum threshold to descend into deeper nodes
-    private static final int MIN_UPDATES_FOR_DESCENT = 25;
+    private static final int MIN_UPDATES_FOR_DESCENT = 2;
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
