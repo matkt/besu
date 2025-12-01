@@ -59,7 +59,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
     private static final ExecutorService VIRTUAL_POOL =
-            Executors.newVirtualThreadPerTaskExecutor();
+            Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()*2);
 
     private static final int MIN_UPDATES_FOR_PARALLEL = 2;
 
