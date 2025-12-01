@@ -58,9 +58,6 @@ import org.apache.tuweni.bytes.Bytes32;
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     extends StoredMerklePatriciaTrie<K, V> {
 
-    private static final ExecutorService VIRTUAL_POOL =
-            Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()*2);
-
     private static final int MIN_UPDATES_FOR_PARALLEL = 2;
 
     private static final int MIN_UPDATES_FOR_DESCENT = 2;
@@ -162,24 +159,20 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
         final BranchNodeWrapper rootWrapper = new BranchNodeWrapper((BranchNode<V>) root);
 
-        final List<CompletableFuture<Void>> futures = new ArrayList<>();
-
         for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNibble.entrySet()) {
             final byte nibble = entry.getKey();
             final List<UpdateEntry<V>> updates = entry.getValue();
 
-            futures.add(CompletableFuture.runAsync(
-                    () -> processGroupRecursively(
-                            rootWrapper,
-                            nibble,
-                            Bytes.of(nibble),
-                            updates,
-                            1,
-                            maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty()),
-                    VIRTUAL_POOL));
+            updates.parallelStream().forEach(vUpdateEntry -> {
+                processGroupRecursively(
+                        rootWrapper,
+                        nibble,
+                        Bytes.of(nibble),
+                        updates,
+                        1,
+                        maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty());
+            });
         }
-
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         this.root = rootWrapper.applyUpdates();
         if (maybeNodeUpdater.isPresent()) {
@@ -232,35 +225,20 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
         final BranchNodeWrapper branchWrapper = new BranchNodeWrapper(branchNode);
 
-        final List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNextNibble.entrySet()) {
+        groupedByNextNibble.entrySet().parallelStream().forEach(entry -> {
             final byte nibble = entry.getKey();
             final List<UpdateEntry<V>> childUpdates = entry.getValue();
             final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
-            if (childUpdates.size() >= MIN_UPDATES_FOR_PARALLEL) {
-                futures.add(CompletableFuture.runAsync(
-                        () -> processGroupRecursively(
-                                branchWrapper,
-                                nibble,
-                                childLocation,
-                                childUpdates,
-                                depth + 1,
-                                maybeCommitCache),
-                        VIRTUAL_POOL));
-            } else {
-                processGroupRecursively(
-                        branchWrapper,
-                        nibble,
-                        childLocation,
-                        childUpdates,
-                        depth + 1,
-                        maybeCommitCache);
-            }
-        }
-        if (!futures.isEmpty()) {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        }
+            processGroupRecursively(
+                    branchWrapper,
+                    nibble,
+                    childLocation,
+                    childUpdates,
+                    depth + 1,
+                    maybeCommitCache);
+
+        });
         parentWrapper.setChildren(parentNibbleIndex, branchWrapper.applyUpdates());
     }
 
