@@ -43,10 +43,15 @@ import org.hyperledger.besu.ethereum.trie.patricia.ParallelStoredMerklePatriciaT
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -60,7 +65,9 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 public class BonsaiWorldState extends PathBasedWorldState {
 
-  protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
+    private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
+
+    protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
   private final CodeCache codeCache;
 
   public BonsaiWorldState(
@@ -131,13 +138,22 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
     // This must be done before updating the accounts so
     // that we can get the storage state hash
-    Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>>
-        storageStream = worldStateUpdater.getStorageToUpdate().entrySet().stream();
-    storageStream.forEach(
-        addressMapEntry ->
-            updateAccountStorageState(maybeStateUpdater, worldStateUpdater, addressMapEntry));
+      final List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-    // Third update the code.  This has the side effect of ensuring a code hash is calculated.
+      Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>>
+        storageStream = worldStateUpdater.getStorageToUpdate().entrySet().stream();
+    storageStream.forEach(addressMapEntry ->{
+        futures.add(CompletableFuture.runAsync(new Runnable() {
+            @Override
+            public void run() {
+                updateAccountStorageState(maybeStateUpdater, worldStateUpdater, addressMapEntry);
+            }
+        },VIRTUAL_POOL));
+    } );
+
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+      // Third update the code.  This has the side effect of ensuring a code hash is calculated.
     updateCode(maybeStateUpdater, worldStateUpdater);
 
     // next walk the account trie
