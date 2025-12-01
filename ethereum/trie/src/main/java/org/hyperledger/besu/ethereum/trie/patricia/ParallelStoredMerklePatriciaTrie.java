@@ -16,24 +16,18 @@ package org.hyperledger.besu.ethereum.trie.patricia;
 
 import static org.hyperledger.besu.ethereum.trie.CompactEncoding.bytesToPath;
 
-import org.hyperledger.besu.ethereum.trie.CommitVisitor;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 import org.hyperledger.besu.ethereum.trie.StoredNode;
+import org.hyperledger.besu.ethereum.trie.CommitVisitor;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
@@ -42,337 +36,213 @@ import java.util.stream.Collectors;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-
 /**
- * A parallel implementation of StoredMerklePatriciaTrie that processes updates in parallel
- * recursively descending to any depth where BranchNodes exist and updates are sufficient.
- * Uses a deferred commit strategy to avoid synchronization bottlenecks.
- *
- * This implementation uses both CompletableFuture for top-level coordination and
- * StructuredTaskScope for nested parallel operations
+ * A recursive parallel implementation using virtual threads.
+ * Recursively descends the trie and spawns virtual threads for each branch.
  *
  * @param <K> The type of keys
  * @param <V> The type of values stored by this trie
  */
-@SuppressWarnings("rawtypes")
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
-    extends StoredMerklePatriciaTrie<K, V> {
+        extends StoredMerklePatriciaTrie<K, V> {
 
-    private static final int MIN_UPDATES_FOR_PARALLEL = 2;
-
-    private static final int MIN_UPDATES_FOR_DESCENT = 2;
+    private static final ExecutorService VIRTUAL_POOL =
+            Executors.newVirtualThreadPerTaskExecutor();
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
-  public ParallelStoredMerklePatriciaTrie(
-      final NodeLoader nodeLoader,
-      final Function<V, Bytes> valueSerializer,
-      final Function<Bytes, V> valueDeserializer) {
-    super(nodeLoader, valueSerializer, valueDeserializer);
-  }
-
-  public ParallelStoredMerklePatriciaTrie(
-      final NodeLoader nodeLoader,
-      final Bytes32 rootHash,
-      final Bytes rootLocation,
-      final Function<V, Bytes> valueSerializer,
-      final Function<Bytes, V> valueDeserializer) {
-    super(nodeLoader, rootHash, rootLocation, valueSerializer, valueDeserializer);
-  }
-
-  public ParallelStoredMerklePatriciaTrie(
-      final NodeLoader nodeLoader,
-      final Bytes32 rootHash,
-      final Function<V, Bytes> valueSerializer,
-      final Function<Bytes, V> valueDeserializer) {
-    super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
-  }
-
-  public ParallelStoredMerklePatriciaTrie(
-      final StoredNodeFactory<V> nodeFactory, final Bytes32 rootHash) {
-    super(nodeFactory, rootHash);
-  }
-
-  @Override
-  public void put(final K key, final V value) {
-    pendingUpdates.put(key, Optional.of(value));
-  }
-
-  @Override
-  public void remove(final K key) {
-    pendingUpdates.put(key, Optional.empty());
-  }
-
-  @Override
-  public void commit(final NodeUpdater nodeUpdater) {
-    processPendingUpdates(Optional.of(nodeUpdater));
-  }
-
-  @Override
-  public Bytes32 getRootHash() {
-    if (pendingUpdates.isEmpty()) {
-      return root.getHash();
+    public ParallelStoredMerklePatriciaTrie(
+            final NodeLoader nodeLoader,
+            final Function<V, Bytes> valueSerializer,
+            final Function<Bytes, V> valueDeserializer) {
+        super(nodeLoader, valueSerializer, valueDeserializer);
     }
-    processPendingUpdates(Optional.empty());
-    return root.getHash();
-  }
 
-    private record UpdateEntry<V>(Bytes path, Optional<V> value) {
+    public ParallelStoredMerklePatriciaTrie(
+            final NodeLoader nodeLoader,
+            final Bytes32 rootHash,
+            final Bytes rootLocation,
+            final Function<V, Bytes> valueSerializer,
+            final Function<Bytes, V> valueDeserializer) {
+        super(nodeLoader, rootHash, rootLocation, valueSerializer, valueDeserializer);
+    }
 
-        byte getNibble(final int index) {
-                if (index >= path.size()) {
-                    return 0;
-                }
-                return path.get(index);
+    public ParallelStoredMerklePatriciaTrie(
+            final NodeLoader nodeLoader,
+            final Bytes32 rootHash,
+            final Function<V, Bytes> valueSerializer,
+            final Function<Bytes, V> valueDeserializer) {
+        super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
+    }
+
+    public ParallelStoredMerklePatriciaTrie(
+            final StoredNodeFactory<V> nodeFactory, final Bytes32 rootHash) {
+        super(nodeFactory, rootHash);
+    }
+
+    @Override
+    public void put(final K key, final V value) {
+        pendingUpdates.put(key, Optional.of(value));
+    }
+
+    @Override
+    public void remove(final K key) {
+        pendingUpdates.put(key, Optional.empty());
+    }
+
+    @Override
+    public void commit(final NodeUpdater nodeUpdater) {
+        processPendingUpdates(Optional.of(nodeUpdater));
+    }
+
+    @Override
+    public Bytes32 getRootHash() {
+        if (pendingUpdates.isEmpty()) {
+            return root.getHash();
+        }
+        processPendingUpdates(Optional.empty());
+        return root.getHash();
+    }
+
+    /**
+     * Entry point for recursive processing
+     */
+    private void processPendingUpdates(final Optional<NodeUpdater> maybeNodeUpdater) {
+        if (pendingUpdates.isEmpty()) {
+            return;
+        }
+
+        try {
+            // Convert updates to paths
+            Map<Bytes, Optional<V>> pathUpdates = pendingUpdates.entrySet().stream()
+                    .collect(Collectors.toMap(
+                            e -> bytesToPath(e.getKey()),
+                            Map.Entry::getValue
+                    ));
+
+            // Start recursive processing from root
+            this.root = processNodeRecursively(this.root, pathUpdates, 0, Bytes.EMPTY, maybeNodeUpdater);
+
+            // Store root and reset if committing
+            if (maybeNodeUpdater.isPresent()) {
+                storeAndResetRoot(maybeNodeUpdater.get());
             }
-        }
 
-  private void processPendingUpdates(final Optional<NodeUpdater> maybeNodeUpdater) {
-    if (pendingUpdates.isEmpty()) {
-      return;
-    }
-
-    try {
-      if (pendingUpdates.size() >= MIN_UPDATES_FOR_PARALLEL && loadRootNode() instanceof BranchNode<V>) {
-        processUpdatesInParallel(maybeNodeUpdater);
-      } else {
-        processUpdatesSequentially(maybeNodeUpdater);
-      }
-    } catch (InterruptedException | ExecutionException e) {
-      throw new RuntimeException("Failed to process updates", e);
-    } finally {
-      pendingUpdates.clear();
-    }
-  }
-
-    private void processUpdatesInParallel(final Optional<NodeUpdater> maybeNodeUpdater)
-            throws InterruptedException, ExecutionException {
-
-        final NodeCommitCache commitCache = new NodeCommitCache();
-
-        final List<UpdateEntry<V>> updateEntries = pendingUpdates.entrySet().stream()
-                .map(entry -> new UpdateEntry<>(bytesToPath(entry.getKey()), entry.getValue()))
-                .toList();
-        final Map<Byte, List<UpdateEntry<V>>> groupedByNibble =
-                updateEntries.stream()
-                        .collect(Collectors.groupingBy(entry -> entry.getNibble(0)));
-
-        final BranchNodeWrapper rootWrapper = new BranchNodeWrapper((BranchNode<V>) root);
-
-        for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNibble.entrySet()) {
-            final byte nibble = entry.getKey();
-            final List<UpdateEntry<V>> updates = entry.getValue();
-
-            updates.parallelStream().forEach(vUpdateEntry -> {
-                processGroupRecursively(
-                        rootWrapper,
-                        nibble,
-                        Bytes.of(nibble),
-                        updates,
-                        1,
-                        maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty());
-            });
-        }
-
-        this.root = rootWrapper.applyUpdates();
-        if (maybeNodeUpdater.isPresent()) {
-            commitCache.flushTo(maybeNodeUpdater.get());
-            storeAndResetRoot(maybeNodeUpdater.get());
+        } finally {
+            pendingUpdates.clear();
         }
     }
 
-    private void processGroupRecursively(
-            final BranchNodeWrapper parentWrapper,
-            final byte nibbleIndex,
-            final Bytes location,
-            final List<UpdateEntry<V>> updates,
-            final int depth,
-            final Optional<NodeCommitCache> maybeCommitCache) {
-        final Node<V> currentNode = parentWrapper.getPendingChildren().get(nibbleIndex);
-        if (currentNode instanceof BranchNode && updates.size() >= MIN_UPDATES_FOR_DESCENT) {
-            processParallelDescent(
-                    parentWrapper,
-                    nibbleIndex,
-                    (BranchNode<V>) currentNode,
-                    location,
-                    updates,
-                    depth,
-                    maybeCommitCache);
-        } else {
-            processNodeUpdatesSequentially(
-                    parentWrapper,
-                    nibbleIndex,
-                    currentNode,
-                    location,
-                    updates,
-                    depth,
-                    maybeCommitCache);
-        }
-    }
-
-    private void processParallelDescent(
-            final BranchNodeWrapper parentWrapper,
-            final byte parentNibbleIndex,
-            final BranchNode<V> branchNode,
-            final Bytes location,
-            final List<UpdateEntry<V>> updates,
-            final int depth,
-            final Optional<NodeCommitCache> maybeCommitCache) {
-
-        final Map<Byte, List<UpdateEntry<V>>> groupedByNextNibble =
-                updates.stream()
-                        .collect(Collectors.groupingBy(entry -> entry.getNibble(depth)));
-
-        final BranchNodeWrapper branchWrapper = new BranchNodeWrapper(branchNode);
-
-
-        groupedByNextNibble.entrySet().parallelStream().forEach(entry -> {
-            final byte nibble = entry.getKey();
-            final List<UpdateEntry<V>> childUpdates = entry.getValue();
-            final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
-            processGroupRecursively(
-                    branchWrapper,
-                    nibble,
-                    childLocation,
-                    childUpdates,
-                    depth + 1,
-                    maybeCommitCache);
-
-        });
-        parentWrapper.setChildren(parentNibbleIndex, branchWrapper.applyUpdates());
-    }
-
-    private void processNodeUpdatesSequentially(
-            final BranchNodeWrapper nodeWrapper,
-            final byte nibbleIndex,
+    /**
+     * Recursively process a node and its children in parallel
+     *
+     * @param node Current node being processed
+     * @param updates Map of path -> value updates
+     * @param depth Current depth in the path
+     * @param location Current location in the trie
+     * @param maybeNodeUpdater Optional node updater for committing
+     * @return Updated node
+     */
+    private Node<V> processNodeRecursively(
             final Node<V> node,
+            final Map<Bytes, Optional<V>> updates,
+            final int depth,
             final Bytes location,
-            final List<UpdateEntry<V>> updates,
-            final int pathSliceOffset,
-            final Optional<NodeCommitCache> maybeCommitCache) {
+            final Optional<NodeUpdater> maybeNodeUpdater) {
 
-        Node<V> tmpNode = node;
-        for (final UpdateEntry<V> entry : updates) {
-            if (entry.path.size() > pathSliceOffset) {
-                final Bytes path = entry.path.slice(pathSliceOffset);
-                final PathNodeVisitor<V> visitor =
-                        entry.value.isPresent()
-                                ? getPutVisitor(entry.value.get())
-                                : getRemoveVisitor();
-                tmpNode = tmpNode.accept(visitor, path);
-            } else if (entry.path.size() == pathSliceOffset) {
-                final PathNodeVisitor<V> visitor =
-                        entry.value.isPresent()
-                                ? getPutVisitor(entry.value.get())
-                                : getRemoveVisitor();
-                tmpNode = tmpNode.accept(visitor, Bytes.EMPTY);
+        // Base case: no updates for this node
+        if (updates.isEmpty()) {
+            return node;
+        }
+
+        // If it's a BranchNode, recurse in parallel on children
+        if (node instanceof BranchNode) {
+            return processBranchNodeRecursively(
+                    (BranchNode<V>) node, updates, depth, location, maybeNodeUpdater);
+        }
+
+        // For other node types, apply updates sequentially
+        Node<V> result = node;
+        for (Map.Entry<Bytes, Optional<V>> update : updates.entrySet()) {
+            Bytes remainingPath = update.getKey().slice(depth);
+            PathNodeVisitor<V> visitor = update.getValue().isPresent()
+                    ? getPutVisitor(update.getValue().get())
+                    : getRemoveVisitor();
+            result = result.accept(visitor, remainingPath);
+        }
+
+        // Commit this node if needed
+        if (maybeNodeUpdater.isPresent()) {
+            result.accept(location, new CommitVisitor<>(maybeNodeUpdater.get()));
+        }
+
+        return result;
+    }
+
+    /**
+     * Process a BranchNode recursively in parallel
+     */
+    private Node<V> processBranchNodeRecursively(
+            final BranchNode<V> branchNode,
+            final Map<Bytes, Optional<V>> updates,
+            final int depth,
+            final Bytes location,
+            final Optional<NodeUpdater> maybeNodeUpdater) {
+
+        // Group updates by next nibble (0-15)
+        Map<Byte, Map<Bytes, Optional<V>>> grouped = new HashMap<>();
+
+        for (Map.Entry<Bytes, Optional<V>> update : updates.entrySet()) {
+            Bytes path = update.getKey();
+            if (path.size() > depth) {
+                byte nibble = path.get(depth);
+                grouped.computeIfAbsent(nibble, k -> new HashMap<>())
+                        .put(path, update.getValue());
             }
         }
-        if (maybeCommitCache.isPresent()) {
-            tmpNode.accept(location, new CommitVisitor<>(new NodeUpdater() {
-                @Override
-                public void store(final Bytes location, final  Bytes32 hash, final Bytes value) {
-                    maybeCommitCache.get().put(location, hash, value);
+
+        // Process each child in parallel using virtual threads
+        List<Node<V>> children = branchNode.getChildren();
+        List<Node<V>> newChildren = new java.util.ArrayList<>(children);
+
+        for (int i = 0; i < children.size(); i++) {
+            final int index = i;
+            final byte nibble = (byte) i;
+            final Node<V> child = children.get(i);
+            final Map<Bytes, Optional<V>> childUpdates = grouped.get(nibble);
+
+            if (childUpdates != null && !childUpdates.isEmpty()) {
+                final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
+
+                // Spawn a virtual thread for each child with updates
+                try {
+                    Node<V> updatedChild = VIRTUAL_POOL.submit(() ->
+                            processNodeRecursively(child, childUpdates, depth + 1, childLocation, maybeNodeUpdater)
+                    ).get();
+                    newChildren.set(index, updatedChild);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to process child node", e);
                 }
-            }));
-        } else {
-            Objects.requireNonNull(tmpNode.getHash());
-        }
-        nodeWrapper.setChildren(nibbleIndex, tmpNode);
-    }
-
-    private void processUpdatesSequentially(final Optional<NodeUpdater> maybeNodeUpdater) {
-        pendingUpdates.forEach(
-                (key, value) -> {
-                    if (value.isPresent()) {
-                        super.put(key, value.get());
-                    } else {
-                        super.remove(key);
-                    }
-                });
-        maybeNodeUpdater.ifPresent(super::commit);
-    }
-
-  private void storeAndResetRoot(final NodeUpdater nodeUpdater) {
-    final Bytes32 rootHash = root.getHash();
-    nodeUpdater.store(Bytes.EMPTY, rootHash, root.getEncodedBytes());
-    this.root =
-        rootHash.equals(EMPTY_TRIE_NODE_HASH)
-            ? NullNode.instance()
-            : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
-  }
-
-  private Node<V> loadRootNode() {
-    this.root =
-        this.root.accept(
-            new PathNodeVisitor<V>() {
-              @Override
-              public Node<V> visit(final ExtensionNode<V> extensionNode, final Bytes path) {
-                return extensionNode;
-              }
-
-              @Override
-              public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
-                return branchNode;
-              }
-
-              @Override
-              public Node<V> visit(final LeafNode<V> leafNode, final Bytes path) {
-                return leafNode;
-              }
-
-              @Override
-              public Node<V> visit(final NullNode<V> nullNode, final Bytes path) {
-                return nullNode;
-              }
-            },
-            Bytes.EMPTY);
-    return this.root;
-  }
-
-  class BranchNodeWrapper {
-    private final BranchNode<V> root;
-    private final List<Node<V>> pendingChildren;
-
-    public BranchNodeWrapper(final BranchNode<V> root) {
-      this.root = root;
-      this.pendingChildren = Collections.synchronizedList(new ArrayList<>(root.getChildren()));
-    }
-
-    public List<Node<V>> getPendingChildren() {
-      return pendingChildren;
-    }
-
-    public void setChildren(final byte index, final Node<V> children) {
-      this.pendingChildren.set(index, children);
-    }
-
-    public Node<V> applyUpdates() {
-      return this.root.replaceAllChildren(pendingChildren, true);
-    }
-  }
-
-    private static class NodeCommitCache {
-        private final Map<Bytes, NodeData> cache = new ConcurrentHashMap<>();
-
-        void put(final Bytes location, final Bytes32 hash, final Bytes encodedBytes) {
-            cache.put(location, new NodeData(hash, encodedBytes));
-        }
-
-        void flushTo(final NodeUpdater nodeUpdater) {
-            cache.forEach((location, nodeData) ->
-                    nodeUpdater.store(location, nodeData.hash, nodeData.encodedBytes));
-        }
-
-        private static class NodeData {
-            final Bytes32 hash;
-            final Bytes encodedBytes;
-
-            NodeData(final Bytes32 hash, final Bytes encodedBytes) {
-                this.hash = hash;
-                this.encodedBytes = encodedBytes;
             }
         }
+
+        // Return new branch with updated children
+        Node<V> result = branchNode.replaceAllChildren(newChildren, true);
+
+        // Commit this branch node if needed
+        if (maybeNodeUpdater.isPresent()) {
+            result.accept(location, new CommitVisitor<>(maybeNodeUpdater.get()));
+        }
+
+        return result;
     }
 
+    private void storeAndResetRoot(final NodeUpdater nodeUpdater) {
+        final Bytes32 rootHash = root.getHash();
+        nodeUpdater.store(Bytes.EMPTY, rootHash, root.getEncodedBytes());
+        this.root =
+                rootHash.equals(EMPTY_TRIE_NODE_HASH)
+                        ? NullNode.instance()
+                        : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
+    }
 }
