@@ -8,6 +8,7 @@ import org.hyperledger.besu.ethereum.trie.CommitVisitor;
 import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
+import org.hyperledger.besu.ethereum.trie.NullNode;
 import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 import org.hyperledger.besu.ethereum.trie.StoredNode;
 
@@ -26,25 +27,26 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Parallel implementation using virtual threads for efficient trie updates.
- * Descends through ExtensionNodes to find BranchNodes for parallel processing.
+ * A parallel implementation of StoredMerklePatriciaTrie that processes updates in parallel
+ * recursively descending to any depth where BranchNodes exist and updates are sufficient.
+ * Uses a deferred commit strategy to avoid synchronization bottlenecks.
  *
- * <p>Two thresholds control parallelization:
- * <ul>
- *   <li>MIN_UPDATES_FOR_DESCENT: minimum updates required to descend through ExtensionNodes</li>
- *   <li>MIN_UPDATES_FOR_NEW_THREAD: minimum updates required to spawn a new thread</li>
- * </ul>
+ * <p>This implementation uses virtual threads for efficient parallel processing.
+ * It descends through ExtensionNodes to find BranchNodes for optimal parallelization.
+ *
+ * @param <K> The type of keys
+ * @param <V> The type of values stored by this trie
  */
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         extends StoredMerklePatriciaTrie<K, V> {
 
     private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
-    // Minimum threshold to descend through ExtensionNodes
-    private static final int MIN_UPDATES_FOR_DESCENT = 25;
+    // Minimum threshold to enable parallel processing
+    private static final int MIN_UPDATES_FOR_PARALLEL = 5;
 
-    // Minimum threshold to spawn a new thread
-    private static final int MIN_UPDATES_FOR_NEW_THREAD = 5;
+    // Minimum threshold to descend into deeper nodes
+    private static final int MIN_UPDATES_FOR_DESCENT = 25;
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
@@ -57,10 +59,26 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     }
 
     public ParallelStoredMerklePatriciaTrie(
-            final NodeLoader nodeLoader, final Bytes32 rootHash,
+            final NodeLoader nodeLoader,
+            final Bytes32 rootHash,
+            final Bytes rootLocation,
+            final Function<V, Bytes> valueSerializer,
+            final Function<Bytes, V> valueDeserializer) {
+        super(nodeLoader, rootHash, rootLocation, valueSerializer, valueDeserializer);
+    }
+
+    public ParallelStoredMerklePatriciaTrie(
+            final NodeLoader nodeLoader,
+            final Bytes32 rootHash,
             final Function<V, Bytes> valueSerializer,
             final Function<Bytes, V> valueDeserializer) {
         super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
+    }
+
+    public ParallelStoredMerklePatriciaTrie(
+            final StoredNodeFactory<V> nodeFactory,
+            final Bytes32 rootHash) {
+        super(nodeFactory, rootHash);
     }
 
     @Override
@@ -75,178 +93,236 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     @Override
     public void commit(final NodeUpdater nodeUpdater) {
-        applyUpdates(Optional.of(nodeUpdater));
+        processPendingUpdates(Optional.of(nodeUpdater));
     }
 
     @Override
     public Bytes32 getRootHash() {
-        applyUpdates(Optional.empty());
+        if (pendingUpdates.isEmpty()) {
+            return root.getHash();
+        }
+        processPendingUpdates(Optional.empty());
         return root.getHash();
     }
 
-    // Structure to store an update
-    private record Update<V>(Bytes path, Optional<V> value) {
-        byte nibbleAt(final int index) {
-            return index < path.size() ? path.get(index) : 0;
+    // Update entry structure
+    private record UpdateEntry<V>(Bytes path, Optional<V> value) {
+        byte getNibble(final int index) {
+            return index >= path.size() ? 0 : path.get(index);
         }
     }
 
+    // Node information after descent
+    private record NodeInfo<V>(Node<V> node, Bytes location, int depth) {}
+
     // Main entry point
-    private void applyUpdates(final Optional<NodeUpdater> nodeUpdater) {
-        if (pendingUpdates.isEmpty()) return;
+    private void processPendingUpdates(final Optional<NodeUpdater> maybeNodeUpdater) {
+        if (pendingUpdates.isEmpty()) {
+            return;
+        }
 
         try {
-            List<Update<V>> updates = pendingUpdates.entrySet().stream()
-                    .map(e -> new Update<>(bytesToPath(e.getKey()), e.getValue()))
-                    .toList();
-
-            // Check if we have enough updates for parallelization
-            if (updates.size() >= MIN_UPDATES_FOR_DESCENT) {
-                applyParallel(updates, nodeUpdater);
+            if (pendingUpdates.size() >= MIN_UPDATES_FOR_PARALLEL && loadRootNode() instanceof BranchNode<V>) {
+                processUpdatesInParallel(maybeNodeUpdater);
             } else {
-                applySequential(nodeUpdater);
+                processUpdatesSequentially(maybeNodeUpdater);
             }
         } finally {
             pendingUpdates.clear();
         }
     }
 
-    private void applyParallel(final List<Update<V>> updates, final Optional<NodeUpdater> nodeUpdater) {
-        CommitCache cache = new CommitCache();
+    private void processUpdatesInParallel(final Optional<NodeUpdater> maybeNodeUpdater) {
+        final CommitCache commitCache = new CommitCache();
 
-        // Descend to a BranchNode if we have enough updates
-        NodeInfo<V> nodeInfo = findBranchNode(root, Bytes.EMPTY, 0);
+        final List<UpdateEntry<V>> updateEntries = pendingUpdates.entrySet().stream()
+                .map(entry -> new UpdateEntry<>(bytesToPath(entry.getKey()), entry.getValue()))
+                .toList();
 
-        if (nodeInfo.node instanceof BranchNode<V> branchNode) {
-            BranchWrapper wrapper = new BranchWrapper(branchNode);
+        final Map<Byte, List<UpdateEntry<V>>> groupedByNibble = updateEntries.stream()
+                .collect(Collectors.groupingBy(entry -> entry.getNibble(0)));
 
-            Map<Byte, List<Update<V>>> grouped = updates.stream()
-                    .collect(Collectors.groupingBy(u -> u.nibbleAt(nodeInfo.depth)));
+        final BranchWrapper rootWrapper = new BranchWrapper((BranchNode<V>) root);
+        final List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-            List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-            for (Map.Entry<Byte, List<Update<V>>> entry : grouped.entrySet()) {
-                final byte nibble = entry.getKey();
-                final List<Update<V>> groupUpdates = entry.getValue();
-
-                // Spawn a new thread only if we have enough updates
-                if (groupUpdates.size() >= MIN_UPDATES_FOR_NEW_THREAD) {
-                    futures.add(CompletableFuture.runAsync(() ->
-                                    processGroup(wrapper, nibble, groupUpdates,
-                                            nodeInfo.location, nodeInfo.depth,
-                                            nodeUpdater.isPresent() ? Optional.of(cache) : Optional.empty()),
-                            VIRTUAL_POOL));
-                } else {
-                    // Process in current thread
-                    processGroup(wrapper, nibble, groupUpdates,
-                            nodeInfo.location, nodeInfo.depth,
-                            nodeUpdater.isPresent() ? Optional.of(cache) : Optional.empty());
-                }
-            }
-
-            if (!futures.isEmpty()) {
-                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
-            }
-
-            this.root = wrapper.buildNode();
-
-            if (nodeUpdater.isPresent()) {
-                cache.commitTo(nodeUpdater.get());
-                storeRoot(nodeUpdater.get());
-            }
-        } else {
-            applySequential(nodeUpdater);
-        }
-    }
-
-    // Find the first BranchNode by descending through Extensions
-    private NodeInfo<V> findBranchNode(final Node<V> node, final Bytes location, final int depth) {
-        if (node instanceof ExtensionNode<V> ext) {
-            Node<V> child = ext.getChild();
-            Bytes newLocation = Bytes.concatenate(location, ext.getPath());
-            return findBranchNode(child, newLocation, depth + ext.getPath().size());
-        }
-        return new NodeInfo<>(node, location, depth);
-    }
-
-    private record NodeInfo<V>(Node<V> node, Bytes location, int depth) {}
-
-    private void processGroup(final BranchWrapper wrapper, final byte nibble,
-                              final List<Update<V>> updates, final Bytes location,
-                              final int depth, final Optional<CommitCache> cache) {
-        final Node<V> current = wrapper.getChild(nibble);
-        final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
-
-        final NodeInfo<V> info;
-        if (updates.size() >= MIN_UPDATES_FOR_DESCENT) {
-            info = findBranchNode(current, childLocation, depth + 1);
-        } else {
-            info = new NodeInfo<>(current, childLocation, depth + 1);
-        }
-
-        // Parallelize on a BranchNode ONLY if we have enough updates
-        final Node<V> updated;
-        if (updates.size() >= MIN_UPDATES_FOR_DESCENT && info.node instanceof BranchNode<V> branchNode) {
-            final BranchWrapper childWrapper = new BranchWrapper(branchNode);
-            processGroupsInParallel(childWrapper, updates, info.location, info.depth, cache);
-            updated = childWrapper.buildNode();
-        } else {
-            // Not enough updates: sequential processing
-            updated = applyUpdatesSequentially(current, updates, depth);
-        }
-
-        if (cache.isPresent()) {
-            updated.accept(childLocation, new CommitVisitor<>(
-                    (loc, hash, bytes) -> cache.get().store(loc, hash, bytes)));
-        } else {
-            Objects.requireNonNull(updated.getHash());
-        }
-
-        wrapper.setChild(nibble, updated);
-    }
-
-    private void processGroupsInParallel(final BranchWrapper wrapper, final List<Update<V>> updates,
-                                         final Bytes location, final int depth, final Optional<CommitCache> cache) {
-        Map<Byte, List<Update<V>>> grouped = updates.stream()
-                .collect(Collectors.groupingBy(u -> u.nibbleAt(depth)));
-
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-        for (Map.Entry<Byte, List<Update<V>>> entry : grouped.entrySet()) {
+        // Process each group in parallel
+        for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNibble.entrySet()) {
             final byte nibble = entry.getKey();
-            final List<Update<V>> groupUpdates = entry.getValue();
+            final List<UpdateEntry<V>> updates = entry.getValue();
 
-            // Spawn a new thread ONLY if we have enough updates
-            if (groupUpdates.size() >= MIN_UPDATES_FOR_NEW_THREAD) {
-                futures.add(CompletableFuture.runAsync(() ->
-                                processGroup(wrapper, nibble, groupUpdates, location, depth, cache),
+            futures.add(CompletableFuture.runAsync(
+                    () -> processGroupRecursively(
+                            rootWrapper,
+                            nibble,
+                            Bytes.of(nibble),
+                            updates,
+                            1,
+                            maybeNodeUpdater.isPresent() ? Optional.of(commitCache) : Optional.empty()),
+                    VIRTUAL_POOL));
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        this.root = rootWrapper.applyUpdates();
+
+        if (maybeNodeUpdater.isPresent()) {
+            commitCache.flushTo(maybeNodeUpdater.get());
+            storeAndResetRoot(maybeNodeUpdater.get());
+        }
+    }
+
+    private void processGroupRecursively(
+            final BranchWrapper parentWrapper,
+            final byte nibbleIndex,
+            final Bytes location,
+            final List<UpdateEntry<V>> updates,
+            final int depth,
+            final Optional<CommitCache> maybeCommitCache) {
+
+        Node<V> currentNode = parentWrapper.getPendingChildren().get(nibbleIndex);
+
+        // Descend through ExtensionNodes if we have enough updates
+        NodeInfo<V> nodeInfo = null;
+        if (updates.size() >= MIN_UPDATES_FOR_DESCENT && currentNode instanceof ExtensionNode<V>) {
+            nodeInfo = descendThroughExtensions(currentNode, location, depth);
+            currentNode = nodeInfo.node;
+        }
+
+        // Process based on node type
+        if (currentNode instanceof BranchNode<V> branchNode && updates.size() >= MIN_UPDATES_FOR_DESCENT) {
+            // Parallel descent into BranchNode
+            final Bytes actualLocation = nodeInfo != null ? nodeInfo.location : location;
+            final int actualDepth = nodeInfo != null ? nodeInfo.depth : depth;
+
+            processParallelDescent(
+                    parentWrapper,
+                    nibbleIndex,
+                    branchNode,
+                    actualLocation,
+                    updates,
+                    actualDepth,
+                    maybeCommitCache);
+        } else {
+            // Sequential processing for other cases
+            processNodeUpdatesSequentially(
+                    parentWrapper,
+                    nibbleIndex,
+                    currentNode,
+                    location,
+                    updates,
+                    depth,
+                    maybeCommitCache);
+        }
+    }
+
+    private NodeInfo<V> descendThroughExtensions(
+            final Node<V> startNode,
+            final Bytes startLocation,
+            final int startDepth) {
+
+        Node<V> currentNode = startNode;
+        Bytes currentLocation = startLocation;
+        int currentDepth = startDepth;
+
+        // Keep descending while we encounter ExtensionNodes
+        while (currentNode instanceof ExtensionNode<V> ext) {
+            currentLocation = Bytes.concatenate(currentLocation, ext.getPath());
+            currentDepth += ext.getPath().size();
+            currentNode = ext.getChild();
+        }
+
+        return new NodeInfo<>(currentNode, currentLocation, currentDepth);
+    }
+
+    private void processParallelDescent(
+            final BranchWrapper parentWrapper,
+            final byte parentNibbleIndex,
+            final BranchNode<V> branchNode,
+            final Bytes location,
+            final List<UpdateEntry<V>> updates,
+            final int depth,
+            final Optional<CommitCache> maybeCommitCache) {
+
+        final Map<Byte, List<UpdateEntry<V>>> groupedByNextNibble = updates.stream()
+                .collect(Collectors.groupingBy(entry -> entry.getNibble(depth)));
+
+        final BranchWrapper branchWrapper = new BranchWrapper(branchNode);
+        final List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedByNextNibble.entrySet()) {
+            final byte nibble = entry.getKey();
+            final List<UpdateEntry<V>> childUpdates = entry.getValue();
+            final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
+
+            // Always parallelize if we have enough updates
+            if (childUpdates.size() >= MIN_UPDATES_FOR_PARALLEL) {
+                futures.add(CompletableFuture.runAsync(
+                        () -> processGroupRecursively(
+                                branchWrapper,
+                                nibble,
+                                childLocation,
+                                childUpdates,
+                                depth + 1,
+                                maybeCommitCache),
                         VIRTUAL_POOL));
             } else {
-                // Process in current thread
-                processGroup(wrapper, nibble, groupUpdates, location, depth, cache);
+                // Process in current thread for small update groups
+                processGroupRecursively(
+                        branchWrapper,
+                        nibble,
+                        childLocation,
+                        childUpdates,
+                        depth + 1,
+                        maybeCommitCache);
             }
         }
 
         if (!futures.isEmpty()) {
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         }
+
+        parentWrapper.setChildren(parentNibbleIndex, branchWrapper.applyUpdates());
     }
 
-    // Sequential application of updates on a node
-    private Node<V> applyUpdatesSequentially(final Node<V> node, final List<Update<V>> updates, final int depth) {
-        Node<V> current = node;
-        for (Update<V> update : updates) {
-            Bytes path = update.path.slice(depth);
-            PathNodeVisitor<V> visitor = update.value.isPresent()
-                    ? getPutVisitor(update.value.get())
+    private void processNodeUpdatesSequentially(
+            final BranchWrapper nodeWrapper,
+            final byte nibbleIndex,
+            final Node<V> node,
+            final Bytes location,
+            final List<UpdateEntry<V>> updates,
+            final int pathSliceOffset,
+            final Optional<CommitCache> maybeCommitCache) {
+
+        Node<V> tmpNode = node;
+
+        for (final UpdateEntry<V> entry : updates) {
+            final Bytes path;
+            if (entry.path.size() > pathSliceOffset) {
+                path = entry.path.slice(pathSliceOffset);
+            } else if (entry.path.size() == pathSliceOffset) {
+                path = Bytes.EMPTY;
+            } else {
+                continue;
+            }
+
+            final PathNodeVisitor<V> visitor = entry.value.isPresent()
+                    ? getPutVisitor(entry.value.get())
                     : getRemoveVisitor();
-            current = current.accept(visitor, path);
+
+            tmpNode = tmpNode.accept(visitor, path);
         }
-        return current;
+
+        if (maybeCommitCache.isPresent()) {
+            tmpNode.accept(location, new CommitVisitor<>(
+                    (loc, hash, value) -> maybeCommitCache.get().store(loc, hash, value)));
+        } else {
+            Objects.requireNonNull(tmpNode.getHash());
+        }
+
+        nodeWrapper.setChildren(nibbleIndex, tmpNode);
     }
 
-    // Sequential fallback
-    private void applySequential(final Optional<NodeUpdater> nodeUpdater) {
+    private void processUpdatesSequentially(final Optional<NodeUpdater> maybeNodeUpdater) {
         pendingUpdates.forEach((key, value) -> {
             if (value.isPresent()) {
                 super.put(key, value.get());
@@ -254,50 +330,88 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                 super.remove(key);
             }
         });
-        nodeUpdater.ifPresent(super::commit);
+        maybeNodeUpdater.ifPresent(super::commit);
     }
 
-    private void storeRoot(final NodeUpdater nodeUpdater) {
-        final Bytes32 hash = root.getHash();
-        nodeUpdater.store(Bytes.EMPTY, hash, root.getEncodedBytes());
-        this.root = new StoredNode<>(nodeFactory, Bytes.EMPTY, hash);
+    private void storeAndResetRoot(final NodeUpdater nodeUpdater) {
+        final Bytes32 rootHash = root.getHash();
+        nodeUpdater.store(Bytes.EMPTY, rootHash, root.getEncodedBytes());
+        this.root = rootHash.equals(EMPTY_TRIE_NODE_HASH)
+                ? NullNode.instance()
+                : new StoredNode<>(nodeFactory, Bytes.EMPTY, rootHash);
     }
 
-    // Thread-safe wrapper for BranchNode modifications
+    private Node<V> loadRootNode() {
+        this.root = this.root.accept(
+                new PathNodeVisitor<V>() {
+                    @Override
+                    public Node<V> visit(final ExtensionNode<V> extensionNode, final Bytes path) {
+                        return extensionNode;
+                    }
+
+                    @Override
+                    public Node<V> visit(final BranchNode<V> branchNode, final Bytes path) {
+                        return branchNode;
+                    }
+
+                    @Override
+                    public Node<V> visit(final LeafNode<V> leafNode, final Bytes path) {
+                        return leafNode;
+                    }
+
+                    @Override
+                    public Node<V> visit(final NullNode<V> nullNode, final Bytes path) {
+                        return nullNode;
+                    }
+                },
+                Bytes.EMPTY);
+        return this.root;
+    }
+
+    // Thread-safe wrapper for BranchNode
     private class BranchWrapper {
-        private final BranchNode<V> original;
-        private final List<Node<V>> children;
+        private final BranchNode<V> root;
+        private final List<Node<V>> pendingChildren;
 
-        BranchWrapper(final BranchNode<V> node) {
-            this.original = node;
-            this.children = Collections.synchronizedList(new ArrayList<>(node.getChildren()));
+        public BranchWrapper(final BranchNode<V> root) {
+            this.root = root;
+            this.pendingChildren = Collections.synchronizedList(new ArrayList<>(root.getChildren()));
         }
 
-        Node<V> getChild(final byte index) {
-            return children.get(index);
+        public List<Node<V>> getPendingChildren() {
+            return pendingChildren;
         }
 
-        void setChild(final byte index, final Node<V> child) {
-            children.set(index, child);
+        public void setChildren(final byte index, final Node<V> children) {
+            this.pendingChildren.set(index, children);
         }
 
-        Node<V> buildNode() {
-            return original.replaceAllChildren(children, true);
+        public Node<V> applyUpdates() {
+            return this.root.replaceAllChildren(pendingChildren, true);
         }
     }
 
-    // Commit cache
+    // Commit cache for deferred writes
     private static class CommitCache {
         private final Map<Bytes, NodeData> cache = new ConcurrentHashMap<>();
 
-        void store(final Bytes location, final Bytes32 hash, final Bytes bytes) {
-            cache.put(location, new NodeData(hash, bytes));
+        void store(final Bytes location, final Bytes32 hash, final Bytes encodedBytes) {
+            cache.put(location, new NodeData(hash, encodedBytes));
         }
 
-        void commitTo(final NodeUpdater updater) {
-            cache.forEach((loc, data) -> updater.store(loc, data.hash, data.bytes));
+        void flushTo(final NodeUpdater nodeUpdater) {
+            cache.forEach((location, nodeData) ->
+                    nodeUpdater.store(location, nodeData.hash, nodeData.encodedBytes));
         }
 
-        record NodeData(Bytes32 hash, Bytes bytes) {}
+        private static class NodeData {
+            final Bytes32 hash;
+            final Bytes encodedBytes;
+
+            NodeData(final Bytes32 hash, final Bytes encodedBytes) {
+                this.hash = hash;
+                this.encodedBytes = encodedBytes;
+            }
+        }
     }
 }
