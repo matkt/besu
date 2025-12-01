@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -153,31 +154,32 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         final Node<V> current = wrapper.getChild(nibble);
         final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
 
-        // Si c'est une extension avec assez d'updates, descendre
-        if (current instanceof ExtensionNode<V> && updates.size() >= MIN_UPDATES_FOR_PARALLEL) {
-            NodeInfo<V> info = findBranchNode(current, childLocation, depth + 1);
-            if (info.node instanceof BranchNode<V> branch) {
-                BranchWrapper childWrapper = new BranchWrapper(branch);
-                processGroupsInParallel(childWrapper, updates, info.location, info.depth, cache);
-                wrapper.setChild(nibble, childWrapper.buildNode());
-                return;
-            }
+        NodeInfo<V> info ;
+        if (current instanceof ExtensionNode<V> ) {
+            info = findBranchNode(current, childLocation, depth + 1);
+        } else {
+            info = new NodeInfo<>(current, childLocation, depth + 1);
         }
+        final Node<V> updated;
+        if (updates.size() >= MIN_UPDATES_FOR_PARALLEL && info.node instanceof  BranchNode<V> branchNode) {
+            BranchWrapper childWrapper = new BranchWrapper(branchNode);
+            processGroupsInParallel(childWrapper, updates, info.location, info.depth, cache);
+            updated  = childWrapper.buildNode();
+        } else{
+            updated = applyUpdatesSequentially(current, updates, depth);
 
-        // Sinon traiter séquentiellement
-        final Node<V> updated = applyUpdatesSequentially(current, updates, depth);
+        }
 
         if (cache.isPresent()) {
             updated.accept(childLocation, new CommitVisitor<>(
                     (loc, hash, bytes) -> cache.get().store(loc, hash, bytes)));
         } else {
-            updated.getHash(); // Force hash calculation
+            Objects.requireNonNull(updated.getHash());
         }
-
         wrapper.setChild(nibble, updated);
+
     }
 
-    // Traiter plusieurs groupes en parallèle
     private void processGroupsInParallel(final BranchWrapper wrapper, final List<Update<V>> updates,
                                          final Bytes location, final int depth, final Optional<CommitCache> cache) {
         Map<Byte, List<Update<V>>> grouped = updates.stream()
