@@ -63,6 +63,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
 
+@SuppressWarnings("rawtypes")
 public class BonsaiWorldState extends PathBasedWorldState {
 
     private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
