@@ -28,16 +28,27 @@ import java.util.stream.Collectors;
 /**
  * Parallel implementation using virtual threads for efficient trie updates.
  * Descends through ExtensionNodes to find BranchNodes for parallel processing.
+ *
+ * <p>Two thresholds control parallelization:
+ * <ul>
+ *   <li>MIN_UPDATES_FOR_DESCENT: minimum updates required to descend through ExtensionNodes</li>
+ *   <li>MIN_UPDATES_FOR_NEW_THREAD: minimum updates required to spawn a new thread</li>
+ * </ul>
  */
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         extends StoredMerklePatriciaTrie<K, V> {
 
     private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
-    private static final int MIN_UPDATES_FOR_PARALLEL = 5;
+
+    // Minimum threshold to descend through ExtensionNodes
+    private static final int MIN_UPDATES_FOR_DESCENT = 25;
+
+    // Minimum threshold to spawn a new thread
+    private static final int MIN_UPDATES_FOR_NEW_THREAD = 5;
 
     private final Map<K, Optional<V>> pendingUpdates = new HashMap<>();
 
-    // Constructeurs
+    // Constructors
     public ParallelStoredMerklePatriciaTrie(
             final NodeLoader nodeLoader,
             final Function<V, Bytes> valueSerializer,
@@ -73,14 +84,14 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         return root.getHash();
     }
 
-    // Structure pour stocker un update
+    // Structure to store an update
     private record Update<V>(Bytes path, Optional<V> value) {
         byte nibbleAt(final int index) {
             return index < path.size() ? path.get(index) : 0;
         }
     }
 
-    // Point d'entrée principal
+    // Main entry point
     private void applyUpdates(final Optional<NodeUpdater> nodeUpdater) {
         if (pendingUpdates.isEmpty()) return;
 
@@ -89,7 +100,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
                     .map(e -> new Update<>(bytesToPath(e.getKey()), e.getValue()))
                     .toList();
 
-            if (updates.size() >= MIN_UPDATES_FOR_PARALLEL) {
+            // Check if we have enough updates for parallelization
+            if (updates.size() >= MIN_UPDATES_FOR_DESCENT) {
                 applyParallel(updates, nodeUpdater);
             } else {
                 applySequential(nodeUpdater);
@@ -99,30 +111,42 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         }
     }
 
-    // Application parallèle
     private void applyParallel(final List<Update<V>> updates, final Optional<NodeUpdater> nodeUpdater) {
         CommitCache cache = new CommitCache();
 
-        // Descendre jusqu'à une BranchNode
+        // Descend to a BranchNode if we have enough updates
         NodeInfo<V> nodeInfo = findBranchNode(root, Bytes.EMPTY, 0);
 
         if (nodeInfo.node instanceof BranchNode<V> branchNode) {
             BranchWrapper wrapper = new BranchWrapper(branchNode);
 
-            // Grouper les updates par nibble
             Map<Byte, List<Update<V>>> grouped = updates.stream()
                     .collect(Collectors.groupingBy(u -> u.nibbleAt(nodeInfo.depth)));
 
-            // Traiter chaque groupe en parallèle
-            List<CompletableFuture<Void>> futures = grouped.entrySet().stream()
-                    .map(entry -> CompletableFuture.runAsync(() ->
-                                    processGroup(wrapper, entry.getKey(), entry.getValue(),
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+            for (Map.Entry<Byte, List<Update<V>>> entry : grouped.entrySet()) {
+                final byte nibble = entry.getKey();
+                final List<Update<V>> groupUpdates = entry.getValue();
+
+                // Spawn a new thread only if we have enough updates
+                if (groupUpdates.size() >= MIN_UPDATES_FOR_NEW_THREAD) {
+                    futures.add(CompletableFuture.runAsync(() ->
+                                    processGroup(wrapper, nibble, groupUpdates,
                                             nodeInfo.location, nodeInfo.depth,
                                             nodeUpdater.isPresent() ? Optional.of(cache) : Optional.empty()),
-                            VIRTUAL_POOL))
-                    .toList();
+                            VIRTUAL_POOL));
+                } else {
+                    // Process in current thread
+                    processGroup(wrapper, nibble, groupUpdates,
+                            nodeInfo.location, nodeInfo.depth,
+                            nodeUpdater.isPresent() ? Optional.of(cache) : Optional.empty());
+                }
+            }
 
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+            if (!futures.isEmpty()) {
+                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+            }
 
             this.root = wrapper.buildNode();
 
@@ -135,39 +159,40 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         }
     }
 
-    // Trouver la première BranchNode en descendant les Extensions
+    // Find the first BranchNode by descending through Extensions
     private NodeInfo<V> findBranchNode(final Node<V> node, final Bytes location, final int depth) {
         if (node instanceof ExtensionNode<V> ext) {
             Node<V> child = ext.getChild();
             Bytes newLocation = Bytes.concatenate(location, ext.getPath());
             return findBranchNode(child, newLocation, depth + ext.getPath().size());
         }
-        return new NodeInfo<V>(node, location, depth);
+        return new NodeInfo<>(node, location, depth);
     }
 
     private record NodeInfo<V>(Node<V> node, Bytes location, int depth) {}
 
-    // Traiter un groupe d'updates
     private void processGroup(final BranchWrapper wrapper, final byte nibble,
                               final List<Update<V>> updates, final Bytes location,
                               final int depth, final Optional<CommitCache> cache) {
         final Node<V> current = wrapper.getChild(nibble);
         final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
 
-        NodeInfo<V> info ;
-        if (current instanceof ExtensionNode<V> ) {
+        final NodeInfo<V> info;
+        if (updates.size() >= MIN_UPDATES_FOR_DESCENT) {
             info = findBranchNode(current, childLocation, depth + 1);
         } else {
             info = new NodeInfo<>(current, childLocation, depth + 1);
         }
-        final Node<V> updated;
-        if (updates.size() >= MIN_UPDATES_FOR_PARALLEL && info.node instanceof  BranchNode<V> branchNode) {
-            BranchWrapper childWrapper = new BranchWrapper(branchNode);
-            processGroupsInParallel(childWrapper, updates, info.location, info.depth, cache);
-            updated  = childWrapper.buildNode();
-        } else{
-            updated = applyUpdatesSequentially(current, updates, depth);
 
+        // Parallelize on a BranchNode ONLY if we have enough updates
+        final Node<V> updated;
+        if (updates.size() >= MIN_UPDATES_FOR_DESCENT && info.node instanceof BranchNode<V> branchNode) {
+            final BranchWrapper childWrapper = new BranchWrapper(branchNode);
+            processGroupsInParallel(childWrapper, updates, info.location, info.depth, cache);
+            updated = childWrapper.buildNode();
+        } else {
+            // Not enough updates: sequential processing
+            updated = applyUpdatesSequentially(current, updates, depth);
         }
 
         if (cache.isPresent()) {
@@ -176,8 +201,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         } else {
             Objects.requireNonNull(updated.getHash());
         }
-        wrapper.setChild(nibble, updated);
 
+        wrapper.setChild(nibble, updated);
     }
 
     private void processGroupsInParallel(final BranchWrapper wrapper, final List<Update<V>> updates,
@@ -185,16 +210,29 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         Map<Byte, List<Update<V>>> grouped = updates.stream()
                 .collect(Collectors.groupingBy(u -> u.nibbleAt(depth)));
 
-        List<CompletableFuture<Void>> futures = grouped.entrySet().stream()
-                .map(entry -> CompletableFuture.runAsync(() ->
-                                processGroup(wrapper, entry.getKey(), entry.getValue(), location, depth, cache),
-                        VIRTUAL_POOL))
-                .toList();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        for (Map.Entry<Byte, List<Update<V>>> entry : grouped.entrySet()) {
+            final byte nibble = entry.getKey();
+            final List<Update<V>> groupUpdates = entry.getValue();
+
+            // Spawn a new thread ONLY if we have enough updates
+            if (groupUpdates.size() >= MIN_UPDATES_FOR_NEW_THREAD) {
+                futures.add(CompletableFuture.runAsync(() ->
+                                processGroup(wrapper, nibble, groupUpdates, location, depth, cache),
+                        VIRTUAL_POOL));
+            } else {
+                // Process in current thread
+                processGroup(wrapper, nibble, groupUpdates, location, depth, cache);
+            }
+        }
+
+        if (!futures.isEmpty()) {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        }
     }
 
-    // Application séquentielle des updates sur un noeud
+    // Sequential application of updates on a node
     private Node<V> applyUpdatesSequentially(final Node<V> node, final List<Update<V>> updates, final int depth) {
         Node<V> current = node;
         for (Update<V> update : updates) {
@@ -207,7 +245,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         return current;
     }
 
-    // Fallback séquentiel
+    // Sequential fallback
     private void applySequential(final Optional<NodeUpdater> nodeUpdater) {
         pendingUpdates.forEach((key, value) -> {
             if (value.isPresent()) {
@@ -225,7 +263,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         this.root = new StoredNode<>(nodeFactory, Bytes.EMPTY, hash);
     }
 
-    // Wrapper pour BranchNode avec modifications thread-safe
+    // Thread-safe wrapper for BranchNode modifications
     private class BranchWrapper {
         private final BranchNode<V> original;
         private final List<Node<V>> children;
@@ -248,7 +286,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         }
     }
 
-    // Cache pour les commits
+    // Commit cache
     private static class CommitCache {
         private final Map<Bytes, NodeData> cache = new ConcurrentHashMap<>();
 
