@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
  * @param <K> The type of keys
  * @param <V> The type of values stored by this trie
  */
+@SuppressWarnings("rawtypes")
 public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
         extends StoredMerklePatriciaTrie<K, V> {
 
