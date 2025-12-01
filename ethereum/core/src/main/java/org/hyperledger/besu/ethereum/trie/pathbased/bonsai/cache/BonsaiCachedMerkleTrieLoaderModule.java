@@ -20,13 +20,12 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import dagger.Module;
 import dagger.Provides;
 
-@SuppressWarnings("unused")
 @Module
 public class BonsaiCachedMerkleTrieLoaderModule {
 
   @Provides
   BonsaiCachedMerkleTrieLoader provideCachedMerkleTrieLoaderModule(
       final MetricsSystem metricsSystem) {
-    return new NoopBonsaiCachedMerkleTrieLoader();
+    return new BonsaiCachedMerkleTrieLoader((ObservableMetricsSystem) metricsSystem);
   }
 }
