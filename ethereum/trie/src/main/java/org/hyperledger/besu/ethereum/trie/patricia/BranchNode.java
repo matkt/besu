@@ -130,7 +130,7 @@ public class BranchNode<V> implements Node<V> {
     final BytesValueRLPOutput out = new BytesValueRLPOutput();
     out.startList();
     for (int i = 0; i < maxChild(); ++i) {
-     out.writeRaw(children.get(i).getEncodedBytesRef());
+      out.writeRaw(children.get(i).getEncodedBytesRef());
     }
     if (value.isPresent()) {
       out.writeBytes(valueSerializer.apply(value.get()));

@@ -40,8 +40,7 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
 
-
-    private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
+  private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
   private static final int ACCOUNT_CACHE_SIZE = 100_000;
   private static final int STORAGE_CACHE_SIZE = 200_000;
@@ -60,7 +59,8 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Hash worldStateRootHash,
       final Address account) {
     CompletableFuture.runAsync(
-        () -> cacheAccountNodes(worldStateKeyValueStorage, worldStateRootHash, account), VIRTUAL_POOL);
+        () -> cacheAccountNodes(worldStateKeyValueStorage, worldStateRootHash, account),
+        VIRTUAL_POOL);
   }
 
   @VisibleForTesting
@@ -94,7 +94,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Address account,
       final StorageSlotKey slotKey) {
     CompletableFuture.runAsync(
-        () -> cacheStorageNodes(worldStateKeyValueStorage, account, slotKey),VIRTUAL_POOL);
+        () -> cacheStorageNodes(worldStateKeyValueStorage, account, slotKey), VIRTUAL_POOL);
   }
 
   @VisibleForTesting
