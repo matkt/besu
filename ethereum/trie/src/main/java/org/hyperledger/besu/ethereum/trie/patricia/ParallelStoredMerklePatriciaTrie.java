@@ -275,8 +275,8 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     final BranchWrapper branchWrapper = new BranchWrapper(branchNode);
 
     // Partition groups into large (parallel) and small (sequential)
-    final Map<Byte, List<UpdateEntry<V>>> largeGroups = new ConcurrentHashMap<>();
-    final Map<Byte, List<UpdateEntry<V>>> smallGroups = new ConcurrentHashMap<>();
+    final Map<Byte, List<UpdateEntry<V>>> largeGroups = new HashMap<>();
+    final Map<Byte, List<UpdateEntry<V>>> smallGroups = new HashMap<>();
 
     for (Map.Entry<Byte, List<UpdateEntry<V>>> entry : groupedUpdates.entrySet()) {
       branchWrapper.loadChild(entry.getKey()); // force load lazy nodes
