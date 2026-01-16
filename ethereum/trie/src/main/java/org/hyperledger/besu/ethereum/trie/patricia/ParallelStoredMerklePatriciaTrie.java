@@ -295,7 +295,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       for (final Map.Entry<Byte, List<UpdateEntry<V>>> entry : largeGroups.entrySet()) {
         final byte nibble = entry.getKey();
         final List<UpdateEntry<V>> childUpdates = entry.getValue();
-        final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
+        final Bytes childLocation = concatenateWithByte(location, nibble);
 
         ForkJoinTask<Void> task =
                 ForkJoinTask.adapt(
@@ -316,7 +316,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     for (final Map.Entry<Byte, List<UpdateEntry<V>>> entry : smallGroups.entrySet()) {
       final byte nibble = entry.getKey();
       final List<UpdateEntry<V>> childUpdates = entry.getValue();
-      final Bytes childLocation = Bytes.concatenate(location, Bytes.of(nibble));
+      final Bytes childLocation = concatenateWithByte(location, nibble);
 
       final Node<V> currentChild = branchWrapper.getPendingChildren().get(nibble);
       final Node<V> updatedChild =
@@ -358,7 +358,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
 
     // No divergence: all updates continue past extension
     if (divergenceIndex == extensionPath.size()) {
-      final Bytes newLocation = Bytes.concatenate(location, extensionPath);
+      final Bytes newLocation = concatenateWithBytes(location, extensionPath);
       final Node<V> newChild =
               processNode(
                       extensionNode.getChild(),
@@ -545,6 +545,31 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
     return (BranchNode<V>) nodeFactory.createBranch(children, Optional.empty());
   }
 
+  private Bytes concatenateWithByte(final Bytes location, final byte nibble) {
+    final int len = location.size();
+    final byte[] out = new byte[len + 1];
+
+    final byte[] in = location.toArrayUnsafe();
+    System.arraycopy(in, 0, out, 0, len);
+
+    out[len] = nibble;
+    return Bytes.wrap(out);
+  }
+
+  private Bytes concatenateWithBytes(final Bytes location, final Bytes extensionPath) {
+    final int lenLoc = location.size();
+    final int lenExt = extensionPath.size();
+
+    final byte[] out = new byte[lenLoc + lenExt];
+
+    final byte[] locArr = location.toArrayUnsafe();
+    final byte[] extArr = extensionPath.toArrayUnsafe();
+
+    System.arraycopy(locArr, 0, out, 0, lenLoc);
+    System.arraycopy(extArr, 0, out, lenLoc, lenExt);
+
+    return Bytes.wrap(out);
+  }
   /**
    * Groups updates by their nibble at the specified depth.
    *
