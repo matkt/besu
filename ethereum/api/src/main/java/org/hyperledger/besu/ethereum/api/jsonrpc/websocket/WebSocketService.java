@@ -113,7 +113,7 @@ public class WebSocketService {
             .setHost(configuration.getHost())
             .setPort(configuration.getPort())
             .setHandle100ContinueAutomatically(true)
-            .setCompressionSupported(true)
+            .setCompressionSupported(false)
             .addWebSocketSubProtocol("undefined")
             .setMaxWebSocketFrameSize(configuration.getMaxFrameSize())
             .setMaxWebSocketMessageSize(configuration.getMaxFrameSize() * 4)
