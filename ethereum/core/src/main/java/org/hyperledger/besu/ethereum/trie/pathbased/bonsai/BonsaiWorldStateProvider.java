@@ -62,7 +62,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
     this.worldStateHealerSupplier = worldStateHealerSupplier;
     this.evmConfiguration = evmConfiguration;
     provideCachedWorldStorageManager(
-        new BonsaiWorldStateRegistry(
+        new BonsaiCachedWorldStorageManager(
             this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
     loadHeadWorldState(
         new BonsaiWorldState(
@@ -71,7 +71,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
 
   @VisibleForTesting
   BonsaiWorldStateProvider(
-      final BonsaiWorldStateRegistry bonsaiWorldStateRegistry,
+      final BonsaiCachedWorldStorageManager bonsaiCachedWorldStorageManager,
       final PathBasedExtraStorageConfiguration pathBasedExtraStorageConfiguration,
       final TrieLogManager trieLogManager,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
@@ -85,7 +85,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
     this.bonsaiMerkleTriePreLoader = bonsaiMerkleTriePreLoader;
     this.worldStateHealerSupplier = worldStateHealerSupplier;
     this.evmConfiguration = evmConfiguration;
-    provideCachedWorldStorageManager(bonsaiWorldStateRegistry);
+    provideCachedWorldStorageManager(bonsaiCachedWorldStorageManager);
     loadHeadWorldState(
         new BonsaiWorldState(
             this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));

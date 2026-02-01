@@ -71,7 +71,7 @@ class BonsaiWorldStateProviderTest {
   @Mock private SegmentedKeyValueStorage segmentedKeyValueStorage;
   @Mock private KeyValueStorage trieLogStorage;
   @Mock private SegmentedKeyValueStorageTransaction segmentedKeyValueStorageTransaction;
-  @Mock private BonsaiWorldStateRegistry cachedWorldStorageManager;
+  @Mock private BonsaiCachedWorldStorageManager cachedWorldStorageManager;
   @Mock private TrieLogManager trieLogManager;
 
   private BonsaiWorldStateProvider bonsaiWorldStateArchive;

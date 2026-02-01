@@ -94,11 +94,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
           if (ws != null) {
             balPrefetchMechanism
                 .prefetch(ws, blockAccessList, executor)
-                .exceptionally(
-                    ex -> {
-                      LOG.error("Prefetch failed", ex);
-                      return null;
-                    })
                 .whenComplete((result, ex) -> ws.close());
           }
         });
