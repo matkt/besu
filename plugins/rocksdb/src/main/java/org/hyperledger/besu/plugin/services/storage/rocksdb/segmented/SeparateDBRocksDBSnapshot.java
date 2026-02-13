@@ -42,11 +42,12 @@ import org.rocksdb.TransactionDB;
  * <p>Creates and manages snapshots across multiple independent RocksDB instances.
  */
 public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
+  private static final String SHARDED_SEGMENT_NAME = "ACCOUNT_STORAGE_STORAGE";
 
-  private final Map<SegmentIdentifier, TransactionDB> databases;
-  private final Map<SegmentIdentifier, ColumnFamilyHandle> columnHandles;
-  private final Map<SegmentIdentifier, Snapshot> snapshots;
-  private final Map<SegmentIdentifier, RocksDBMetrics> metrics;
+  private final Map<String, TransactionDB> databases;
+  private final Map<String, ColumnFamilyHandle> columnHandles;
+  private final Map<String, Snapshot> snapshots;
+  private final Map<String, RocksDBMetrics> metrics;
   private final ReadOptions readOptions;
   private volatile boolean closed = false;
 
@@ -59,9 +60,9 @@ public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
    * @param enableReadCache whether to enable read cache for snapshots
    */
   public SeparateDBRocksDBSnapshot(
-      final Map<SegmentIdentifier, TransactionDB> databases,
-      final Map<SegmentIdentifier, ColumnFamilyHandle> columnHandles,
-      final Map<SegmentIdentifier, RocksDBMetrics> metrics,
+      final Map<String, TransactionDB> databases,
+      final Map<String, ColumnFamilyHandle> columnHandles,
+      final Map<String, RocksDBMetrics> metrics,
       final boolean enableReadCache) {
 
     this.databases = databases;
@@ -70,7 +71,7 @@ public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
     this.snapshots = new HashMap<>();
 
     // Create snapshots for each database
-    for (Map.Entry<SegmentIdentifier, TransactionDB> entry : databases.entrySet()) {
+    for (Map.Entry<String, TransactionDB> entry : databases.entrySet()) {
       Snapshot snapshot = entry.getValue().getSnapshot();
       snapshots.put(entry.getKey(), snapshot);
     }
@@ -85,16 +86,17 @@ public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
   public Optional<byte[]> get(final SegmentIdentifier segment, final byte[] key)
       throws StorageException {
     throwIfClosed();
+    final String segmentShardKey = segmentShardKey(segment, shardForSegment(segment, key));
 
     try (final OperationTimer.TimingContext ignored =
-        metrics.get(segment).getReadLatency().startTimer()) {
+        metrics.get(segmentShardKey).getReadLatency().startTimer()) {
 
-      TransactionDB db = databases.get(segment);
-      ColumnFamilyHandle handle = columnHandles.get(segment);
-      Snapshot snapshot = snapshots.get(segment);
+      TransactionDB db = databases.get(segmentShardKey);
+      ColumnFamilyHandle handle = columnHandles.get(segmentShardKey);
+      Snapshot snapshot = snapshots.get(segmentShardKey);
 
       if (db == null || handle == null || snapshot == null) {
-        throw new StorageException("Segment not found: " + segment.getName());
+        throw new StorageException("Segment shard not found: " + segmentShardKey);
       }
 
       // Use the snapshot for this read
@@ -189,7 +191,7 @@ public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
       closed = true;
 
       // Release all snapshots
-      for (Map.Entry<SegmentIdentifier, Snapshot> entry : snapshots.entrySet()) {
+      for (Map.Entry<String, Snapshot> entry : snapshots.entrySet()) {
         TransactionDB db = databases.get(entry.getKey());
         if (db != null) {
           db.releaseSnapshot(entry.getValue());
@@ -210,5 +212,20 @@ public class SeparateDBRocksDBSnapshot implements SnappedKeyValueStorage {
     if (closed) {
       throw new IllegalStateException("Snapshot has been closed");
     }
+  }
+
+  private static int shardIndex(final byte[] key) {
+    if (key == null || key.length == 0) {
+      return 0;
+    }
+    return (key[0] & 0xFF) >>> 4;
+  }
+
+  private static int shardForSegment(final SegmentIdentifier segment, final byte[] key) {
+    return SHARDED_SEGMENT_NAME.equals(segment.getName()) ? shardIndex(key) : 0;
+  }
+
+  private static String segmentShardKey(final SegmentIdentifier segment, final int shard) {
+    return segment.getName() + "#" + shard;
   }
 }

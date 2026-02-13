@@ -32,6 +32,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +44,6 @@ import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
-import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.ColumnFamilyDescriptor;
@@ -85,6 +85,8 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   protected static final long EXPECTED_WAL_FILE_SIZE = 67_108_864L;
   private static final long NUMBER_OF_LOG_FILES_TO_KEEP = 7;
   private static final long TIME_TO_ROLL_LOG_FILE = 86_400L;
+  private static final int KEY_RANGE_SHARDS = 16;
+  private static final String SHARDED_SEGMENT_NAME = "ACCOUNT_STORAGE_STORAGE";
 
   static {
     RocksDbUtil.loadNativeLibrary();
@@ -98,25 +100,40 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   protected final RocksDBConfiguration configuration;
   private final MetricsSystem metricsSystem;
   private final RocksDBMetricsFactory rocksDBMetricsFactory;
-  private final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration perColumnConfig;
+  private final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
+          .PerColumnConfiguration
+      perColumnConfig;
+  private final Map<SegmentIdentifier, ShardBindings> segmentBindings = new HashMap<>();
 
-  /** Map of RocksDB instances per segment */
-  private final Map<SegmentIdentifier, TransactionDB> databases = new HashMap<>();
+  /** Map of RocksDB instances per segment shard. */
+  private final Map<String, TransactionDB> databases = new HashMap<>();
 
-  /** Map of default column handles per segment */
-  private final Map<SegmentIdentifier, ColumnFamilyHandle> defaultColumnHandles = new HashMap<>();
+  /** Map of default column handles per segment shard. */
+  private final Map<String, ColumnFamilyHandle> defaultColumnHandles = new HashMap<>();
 
-  /** Map of metrics per segment */
-  private final Map<SegmentIdentifier, RocksDBMetrics> segmentMetrics = new HashMap<>();
+  /** Map of metrics per segment shard. */
+  private final Map<String, RocksDBMetrics> segmentMetrics = new HashMap<>();
 
-  /** Map of statistics per segment */
-  private final Map<SegmentIdentifier, Statistics> segmentStats = new HashMap<>();
+  /** Map of statistics per segment shard. */
+  private final Map<String, Statistics> segmentStats = new HashMap<>();
 
-  /** Map of row caches per segment (if enabled) */
-  private final Map<SegmentIdentifier, org.rocksdb.Cache> segmentRowCaches = new HashMap<>();
-  
-  /** Map of block caches per segment */
-  private final Map<SegmentIdentifier, org.rocksdb.Cache> segmentBlockCaches = new HashMap<>();
+  /** Map of row caches per segment shard (if enabled). */
+  private final Map<String, org.rocksdb.Cache> segmentRowCaches = new HashMap<>();
+
+  /** Map of block caches per segment shard. */
+  private final Map<String, org.rocksdb.Cache> segmentBlockCaches = new HashMap<>();
+
+  private static final class ShardBindings {
+    private final TransactionDB[] databases;
+    private final ColumnFamilyHandle[] handles;
+    private final RocksDBMetrics[] metrics;
+
+    private ShardBindings(final int shardCount) {
+      this.databases = new TransactionDB[shardCount];
+      this.handles = new ColumnFamilyHandle[shardCount];
+      this.metrics = new RocksDBMetrics[shardCount];
+    }
+  }
 
   /**
    * Instantiates a new Separate DB RocksDB columnar key value storage.
@@ -139,14 +156,14 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     this.configuration = configuration;
     this.metricsSystem = metricsSystem;
     this.rocksDBMetricsFactory = rocksDBMetricsFactory;
-    
+
     // Initialize per-column configuration with recommended defaults
     this.perColumnConfig = initializePerColumnConfig();
 
     try {
-      // Create a separate database for each segment
+      // Create 16 sharded databases for each segment.
       for (SegmentIdentifier segment : segments) {
-        createDatabaseForSegment(segment);
+        createDatabasesForSegment(segment);
       }
     } catch (RocksDBException e) {
       // Close any opened databases before throwing
@@ -164,9 +181,11 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    *
    * @return the per-column configuration
    */
-  private org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration initializePerColumnConfig() {
+  private org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration
+      initializePerColumnConfig() {
     LOG.info("Initializing optimized per-column RocksDB configuration");
-    return org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration.OptimizedConfigs.createRecommendedConfig();
+    return org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration
+        .OptimizedConfigs.createRecommendedConfig();
   }
 
   /**
@@ -175,20 +194,35 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    * @param segment the segment identifier
    * @throws RocksDBException if database creation fails
    */
-  private void createDatabaseForSegment(final SegmentIdentifier segment) throws RocksDBException {
+  private void createDatabasesForSegment(final SegmentIdentifier segment) throws RocksDBException {
+    final int shardCount = shardCountForSegment(segment);
+    final ShardBindings bindings = new ShardBindings(shardCount);
+    segmentBindings.put(segment, bindings);
+    for (int shard = 0; shard < shardCount; shard++) {
+      createDatabaseForSegmentShard(segment, shard, bindings);
+    }
+  }
+
+  private void createDatabaseForSegmentShard(
+      final SegmentIdentifier segment, final int shard, final ShardBindings bindings)
+      throws RocksDBException {
 
     // Create a subdirectory for this segment using the segment name
-    Path segmentPath = configuration.getDatabaseDir().resolve(segment.getName());
+    Path segmentPath =
+        configuration.getDatabaseDir().resolve(segment.getName()).resolve(shardDirectory(shard));
     String dbPath = segmentPath.toString();
+    final String segmentShardKey = segmentShardKey(segment, shard);
 
     LOG.info(
-        "Creating separate RocksDB instance for segment '{}' at {}", segment.getName(), dbPath);
+        "Creating separate RocksDB instance for segment shard '{}' at {}", segmentShardKey, dbPath);
 
     // Get column-specific configuration
-    org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration.ColumnConfig columnConfig = 
-        perColumnConfig.getConfigForSegment(segment);
-    
-    LOG.info("Segment '{}' optimized config: cache={}MB, maxFiles={}, threads={}", 
+    org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration
+            .ColumnConfig
+        columnConfig = perColumnConfig.getConfigForSegment(segment);
+
+    LOG.info(
+        "Segment '{}' optimized config: cache={}MB, maxFiles={}, threads={}",
         segment.getName(),
         columnConfig.getCacheCapacity() / (1024 * 1024),
         columnConfig.getMaxOpenFiles(),
@@ -203,13 +237,14 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
 
     // Create options for this segment's database
     Statistics stats = new Statistics();
-    segmentStats.put(segment, stats);
+    segmentStats.put(segmentShardKey, stats);
 
-    DBOptions dbOptions = createDBOptions(segment, stats, columnConfig);
+    DBOptions dbOptions = createDBOptions(segmentShardKey, stats, columnConfig);
     TransactionDBOptions txOptions = new TransactionDBOptions();
 
     // Create column family options for the default column family
-    ColumnFamilyOptions cfOptions = createColumnFamilyOptions(segment, columnConfig);
+    ColumnFamilyOptions cfOptions =
+        createColumnFamilyOptions(segmentShardKey, segment, columnConfig);
 
     // Create column family descriptor for default column
     ColumnFamilyDescriptor defaultCfDescriptor =
@@ -223,28 +258,32 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
         RocksDBOpener.openTransactionDBWithWarning(
             dbOptions, txOptions, dbPath, cfDescriptors, cfHandles);
 
-    databases.put(segment, db);
-    defaultColumnHandles.put(segment, cfHandles.get(0));
+    databases.put(segmentShardKey, db);
+    defaultColumnHandles.put(segmentShardKey, cfHandles.get(0));
+    bindings.databases[shard] = db;
+    bindings.handles[shard] = cfHandles.get(0);
 
     // Initialize metrics for this segment
     RocksDBMetrics metrics = rocksDBMetricsFactory.create(metricsSystem, configuration, db, stats);
-    segmentMetrics.put(segment, metrics);
+    segmentMetrics.put(segmentShardKey, metrics);
+    bindings.metrics[shard] = metrics;
 
-    LOG.debug("Successfully created RocksDB instance for segment '{}'", segment.getName());
+    LOG.debug("Successfully created RocksDB instance for segment shard '{}'", segmentShardKey);
   }
 
   /**
    * Creates DBOptions for a segment database with column-specific configuration.
    *
-   * @param segment the segment identifier
    * @param stats the statistics object
    * @param columnConfig the column-specific configuration
    * @return configured DBOptions
    */
   private DBOptions createDBOptions(
-      final SegmentIdentifier segment,
+      final String segmentShardKey,
       final Statistics stats,
-      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration.ColumnConfig columnConfig) {
+      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
+              .PerColumnConfiguration.ColumnConfig
+          columnConfig) {
     DBOptions options = new DBOptions();
     options
         .setCreateIfMissing(true)
@@ -256,16 +295,21 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
         .setEnv(Env.getDefault().setBackgroundThreads(columnConfig.getBackgroundThreadCount()))
         .setMaxTotalWalSize(WAL_MAX_TOTAL_SIZE)
         .setRecycleLogFileNum(WAL_MAX_TOTAL_SIZE / EXPECTED_WAL_FILE_SIZE);
-    
+
     // Configure row cache if specified
-    columnConfig.getRowCacheSize().ifPresent(rowCacheSize -> {
-      LOG.info("Enabling row cache for segment '{}' with size {}MB", 
-          segment.getName(), rowCacheSize / (1024 * 1024));
-      org.rocksdb.Cache rowCache = new org.rocksdb.LRUCache(rowCacheSize);
-      segmentRowCaches.put(segment, rowCache);
-      options.setRowCache(rowCache);
-    });
-    
+    columnConfig
+        .getRowCacheSize()
+        .ifPresent(
+            rowCacheSize -> {
+              LOG.info(
+                  "Enabling row cache for segment shard '{}' with size {}MB",
+                  segmentShardKey,
+                  rowCacheSize / (1024 * 1024));
+              org.rocksdb.Cache rowCache = new org.rocksdb.LRUCache(rowCacheSize);
+              segmentRowCaches.put(segmentShardKey, rowCache);
+              options.setRowCache(rowCache);
+            });
+
     return options;
   }
 
@@ -277,9 +321,12 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    * @return configured ColumnFamilyOptions
    */
   private ColumnFamilyOptions createColumnFamilyOptions(
+      final String segmentShardKey,
       final SegmentIdentifier segment,
-      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration.ColumnConfig columnConfig) {
-    BlockBasedTableConfig tableConfig = createBlockBasedTableConfig(segment, columnConfig);
+      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
+              .PerColumnConfiguration.ColumnConfig
+          columnConfig) {
+    BlockBasedTableConfig tableConfig = createBlockBasedTableConfig(segmentShardKey, columnConfig);
 
     ColumnFamilyOptions options =
         new ColumnFamilyOptions()
@@ -290,19 +337,19 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     // Note: Row cache is configured via BlockBasedTableConfig, not here
 
     // Apply write buffer size if specified
-    columnConfig.getWriteBufferSize()
-        .ifPresent(options::setWriteBufferSize);
+    columnConfig.getWriteBufferSize().ifPresent(options::setWriteBufferSize);
 
     // Apply max write buffer number if specified
-    columnConfig.getMaxWriteBufferNumber()
-        .ifPresent(options::setMaxWriteBufferNumber);
+    columnConfig.getMaxWriteBufferNumber().ifPresent(options::setMaxWriteBufferNumber);
 
     // Apply level compaction dynamic level bytes if specified (expects boolean)
-    columnConfig.getLevelCompactionDynamicLevelBytes()
+    columnConfig
+        .getLevelCompactionDynamicLevelBytes()
         .ifPresent(dynLevel -> options.setLevelCompactionDynamicLevelBytes(dynLevel > 0));
 
     // Apply target file size base if specified
-    columnConfig.getTargetFileSizeBase()
+    columnConfig
+        .getTargetFileSizeBase()
         .ifPresent(size -> options.setTargetFileSizeBase((long) size));
 
     // Configure BlobDB for segments with static data
@@ -310,8 +357,9 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
       configureBlobDB(segment, options);
     }
 
-    LOG.debug("Created ColumnFamilyOptions for segment '{}' with cache={}, writeBuffer={}, rowCache={}", 
-        segment.getName(), 
+    LOG.debug(
+        "Created ColumnFamilyOptions for segment shard '{}' with cache={}, writeBuffer={}, rowCache={}",
+        segmentShardKey,
         columnConfig.getCacheCapacity(),
         columnConfig.getWriteBufferSize().orElse(0),
         columnConfig.getRowCacheSize().orElse(0L));
@@ -322,26 +370,30 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   /**
    * Creates BlockBasedTableConfig for a segment with column-specific configuration.
    *
-   * @param segment the segment identifier
    * @param columnConfig the column-specific configuration
    * @return configured BlockBasedTableConfig
    */
   private BlockBasedTableConfig createBlockBasedTableConfig(
-      final SegmentIdentifier segment,
-      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.PerColumnConfiguration.ColumnConfig columnConfig) {
+      final String segmentShardKey,
+      final org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
+              .PerColumnConfiguration.ColumnConfig
+          columnConfig) {
     final org.rocksdb.Cache blockCache = new LRUCache(columnConfig.getCacheCapacity());
-    segmentBlockCaches.put(segment, blockCache);
+    segmentBlockCaches.put(segmentShardKey, blockCache);
 
-    BlockBasedTableConfig tableConfig = new BlockBasedTableConfig()
-        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-        .setBlockCache(blockCache)
-        .setFilterPolicy(new BloomFilter(10, false))
-        .setPartitionFilters(true)
-        .setCacheIndexAndFilterBlocks(false)
-        .setBlockSize(ROCKSDB_BLOCK_SIZE);
+    BlockBasedTableConfig tableConfig =
+        new BlockBasedTableConfig()
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+            .setBlockCache(blockCache)
+            .setFilterPolicy(new BloomFilter(10, false))
+            .setPartitionFilters(true)
+            .setCacheIndexAndFilterBlocks(false)
+            .setBlockSize(ROCKSDB_BLOCK_SIZE);
 
-    LOG.debug("Created BlockBasedTableConfig for segment '{}' with blockCache={}MB", 
-        segment.getName(), columnConfig.getCacheCapacity() / (1024 * 1024));
+    LOG.debug(
+        "Created BlockBasedTableConfig for segment shard '{}' with blockCache={}MB",
+        segmentShardKey,
+        columnConfig.getCacheCapacity() / (1024 * 1024));
 
     return tableConfig;
   }
@@ -375,10 +427,16 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    * @param segment the segment identifier
    * @return the RocksDB instance
    */
-  private TransactionDB getDatabase(final SegmentIdentifier segment) {
-    TransactionDB db = databases.get(segment);
+  private TransactionDB getDatabase(final SegmentIdentifier segment, final int shard) {
+    final ShardBindings bindings = segmentBindings.get(segment);
+    if (bindings == null || shard < 0 || shard >= bindings.databases.length) {
+      throw new IllegalArgumentException(
+          "No shard bindings found for segment/shard: " + segment.getName() + "#" + shard);
+    }
+    TransactionDB db = bindings.databases[shard];
     if (db == null) {
-      throw new IllegalArgumentException("No database found for segment: " + segment.getName());
+      throw new IllegalArgumentException(
+          "No database found for segment shard: " + segment.getName() + "#" + shard);
     }
     return db;
   }
@@ -389,11 +447,16 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    * @param segment the segment identifier
    * @return the column family handle
    */
-  private ColumnFamilyHandle getColumnHandle(final SegmentIdentifier segment) {
-    ColumnFamilyHandle handle = defaultColumnHandles.get(segment);
+  private ColumnFamilyHandle getColumnHandle(final SegmentIdentifier segment, final int shard) {
+    final ShardBindings bindings = segmentBindings.get(segment);
+    if (bindings == null || shard < 0 || shard >= bindings.handles.length) {
+      throw new IllegalArgumentException(
+          "No shard bindings found for segment/shard: " + segment.getName() + "#" + shard);
+    }
+    ColumnFamilyHandle handle = bindings.handles[shard];
     if (handle == null) {
       throw new IllegalArgumentException(
-          "No column handle found for segment: " + segment.getName());
+          "No column handle found for segment shard: " + segment.getName() + "#" + shard);
     }
     return handle;
   }
@@ -404,10 +467,16 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
    * @param segment the segment identifier
    * @return the RocksDB metrics
    */
-  private RocksDBMetrics getMetrics(final SegmentIdentifier segment) {
-    RocksDBMetrics metrics = segmentMetrics.get(segment);
+  private RocksDBMetrics getMetrics(final SegmentIdentifier segment, final int shard) {
+    final ShardBindings bindings = segmentBindings.get(segment);
+    if (bindings == null || shard < 0 || shard >= bindings.metrics.length) {
+      throw new IllegalArgumentException(
+          "No shard bindings found for segment/shard: " + segment.getName() + "#" + shard);
+    }
+    RocksDBMetrics metrics = bindings.metrics[shard];
     if (metrics == null) {
-      throw new IllegalArgumentException("No metrics found for segment: " + segment.getName());
+      throw new IllegalArgumentException(
+          "No metrics found for segment shard: " + segment.getName() + "#" + shard);
     }
     return metrics;
   }
@@ -416,11 +485,12 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   public Optional<byte[]> get(final SegmentIdentifier segment, final byte[] key)
       throws StorageException {
     throwIfClosed();
+    final int shard = shardForSegment(segment, key);
 
     try (final OperationTimer.TimingContext ignored =
-        getMetrics(segment).getReadLatency().startTimer()) {
-      TransactionDB db = getDatabase(segment);
-      ColumnFamilyHandle handle = getColumnHandle(segment);
+        getMetrics(segment, shard).getReadLatency().startTimer()) {
+      TransactionDB db = getDatabase(segment, shard);
+      ColumnFamilyHandle handle = getColumnHandle(segment, shard);
       return Optional.ofNullable(db.get(handle, readOptions, key));
     } catch (final RocksDBException e) {
       throw new StorageException(e);
@@ -431,90 +501,59 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   public Optional<NearestKeyValue> getNearestBefore(
       final SegmentIdentifier segment, final Bytes key) throws StorageException {
     throwIfClosed();
-
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-
-    try (final RocksIterator rocksIterator = db.newIterator(handle)) {
-      rocksIterator.seekForPrev(key.toArrayUnsafe());
-      return Optional.of(rocksIterator)
-          .filter(AbstractRocksIterator::isValid)
-          .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
-    }
+    return stream(segment)
+        .map(p -> new NearestKeyValue(Bytes.wrap(p.getKey()), Optional.of(p.getValue())))
+        .filter(kv -> Arrays.compareUnsigned(kv.key().toArrayUnsafe(), key.toArrayUnsafe()) <= 0)
+        .max((a, b) -> Arrays.compareUnsigned(a.key().toArrayUnsafe(), b.key().toArrayUnsafe()));
   }
 
   @Override
   public Optional<NearestKeyValue> getNearestAfter(final SegmentIdentifier segment, final Bytes key)
       throws StorageException {
     throwIfClosed();
-
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-
-    try (final RocksIterator rocksIterator = db.newIterator(handle)) {
-      rocksIterator.seek(key.toArrayUnsafe());
-      return Optional.of(rocksIterator)
-          .filter(AbstractRocksIterator::isValid)
-          .map(it -> new NearestKeyValue(Bytes.of(it.key()), Optional.of(it.value())));
-    }
+    return stream(segment)
+        .map(p -> new NearestKeyValue(Bytes.wrap(p.getKey()), Optional.of(p.getValue())))
+        .filter(kv -> Arrays.compareUnsigned(kv.key().toArrayUnsafe(), key.toArrayUnsafe()) >= 0)
+        .min((a, b) -> Arrays.compareUnsigned(a.key().toArrayUnsafe(), b.key().toArrayUnsafe()));
   }
 
   @Override
   public Stream<Pair<byte[], byte[]>> stream(final SegmentIdentifier segment) {
     throwIfClosed();
-
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-    final RocksIterator rocksIterator = db.newIterator(handle);
-    rocksIterator.seekToFirst();
-    return RocksDbIterator.create(rocksIterator).toStream();
+    return streamAllShards(segment)
+        .sorted((a, b) -> Arrays.compareUnsigned(a.getKey(), b.getKey()));
   }
 
   @Override
   public Stream<Pair<byte[], byte[]>> streamFromKey(
       final SegmentIdentifier segment, final byte[] startKey) {
     throwIfClosed();
-
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-    final RocksIterator rocksIterator = db.newIterator(handle);
-    rocksIterator.seek(startKey);
-    return RocksDbIterator.create(rocksIterator).toStream();
+    return stream(segment).filter(e -> Arrays.compareUnsigned(e.getKey(), startKey) >= 0);
   }
 
   @Override
   public Stream<Pair<byte[], byte[]>> streamFromKey(
       final SegmentIdentifier segment, final byte[] startKey, final byte[] endKey) {
     throwIfClosed();
-
-    final Bytes endKeyBytes = Bytes.wrap(endKey);
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-    final RocksIterator rocksIterator = db.newIterator(handle);
-    rocksIterator.seek(startKey);
-    return RocksDbIterator.create(rocksIterator)
-        .toStream()
-        .takeWhile(e -> endKeyBytes.compareTo(Bytes.wrap(e.getKey())) >= 0);
+    return stream(segment)
+        .filter(e -> Arrays.compareUnsigned(e.getKey(), startKey) >= 0)
+        .filter(e -> Arrays.compareUnsigned(e.getKey(), endKey) <= 0);
   }
 
   @Override
   public Stream<byte[]> streamKeys(final SegmentIdentifier segment) {
     throwIfClosed();
-
-    TransactionDB db = getDatabase(segment);
-    ColumnFamilyHandle handle = getColumnHandle(segment);
-    final RocksIterator rocksIterator = db.newIterator(handle);
-    rocksIterator.seekToFirst();
-    return RocksDbIterator.create(rocksIterator).toStreamKeys();
+    return stream(segment).map(Pair::getKey);
   }
 
   @Override
   public boolean tryDelete(final SegmentIdentifier segment, final byte[] key) {
     throwIfClosed();
+    final int shard = shardForSegment(segment, key);
 
     try {
-      TransactionDB db = getDatabase(segment);
-      ColumnFamilyHandle handle = getColumnHandle(segment);
+      TransactionDB db = getDatabase(segment, shard);
+      ColumnFamilyHandle handle = getColumnHandle(segment, shard);
       db.delete(handle, tryDeleteOptions, key);
       return true;
     } catch (RocksDBException e) {
@@ -549,16 +588,17 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     throwIfClosed();
 
     try {
-      TransactionDB db = getDatabase(segment);
-      ColumnFamilyHandle handle = getColumnHandle(segment);
+      for (int shard = 0; shard < shardCountForSegment(segment); shard++) {
+        TransactionDB db = getDatabase(segment, shard);
+        ColumnFamilyHandle handle = getColumnHandle(segment, shard);
 
-      // Delete all keys in this segment
-      // We cannot drop the DEFAULT column family, so we iterate and delete all keys
-      try (final RocksIterator iterator = db.newIterator(handle)) {
-        iterator.seekToFirst();
-        while (iterator.isValid()) {
-          db.delete(handle, iterator.key());
-          iterator.next();
+        // Delete all keys in this segment shard.
+        try (final RocksIterator iterator = db.newIterator(handle)) {
+          iterator.seekToFirst();
+          while (iterator.isValid()) {
+            db.delete(handle, iterator.key());
+            iterator.next();
+          }
         }
       }
     } catch (RocksDBException e) {
@@ -604,10 +644,10 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
 
       // Close all databases
       databases.values().forEach(TransactionDB::close);
-      
+
       // Close all block caches
       segmentBlockCaches.values().forEach(org.rocksdb.Cache::close);
-      
+
       // Close all row caches
       segmentRowCaches.values().forEach(org.rocksdb.Cache::close);
 
@@ -618,6 +658,7 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
       segmentStats.clear();
       segmentBlockCaches.clear();
       segmentRowCaches.clear();
+      segmentBindings.clear();
 
       tryDeleteOptions.close();
       readOptions.close();
@@ -639,29 +680,35 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
   /** Transaction implementation for separate database architecture. */
   private class SeparateDBRocksDBTransaction implements SegmentedKeyValueStorageTransaction {
 
-    private final Map<SegmentIdentifier, org.rocksdb.Transaction> transactions = new HashMap<>();
-    private final Map<SegmentIdentifier, WriteOptions> writeOptions = new HashMap<>();
+    private final Map<SegmentIdentifier, org.rocksdb.Transaction[]> transactions = new HashMap<>();
+    private final Map<SegmentIdentifier, WriteOptions[]> writeOptions = new HashMap<>();
 
     SeparateDBRocksDBTransaction() {
       // Transactions are created lazily per segment when needed
     }
 
-    private org.rocksdb.Transaction getTransaction(final SegmentIdentifier segment) {
-      return transactions.computeIfAbsent(
-          segment,
-          seg -> {
-            WriteOptions wo = new WriteOptions();
-            wo.setIgnoreMissingColumnFamilies(true);
-            writeOptions.put(seg, wo);
-            return getDatabase(seg).beginTransaction(wo);
-          });
+    private org.rocksdb.Transaction getTransaction(
+        final SegmentIdentifier segment, final byte[] key) {
+      final int shard = shardForSegment(segment, key);
+      final int shardCount = shardCountForSegment(segment);
+      final org.rocksdb.Transaction[] txArray =
+          transactions.computeIfAbsent(segment, ignored -> new org.rocksdb.Transaction[shardCount]);
+      if (txArray[shard] == null) {
+        final WriteOptions[] optionsArray =
+            writeOptions.computeIfAbsent(segment, ignored -> new WriteOptions[shardCount]);
+        final WriteOptions wo = new WriteOptions();
+        wo.setIgnoreMissingColumnFamilies(true);
+        optionsArray[shard] = wo;
+        txArray[shard] = getDatabase(segment, shard).beginTransaction(wo);
+      }
+      return txArray[shard];
     }
 
     @Override
     public void put(final SegmentIdentifier segment, final byte[] key, final byte[] value) {
       try {
-        org.rocksdb.Transaction tx = getTransaction(segment);
-        ColumnFamilyHandle handle = getColumnHandle(segment);
+        org.rocksdb.Transaction tx = getTransaction(segment, key);
+        ColumnFamilyHandle handle = getColumnHandle(segment, shardForSegment(segment, key));
         tx.put(handle, key, value);
       } catch (RocksDBException e) {
         throw new StorageException(e);
@@ -671,8 +718,8 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     @Override
     public void remove(final SegmentIdentifier segment, final byte[] key) {
       try {
-        org.rocksdb.Transaction tx = getTransaction(segment);
-        ColumnFamilyHandle handle = getColumnHandle(segment);
+        org.rocksdb.Transaction tx = getTransaction(segment, key);
+        ColumnFamilyHandle handle = getColumnHandle(segment, shardForSegment(segment, key));
         tx.delete(handle, key);
       } catch (RocksDBException e) {
         throw new StorageException(e);
@@ -683,8 +730,12 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     public void commit() throws StorageException {
       try {
         // Commit all transactions
-        for (org.rocksdb.Transaction tx : transactions.values()) {
-          tx.commit();
+        for (org.rocksdb.Transaction[] txArray : transactions.values()) {
+          for (org.rocksdb.Transaction tx : txArray) {
+            if (tx != null) {
+              tx.commit();
+            }
+          }
         }
       } catch (RocksDBException e) {
         throw new StorageException(e);
@@ -697,8 +748,12 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
     public void rollback() {
       try {
         // Rollback all transactions
-        for (org.rocksdb.Transaction tx : transactions.values()) {
-          tx.rollback();
+        for (org.rocksdb.Transaction[] txArray : transactions.values()) {
+          for (org.rocksdb.Transaction tx : txArray) {
+            if (tx != null) {
+              tx.rollback();
+            }
+          }
         }
       } catch (RocksDBException e) {
         LOG.error("Failed to rollback transaction", e);
@@ -709,10 +764,69 @@ public class SeparateDBRocksDBColumnarKeyValueStorage
 
     @Override
     public void close() {
-      transactions.values().forEach(org.rocksdb.Transaction::close);
-      writeOptions.values().forEach(WriteOptions::close);
+      transactions
+          .values()
+          .forEach(
+              txArray -> {
+                for (org.rocksdb.Transaction tx : txArray) {
+                  if (tx != null) {
+                    tx.close();
+                  }
+                }
+              });
+      writeOptions
+          .values()
+          .forEach(
+              optionsArray -> {
+                for (WriteOptions wo : optionsArray) {
+                  if (wo != null) {
+                    wo.close();
+                  }
+                }
+              });
       transactions.clear();
       writeOptions.clear();
     }
+  }
+
+  private Stream<Pair<byte[], byte[]>> streamAllShards(final SegmentIdentifier segment) {
+    Stream<Pair<byte[], byte[]>> stream = Stream.empty();
+    for (int shard = 0; shard < shardCountForSegment(segment); shard++) {
+      final TransactionDB db = getDatabase(segment, shard);
+      final ColumnFamilyHandle handle = getColumnHandle(segment, shard);
+      final RocksIterator rocksIterator = db.newIterator(handle);
+      rocksIterator.seekToFirst();
+      stream = Stream.concat(stream, RocksDbIterator.create(rocksIterator).toStream());
+    }
+    return stream;
+  }
+
+  private static int shardIndex(final byte[] key) {
+    if (key == null || key.length == 0) {
+      return 0;
+    }
+    return (key[0] & 0xFF) >>> 4;
+  }
+
+  private static boolean isShardedSegment(final SegmentIdentifier segment) {
+    return SHARDED_SEGMENT_NAME.equals(segment.getName());
+  }
+
+  private static int shardCountForSegment(final SegmentIdentifier segment) {
+    return isShardedSegment(segment) ? KEY_RANGE_SHARDS : 1;
+  }
+
+  private static int shardForSegment(final SegmentIdentifier segment, final byte[] key) {
+    return isShardedSegment(segment) ? shardIndex(key) : 0;
+  }
+
+  private static String shardDirectory(final int shard) {
+    final int from = shard << 4;
+    final int to = from | 0x0F;
+    return String.format("keyrange-%02X-%02X", from, to);
+  }
+
+  private static String segmentShardKey(final SegmentIdentifier segment, final int shard) {
+    return segment.getName() + "#" + shard;
   }
 }
