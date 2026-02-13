@@ -54,9 +54,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import com.google.common.base.Suppliers;
 import com.google.common.primitives.Longs;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -130,6 +132,8 @@ public class Transaction
   private final Optional<List<CodeDelegation>> maybeCodeDelegationList;
 
   private final Optional<Bytes> rawRlp;
+  private final Supplier<Bytes> blockBodyOpaqueEncoding;
+  private final Supplier<Bytes> pooledOpaqueEncoding;
 
   public static Builder builder() {
     return new Builder();
@@ -272,6 +276,10 @@ public class Transaction
     this.blobsWithCommitments = blobsWithCommitments;
     this.maybeCodeDelegationList = maybeCodeDelegationList;
     this.rawRlp = rawRlp;
+    this.blockBodyOpaqueEncoding =
+        Suppliers.memoize(() -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.BLOCK_BODY));
+    this.pooledOpaqueEncoding =
+        Suppliers.memoize(() -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.POOLED_TRANSACTION));
     hash.ifPresent(h -> this.hash = h);
     sizeForAnnouncement.ifPresent(i -> this.sizeForAnnouncement = i);
     sizeForBlockInclusion.ifPresent(i -> this.sizeForBlockInclusion = i);
@@ -534,7 +542,7 @@ public class Transaction
    * @param context the serialization format to use
    */
   public void writeTo(final RLPOutput out, final EncodingContext context) {
-    TransactionEncoder.encodeRLP(this, out, context);
+    TransactionEncoder.encodeRLP(transactionType, opaqueEncoding(context), out);
   }
 
   @Override
@@ -618,7 +626,7 @@ public class Transaction
   }
 
   private void memoizeHashAndSizeForBlockInclusion() {
-    final Bytes bytes = TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.BLOCK_BODY);
+    final Bytes bytes = blockBodyOpaqueEncoding.get();
     hash = Hash.hash(bytes);
     sizeForBlockInclusion = bytes.size();
     if (!transactionType.supportsBlob() || this.getBlobsWithCommitments().isEmpty()) {
@@ -628,8 +636,7 @@ public class Transaction
   }
 
   private void memoizeSizeForAnnouncement() {
-    final Bytes pooledBytes =
-        TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.POOLED_TRANSACTION);
+    final Bytes pooledBytes = pooledOpaqueEncoding.get();
     sizeForAnnouncement = pooledBytes.size();
     if (!transactionType.supportsBlob() || this.getBlobsWithCommitments().isEmpty()) {
       // for transactions not containing blobs the encoding is the same, so we can set these as
@@ -737,6 +744,12 @@ public class Transaction
 
   public Optional<Bytes> getRawRlp() {
     return rawRlp;
+  }
+
+  private Bytes opaqueEncoding(final EncodingContext context) {
+    return context == EncodingContext.POOLED_TRANSACTION
+        ? pooledOpaqueEncoding.get()
+        : blockBodyOpaqueEncoding.get();
   }
 
   @Override

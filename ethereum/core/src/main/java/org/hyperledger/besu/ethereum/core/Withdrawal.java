@@ -23,7 +23,9 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
+import com.google.common.base.Suppliers;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt64;
 
@@ -32,6 +34,7 @@ public class Withdrawal implements org.hyperledger.besu.plugin.data.Withdrawal {
   private final UInt64 validatorIndex;
   private final Address address;
   private final GWei amount;
+  private final Supplier<Bytes> encodedRlp;
 
   public Withdrawal(
       final UInt64 index, final UInt64 validatorIndex, final Address address, final GWei amount) {
@@ -39,6 +42,7 @@ public class Withdrawal implements org.hyperledger.besu.plugin.data.Withdrawal {
     this.validatorIndex = validatorIndex;
     this.address = address;
     this.amount = amount;
+    this.encodedRlp = Suppliers.memoize(() -> WithdrawalEncoder.encodeOpaqueBytes(this));
   }
 
   public static Withdrawal readFrom(final Bytes rlpBytes) {
@@ -50,7 +54,7 @@ public class Withdrawal implements org.hyperledger.besu.plugin.data.Withdrawal {
   }
 
   public void writeTo(final RLPOutput out) {
-    WithdrawalEncoder.encode(this, out);
+    out.writeRLPBytes(encodedRlp.get());
   }
 
   @Override

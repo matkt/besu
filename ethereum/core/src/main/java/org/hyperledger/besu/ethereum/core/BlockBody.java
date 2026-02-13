@@ -15,12 +15,17 @@
 package org.hyperledger.besu.ethereum.core;
 
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
+
+import com.google.common.base.Suppliers;
+import org.apache.tuweni.bytes.Bytes;
 
 public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
 
@@ -37,11 +42,13 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
 
   private final List<BlockHeader> ommers;
   private final Optional<List<Withdrawal>> withdrawals;
+  private final Supplier<Bytes> wrappedBodyRlp;
 
   public BlockBody(final List<Transaction> transactions, final List<BlockHeader> ommers) {
     this.transactions = transactions;
     this.ommers = ommers;
     this.withdrawals = Optional.empty();
+    this.wrappedBodyRlp = Suppliers.memoize(() -> RLP.encode(this::writeWrappedBodyListTo));
   }
 
   public BlockBody(
@@ -51,6 +58,7 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
     this.transactions = transactions;
     this.ommers = ommers;
     this.withdrawals = withdrawals;
+    this.wrappedBodyRlp = Suppliers.memoize(() -> RLP.encode(this::writeWrappedBodyListTo));
   }
 
   public static BlockBody empty() {
@@ -89,6 +97,10 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
    * @param output Output to write to
    */
   public void writeWrappedBodyTo(final RLPOutput output) {
+    output.writeRLPBytes(wrappedBodyRlp.get());
+  }
+
+  private void writeWrappedBodyListTo(final RLPOutput output) {
     output.startList();
     writeTo(output);
     output.endList();

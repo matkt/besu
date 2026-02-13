@@ -511,9 +511,8 @@ public class BlockchainQueries {
                                           body.getOmmers().stream()
                                               .map(BlockHeader::getHash)
                                               .collect(Collectors.toList());
-                                      final int size = new Block(header, body).getSize();
                                       return new BlockWithMetadata<>(
-                                          header, txs, ommers, td, size, body.getWithdrawals());
+                                          header, txs, ommers, td, 0, body.getWithdrawals());
                                     })));
   }
 

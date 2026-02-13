@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.LogsBloomFilter;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Objects;
@@ -44,7 +45,7 @@ public class BlockHeader extends SealableBlockHeader
 
   private final Supplier<ParsedExtraData> parsedExtraData;
 
-  private final Optional<Bytes> rawRlp;
+  private final Supplier<Bytes> encodedRlp;
 
   public BlockHeader(
       final Hash parentHash,
@@ -151,7 +152,7 @@ public class BlockHeader extends SealableBlockHeader
     this.nonce = nonce;
     this.hash = Suppliers.memoize(() -> blockHeaderFunctions.hash(this));
     this.parsedExtraData = Suppliers.memoize(() -> blockHeaderFunctions.parseExtraData(this));
-    this.rawRlp = rawRlp;
+    this.encodedRlp = Suppliers.memoize(() -> rawRlp.orElseGet(() -> RLP.encode(this::writeList)));
   }
 
   private BlockHeader(
@@ -207,7 +208,7 @@ public class BlockHeader extends SealableBlockHeader
     this.nonce = nonce;
     this.hash = Suppliers.memoize(() -> blockHeaderHash);
     this.parsedExtraData = Suppliers.memoize(() -> blockHeaderFunctions.parseExtraData(this));
-    this.rawRlp = rawRlp;
+    this.encodedRlp = Suppliers.memoize(() -> rawRlp.orElseGet(() -> RLP.encode(this::writeList)));
   }
 
   public static boolean hasEmptyBlock(final BlockHeader blockHeader) {
@@ -272,51 +273,51 @@ public class BlockHeader extends SealableBlockHeader
    * @param out The RLP output to write to
    */
   public void writeTo(final RLPOutput out) {
-    rawRlp.ifPresentOrElse(
-        out::writeRLPBytes,
-        () -> {
-          out.startList();
+    out.writeRLPBytes(encodedRlp.get());
+  }
 
-          out.writeBytes(parentHash.getBytes());
-          out.writeBytes(ommersHash.getBytes());
-          out.writeBytes(coinbase.getBytes());
-          out.writeBytes(stateRoot.getBytes());
-          out.writeBytes(transactionsRoot.getBytes());
-          out.writeBytes(receiptsRoot.getBytes());
-          out.writeBytes(logsBloom.getBytes());
-          out.writeUInt256Scalar(difficulty);
-          out.writeLongScalar(number);
-          out.writeLongScalar(gasLimit);
-          out.writeLongScalar(gasUsed);
-          out.writeLongScalar(timestamp);
-          out.writeBytes(extraData);
-          out.writeBytes(mixHashOrPrevRandao);
-          out.writeLong(nonce);
-          do {
-            if (baseFee == null) break;
-            out.writeUInt256Scalar(baseFee);
+  private void writeList(final RLPOutput out) {
+    out.startList();
 
-            if (withdrawalsRoot == null) break;
-            out.writeBytes(withdrawalsRoot.getBytes());
+    out.writeBytes(parentHash.getBytes());
+    out.writeBytes(ommersHash.getBytes());
+    out.writeBytes(coinbase.getBytes());
+    out.writeBytes(stateRoot.getBytes());
+    out.writeBytes(transactionsRoot.getBytes());
+    out.writeBytes(receiptsRoot.getBytes());
+    out.writeBytes(logsBloom.getBytes());
+    out.writeUInt256Scalar(difficulty);
+    out.writeLongScalar(number);
+    out.writeLongScalar(gasLimit);
+    out.writeLongScalar(gasUsed);
+    out.writeLongScalar(timestamp);
+    out.writeBytes(extraData);
+    out.writeBytes(mixHashOrPrevRandao);
+    out.writeLong(nonce);
+    do {
+      if (baseFee == null) break;
+      out.writeUInt256Scalar(baseFee);
 
-            if (excessBlobGas == null || blobGasUsed == null) break;
-            out.writeLongScalar(blobGasUsed);
-            out.writeUInt64Scalar(excessBlobGas);
+      if (withdrawalsRoot == null) break;
+      out.writeBytes(withdrawalsRoot.getBytes());
 
-            if (parentBeaconBlockRoot == null) break;
-            out.writeBytes(parentBeaconBlockRoot);
+      if (excessBlobGas == null || blobGasUsed == null) break;
+      out.writeLongScalar(blobGasUsed);
+      out.writeUInt64Scalar(excessBlobGas);
 
-            if (requestsHash == null) break;
-            out.writeBytes(requestsHash.getBytes());
+      if (parentBeaconBlockRoot == null) break;
+      out.writeBytes(parentBeaconBlockRoot);
 
-            if (blockAccessListHash == null) break;
-            out.writeBytes(blockAccessListHash.getBytes());
+      if (requestsHash == null) break;
+      out.writeBytes(requestsHash.getBytes());
 
-            if (slotNumber == null) break;
-            out.writeLongScalar(slotNumber);
-          } while (false);
-          out.endList();
-        });
+      if (blockAccessListHash == null) break;
+      out.writeBytes(blockAccessListHash.getBytes());
+
+      if (slotNumber == null) break;
+      out.writeLongScalar(slotNumber);
+    } while (false);
+    out.endList();
   }
 
   public static BlockHeader readFrom(
