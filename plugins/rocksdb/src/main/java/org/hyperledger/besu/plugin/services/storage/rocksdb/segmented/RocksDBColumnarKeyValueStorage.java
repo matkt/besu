@@ -76,8 +76,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
-  /** RocksDb blockcache size when using the high spec option */
-  protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
+  /** RocksDb blockcache size when using the high spec option - reduced to 256MB per shard */
+  protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 268_435_456L;
+
+  /** Default blockcache size per shard - 64MB */
+  protected static final long ROCKSDB_BLOCKCACHE_SIZE_DEFAULT = 67_108_864L;
 
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
@@ -274,7 +277,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /***
    * Create a Block Base Table configuration for each segment, depending on the configuration in place
-   * and the segment itself
+   * and the segment itself. Each segment gets its own cache with a reasonable size to avoid memory issues.
    *
    * @param segment The segment related to the column family
    * @param config RocksDB configuration
@@ -282,11 +285,14 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private BlockBasedTableConfig createBlockBasedTableConfig(
       final SegmentIdentifier segment, final RocksDBConfiguration config) {
-    final LRUCache cache =
-        new LRUCache(
-            config.isHighSpec() && segment.isEligibleToHighSpecFlag()
-                ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                : config.getCacheCapacity());
+    // Each shard gets its own cache with reasonable size
+    final long cacheSize =
+        config.isHighSpec() && segment.isEligibleToHighSpecFlag()
+            ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC // 256 MB for high-spec segments
+            : ROCKSDB_BLOCKCACHE_SIZE_DEFAULT; // 64 MB for regular segments
+    
+    final LRUCache cache = new LRUCache(cacheSize);
+    
     return new BlockBasedTableConfig()
         .setFormatVersion(ROCKSDB_FORMAT_VERSION)
         .setBlockCache(cache)
