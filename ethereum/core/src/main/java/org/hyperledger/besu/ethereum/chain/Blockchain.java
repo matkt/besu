@@ -249,6 +249,20 @@ public interface Blockchain {
    */
   long observeBlockAdded(BlockAddedObserver observer);
 
+  /**
+   * Adds an observer with high priority that will get called when a new block is added. Priority
+   * observers are notified before regular observers.
+   *
+   * <p>This is useful for time-sensitive operations like WebSocket subscriptions that need to
+   * notify clients quickly, without waiting for slower operations like pruning or archiving.
+   *
+   * @param observer the observer to call
+   * @return the observer ID that can be used to remove it later.
+   */
+  default long observeBlockAddedWithPriority(final BlockAddedObserver observer) {
+    return observeBlockAdded(observer);
+  }
+
   /** Removes all observers previously added via {@link #observeBlockAdded(BlockAddedObserver)}. */
   default void removeAllBlockAddedObservers() {}
 

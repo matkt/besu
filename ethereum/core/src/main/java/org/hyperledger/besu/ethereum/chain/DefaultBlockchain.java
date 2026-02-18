@@ -72,6 +72,7 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   protected final BlockchainStorage blockchainStorage;
 
+  private final Subscribers<BlockAddedObserver> priorityBlockAddedObservers = Subscribers.create();
   private final Subscribers<BlockAddedObserver> blockAddedObservers = Subscribers.create();
   private final Subscribers<ChainReorgObserver> blockReorgObservers = Subscribers.create();
   private final long reorgLoggingThreshold;
@@ -624,6 +625,7 @@ public class DefaultBlockchain implements MutableBlockchain {
     }
 
     updater.commit();
+    priorityBlockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
     blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
   }
 
@@ -939,6 +941,7 @@ public class DefaultBlockchain implements MutableBlockchain {
 
       var reorgEvent = handleChainReorg(updater, blockWithReceipts);
       updater.commit();
+      priorityBlockAddedObservers.forEach(o -> o.onBlockAdded(reorgEvent));
       blockAddedObservers.forEach(o -> o.onBlockAdded(reorgEvent));
 
       updateCacheForNewCanonicalHead(block, calculateTotalDifficulty(block.getHeader()));
@@ -966,6 +969,7 @@ public class DefaultBlockchain implements MutableBlockchain {
       updateCacheForNewCanonicalHead(
           blockWithReceipts.getBlock(), calculateTotalDifficulty(blockHeader));
       updater.commit();
+      priorityBlockAddedObservers.forEach(observer -> observer.onBlockAdded(newHeadEvent));
       blockAddedObservers.forEach(observer -> observer.onBlockAdded(newHeadEvent));
       return true;
     } catch (final NoSuchElementException e) {
@@ -1112,13 +1116,21 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
+  public long observeBlockAddedWithPriority(final BlockAddedObserver observer) {
+    checkNotNull(observer);
+    return priorityBlockAddedObservers.subscribe(observer);
+  }
+
+  @Override
   public void removeAllBlockAddedObservers() {
+    priorityBlockAddedObservers.unsubscribeAll();
     blockAddedObservers.unsubscribeAll();
   }
 
   @Override
   public boolean removeObserver(final long observerId) {
-    return blockAddedObservers.unsubscribe(observerId);
+    return priorityBlockAddedObservers.unsubscribe(observerId)
+        || blockAddedObservers.unsubscribe(observerId);
   }
 
   @Override
@@ -1134,7 +1146,8 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @VisibleForTesting
   int observerCount() {
-    return blockAddedObservers.getSubscriberCount();
+    return priorityBlockAddedObservers.getSubscriberCount()
+        + blockAddedObservers.getSubscriberCount();
   }
 
   private void notifyChainReorgBlockAdded(final BlockWithReceipts blockWithReceipts) {

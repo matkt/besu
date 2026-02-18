@@ -1362,7 +1362,7 @@ public class RunnerBuilder {
     final NewBlockHeadersSubscriptionService newBlockHeadersSubscriptionService =
         new NewBlockHeadersSubscriptionService(subscriptionManager, blockchainQueries);
 
-    blockchain.observeBlockAdded(newBlockHeadersSubscriptionService);
+    blockchain.observeBlockAddedWithPriority(newBlockHeadersSubscriptionService);
   }
 
   private WebSocketService createWebsocketService(
