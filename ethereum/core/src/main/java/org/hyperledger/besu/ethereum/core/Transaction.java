@@ -56,9 +56,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import com.google.common.base.Suppliers;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
-import com.google.common.base.Suppliers;
 import com.google.common.primitives.Longs;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -277,9 +277,11 @@ public class Transaction
     this.maybeCodeDelegationList = maybeCodeDelegationList;
     this.rawRlp = rawRlp;
     this.blockBodyOpaqueEncoding =
-        Suppliers.memoize(() -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.BLOCK_BODY));
+        Suppliers.memoize(
+            () -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.BLOCK_BODY));
     this.pooledOpaqueEncoding =
-        Suppliers.memoize(() -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.POOLED_TRANSACTION));
+        Suppliers.memoize(
+            () -> TransactionEncoder.encodeOpaqueBytes(this, EncodingContext.POOLED_TRANSACTION));
     hash.ifPresent(h -> this.hash = h);
     sizeForAnnouncement.ifPresent(i -> this.sizeForAnnouncement = i);
     sizeForBlockInclusion.ifPresent(i -> this.sizeForBlockInclusion = i);

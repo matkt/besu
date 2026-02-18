@@ -624,8 +624,10 @@ public class DefaultBlockchain implements MutableBlockchain {
       }
     }
 
-    updater.commit();
     priorityBlockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
+
+    updater.commit();
+
     blockAddedObservers.forEach(observer -> observer.onBlockAdded(blockAddedEvent));
   }
 
