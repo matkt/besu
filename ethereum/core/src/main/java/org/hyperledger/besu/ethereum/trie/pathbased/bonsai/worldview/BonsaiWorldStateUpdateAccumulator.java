@@ -38,7 +38,17 @@ public class BonsaiWorldStateUpdateAccumulator
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
       final CodeCache codeCache) {
-    super(world, accountPreloader, storagePreloader, evmConfiguration);
+    this(world, accountPreloader, storagePreloader, evmConfiguration, codeCache, true);
+  }
+
+  public BonsaiWorldStateUpdateAccumulator(
+      final PathBasedWorldView world,
+      final Consumer<PathBasedValue<BonsaiAccount>> accountPreloader,
+      final Consumer<StorageSlotKey> storagePreloader,
+      final EvmConfiguration evmConfiguration,
+      final CodeCache codeCache,
+      final boolean verifyRollFromDatabase) {
+    super(world, accountPreloader, storagePreloader, evmConfiguration, verifyRollFromDatabase);
 
     this.codeCache = codeCache;
   }
@@ -51,7 +61,8 @@ public class BonsaiWorldStateUpdateAccumulator
             getAccountPreloader(),
             getStoragePreloader(),
             getEvmConfiguration(),
-            codeCache);
+            codeCache,
+            isVerifyRollFromDatabase());
     copy.cloneFromUpdater(this);
     return copy;
   }

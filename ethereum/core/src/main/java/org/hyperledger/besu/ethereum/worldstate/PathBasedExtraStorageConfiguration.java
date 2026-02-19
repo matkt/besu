@@ -37,6 +37,7 @@ public interface PathBasedExtraStorageConfiguration {
   int DEFAULT_TRIE_LOG_PRUNING_WINDOW_SIZE = 5_000;
   boolean DEFAULT_PARALLEL_TX_PROCESSING = true;
   boolean DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION = true;
+  boolean DEFAULT_VERIFY_ROLL_FROM_DATABASE = false;
 
   @Value.Default
   default Long getMaxLayersToLoad() {
@@ -61,6 +62,11 @@ public interface PathBasedExtraStorageConfiguration {
   @Value.Default
   default boolean getParallelStateRootComputationEnabled() {
     return DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
+  }
+
+  @Value.Default
+  default boolean getVerifyRollFromDatabase() {
+    return DEFAULT_VERIFY_ROLL_FROM_DATABASE;
   }
 
   @Value.Default

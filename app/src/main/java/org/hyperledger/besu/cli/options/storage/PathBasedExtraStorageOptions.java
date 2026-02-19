@@ -19,6 +19,7 @@ import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConf
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.DEFAULT_PARALLEL_TX_PROCESSING;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.DEFAULT_TRIE_LOG_PRUNING_WINDOW_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.DEFAULT_VERIFY_ROLL_FROM_DATABASE;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_FULL_FLAT_DB_ENABLED;
@@ -65,6 +66,9 @@ public class PathBasedExtraStorageOptions
   public static final String PARALLEL_STATE_ROOT_COMPUTATION_ENABLED =
       "--bonsai-parallel-state-root-computation-enabled";
 
+  /** The bonsai verify roll from database option name. */
+  public static final String VERIFY_ROLL_FROM_DATABASE = "--bonsai-verify-roll-from-database";
+
   @Option(
       names = {LIMIT_TRIE_LOGS_ENABLED},
       fallbackValue = "true",
@@ -92,6 +96,13 @@ public class PathBasedExtraStorageOptions
       description =
           "Enables parallel computation of state root hash to optimize performance. Will be ignored if --data-storage-format is not bonsai (default: ${DEFAULT-VALUE})")
   private Boolean isParallelStateRootComputationEnabled = DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
+
+  @Option(
+      names = {VERIFY_ROLL_FROM_DATABASE},
+      arity = "1",
+      description =
+          "When enabled, roll operations (trie log replay) verify prior values by reading from the database. When disabled, only trie log values are used, avoiding DB reads (default: ${DEFAULT-VALUE})")
+  private Boolean verifyRollFromDatabase = DEFAULT_VERIFY_ROLL_FROM_DATABASE;
 
   @CommandLine.ArgGroup(validate = false)
   private final PathBasedExtraStorageOptions.Unstable unstableOptions = new Unstable();
@@ -188,6 +199,7 @@ public class PathBasedExtraStorageOptions
         domainObject.getParallelTxProcessingEnabled();
     dataStorageOptions.isParallelStateRootComputationEnabled =
         domainObject.getParallelStateRootComputationEnabled();
+    dataStorageOptions.verifyRollFromDatabase = domainObject.getVerifyRollFromDatabase();
 
     return dataStorageOptions;
   }
@@ -200,6 +212,7 @@ public class PathBasedExtraStorageOptions
         .trieLogPruningWindowSize(trieLogPruningWindowSize)
         .parallelTxProcessingEnabled(isParallelTxProcessingEnabled)
         .parallelStateRootComputationEnabled(isParallelStateRootComputationEnabled)
+        .verifyRollFromDatabase(verifyRollFromDatabase)
         .unstable(
             ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
                 .fullFlatDbEnabled(unstableOptions.fullFlatDbEnabled)

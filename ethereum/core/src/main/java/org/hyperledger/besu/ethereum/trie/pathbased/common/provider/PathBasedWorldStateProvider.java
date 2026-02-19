@@ -91,6 +91,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
         WorldStateConfig.newBuilder()
             .parallelStateRootComputationEnabled(
                 pathBasedExtraStorageConfiguration.getParallelStateRootComputationEnabled())
+            .verifyRollFromDatabase(pathBasedExtraStorageConfiguration.getVerifyRollFromDatabase())
             .build();
   }
 

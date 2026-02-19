@@ -102,7 +102,8 @@ public class BonsaiWorldState extends PathBasedWorldState {
                 this.bonsaiCachedMerkleTrieLoader.preLoadStorageSlot(
                     getWorldStateStorage(), addr, value),
             evmConfiguration,
-            codeCache));
+            codeCache,
+            worldStateConfig.isVerifyRollFromDatabase()));
     this.codeCache = codeCache;
   }
 

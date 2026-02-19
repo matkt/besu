@@ -77,17 +77,32 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
   protected boolean isAccumulatorStateChanged;
 
+  /**
+   * When true (default), roll methods load missing values from DB; when false, use trie log only.
+   */
+  private final boolean verifyRollFromDatabase;
+
   public PathBasedWorldStateUpdateAccumulator(
       final PathBasedWorldView world,
       final Consumer<PathBasedValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
+    this(world, accountPreloader, storagePreloader, evmConfiguration, true);
+  }
+
+  public PathBasedWorldStateUpdateAccumulator(
+      final PathBasedWorldView world,
+      final Consumer<PathBasedValue<ACCOUNT>> accountPreloader,
+      final Consumer<StorageSlotKey> storagePreloader,
+      final EvmConfiguration evmConfiguration,
+      final boolean verifyRollFromDatabase) {
     super(world, evmConfiguration);
     this.accountsToUpdate = new AccountConsumingMap<>(new ConcurrentHashMap<>(), accountPreloader);
     this.accountPreloader = accountPreloader;
     this.storagePreloader = storagePreloader;
     this.isAccumulatorStateChanged = false;
     this.evmConfiguration = evmConfiguration;
+    this.verifyRollFromDatabase = verifyRollFromDatabase;
   }
 
   public void cloneFromUpdater(final PathBasedWorldStateUpdateAccumulator<ACCOUNT> source) {
@@ -223,7 +238,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     this.isAccumulatorStateChanged = true;
   }
 
-  protected Consumer<PathBasedValue<ACCOUNT>> getAccountPreloader() {
+  public Consumer<PathBasedValue<ACCOUNT>> getAccountPreloader() {
     return accountPreloader;
   }
 
@@ -233,6 +248,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
 
   public EvmConfiguration getEvmConfiguration() {
     return evmConfiguration;
+  }
+
+  public boolean isVerifyRollFromDatabase() {
+    return verifyRollFromDatabase;
   }
 
   @Override
@@ -684,7 +703,21 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     }
     PathBasedValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
     if (accountValue == null) {
-      accountValue = loadAccountFromParent(address, accountValue);
+      if (verifyRollFromDatabase) {
+        accountValue = loadAccountFromParent(address, accountValue);
+      } else {
+        // Use trie log values only: no DB read; prior/expected from trie log, then set updated.
+        final ACCOUNT priorAccount =
+            expectedValue == null
+                ? null
+                : createAccount(wrappedWorldView(), address, expectedValue, false);
+        final ACCOUNT updatedAccount =
+            expectedValue == null
+                ? null
+                : createAccount(wrappedWorldView(), address, expectedValue, true);
+        accountValue = new PathBasedValue<>(priorAccount, updatedAccount);
+        accountsToUpdate.put(address, accountValue);
+      }
     }
     if (accountValue == null) {
       if (expectedValue == null && replacementValue != null) {
@@ -750,13 +783,19 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     }
     PathBasedValue<Bytes> codeValue = codeToUpdate.get(address);
     if (codeValue == null) {
-      final Bytes storedCode =
-          wrappedWorldView()
-              .getCode(
-                  address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
-              .orElse(Bytes.EMPTY);
-      if (!storedCode.isEmpty()) {
-        codeValue = new PathBasedValue<>(storedCode, storedCode);
+      if (verifyRollFromDatabase) {
+        final Bytes storedCode =
+            wrappedWorldView()
+                .getCode(
+                    address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
+                .orElse(Bytes.EMPTY);
+        if (!storedCode.isEmpty()) {
+          codeValue = new PathBasedValue<>(storedCode, storedCode);
+          codeToUpdate.put(address, codeValue);
+        }
+      } else {
+        // Use trie log values only: no DB read
+        codeValue = new PathBasedValue<>(expectedCode, expectedCode);
         codeToUpdate.put(address, codeValue);
       }
     }
@@ -819,10 +858,22 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     final Map<StorageSlotKey, PathBasedValue<UInt256>> storageMap = storageToUpdate.get(address);
     PathBasedValue<UInt256> slotValue = storageMap == null ? null : storageMap.get(storageSlotKey);
     if (slotValue == null) {
-      final Optional<UInt256> storageValue =
-          wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
-      if (storageValue.isPresent()) {
-        slotValue = new PathBasedValue<>(storageValue.get(), storageValue.get());
+      if (verifyRollFromDatabase) {
+        final Optional<UInt256> storageValue =
+            wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
+        if (storageValue.isPresent()) {
+          slotValue = new PathBasedValue<>(storageValue.get(), storageValue.get());
+          storageToUpdate
+              .computeIfAbsent(
+                  address,
+                  k ->
+                      new StorageConsumingMap<>(
+                          address, new ConcurrentHashMap<>(), storagePreloader))
+              .put(storageSlotKey, slotValue);
+        }
+      } else {
+        // Use trie log values only: no DB read
+        slotValue = new PathBasedValue<>(expectedValue, expectedValue);
         storageToUpdate
             .computeIfAbsent(
                 address,

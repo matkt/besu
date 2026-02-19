@@ -33,10 +33,18 @@ public class WorldStateConfig {
    */
   private boolean isParallelStateRootComputationEnabled;
 
+  /**
+   * When true (default), rollAccountChange, rollCodeChange and rollStorageChange load missing
+   * values from the database to verify consistency. When false, only values from the trie log are
+   * used, avoiding DB reads when the prior value is already in the trie log.
+   */
+  private boolean verifyRollFromDatabase;
+
   private WorldStateConfig(final Builder builder) {
     this.isTrieDisabled = builder.isTrieDisabled;
     this.isStateful = builder.isStateful;
     this.isParallelStateRootComputationEnabled = builder.isParallelStateRootComputationEnabled;
+    this.verifyRollFromDatabase = builder.verifyRollFromDatabase;
   }
 
   public boolean isTrieDisabled() {
@@ -49,6 +57,10 @@ public class WorldStateConfig {
 
   public boolean isParallelStateRootComputationEnabled() {
     return isParallelStateRootComputationEnabled;
+  }
+
+  public boolean isVerifyRollFromDatabase() {
+    return verifyRollFromDatabase;
   }
 
   public void setTrieDisabled(final boolean trieDisabled) {
@@ -64,6 +76,10 @@ public class WorldStateConfig {
     isParallelStateRootComputationEnabled = parallelStateRootComputationEnabled;
   }
 
+  public void setVerifyRollFromDatabase(final boolean verifyRollFromDatabase) {
+    this.verifyRollFromDatabase = verifyRollFromDatabase;
+  }
+
   /**
    * Merges this WorldStateConfig with another WorldStateConfig and returns a new instance.
    *
@@ -75,6 +91,7 @@ public class WorldStateConfig {
         .trieDisabled(other.isTrieDisabled)
         .stateful(other.isStateful)
         .parallelStateRootComputationEnabled(other.isParallelStateRootComputationEnabled)
+        .verifyRollFromDatabase(other.isVerifyRollFromDatabase())
         .build();
   }
 
@@ -91,6 +108,7 @@ public class WorldStateConfig {
         .stateful(true)
         .parallelStateRootComputationEnabled(true)
         .trieDisabled(false)
+        .verifyRollFromDatabase(true)
         .build();
   }
 
@@ -98,6 +116,7 @@ public class WorldStateConfig {
     private boolean isStateful = true;
     private boolean isTrieDisabled = false;
     private boolean isParallelStateRootComputationEnabled = true;
+    private boolean verifyRollFromDatabase = true;
 
     public Builder() {}
 
@@ -105,6 +124,7 @@ public class WorldStateConfig {
       this.isTrieDisabled = spec.isTrieDisabled();
       this.isStateful = spec.isStateful();
       this.isParallelStateRootComputationEnabled = spec.isParallelStateRootComputationEnabled();
+      this.verifyRollFromDatabase = spec.isVerifyRollFromDatabase();
     }
 
     public Builder trieDisabled(final boolean trieDisabled) {
@@ -120,6 +140,11 @@ public class WorldStateConfig {
     public Builder parallelStateRootComputationEnabled(
         final boolean parallelStateRootComputationEnabled) {
       this.isParallelStateRootComputationEnabled = parallelStateRootComputationEnabled;
+      return this;
+    }
+
+    public Builder verifyRollFromDatabase(final boolean verifyRollFromDatabase) {
+      this.verifyRollFromDatabase = verifyRollFromDatabase;
       return this;
     }
 
