@@ -760,27 +760,60 @@ public class MergeCoordinator implements MergeMiningCoordinator, BadChainListene
       return true;
     }
 
-    if (moveWorldStateTo(newHead)) {
-      if (newHead.getParentHash().equals(blockchain.getChainHeadHash())) {
-        LOG.atDebug()
-            .setMessage(
-                "Forwarding chain head to the block {} saved from a previous newPayload invocation")
-            .addArgument(newHead::toLogString)
-            .log();
-        return blockchain.forwardToBlock(newHead);
-      } else {
-        LOG.atDebug()
-            .setMessage("New head {} is a chain reorg, rewind chain head to it")
-            .addArgument(newHead::toLogString)
-            .log();
-        return blockchain.rewindToBlock(newHead.getHash());
-      }
+    final boolean isForward = newHead.getParentHash().equals(blockchain.getChainHeadHash());
+
+    final CompletableFuture<Boolean> moveWorldStateFuture =
+        ethScheduler.scheduleComputationTask(() -> moveWorldStateTo(newHead));
+
+    final CompletableFuture<Boolean> blockchainOperationFuture;
+
+    if (isForward) {
+      blockchainOperationFuture =
+          ethScheduler.scheduleComputationTask(
+              () -> {
+                LOG.atDebug()
+                    .setMessage(
+                        "Forwarding chain head to the block {} saved from a previous newPayload invocation")
+                    .addArgument(newHead::toLogString)
+                    .log();
+                return blockchain.forwardToBlock(newHead);
+              });
+    } else {
+      blockchainOperationFuture =
+          ethScheduler.scheduleComputationTask(
+              () -> {
+                LOG.atDebug()
+                    .setMessage("New head {} is a chain reorg, rewind chain head to it")
+                    .addArgument(newHead::toLogString)
+                    .log();
+                return blockchain.rewindToBlock(newHead.getHash());
+              });
     }
-    LOG.atDebug()
-        .setMessage("Failed to move the worldstate forward to hash {}, not moving chain head")
-        .addArgument(newHead::toLogString)
-        .log();
-    return false;
+
+    try {
+      final boolean worldStateMoved = moveWorldStateFuture.get();
+      final boolean blockchainResult = blockchainOperationFuture.get();
+
+      if (!worldStateMoved) {
+        LOG.atDebug()
+            .setMessage("Failed to move the worldstate forward to hash {}, not moving chain head")
+            .addArgument(newHead::toLogString)
+            .log();
+        return false;
+      }
+
+      return blockchainResult;
+
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+      LOG.error(
+          "Interrupted during parallel setNewHead execution for block {}", newHead.toLogString());
+      return false;
+    } catch (final Exception e) {
+      LOG.error(
+          "Error during parallel setNewHead execution for block {}", newHead.toLogString(), e);
+      return false;
+    }
   }
 
   private boolean moveWorldStateTo(final BlockHeader newHead) {
