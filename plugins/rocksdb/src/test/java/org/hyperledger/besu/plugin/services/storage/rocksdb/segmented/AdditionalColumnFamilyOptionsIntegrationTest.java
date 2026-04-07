@@ -196,6 +196,7 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
         OptionsUtil.getLatestOptionsFileName(dbDir.toString(), Env.getDefault());
     final String content = Files.readString(dbDir.resolve(optionsFileName), StandardCharsets.UTF_8);
     assertThat(content).containsIgnoringCase("partition_filters");
+    assertThat(content).containsIgnoringCase("kTwoLevelIndexSearch");
     assertThat(content)
         .containsIgnoringCase("prepopulate_block_cache")
         .containsIgnoringCase("kFlushOnly");
