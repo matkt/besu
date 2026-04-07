@@ -76,8 +76,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
-  /** RocksDb blockcache size when using the high spec option */
-  protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
+  /**
+   * Block cache size always applied to hot Bonsai state column families ({@code
+   * TRIE_BRANCH_STORAGE}, {@code ACCOUNT_STORAGE_STORAGE}, {@code ACCOUNT_INFO_STATE}), regardless
+   * of {@link RocksDBConfiguration#isHighSpec()}.
+   */
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_HOT_STATE = 2_147_483_648L;
+
+  /**
+   * Block cache for column families that are not hot state segments (128 MiB per CF minimum),
+   * floored by {@link RocksDBConfiguration#getCacheCapacity()} when the user raises it.
+   */
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_OTHERS = 134_217_728L;
 
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
@@ -186,7 +196,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * then builds {@link RocksDbNativeOptionStrings.InsertionOrderedProperties} by applying its
    * block-table keys in a fixed order (so {@code index_type} precedes {@code partition_filters} in
    * the JNI option string), then merges user keys (same key in user config overrides the Besu
-   * default). A single {@code getColumnFamilyOptionsFromProps} call follows, which unlocks any
+   * default). Besu defaults enable caching index/filter blocks with high priority, pin L0
+   * index/filter blocks, and {@code kNoChecksum} on SST blocks. Hot state column families ({@code
+   * TRIE_BRANCH_STORAGE}, {@code ACCOUNT_STORAGE_STORAGE}, {@code ACCOUNT_INFO_STATE}) always use
+   * a large block cache (independent of high-spec); other families use 128 MiB (minimum), floored
+   * by the configured cache capacity. A
+   * single {@code getColumnFamilyOptionsFromProps} call
+   * follows, which unlocks any
    * column-family or {@code block_based_table_factory.*} option the native RocksDB build accepts,
    * even when rocksdbjni does not expose it on Java option classes. Compaction and blob options are
    * still set in Java where needed. {@code level_compaction_dynamic_level_bytes} is taken from the
@@ -232,17 +248,41 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
       final SegmentIdentifier segment,
       final RocksDBConfiguration configuration) {
-    final long blockCacheBytes =
-        configuration.isHighSpec() && segment.isEligibleToHighSpecFlag()
-            ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-            : configuration.getCacheCapacity();
+    final long blockCacheBytes = resolveBlockCacheBytes(segment, configuration);
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
     cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
     cfProps.setProperty("block_based_table_factory.partition_filters", "false");
-    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
+    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
+    cfProps.setProperty(
+        "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
+    cfProps.setProperty(
+        "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
+    cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
     cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
     cfProps.setProperty("block_based_table_factory.block_cache", Long.toString(blockCacheBytes));
+  }
+
+  /**
+   * Block cache bytes: hot state segments ({@code ACCOUNT_INFO_STATE}, {@code
+   * ACCOUNT_STORAGE_STORAGE}, {@code TRIE_BRANCH_STORAGE}) always use at least {@link
+   * #ROCKSDB_BLOCKCACHE_SIZE_HOT_STATE}; other column families use at least 128 MiB (or the
+   * configured cache capacity if higher). Does not use {@link RocksDBConfiguration#isHighSpec()}.
+   */
+  private static long resolveBlockCacheBytes(
+      final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
+    final long baseCapacity = configuration.getCacheCapacity();
+    if (isHotStateSegment(segment)) {
+      return Math.max(ROCKSDB_BLOCKCACHE_SIZE_HOT_STATE, baseCapacity);
+    }
+    return Math.max(ROCKSDB_BLOCKCACHE_SIZE_OTHERS, baseCapacity);
+  }
+
+  private static boolean isHotStateSegment(final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    return "TRIE_BRANCH_STORAGE".equals(name)
+        || "ACCOUNT_STORAGE_STORAGE".equals(name)
+        || "ACCOUNT_INFO_STATE".equals(name);
   }
 
   /**
