@@ -95,6 +95,13 @@ public class RocksDBCLIOptionsTest {
   }
 
   @Test
+  public void maxOpenFilesNegativeOneParsesWithEqualsForm() {
+    final RocksDBCLIOptions options = RocksDBCLIOptions.create();
+    new CommandLine(options).parseArgs(MAX_OPEN_FILES_FLAG + "=-1");
+    assertThat(options.toDomainObject().getMaxOpenFiles()).isEqualTo(-1);
+  }
+
+  @Test
   public void customIsHighSpec() {
     final RocksDBCLIOptions options = RocksDBCLIOptions.create();
 

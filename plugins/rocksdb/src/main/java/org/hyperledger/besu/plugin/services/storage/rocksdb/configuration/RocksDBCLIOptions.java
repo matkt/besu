@@ -74,14 +74,19 @@ public class RocksDBCLIOptions {
   public static final String ADDITIONAL_DATABASE_OPTIONS =
       "--Xplugin-rocksdb-additional-database-options";
 
-  /** The Max open files. */
+  /**
+   * Max open files; {@link CommandLine.Option#defaultValue()} must stay equal to {@link
+   * #DEFAULT_MAX_OPEN_FILES} so Picocli and {@link RocksDBConfigurationBuilder} agree.
+   */
   @CommandLine.Option(
       names = {MAX_OPEN_FILES_FLAG},
       hidden = true,
-      defaultValue = "1024",
+      defaultValue = "-1",
       paramLabel = "<INTEGER>",
       description =
-          "Max SST files RocksDB keeps open (default: ${DEFAULT-VALUE}). Use -1 for no RocksDB-side cap. Still bounded by OS file descriptor limits (ulimit).")
+          "Max SST files RocksDB keeps open (default: ${DEFAULT-VALUE}). -1 = no RocksDB-side cap. For a negative value on the shell use "
+              + MAX_OPEN_FILES_FLAG
+              + "=-1 (Picocli otherwise treats a bare -1 as a flag). Still bounded by OS file descriptor limits (ulimit).")
   int maxOpenFiles;
 
   /** The Cache capacity. */
