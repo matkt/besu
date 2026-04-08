@@ -15,7 +15,10 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -77,11 +80,10 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
   /**
-   * Block cache for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} (1.5 GiB each;
-   * reduced from 2 GiB to save 1 GiB RAM total across both), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when higher.
+   * Block cache for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} (512 MiB each),
+   * floored by {@link RocksDBConfiguration#getCacheCapacity()} when higher.
    */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 1_610_612_736L;
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 1_073_741_824L;
 
   /**
    * Block cache for {@code ACCOUNT_INFO_STATE} and all other column families (128 MiB per CF
@@ -196,10 +198,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * then builds {@link RocksDbNativeOptionStrings.InsertionOrderedProperties} by applying its
    * block-table keys in a fixed order (so {@code index_type} precedes {@code partition_filters} in
    * the JNI option string), then merges user keys (same key in user config overrides the Besu
-   * default). Besu defaults use a two-level index with partitioned bloom filters, caching
-   * index/filter blocks with high priority, pin L0 index/filter blocks, and {@code kNoChecksum} on
-   * SST blocks. {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} use a 1.5 GiB block
-   * cache each; {@code ACCOUNT_INFO_STATE} and other families use 128 MiB (minimum), floored by the
+   * default). Besu defaults use a two-level index with partitioned bloom filters and {@code
+   * kNoChecksum} on SST blocks. Index and filter blocks are cached (with high priority and L0 pin)
+   * only for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE}; other column families
+   * keep index/filters outside the block cache. {@code TRIE_BRANCH_STORAGE} and {@code
+   * ACCOUNT_STORAGE_STORAGE} use a 512 MiB block cache each; {@code ACCOUNT_INFO_STATE} and other
+   * families use 128 MiB (minimum), floored by the
    * configured cache capacity. A
    * single {@code getColumnFamilyOptionsFromProps} call
    * follows, which unlocks any
@@ -251,15 +255,20 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     final long blockCacheBytes = resolveBlockCacheBytes(segment, configuration);
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
-    cfProps.setProperty(
-        "block_based_table_factory.index_type", "kTwoLevelIndexSearch");
-    cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
-    cfProps.setProperty("block_based_table_factory.partition_filters", "true");
-    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
-    cfProps.setProperty(
-        "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
-    cfProps.setProperty(
-        "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
+    if (isTrieBranchOrFlatSegment(segment)) {
+      cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
+      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
+      cfProps.setProperty(
+          "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
+      cfProps.setProperty(
+          "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
+      cfProps.setProperty(
+              "block_based_table_factory.index_type", "kTwoLevelIndexSearch");
+      cfProps.setProperty("block_based_table_factory.partition_filters", "true");
+    } else {
+      cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:6:false");
+      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
+    }
     cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
     cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
     cfProps.setProperty("block_based_table_factory.block_cache", Long.toString(blockCacheBytes));
@@ -267,21 +276,23 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /**
    * Block cache bytes: {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} use at least
-   * 1.5 GiB each; all other column families (including {@code ACCOUNT_INFO_STATE}) use at least 128
+   * 512 MiB each; all other column families (including {@code ACCOUNT_INFO_STATE}) use at least 128
    * MiB (or the configured cache capacity if higher).
    */
   private static long resolveBlockCacheBytes(
       final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
     final long baseCapacity = configuration.getCacheCapacity();
-    if (isTrieBranchOrAccountStorageSegment(segment)) {
+    if (isTrieBranchOrFlatSegment(segment)) {
       return Math.max(ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT, baseCapacity);
     }
     return Math.max(ROCKSDB_BLOCKCACHE_SIZE_OTHERS, baseCapacity);
   }
 
-  private static boolean isTrieBranchOrAccountStorageSegment(final SegmentIdentifier segment) {
+  private static boolean isTrieBranchOrFlatSegment(final SegmentIdentifier segment) {
     final String name = segment.getName();
-    return "TRIE_BRANCH_STORAGE".equals(name) || "ACCOUNT_STORAGE_STORAGE".equals(name);
+    return TRIE_BRANCH_STORAGE.getName().equals(name)
+            || ACCOUNT_STORAGE_STORAGE.getName().equals(name)
+            || ACCOUNT_INFO_STATE.getName().equals(name);
   }
 
   /**
