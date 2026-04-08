@@ -81,22 +81,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
   private static final int ROCKSDB_FORMAT_VERSION = 5;
-  private static final long ROCKSDB_BLOCK_SIZE = 32768;
+
+  /** Default SST data block size for most column families. */
+  private static final long ROCKSDB_BLOCK_SIZE = 32768L;
 
   /**
-   * Per-segment contribution to the shared block-cache budget (see {@link
-   * #computeSharedBlockCacheCapacity}) for {@code TRIE_BRANCH_STORAGE}.
+   * SST data block size for {@code ACCOUNT_STORAGE_STORAGE}: smaller blocks reduce read amplification
+   * on random slot lookups (each miss loads less unrelated data into the block cache).
    */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_BRANCH = 1_073_741_824L;
+  private static final long ROCKSDB_BLOCK_SIZE_ACCOUNT_STORAGE = 16384L;
 
   /** Per-segment contribution for {@code ACCOUNT_STORAGE_STORAGE}. */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_SLOT = 2_147_483_648L;
-
-  /** Per-segment contribution for {@code ACCOUNT_INFO_STATE}. */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO = 1_073_741_824L;
-
-  /** Per-segment contribution for any other column family. */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_OTHERS = 134_217_728L;
+  private static final long ROCKSDB_BLOCKCACHE_SIZE= 2_147_483_648L;
 
   /** Shard bits for the node-wide {@link LRUCache} (2^6 shards). */
   private static final int SHARED_BLOCK_CACHE_NUM_SHARD_BITS = 6;
@@ -221,13 +217,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * block-table keys in a fixed order (so {@code index_type} precedes {@code partition_filters} in
    * the JNI option string), then merges user keys (same key in user config overrides the Besu
    * default). Besu defaults use a two-level index with partitioned bloom filters and {@code
-   * kNoChecksum} on SST blocks. Index and filter blocks are cached (with high priority and L0 pin)
-   * only for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE}; other column families
-   * keep index/filters outside the block cache. A single shared {@link LRUCache} serves all column
-   * families; its size is the sum of per-segment contributions (trie 1 GiB, slots 2 GiB, account 1
-   * GiB, others 128 MiB each), floored by {@link RocksDBConfiguration#getCacheCapacity()}. Any
-   * {@code block_cache} / {@code block_based_table_factory.block_cache} in additional CF options are
-   * not applied (no per-CF cache; see {@link #isDisallowedBlockCacheOptionKey}). A
+   * kNoChecksum} on SST blocks; index and filter blocks are cached with high priority and L0 pin. A
+   * single shared {@link LRUCache} serves all column families; see {@link
+   * #computeSharedBlockCacheCapacity(List, RocksDBConfiguration)}. {@code ACCOUNT_STORAGE_STORAGE} uses
+   * a smaller {@code block_size} than other families to reduce read amplification on random slot
+   * reads. {@code block_cache} / {@code block_based_table_factory.block_cache} in additional CF
+   * options are not applied (no per-CF cache; see {@link #isDisallowedBlockCacheOptionKey}). A
    * single {@code getColumnFamilyOptionsFromProps} call
    * follows, which unlocks any
    * column-family or {@code block_based_table_factory.*} option the native RocksDB build accepts,
@@ -282,8 +277,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       final SegmentIdentifier segment) {
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
-    if (isTrieBranchOrFlatSegment(segment)) {
-      cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
+    cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:13:false");
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
       cfProps.setProperty(
           "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
@@ -292,13 +286,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       cfProps.setProperty(
               "block_based_table_factory.index_type", "kTwoLevelIndexSearch");
       cfProps.setProperty("block_based_table_factory.partition_filters", "true");
-    } else {
-      cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:6:false");
-      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
-    }
+    
     cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
-    cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
+    cfProps.setProperty(
+        "block_based_table_factory.block_size", Long.toString(blockSizeForSegment(segment)));
     cfProps.setProperty("block_based_table_factory.no_block_cache", "true");
+  }
+
+  private static long blockSizeForSegment(final SegmentIdentifier segment) {
+    if (ACCOUNT_STORAGE_STORAGE.getName().equals(segment.getName())) {
+      return ROCKSDB_BLOCK_SIZE_ACCOUNT_STORAGE;
+    }
+    return ROCKSDB_BLOCK_SIZE;
   }
 
   /**
@@ -311,29 +310,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   /**
-   * Total shared block-cache bytes: sum of {@link #segmentBlockCacheContribution(SegmentIdentifier)}
-   * for each opened column family, floored by {@link RocksDBConfiguration#getCacheCapacity()}.
+   * Total shared block-cache bytes: {@code max(ROCKSDB_BLOCKCACHE_SIZE, cacheCapacity)} (see {@link
+   * RocksDBConfiguration#getCacheCapacity()}).
    */
   static long computeSharedBlockCacheCapacity(
       final List<SegmentIdentifier> segments, final RocksDBConfiguration configuration) {
-    long sum = 0L;
-    for (final SegmentIdentifier segment : segments) {
-      sum += segmentBlockCacheContribution(segment);
-    }
-    return Math.max(sum, configuration.getCacheCapacity());
-  }
-
-  private static long segmentBlockCacheContribution(final SegmentIdentifier segment) {
-    if (TRIE_BRANCH_STORAGE.getName().equals(segment.getName())) {
-      return ROCKSDB_BLOCKCACHE_SIZE_TRIE_BRANCH;
-    }
-    if (ACCOUNT_STORAGE_STORAGE.getName().equals(segment.getName())) {
-      return ROCKSDB_BLOCKCACHE_SIZE_SLOT;
-    }
-    if (ACCOUNT_INFO_STATE.getName().equals(segment.getName())) {
-      return ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO;
-    }
-    return ROCKSDB_BLOCKCACHE_SIZE_OTHERS;
+    return Math.max(ROCKSDB_BLOCKCACHE_SIZE, configuration.getCacheCapacity());
   }
 
   private static void applySharedBlockCache(
@@ -344,18 +326,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       columnOpts.setTableFormatConfig(tableFormatConfig);
     }
     ((BlockBasedTableConfig) tableFormatConfig).setBlockCache(sharedBlockCache);
-  }
-
-  private static boolean isTrieBranchOrAccountStorageSegment(final SegmentIdentifier segment) {
-    final String name = segment.getName();
-    return TRIE_BRANCH_STORAGE.getName().equals(name)
-        || ACCOUNT_STORAGE_STORAGE.getName().equals(name);
-  }
-
-  /** Trie, slot storage, and account-info share the same block-table tuning (Bloom, index, etc.). */
-  private static boolean isTrieBranchOrFlatSegment(final SegmentIdentifier segment) {
-    return isTrieBranchOrAccountStorageSegment(segment)
-        || ACCOUNT_INFO_STATE.getName().equals(segment.getName());
   }
 
   /**
