@@ -290,7 +290,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   private static boolean isTrieBranchOrFlatSegment(final SegmentIdentifier segment) {
     final String name = segment.getName();
-    return ACCOUNT_STORAGE_STORAGE.getName().equals(name)
+    return TRIE_BRANCH_STORAGE.getName().equals(name)
+            || ACCOUNT_STORAGE_STORAGE.getName().equals(name)
             || ACCOUNT_INFO_STATE.getName().equals(name);
   }
 
