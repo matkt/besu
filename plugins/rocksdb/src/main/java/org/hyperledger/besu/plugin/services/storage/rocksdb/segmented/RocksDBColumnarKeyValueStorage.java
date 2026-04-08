@@ -83,7 +83,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * Block cache for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} (512 MiB each),
    * floored by {@link RocksDBConfiguration#getCacheCapacity()} when higher.
    */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 1_073_741_824L;
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 1_610_612_736L;
 
   /**
    * Block cache for {@code ACCOUNT_INFO_STATE} and all other column families (128 MiB per CF
@@ -290,8 +290,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   private static boolean isTrieBranchOrFlatSegment(final SegmentIdentifier segment) {
     final String name = segment.getName();
-    return TRIE_BRANCH_STORAGE.getName().equals(name)
-            || ACCOUNT_STORAGE_STORAGE.getName().equals(name)
+    return ACCOUNT_STORAGE_STORAGE.getName().equals(name)
             || ACCOUNT_INFO_STATE.getName().equals(name);
   }
 
