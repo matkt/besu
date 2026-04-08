@@ -52,6 +52,8 @@ import com.google.common.collect.Streams;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.rocksdb.AbstractRocksIterator;
+import org.rocksdb.BlockBasedTableConfig;
+import org.rocksdb.Cache;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -59,6 +61,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.OptionsUtil;
 import org.rocksdb.ReadOptions;
@@ -67,6 +70,7 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
 import org.rocksdb.Status;
+import org.rocksdb.TableFormatConfig;
 import org.rocksdb.TransactionDBOptions;
 import org.rocksdb.WriteOptions;
 import org.slf4j.Logger;
@@ -80,28 +84,22 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
   /**
-   * Block cache minimum for {@code TRIE_BRANCH_STORAGE} (1 GiB), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when higher.
+   * Per-segment contribution to the shared block-cache budget (see {@link
+   * #computeSharedBlockCacheCapacity}) for {@code TRIE_BRANCH_STORAGE}.
    */
   private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_BRANCH = 1_073_741_824L;
 
-  /**
-   * Block cache minimum for {@code ACCOUNT_STORAGE_STORAGE} (2 GiB), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when higher.
-   */
+  /** Per-segment contribution for {@code ACCOUNT_STORAGE_STORAGE}. */
   private static final long ROCKSDB_BLOCKCACHE_SIZE_SLOT = 2_147_483_648L;
 
-  /**
-   * Block cache for {@code ACCOUNT_INFO_STATE} (1 GiB minimum), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when higher.
-   */
+  /** Per-segment contribution for {@code ACCOUNT_INFO_STATE}. */
   private static final long ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO = 1_073_741_824L;
 
-  /**
-   * Block cache for all other column families (128 MiB per CF minimum), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when the user raises it.
-   */
+  /** Per-segment contribution for any other column family. */
   private static final long ROCKSDB_BLOCKCACHE_SIZE_OTHERS = 134_217_728L;
+
+  /** Shard bits for the node-wide {@link LRUCache} (2^6 shards). */
+  private static final int SHARED_BLOCK_CACHE_NUM_SHARD_BITS = 6;
 
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
@@ -130,6 +128,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /** RocksDB DB configuration */
   protected final RocksDBConfiguration configuration;
+
+  /** One LRU block cache for the whole DB; capacity {@link #computeSharedBlockCacheCapacity}. */
+  private final Cache sharedBlockCache;
 
   /** RocksDB DB options */
   protected DBOptions options;
@@ -188,9 +189,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
                   existingColumnFamilies.stream()
                       .noneMatch(existed -> Arrays.equals(existed, ignorableSegment.getId())))
           .forEach(trimmedSegments::remove);
+      final long sharedCacheBytes =
+          computeSharedBlockCacheCapacity(trimmedSegments, configuration);
+      this.sharedBlockCache =
+          new LRUCache(sharedCacheBytes, SHARED_BLOCK_CACHE_NUM_SHARD_BITS);
+      LOG.info(
+          "RocksDB shared block cache for {}: {} bytes across {} column families",
+          configuration.getLabel(),
+          sharedCacheBytes,
+          trimmedSegments.size());
       columnDescriptors =
           trimmedSegments.stream()
-              .map(segment -> createColumnDescriptor(segment, configuration))
+              .map(segment -> createColumnDescriptor(segment, configuration, sharedBlockCache))
               .collect(Collectors.toList());
 
       setGlobalOptions(configuration, stats);
@@ -213,10 +223,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * default). Besu defaults use a two-level index with partitioned bloom filters and {@code
    * kNoChecksum} on SST blocks. Index and filter blocks are cached (with high priority and L0 pin)
    * only for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE}; other column families
-   * keep index/filters outside the block cache. {@code TRIE_BRANCH_STORAGE} and {@code
-   * ACCOUNT_STORAGE_STORAGE} uses a 2 GiB block-cache minimum; {@code TRIE_BRANCH_STORAGE} and {@code
-   * ACCOUNT_INFO_STATE} use 1 GiB each; other families use 128 MiB (minimum), floored by the
-   * configured cache capacity. A
+   * keep index/filters outside the block cache. A single shared {@link LRUCache} serves all column
+   * families; its size is the sum of per-segment contributions (trie 1 GiB, slots 2 GiB, account 1
+   * GiB, others 128 MiB each), floored by {@link RocksDBConfiguration#getCacheCapacity()}. Any
+   * {@code block_cache} / {@code block_based_table_factory.block_cache} in additional CF options are
+   * not applied (no per-CF cache; see {@link #isDisallowedBlockCacheOptionKey}). A
    * single {@code getColumnFamilyOptionsFromProps} call
    * follows, which unlocks any
    * column-family or {@code block_based_table_factory.*} option the native RocksDB build accepts,
@@ -230,7 +241,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * @return a column family descriptor
    */
   private ColumnFamilyDescriptor createColumnDescriptor(
-      final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
+      final SegmentIdentifier segment,
+      final RocksDBConfiguration configuration,
+      final Cache sharedBlockCache) {
     final boolean dynamicLevelCompaction =
         readLevelCompactionDynamicLevelBytesFromOptionsFile(segment, configuration);
 
@@ -239,12 +252,16 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             configuration.getAdditionalColumnFamilyOptions().orElse(""));
     final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps =
         new RocksDbNativeOptionStrings.InsertionOrderedProperties();
-    mergeBesuNativeColumnFamilyOptionsBeforeParse(cfProps, segment, configuration);
+    mergeBesuNativeColumnFamilyOptionsBeforeParse(cfProps, segment);
     for (final String key : userCfProps.stringPropertyNames()) {
+      if (isDisallowedBlockCacheOptionKey(key)) {
+        continue;
+      }
       cfProps.setProperty(key, userCfProps.getProperty(key));
     }
 
     final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
+    applySharedBlockCache(columnOpts, sharedBlockCache);
 
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
     if (segment.containsStaticData()) {
@@ -262,9 +279,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
-      final SegmentIdentifier segment,
-      final RocksDBConfiguration configuration) {
-    final long blockCacheBytes = resolveBlockCacheBytes(segment, configuration);
+      final SegmentIdentifier segment) {
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
     if (isTrieBranchOrFlatSegment(segment)) {
@@ -283,27 +298,52 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     }
     cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
     cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
-    cfProps.setProperty("block_based_table_factory.block_cache", Long.toString(blockCacheBytes));
+    cfProps.setProperty("block_based_table_factory.no_block_cache", "true");
   }
 
   /**
-   * Block cache bytes: {@code TRIE_BRANCH_STORAGE} uses at least 1 GiB; {@code
-   * ACCOUNT_STORAGE_STORAGE} at least 2 GiB; {@code ACCOUNT_INFO_STATE} at least 1 GiB; all other
-   * column families at least 128 MiB (or the configured cache capacity if higher).
+   * There is no per-column-family block cache in Besu: one shared {@link LRUCache} is always
+   * attached in {@link #applySharedBlockCache}. User-supplied keys that would create or size a
+   * dedicated {@code block_cache} for a CF are therefore ignored (not merged into native props).
    */
-  private static long resolveBlockCacheBytes(
-      final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
-    final long baseCapacity = configuration.getCacheCapacity();
+  private static boolean isDisallowedBlockCacheOptionKey(final String key) {
+    return "block_cache".equals(key) || "block_based_table_factory.block_cache".equals(key);
+  }
+
+  /**
+   * Total shared block-cache bytes: sum of {@link #segmentBlockCacheContribution(SegmentIdentifier)}
+   * for each opened column family, floored by {@link RocksDBConfiguration#getCacheCapacity()}.
+   */
+  static long computeSharedBlockCacheCapacity(
+      final List<SegmentIdentifier> segments, final RocksDBConfiguration configuration) {
+    long sum = 0L;
+    for (final SegmentIdentifier segment : segments) {
+      sum += segmentBlockCacheContribution(segment);
+    }
+    return Math.max(sum, configuration.getCacheCapacity());
+  }
+
+  private static long segmentBlockCacheContribution(final SegmentIdentifier segment) {
     if (TRIE_BRANCH_STORAGE.getName().equals(segment.getName())) {
-      return Math.max(ROCKSDB_BLOCKCACHE_SIZE_TRIE_BRANCH, baseCapacity);
+      return ROCKSDB_BLOCKCACHE_SIZE_TRIE_BRANCH;
     }
     if (ACCOUNT_STORAGE_STORAGE.getName().equals(segment.getName())) {
-      return Math.max(ROCKSDB_BLOCKCACHE_SIZE_SLOT, baseCapacity);
+      return ROCKSDB_BLOCKCACHE_SIZE_SLOT;
     }
     if (ACCOUNT_INFO_STATE.getName().equals(segment.getName())) {
-      return Math.max(ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO, baseCapacity);
+      return ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO;
     }
-    return Math.max(ROCKSDB_BLOCKCACHE_SIZE_OTHERS, baseCapacity);
+    return ROCKSDB_BLOCKCACHE_SIZE_OTHERS;
+  }
+
+  private static void applySharedBlockCache(
+      final ColumnFamilyOptions columnOpts, final Cache sharedBlockCache) {
+    TableFormatConfig tableFormatConfig = columnOpts.tableFormatConfig();
+    if (!(tableFormatConfig instanceof BlockBasedTableConfig)) {
+      tableFormatConfig = new BlockBasedTableConfig();
+      columnOpts.setTableFormatConfig(tableFormatConfig);
+    }
+    ((BlockBasedTableConfig) tableFormatConfig).setBlockCache(sharedBlockCache);
   }
 
   private static boolean isTrieBranchOrAccountStorageSegment(final SegmentIdentifier segment) {
@@ -363,8 +403,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       final Properties nativeCfProps) {
     ColumnFamilyOptions base;
     try {
-      final ColumnFamilyOptions fromNative =
-          ColumnFamilyOptions.getColumnFamilyOptionsFromProps(new ConfigOptions(), nativeCfProps);
+      final ColumnFamilyOptions fromNative;
+      try (final ConfigOptions configOptions = new ConfigOptions().setIgnoreUnknownOptions(true)) {
+        fromNative =
+            ColumnFamilyOptions.getColumnFamilyOptionsFromProps(configOptions, nativeCfProps);
+      }
       if (fromNative != null) {
         base = fromNative;
       } else {
@@ -673,6 +716,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
           .map(RocksDbSegmentIdentifier::get)
           .forEach(ColumnFamilyHandle::close);
       getDB().close();
+      sharedBlockCache.close();
     }
   }
 

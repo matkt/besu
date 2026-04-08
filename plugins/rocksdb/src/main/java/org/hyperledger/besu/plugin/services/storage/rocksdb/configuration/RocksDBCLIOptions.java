@@ -23,7 +23,7 @@ import picocli.CommandLine;
 public class RocksDBCLIOptions {
 
   /** The constant DEFAULT_MAX_OPEN_FILES (cap open SST handles; still bounded by OS fd limits). */
-  public static final int DEFAULT_MAX_OPEN_FILES = -1;
+  public static final int DEFAULT_MAX_OPEN_FILES = 1024;
 
   /** The constant DEFAULT_CACHE_CAPACITY. */
   public static final long DEFAULT_CACHE_CAPACITY = 134217728L;
@@ -91,7 +91,7 @@ public class RocksDBCLIOptions {
       defaultValue = "134217728",
       paramLabel = "<LONG>",
       description =
-          "Default block cache floor per column family (128 MiB); hot state CFs use larger caches programmatically (default: ${DEFAULT-VALUE})")
+          "Minimum total RocksDB block cache for the database (shared across all column families); the effective size is max(this value, sum of per-segment contributions) (default: ${DEFAULT-VALUE})")
   long cacheCapacity;
 
   /** The Background thread count. */

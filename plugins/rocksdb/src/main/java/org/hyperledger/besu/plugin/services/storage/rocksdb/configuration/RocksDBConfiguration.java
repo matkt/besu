@@ -105,9 +105,11 @@ public class RocksDBConfiguration {
   }
 
   /**
-   * Gets cache capacity.
+   * Minimum total block-cache capacity for the database. The node uses one shared LRU block cache;
+   * its size is the maximum of this value and the sum of per-column-family contributions computed at
+   * open.
    *
-   * @return the cache capacity
+   * @return the configured cache capacity floor
    */
   public long getCacheCapacity() {
     return cacheCapacity;

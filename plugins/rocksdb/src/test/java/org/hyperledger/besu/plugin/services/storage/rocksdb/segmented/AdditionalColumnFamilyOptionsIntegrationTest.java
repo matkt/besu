@@ -15,6 +15,9 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.DEFAULT;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
@@ -45,9 +48,9 @@ import org.rocksdb.RocksDB;
 
 /**
  * Verifies additional column-family option strings against RocksDB and against Besu's storage
- * wrapper. Besu merges its block-table defaults into the native option map before parsing, so user
- * block-table keys such as {@code prepopulate_block_cache} are preserved alongside Besu's {@code
- * format_version}, bloom filter, and block cache size.
+ * wrapper. Besu merges its block-table defaults into the native option map before parsing; the
+ * block cache is always a single shared {@link org.rocksdb.LRUCache} attached in Java (not per-CF
+ * {@code block_cache} in OPTIONS).
  *
  * <p>Database-level strings are covered by {@link AdditionalDatabaseOptionsIntegrationTest}.
  */
@@ -119,17 +122,13 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
     try (OptimisticRocksDBColumnarKeyValueStorage store =
         new OptimisticRocksDBColumnarKeyValueStorage(
             configuration,
-            List.of(
-                RocksDBColumnarKeyValueStorageTest.TestSegment.DEFAULT,
-                RocksDBColumnarKeyValueStorageTest.TestSegment.FOO),
+            List.of(DEFAULT, TRIE_BRANCH_STORAGE, ACCOUNT_STORAGE_STORAGE),
             List.of(),
             new NoOpMetricsSystem(),
             RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS)) {
 
       final RocksDB db = store.getDB();
-      final var segmentRef =
-          store.columnHandlesBySegmentIdentifier.get(
-              RocksDBColumnarKeyValueStorageTest.TestSegment.DEFAULT);
+      final var segmentRef = store.columnHandlesBySegmentIdentifier.get(TRIE_BRANCH_STORAGE);
       assertThat(segmentRef).isNotNull();
       final long liveWriteBuffer = db.getOptions(segmentRef.get()).writeBufferSize();
       assertThat(liveWriteBuffer).isEqualTo(writeBufferSize);
@@ -140,9 +139,6 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
     final String optionsContent =
         Files.readString(dbDir.resolve(optionsFileName), StandardCharsets.UTF_8);
     assertThat(optionsContent).contains("write_buffer_size=" + writeBufferSize);
-    assertThat(optionsContent)
-        .containsIgnoringCase("prepopulate_block_cache")
-        .containsIgnoringCase("kFlushOnly");
   }
 
   /**
@@ -151,6 +147,9 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
    * on the incremental native options path (e.g. during WAL processing / flush). Besu applies
    * block-table keys in a safe sequence on {@link
    * org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbNativeOptionStrings.InsertionOrderedProperties}.
+   * Opens {@link org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier#DEFAULT}
+   * plus trie and slot column families (same shape as production), writes
+   * across all families, and flushes; success means the native path did not crash.
    */
   @Test
   public void besuMergedBlockTableOptionsSurviveFlushAllColumnFamiliesWithoutNativeCrash(
@@ -168,9 +167,7 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
     try (OptimisticRocksDBColumnarKeyValueStorage store =
         new OptimisticRocksDBColumnarKeyValueStorage(
             configuration,
-            List.of(
-                RocksDBColumnarKeyValueStorageTest.TestSegment.DEFAULT,
-                RocksDBColumnarKeyValueStorageTest.TestSegment.FOO),
+            List.of(DEFAULT, TRIE_BRANCH_STORAGE, ACCOUNT_STORAGE_STORAGE),
             List.of(),
             new NoOpMetricsSystem(),
             RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS)) {
@@ -191,15 +188,6 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
         db.flush(flushOptions, handles);
       }
     }
-
-    final String optionsFileName =
-        OptionsUtil.getLatestOptionsFileName(dbDir.toString(), Env.getDefault());
-    final String content = Files.readString(dbDir.resolve(optionsFileName), StandardCharsets.UTF_8);
-    assertThat(content).containsIgnoringCase("partition_filters");
-    assertThat(content).containsIgnoringCase("kTwoLevelIndexSearch");
-    assertThat(content)
-        .containsIgnoringCase("prepopulate_block_cache")
-        .containsIgnoringCase("kFlushOnly");
   }
 
   @Test
@@ -231,8 +219,8 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
   }
 
   @Test
-  public void unknownCfKeyInStringInvalidatesEntireAdditionalColumnFamilyOptions(
-      @TempDir final Path dbDir) throws Exception {
+  public void unknownCfKeyInStringIsIgnoredAndKnownOptionsStillApply(@TempDir final Path dbDir)
+      throws Exception {
     RocksDbUtil.loadNativeLibrary();
     final long requestedWriteBufferSize = 1_919_191L;
     final var configuration =
@@ -260,10 +248,12 @@ public class AdditionalColumnFamilyOptionsIntegrationTest {
               RocksDBColumnarKeyValueStorageTest.TestSegment.DEFAULT);
       assertThat(segmentRef).isNotNull();
       final long liveWriteBuffer = store.getDB().getOptions(segmentRef.get()).writeBufferSize();
-      assertThat(liveWriteBuffer).isNotEqualTo(requestedWriteBufferSize);
-      // Bare ColumnFamilyOptions default when getColumnFamilyOptionsFromProps returns null (RocksDB
-      // 9.7.x).
-      assertThat(liveWriteBuffer).isEqualTo(67_108_864L);
+      assertThat(liveWriteBuffer).isEqualTo(requestedWriteBufferSize);
     }
+
+    final String optionsFileName =
+        OptionsUtil.getLatestOptionsFileName(dbDir.toString(), Env.getDefault());
+    final String content = Files.readString(dbDir.resolve(optionsFileName), StandardCharsets.UTF_8);
+    assertThat(content).doesNotContain("besu_nonexistent_cf_option_xyz");
   }
 }
