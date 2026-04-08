@@ -80,16 +80,16 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
   /**
-   * Block cache for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} (2 GiB each),
-   * floored by {@link RocksDBConfiguration#getCacheCapacity()} when higher.
+   * Block cache for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} (same minimum;
+   * 2 GiB each), floored by {@link RocksDBConfiguration#getCacheCapacity()} when higher.
    */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 2_147_483_648L*2;
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT = 2_147_483_648L;
 
   /**
-   * Block cache for {@code ACCOUNT_INFO_STATE} (1 GiB minimum), floored by {@link
-   * RocksDBConfiguration#getCacheCapacity()} when higher.
+   * Block cache for {@code ACCOUNT_INFO_STATE} (2 GiB minimum: +1 GiB vs the former 1 GiB tier),
+   * floored by {@link RocksDBConfiguration#getCacheCapacity()} when higher.
    */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO = 1_073_741_824L;
+  private static final long ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO = 2_147_483_648L;
 
   /**
    * Block cache for all other column families (128 MiB per CF minimum), floored by {@link
@@ -208,8 +208,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * kNoChecksum} on SST blocks. Index and filter blocks are cached (with high priority and L0 pin)
    * only for {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE}; other column families
    * keep index/filters outside the block cache. {@code TRIE_BRANCH_STORAGE} and {@code
-   * ACCOUNT_STORAGE_STORAGE} use a 2 GiB block cache each; {@code ACCOUNT_INFO_STATE} uses 1 GiB;
-   * other families use 128 MiB (minimum), floored by the
+   * ACCOUNT_STORAGE_STORAGE} use the same 2 GiB block-cache minimum each; {@code ACCOUNT_INFO_STATE}
+   * uses 2 GiB; other families use 128 MiB (minimum), floored by the
    * configured cache capacity. A
    * single {@code getColumnFamilyOptionsFromProps} call
    * follows, which unlocks any
@@ -281,9 +281,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   /**
-   * Block cache bytes: {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} use at least
-   * 2 GiB each; {@code ACCOUNT_INFO_STATE} uses at least 1 GiB; all other column families use at
-   * least 128 MiB (or the configured cache capacity if higher).
+   * Block cache bytes: {@code TRIE_BRANCH_STORAGE} and {@code ACCOUNT_STORAGE_STORAGE} share the
+   * same minimum (2 GiB each); {@code ACCOUNT_INFO_STATE} uses at least 2 GiB; all other column
+   * families use at least 128 MiB (or the configured cache capacity if higher).
    */
   private static long resolveBlockCacheBytes(
       final SegmentIdentifier segment, final RocksDBConfiguration configuration) {
@@ -291,12 +291,16 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     if (isTrieBranchOrAccountStorageSegment(segment)) {
       return Math.max(ROCKSDB_BLOCKCACHE_SIZE_TRIE_AND_SLOT, baseCapacity);
     }
+    if (ACCOUNT_INFO_STATE.getName().equals(segment.getName())) {
+      return Math.max(ROCKSDB_BLOCKCACHE_SIZE_ACCOUNT_INFO, baseCapacity);
+    }
     return Math.max(ROCKSDB_BLOCKCACHE_SIZE_OTHERS, baseCapacity);
   }
 
   private static boolean isTrieBranchOrAccountStorageSegment(final SegmentIdentifier segment) {
     final String name = segment.getName();
-    return ACCOUNT_STORAGE_STORAGE.getName().equals(name);
+    return TRIE_BRANCH_STORAGE.getName().equals(name)
+        || ACCOUNT_STORAGE_STORAGE.getName().equals(name);
   }
 
   /** Trie, slot storage, and account-info share the same block-table tuning (Bloom, index, etc.). */

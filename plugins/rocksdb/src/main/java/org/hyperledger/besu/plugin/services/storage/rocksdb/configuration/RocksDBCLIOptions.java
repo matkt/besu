@@ -22,8 +22,8 @@ import picocli.CommandLine;
 /** The RocksDb cli options. */
 public class RocksDBCLIOptions {
 
-  /** The constant DEFAULT_MAX_OPEN_FILES (-1 = no limit in RocksDB, subject to OS fd limits). */
-  public static final int DEFAULT_MAX_OPEN_FILES = -1;
+  /** The constant DEFAULT_MAX_OPEN_FILES (cap open SST handles; still bounded by OS fd limits). */
+  public static final int DEFAULT_MAX_OPEN_FILES = 1024;
 
   /** The constant DEFAULT_CACHE_CAPACITY. */
   public static final long DEFAULT_CACHE_CAPACITY = 134217728L;
@@ -78,10 +78,10 @@ public class RocksDBCLIOptions {
   @CommandLine.Option(
       names = {MAX_OPEN_FILES_FLAG},
       hidden = true,
-      defaultValue = "-1",
+      defaultValue = "1024",
       paramLabel = "<INTEGER>",
       description =
-          "Max SST files RocksDB keeps open; -1 means no limit in RocksDB (default: ${DEFAULT-VALUE}). Still bounded by OS file descriptor limits (ulimit).")
+          "Max SST files RocksDB keeps open (default: ${DEFAULT-VALUE}). Use -1 for no RocksDB-side cap. Still bounded by OS file descriptor limits (ulimit).")
   int maxOpenFiles;
 
   /** The Cache capacity. */
