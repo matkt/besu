@@ -23,7 +23,7 @@ import picocli.CommandLine;
 public class RocksDBCLIOptions {
 
   /** The constant DEFAULT_MAX_OPEN_FILES (cap open SST handles; still bounded by OS fd limits). */
-  public static final int DEFAULT_MAX_OPEN_FILES = 1024;
+  public static final int DEFAULT_MAX_OPEN_FILES = -1;
 
   /** The constant DEFAULT_CACHE_CAPACITY. */
   public static final long DEFAULT_CACHE_CAPACITY = 134217728L;
