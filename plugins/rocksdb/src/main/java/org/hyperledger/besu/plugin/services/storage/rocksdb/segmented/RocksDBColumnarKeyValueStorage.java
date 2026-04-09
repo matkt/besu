@@ -302,6 +302,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     cfProps.setProperty(
         "block_based_table_factory.block_size", Long.toString(blockSizeForSegment(segment)));
     cfProps.setProperty("block_based_table_factory.no_block_cache", "true");
+
+    if (usesHighBloomBitsPerKey(segment)) {
+      cfProps.setProperty(
+          "block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
+      cfProps.setProperty("optimize_filters_for_hits", "true");
+    }
   }
 
   private static String bloomFilterPolicyForSegment(final SegmentIdentifier segment) {
