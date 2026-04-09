@@ -86,10 +86,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final long ROCKSDB_BLOCK_SIZE = 32768L;
 
   /**
-   * SST data block size for {@code ACCOUNT_STORAGE_STORAGE}: smaller blocks reduce read amplification
-   * on random slot lookups (each miss loads less unrelated data into the block cache).
+   * SST data block size for trie branches, account info, and storage slots: 4 KiB limits read
+   * amplification on random keyed lookups (each miss loads less unrelated data than {@link
+   * #ROCKSDB_BLOCK_SIZE}).
    */
-  private static final long ROCKSDB_BLOCK_SIZE_ACCOUNT_STORAGE = 16384L;
+  private static final long ROCKSDB_BLOCK_SIZE_TRIE_ACCOUNT_SLOT = 4096L;
 
   /** Per-segment contribution for {@code ACCOUNT_STORAGE_STORAGE}. */
   private static final long ROCKSDB_BLOCKCACHE_SIZE= 2_147_483_648L;
@@ -219,9 +220,10 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * default). Besu defaults use a two-level index with partitioned bloom filters and {@code
    * kNoChecksum} on SST blocks; index and filter blocks are cached with high priority and L0 pin. A
    * single shared {@link LRUCache} serves all column families; see {@link
-   * #computeSharedBlockCacheCapacity(List, RocksDBConfiguration)}. {@code ACCOUNT_STORAGE_STORAGE} uses
-   * a smaller {@code block_size} than other families to reduce read amplification on random slot
-   * reads. {@code block_cache} / {@code block_based_table_factory.block_cache} in additional CF
+   * #computeSharedBlockCacheCapacity(List, RocksDBConfiguration)}. {@code TRIE_BRANCH_STORAGE},
+   * {@code ACCOUNT_INFO_STATE}, and {@code ACCOUNT_STORAGE_STORAGE} use a 4 KiB {@code block_size}
+   * to reduce read amplification on random keyed reads. {@code block_cache} / {@code
+   * block_based_table_factory.block_cache} in additional CF
    * options are not applied (no per-CF cache; see {@link #isDisallowedBlockCacheOptionKey}). A
    * single {@code getColumnFamilyOptionsFromProps} call
    * follows, which unlocks any
@@ -277,7 +279,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       final SegmentIdentifier segment) {
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
-    cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:13:false");
+    cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
     
     cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
@@ -287,10 +289,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   private static long blockSizeForSegment(final SegmentIdentifier segment) {
-    if (ACCOUNT_STORAGE_STORAGE.getName().equals(segment.getName())) {
-      return ROCKSDB_BLOCK_SIZE_ACCOUNT_STORAGE;
+    if (usesSmallBlockSizeForRandomWorldStateAccess(segment)) {
+      return ROCKSDB_BLOCK_SIZE_TRIE_ACCOUNT_SLOT;
     }
     return ROCKSDB_BLOCK_SIZE;
+  }
+
+  private static boolean usesSmallBlockSizeForRandomWorldStateAccess(
+      final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    return TRIE_BRANCH_STORAGE.getName().equals(name)
+        || ACCOUNT_INFO_STATE.getName().equals(name)
+        || ACCOUNT_STORAGE_STORAGE.getName().equals(name);
   }
 
   /**
