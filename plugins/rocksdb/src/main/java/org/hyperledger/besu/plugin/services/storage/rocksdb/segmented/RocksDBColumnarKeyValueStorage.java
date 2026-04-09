@@ -278,14 +278,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
     cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:13:false");
-      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
-      cfProps.setProperty(
-          "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
-      cfProps.setProperty(
-          "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
-      cfProps.setProperty(
-              "block_based_table_factory.index_type", "kTwoLevelIndexSearch");
-      cfProps.setProperty("block_based_table_factory.partition_filters", "true");
+      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
     
     cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
     cfProps.setProperty(
