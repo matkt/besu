@@ -58,7 +58,9 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.BlockBasedTableConfig;
+import org.rocksdb.BloomFilter;
 import org.rocksdb.Cache;
+import org.rocksdb.ChecksumType;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -76,7 +78,6 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
 import org.rocksdb.Status;
-import org.rocksdb.TableFormatConfig;
 import org.rocksdb.TransactionDBOptions;
 import org.rocksdb.WriteOptions;
 import org.slf4j.Logger;
@@ -228,25 +229,16 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * Create a Column Family Descriptor for a given segment It defines basically the different
    * options to apply to the corresponding Column Family
    *
-   * <p>Additional CF options from configuration are parsed into a scratch {@link Properties}; Besu
-   * then builds {@link RocksDbNativeOptionStrings.InsertionOrderedProperties} by applying its
-   * block-table keys in a fixed order (so {@code index_type} precedes {@code partition_filters} in
-   * the JNI option string), then merges user keys (same key in user config overrides the Besu
-   * default). Besu defaults use a two-level index with partitioned bloom filters and {@code
-   * kNoChecksum} on SST blocks; index and filter blocks are cached with high priority and L0 pin. A
-   * single shared {@link LRUCache} serves all column families; see {@link
-   * #computeSharedBlockCacheCapacity(List, RocksDBConfiguration)}. {@code TRIE_BRANCH_STORAGE},
-   * {@code ACCOUNT_INFO_STATE}, and {@code ACCOUNT_STORAGE_STORAGE} use a 4 KiB {@code block_size}
-   * to reduce read amplification on random keyed reads. {@code block_cache} / {@code
-   * block_based_table_factory.block_cache} in additional CF
-   * options are not applied (no per-CF cache; see {@link #isDisallowedBlockCacheOptionKey}). A
-   * single {@code getColumnFamilyOptionsFromProps} call
-   * follows, which unlocks any
-   * column-family or {@code block_based_table_factory.*} option the native RocksDB build accepts,
-   * even when rocksdbjni does not expose it on Java option classes. Compaction and blob options are
-   * still set in Java where needed. {@code level_compaction_dynamic_level_bytes} is taken from the
-   * latest on-disk {@code OPTIONS-*} file when present for this column family (existing
-   * deployments); otherwise it defaults to {@code true}.
+   * <p>Non-table column-family options (e.g. {@code optimize_filters_for_hits}) are set via native
+   * property parsing through {@link #mergeBesuNativeColumnFamilyOptionsBeforeParse}. Block-based
+   * table config (bloom filters, block size, checksums, shared block cache) is built entirely in
+   * Java via {@link #buildBlockBasedTableConfig} and applied with a single {@link
+   * ColumnFamilyOptions#setTableFormatConfig} call. This avoids the bug where native property
+   * parsing and Java {@code setTableFormatConfig} conflict (the latter overwrites the former).
+   * User-supplied {@code block_based_table_factory.*} keys are filtered out. Compaction and blob
+   * options are still set in Java where needed. {@code level_compaction_dynamic_level_bytes} is
+   * taken from the latest on-disk {@code OPTIONS-*} file when present for this column family
+   * (existing deployments); otherwise it defaults to {@code true}.
    *
    * @param segment the segment identifier
    * @param configuration RocksDB configuration
@@ -266,14 +258,15 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         new RocksDbNativeOptionStrings.InsertionOrderedProperties();
     mergeBesuNativeColumnFamilyOptionsBeforeParse(cfProps, segment);
     for (final String key : userCfProps.stringPropertyNames()) {
-      if (isDisallowedBlockCacheOptionKey(key)) {
+      if (isBlockTableFactoryOptionKey(key)) {
         continue;
       }
       cfProps.setProperty(key, userCfProps.getProperty(key));
     }
 
     final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
-    applySharedBlockCache(columnOpts, sharedBlockCache);
+    columnOpts.setTableFormatConfig(
+        buildBlockBasedTableConfig(segment, sharedBlockCache));
 
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
     if (segment.containsStaticData()) {
@@ -283,39 +276,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   /**
-   * Writes Besu's block-table defaults onto {@code cfProps} in this call order so the JNI option
-   * string has {@code index_type=kTwoLevelIndexSearch} before {@code partition_filters=true}
-   * (partitioned filters need a two-level index when options are applied incrementally in native
-   * code). Must run on an empty {@link RocksDbNativeOptionStrings.InsertionOrderedProperties}
-   * before user keys are added.
+   * Writes Besu's non-table column-family defaults onto {@code cfProps}. Table-level settings
+   * (bloom filters, block size, block cache, checksums) are handled entirely in Java via {@link
+   * #buildBlockBasedTableConfig} to avoid conflicts between native property parsing and
+   * {@link ColumnFamilyOptions#setTableFormatConfig}.
    */
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
       final SegmentIdentifier segment) {
-    cfProps.setProperty(
-        "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
-    cfProps.setProperty(
-        "block_based_table_factory.filter_policy", bloomFilterPolicyForSegment(segment));
-    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
-
-    cfProps.setProperty("block_based_table_factory.checksum", "kNoChecksum");
-    cfProps.setProperty(
-        "block_based_table_factory.block_size", Long.toString(blockSizeForSegment(segment)));
-    cfProps.setProperty("block_based_table_factory.no_block_cache", "true");
-
     if (usesHighBloomBitsPerKey(segment)) {
-      cfProps.setProperty(
-          "block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
       cfProps.setProperty("optimize_filters_for_hits", "true");
     }
-  }
-
-  private static String bloomFilterPolicyForSegment(final SegmentIdentifier segment) {
-    final int bits =
-        usesHighBloomBitsPerKey(segment)
-            ? BLOOM_BITS_PER_KEY_WORLD_STATE_HOT
-            : BLOOM_BITS_PER_KEY_DEFAULT;
-    return "bloomfilter:" + bits + ":false";
   }
 
   /**
@@ -350,12 +321,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   /**
-   * There is no per-column-family block cache in Besu: one shared {@link LRUCache} is always
-   * attached in {@link #applySharedBlockCache}. User-supplied keys that would create or size a
-   * dedicated {@code block_cache} for a CF are therefore ignored (not merged into native props).
+   * Block-based table config is built entirely in Java via {@link #buildBlockBasedTableConfig};
+   * user-supplied {@code block_based_table_factory.*} keys are ignored because
+   * {@link ColumnFamilyOptions#setTableFormatConfig} would overwrite them anyway.
    */
-  private static boolean isDisallowedBlockCacheOptionKey(final String key) {
-    return "block_cache".equals(key) || "block_based_table_factory.block_cache".equals(key);
+  private static boolean isBlockTableFactoryOptionKey(final String key) {
+    return key.startsWith("block_based_table_factory.") || "block_cache".equals(key);
   }
 
   /**
@@ -367,14 +338,25 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     return Math.max(ROCKSDB_BLOCKCACHE_SIZE, configuration.getCacheCapacity());
   }
 
-  private static void applySharedBlockCache(
-      final ColumnFamilyOptions columnOpts, final Cache sharedBlockCache) {
-    TableFormatConfig tableFormatConfig = columnOpts.tableFormatConfig();
-    if (!(tableFormatConfig instanceof BlockBasedTableConfig)) {
-      tableFormatConfig = new BlockBasedTableConfig();
-      columnOpts.setTableFormatConfig(tableFormatConfig);
-    }
-    ((BlockBasedTableConfig) tableFormatConfig).setBlockCache(sharedBlockCache);
+  /**
+   * Builds the {@link BlockBasedTableConfig} entirely in Java so that bloom filters, block size,
+   * checksum, and the shared block cache are all set on the same object before a single
+   * {@link ColumnFamilyOptions#setTableFormatConfig} call pushes everything to the native side
+   * atomically.
+   */
+  private static BlockBasedTableConfig buildBlockBasedTableConfig(
+      final SegmentIdentifier segment, final Cache sharedBlockCache) {
+    final int bloomBits =
+        usesHighBloomBitsPerKey(segment)
+            ? BLOOM_BITS_PER_KEY_WORLD_STATE_HOT
+            : BLOOM_BITS_PER_KEY_DEFAULT;
+    return new BlockBasedTableConfig()
+        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+        .setBlockSize(blockSizeForSegment(segment))
+        .setBlockCache(sharedBlockCache)
+        .setCacheIndexAndFilterBlocks(false)
+        .setChecksumType(ChecksumType.kNoChecksum)
+        .setFilterPolicy(new BloomFilter(bloomBits, false));
   }
 
   /**
