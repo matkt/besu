@@ -68,6 +68,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.IndexType;
 import org.rocksdb.InfoLogLevel;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
@@ -346,17 +347,26 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private static BlockBasedTableConfig buildBlockBasedTableConfig(
       final SegmentIdentifier segment, final Cache sharedBlockCache) {
-    final int bloomBits =
-        usesHighBloomBitsPerKey(segment)
-            ? BLOOM_BITS_PER_KEY_WORLD_STATE_HOT
-            : BLOOM_BITS_PER_KEY_DEFAULT;
-    return new BlockBasedTableConfig()
-        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-        .setBlockSize(blockSizeForSegment(segment))
-        .setBlockCache(sharedBlockCache)
-        .setCacheIndexAndFilterBlocks(false)
-        .setChecksumType(ChecksumType.kNoChecksum)
-        .setFilterPolicy(new BloomFilter(bloomBits, false));
+    final boolean hotPath = usesHighBloomBitsPerKey(segment);
+    final int bloomBits = hotPath ? BLOOM_BITS_PER_KEY_WORLD_STATE_HOT : BLOOM_BITS_PER_KEY_DEFAULT;
+    final BlockBasedTableConfig tableConfig =
+        new BlockBasedTableConfig()
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+            .setBlockSize(blockSizeForSegment(segment))
+            .setBlockCache(sharedBlockCache)
+            .setChecksumType(ChecksumType.kNoChecksum)
+            .setFilterPolicy(new BloomFilter(bloomBits, false));
+    if (hotPath) {
+      tableConfig
+          .setCacheIndexAndFilterBlocks(true)
+          .setCacheIndexAndFilterBlocksWithHighPriority(true)
+          .setPinL0FilterAndIndexBlocksInCache(true)
+          .setIndexType(IndexType.kTwoLevelIndexSearch)
+          .setPartitionFilters(true);
+    } else {
+      tableConfig.setCacheIndexAndFilterBlocks(false);
+    }
+    return tableConfig;
   }
 
   /**
