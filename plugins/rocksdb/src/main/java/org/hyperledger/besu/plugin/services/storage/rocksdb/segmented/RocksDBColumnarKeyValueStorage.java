@@ -15,15 +15,7 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_FREEZER;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_FREEZER;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -60,7 +52,6 @@ import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.Cache;
-import org.rocksdb.ChecksumType;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -68,7 +59,6 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
-import org.rocksdb.IndexType;
 import org.rocksdb.InfoLogLevel;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
@@ -89,30 +79,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
   private static final int ROCKSDB_FORMAT_VERSION = 5;
+  private static final long ROCKSDB_BLOCK_SIZE = 32768;
+  private static final int BLOOM_FILTER_BITS_PER_KEY = 10;
 
-  /** Default SST data block size for most column families. */
-  private static final long ROCKSDB_BLOCK_SIZE = 32768L;
+  /** Shared block-cache capacity for the whole DB. */
+  private static final long ROCKSDB_BLOCKCACHE_SIZE = 2_147_483_648L;
 
-  /**
-   * SST data block size for trie branches, account info, and storage slots: 4 KiB limits read
-   * amplification on random keyed lookups (each miss loads less unrelated data than {@link
-   * #ROCKSDB_BLOCK_SIZE}).
-   */
-  private static final long ROCKSDB_BLOCK_SIZE_TRIE_ACCOUNT_SLOT = 4096L;
-
-  /**
-   * Bloom bits/key for world-state column families with heavy random keyed access (accounts, code,
-   * storage slots, trie branches, and matching archive/freezer segments).
-   */
-  private static final int BLOOM_BITS_PER_KEY_WORLD_STATE_HOT = 14;
-
-  /** Bloom bits/key for remaining column families (blockchain, trie logs, sync helpers, etc.). */
-  private static final int BLOOM_BITS_PER_KEY_DEFAULT = 8;
-
-  /** Per-segment contribution for {@code ACCOUNT_STORAGE_STORAGE}. */
-  private static final long ROCKSDB_BLOCKCACHE_SIZE= 2_147_483_648L;
-
-  /** Shard bits for the node-wide {@link LRUCache} (2^6 shards). */
+  /** Shard bits for the node-wide {@link LRUCache} (2^6 = 64 shards). */
   private static final int SHARED_BLOCK_CACHE_NUM_SHARD_BITS = 6;
 
   /** Max total size of all WAL file, after which a flush is triggered */
@@ -266,8 +239,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     }
 
     final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
-    columnOpts.setTableFormatConfig(
-        buildBlockBasedTableConfig(segment, sharedBlockCache));
+    columnOpts.setTableFormatConfig(buildBlockBasedTableConfig(sharedBlockCache));
 
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
     if (segment.containsStaticData()) {
@@ -285,40 +257,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
       final SegmentIdentifier segment) {
-    if (usesHighBloomBitsPerKey(segment)) {
-      cfProps.setProperty("optimize_filters_for_hits", "true");
-    }
-  }
-
-  /**
-   * Column families that benefit from a denser Bloom filter (random keyed reads on state). Archive
-   * and freezer segments for accounts and storage use the same layout as live state.
-   */
-  private static boolean usesHighBloomBitsPerKey(final SegmentIdentifier segment) {
-    final String name = segment.getName();
-    return ACCOUNT_INFO_STATE.getName().equals(name)
-        || ACCOUNT_STORAGE_STORAGE.getName().equals(name)
-        || CODE_STORAGE.getName().equals(name)
-        || TRIE_BRANCH_STORAGE.getName().equals(name)
-        || ACCOUNT_INFO_STATE_ARCHIVE.getName().equals(name)
-        || ACCOUNT_STORAGE_ARCHIVE.getName().equals(name)
-        || ACCOUNT_INFO_STATE_FREEZER.getName().equals(name)
-        || ACCOUNT_STORAGE_FREEZER.getName().equals(name);
-  }
-
-  private static long blockSizeForSegment(final SegmentIdentifier segment) {
-    if (usesSmallBlockSizeForRandomWorldStateAccess(segment)) {
-      return ROCKSDB_BLOCK_SIZE_TRIE_ACCOUNT_SLOT;
-    }
-    return ROCKSDB_BLOCK_SIZE;
-  }
-
-  private static boolean usesSmallBlockSizeForRandomWorldStateAccess(
-      final SegmentIdentifier segment) {
-    final String name = segment.getName();
-    return TRIE_BRANCH_STORAGE.getName().equals(name)
-        || ACCOUNT_INFO_STATE.getName().equals(name)
-        || ACCOUNT_STORAGE_STORAGE.getName().equals(name);
+    // intentionally empty — all CF options are now set through Java API or left at defaults.
+    // optimize_filters_for_hits is NOT set: it skips bloom filters on the last compaction level,
+    // which destroys negative-lookup performance during snap sync healing.
   }
 
   /**
@@ -341,32 +282,19 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /**
    * Builds the {@link BlockBasedTableConfig} entirely in Java so that bloom filters, block size,
-   * checksum, and the shared block cache are all set on the same object before a single
+   * and the shared block cache are all set on the same object before a single
    * {@link ColumnFamilyOptions#setTableFormatConfig} call pushes everything to the native side
-   * atomically.
+   * atomically. Settings match the pre-branch baseline that synced correctly.
    */
   private static BlockBasedTableConfig buildBlockBasedTableConfig(
-      final SegmentIdentifier segment, final Cache sharedBlockCache) {
-    final boolean hotPath = usesHighBloomBitsPerKey(segment);
-    final int bloomBits = hotPath ? BLOOM_BITS_PER_KEY_WORLD_STATE_HOT : BLOOM_BITS_PER_KEY_DEFAULT;
-    final BlockBasedTableConfig tableConfig =
-        new BlockBasedTableConfig()
-            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-            .setBlockSize(blockSizeForSegment(segment))
-            .setBlockCache(sharedBlockCache)
-            .setChecksumType(ChecksumType.kNoChecksum)
-            .setFilterPolicy(new BloomFilter(bloomBits, false));
-    if (hotPath) {
-      tableConfig
-          .setCacheIndexAndFilterBlocks(true)
-          .setCacheIndexAndFilterBlocksWithHighPriority(true)
-          .setPinL0FilterAndIndexBlocksInCache(true)
-          .setIndexType(IndexType.kTwoLevelIndexSearch)
-          .setPartitionFilters(true);
-    } else {
-      tableConfig.setCacheIndexAndFilterBlocks(false);
-    }
-    return tableConfig;
+      final Cache sharedBlockCache) {
+    return new BlockBasedTableConfig()
+        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+        .setBlockCache(sharedBlockCache)
+        .setFilterPolicy(new BloomFilter(BLOOM_FILTER_BITS_PER_KEY, false))
+        .setPartitionFilters(true)
+        .setCacheIndexAndFilterBlocks(false)
+        .setBlockSize(ROCKSDB_BLOCK_SIZE);
   }
 
   /**
