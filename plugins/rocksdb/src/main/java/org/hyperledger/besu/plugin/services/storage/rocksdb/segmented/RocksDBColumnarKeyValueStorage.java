@@ -75,6 +75,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The RocksDb columnar key value storage. */
+@SuppressWarnings("unused")
 public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValueStorage {
 
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
