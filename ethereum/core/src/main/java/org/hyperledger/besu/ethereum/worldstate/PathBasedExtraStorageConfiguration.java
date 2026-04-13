@@ -87,6 +87,7 @@ public interface PathBasedExtraStorageConfiguration {
 
     boolean DEFAULT_FULL_FLAT_DB_ENABLED = true;
     boolean DEFAULT_CODE_USING_CODE_HASH_ENABLED = true;
+    boolean DEFAULT_MERGED_FLAT_WORLD_STATE_COLUMN_FAMILY_ENABLED = false;
 
     @Value.Default
     default boolean getFullFlatDbEnabled() {
@@ -96,6 +97,15 @@ public interface PathBasedExtraStorageConfiguration {
     @Value.Default
     default boolean getCodeStoredByCodeHashEnabled() {
       return DEFAULT_CODE_USING_CODE_HASH_ENABLED;
+    }
+
+    /**
+     * When true, Bonsai flat account and flat storage share only {@code ACCOUNT_INFO_STATE} (new
+     * datadir). When false, legacy separate {@code ACCOUNT_STORAGE_STORAGE} column family is used.
+     */
+    @Value.Default
+    default boolean getMergedFlatWorldStateColumnFamilyEnabled() {
+      return DEFAULT_MERGED_FLAT_WORLD_STATE_COLUMN_FAMILY_ENABLED;
     }
   }
 }

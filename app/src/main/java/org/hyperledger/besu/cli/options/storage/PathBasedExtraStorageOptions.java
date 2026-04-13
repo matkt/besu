@@ -22,6 +22,7 @@ import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConf
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_FULL_FLAT_DB_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_MERGED_FLAT_WORLD_STATE_COLUMN_FAMILY_ENABLED;
 
 import org.hyperledger.besu.cli.options.CLIOptions;
 import org.hyperledger.besu.cli.util.CommandLineUtils;
@@ -117,6 +118,15 @@ public class PathBasedExtraStorageOptions
             "Enables code storage using code hash instead of by account hash. (default: ${DEFAULT-VALUE})")
     private boolean codeUsingCodeHashEnabled = DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 
+    @Option(
+        hidden = true,
+        names = {"--Xbonsai-merged-flat-world-state-column-family-enabled"},
+        arity = "1",
+        description =
+            "From-scratch Bonsai layout: flat accounts and flat storage in ACCOUNT_INFO_STATE only (no ACCOUNT_STORAGE_STORAGE CF). Requires a new database. (default: ${DEFAULT-VALUE})")
+    private boolean mergedFlatWorldStateColumnFamilyEnabled =
+        DEFAULT_MERGED_FLAT_WORLD_STATE_COLUMN_FAMILY_ENABLED;
+
     /** Default Constructor. */
     Unstable() {}
   }
@@ -184,6 +194,8 @@ public class PathBasedExtraStorageOptions
         domainObject.getUnstable().getFullFlatDbEnabled();
     dataStorageOptions.unstableOptions.codeUsingCodeHashEnabled =
         domainObject.getUnstable().getCodeStoredByCodeHashEnabled();
+    dataStorageOptions.unstableOptions.mergedFlatWorldStateColumnFamilyEnabled =
+        domainObject.getUnstable().getMergedFlatWorldStateColumnFamilyEnabled();
     dataStorageOptions.isParallelTxProcessingEnabled =
         domainObject.getParallelTxProcessingEnabled();
     dataStorageOptions.isParallelStateRootComputationEnabled =
@@ -204,6 +216,8 @@ public class PathBasedExtraStorageOptions
             ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
                 .fullFlatDbEnabled(unstableOptions.fullFlatDbEnabled)
                 .codeStoredByCodeHashEnabled(unstableOptions.codeUsingCodeHashEnabled)
+                .mergedFlatWorldStateColumnFamilyEnabled(
+                    unstableOptions.mergedFlatWorldStateColumnFamilyEnabled)
                 .build())
         .build();
   }

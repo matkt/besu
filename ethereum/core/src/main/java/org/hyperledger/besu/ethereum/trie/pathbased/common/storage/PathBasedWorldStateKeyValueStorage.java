@@ -43,6 +43,7 @@ import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.Optional;
@@ -83,10 +84,20 @@ public abstract class PathBasedWorldStateKeyValueStorage
   protected final KeyValueStorage trieLogStorage;
 
   public PathBasedWorldStateKeyValueStorage(final StorageProvider provider) {
+    this(
+        provider,
+        List.of(
+            ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE));
+  }
+
+  /**
+   * @param worldStateSegments column families for the composed world state (Bonsai: three or four
+   *     segments depending on merged flat layout).
+   */
+  public PathBasedWorldStateKeyValueStorage(
+      final StorageProvider provider, final List<SegmentIdentifier> worldStateSegments) {
     this.composedWorldStateStorage =
-        provider.getStorageBySegmentIdentifiers(
-            List.of(
-                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE));
+        provider.getStorageBySegmentIdentifiers(new ArrayList<>(worldStateSegments));
     this.trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
   }

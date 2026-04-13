@@ -15,14 +15,15 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredNodeFactory;
+import org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
@@ -35,57 +36,53 @@ import java.util.stream.Stream;
 import kotlin.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.rlp.RLP;
 
 /**
- * Flat DB for Bonsai: accounts in {@code ACCOUNT_INFO_STATE}, storage slots in {@code
- * ACCOUNT_STORAGE_STORAGE}. For a single-column layout (both in {@code ACCOUNT_INFO_STATE}), use
- * {@link BonsaiPartialMergedFlatDbStrategy} / {@link BonsaiFullMergedFlatDbStrategy} behind the
- * merged-world-state column-family flag.
+ * Partial flat DB with account rows (32-byte keys) and flat storage rows (64-byte keys) in {@code
+ * ACCOUNT_INFO_STATE} only. Requires a new datadir with the merged column-family layout (see
+ * {@link PathBasedUnstable#getMergedFlatWorldStateColumnFamilyEnabled()}).
  */
-public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
+public class BonsaiPartialMergedFlatDbStrategy extends BonsaiPartialFlatDbStrategy {
 
-  public BonsaiFlatDbStrategy(
+  public BonsaiPartialMergedFlatDbStrategy(
       final MetricsSystem metricsSystem, final CodeStorageStrategy codeStorageStrategy) {
     super(metricsSystem, codeStorageStrategy);
   }
 
-  /*
-   * Retrieves the account data for the given account hash, using the world state root hash supplier and node loader.
-   */
-  public abstract Optional<Bytes> getFlatAccount(
-      Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      NodeLoader nodeLoader,
-      Hash accountHash,
-      SegmentedKeyValueStorage storage);
-
-  /*
-   * Retrieves the storage value for the given account hash and storage slot key, using the world state root hash supplier, storage root supplier, and node loader.
-   */
-
-  public abstract Optional<Bytes> getFlatStorageValueByStorageSlotKey(
-      Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      Supplier<Optional<Hash>> storageRootSupplier,
-      NodeLoader nodeLoader,
-      Hash accountHash,
-      StorageSlotKey storageSlotKey,
-      SegmentedKeyValueStorage storageStorage);
-
   @Override
-  public void putFlatAccount(
-      final SegmentedKeyValueStorage storage,
-      final SegmentedKeyValueStorageTransaction transaction,
+  public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
+      final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
+      final Supplier<Optional<Hash>> storageRootSupplier,
+      final NodeLoader nodeLoader,
       final Hash accountHash,
-      final Bytes accountValue) {
-    transaction.put(
-        ACCOUNT_INFO_STATE, accountHash.getBytes().toArrayUnsafe(), accountValue.toArrayUnsafe());
-  }
-
-  @Override
-  public void removeFlatAccount(
-      final SegmentedKeyValueStorage storage,
-      final SegmentedKeyValueStorageTransaction transaction,
-      final Hash accountHash) {
-    transaction.remove(ACCOUNT_INFO_STATE, accountHash.getBytes().toArrayUnsafe());
+      final StorageSlotKey storageSlotKey,
+      final SegmentedKeyValueStorage storage) {
+    getStorageValueCounter.inc();
+    Optional<Bytes> response =
+        storage
+            .get(
+                ACCOUNT_INFO_STATE,
+                Bytes.concatenate(accountHash.getBytes(), storageSlotKey.getSlotHash().getBytes())
+                    .toArrayUnsafe())
+            .map(Bytes::wrap);
+    if (response.isEmpty()) {
+      final Optional<Hash> storageRoot = storageRootSupplier.get();
+      final Optional<Bytes> worldStateRootHash = worldStateRootHashSupplier.get();
+      if (storageRoot.isPresent() && worldStateRootHash.isPresent()) {
+        response =
+            new StoredMerklePatriciaTrie<>(
+                    new StoredNodeFactory<>(nodeLoader, Function.identity(), Function.identity()),
+                    Bytes32.wrap(storageRoot.get().getBytes()))
+                .get(storageSlotKey.getSlotHash().getBytes())
+                .map(bytes -> Bytes32.leftPad(RLP.decodeValue(bytes)));
+        if (response.isEmpty()) getStorageValueMissingMerkleTrieCounter.inc();
+        else getStorageValueMerkleTrieCounter.inc();
+      }
+    } else {
+      getStorageValueFlatDatabaseCounter.inc();
+    }
+    return response;
   }
 
   @Override
@@ -95,10 +92,9 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Hash accountHash,
       final Hash slotHash,
       final Bytes storageValue) {
-    transaction.put(
-        ACCOUNT_STORAGE_STORAGE,
-        Bytes.concatenate(accountHash.getBytes(), slotHash.getBytes()).toArrayUnsafe(),
-        storageValue.toArrayUnsafe());
+    final byte[] key =
+        Bytes.concatenate(accountHash.getBytes(), slotHash.getBytes()).toArrayUnsafe();
+    transaction.put(ACCOUNT_INFO_STATE, key, storageValue.toArrayUnsafe());
   }
 
   @Override
@@ -108,21 +104,19 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Hash accountHash,
       final Hash slotHash) {
     transaction.remove(
-        ACCOUNT_STORAGE_STORAGE,
+        ACCOUNT_INFO_STATE,
         Bytes.concatenate(accountHash.getBytes(), slotHash.getBytes()).toArrayUnsafe());
   }
 
   @Override
   public void clearAll(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
-    storage.clear(ACCOUNT_STORAGE_STORAGE);
     storage.clear(CODE_STORAGE);
   }
 
   @Override
   public void resetOnResync(final SegmentedKeyValueStorage storage) {
     storage.clear(ACCOUNT_INFO_STATE);
-    storage.clear(ACCOUNT_STORAGE_STORAGE);
   }
 
   @Override
@@ -131,13 +125,13 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Hash accountHash,
       final Bytes startKeyHash,
       final Function<Bytes, Bytes> valueMapper) {
-
     return storage
         .streamFromKey(
-            ACCOUNT_STORAGE_STORAGE,
+            ACCOUNT_INFO_STATE,
             Bytes.concatenate(accountHash.getBytes(), startKeyHash).toArrayUnsafe())
         .takeWhile(
             pair -> Bytes.wrap(pair.getKey()).slice(0, Bytes32.SIZE).equals(accountHash.getBytes()))
+        .filter(pair -> pair.getKey().length > Bytes32.SIZE)
         .map(
             pair ->
                 new Pair<>(
@@ -152,12 +146,12 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final Bytes startKeyHash,
       final Bytes32 endKeyHash,
       final Function<Bytes, Bytes> valueMapper) {
-
     return storage
         .streamFromKey(
-            ACCOUNT_STORAGE_STORAGE,
+            ACCOUNT_INFO_STATE,
             Bytes.concatenate(accountHash.getBytes(), startKeyHash).toArrayUnsafe(),
             Bytes.concatenate(accountHash.getBytes(), endKeyHash).toArrayUnsafe())
+        .filter(pair -> pair.getKey().length > Bytes32.SIZE)
         .map(
             pair ->
                 new Pair<>(
@@ -170,6 +164,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final SegmentedKeyValueStorage storage, final Bytes startKeyHash, final Bytes32 endKeyHash) {
     return storage
         .streamFromKey(ACCOUNT_INFO_STATE, startKeyHash.toArrayUnsafe(), endKeyHash.toArrayUnsafe())
+        .filter(pair -> pair.getKey().length == Bytes32.SIZE)
         .map(pair -> new Pair<>(Bytes32.wrap(pair.getKey()), Bytes.wrap(pair.getValue())));
   }
 
@@ -178,6 +173,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       final SegmentedKeyValueStorage storage, final Bytes startKeyHash) {
     return storage
         .streamFromKey(ACCOUNT_INFO_STATE, startKeyHash.toArrayUnsafe())
+        .filter(pair -> pair.getKey().length == Bytes32.SIZE)
         .map(pair -> new Pair<>(Bytes32.wrap(pair.getKey()), Bytes.wrap(pair.getValue())));
   }
 }

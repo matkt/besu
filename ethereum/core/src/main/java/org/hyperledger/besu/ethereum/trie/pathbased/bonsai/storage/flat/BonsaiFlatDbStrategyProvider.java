@@ -89,12 +89,25 @@ public class BonsaiFlatDbStrategyProvider extends FlatDbStrategyProvider {
       final FlatDbMode flatDbMode,
       final MetricsSystem metricsSystem,
       final CodeStorageStrategy codeStorageStrategy) {
+    final boolean merged =
+        dataStorageConfiguration
+            .getPathBasedExtraStorageConfiguration()
+            .getUnstable()
+            .getMergedFlatWorldStateColumnFamilyEnabled();
     if (flatDbMode == FlatDbMode.FULL) {
-      return new BonsaiFullFlatDbStrategy(metricsSystem, codeStorageStrategy);
+      return merged
+          ? new BonsaiFullMergedFlatDbStrategy(metricsSystem, codeStorageStrategy)
+          : new BonsaiFullFlatDbStrategy(metricsSystem, codeStorageStrategy);
     } else if (flatDbMode == FlatDbMode.ARCHIVE) {
+      if (merged) {
+        LOG.warn(
+            "Merged flat world-state column family is not used for archive flat DB; using archive strategy.");
+      }
       return new BonsaiArchiveFlatDbStrategy(metricsSystem, codeStorageStrategy);
     } else {
-      return new BonsaiPartialFlatDbStrategy(metricsSystem, codeStorageStrategy);
+      return merged
+          ? new BonsaiPartialMergedFlatDbStrategy(metricsSystem, codeStorageStrategy)
+          : new BonsaiPartialFlatDbStrategy(metricsSystem, codeStorageStrategy);
     }
   }
 }

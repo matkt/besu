@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorl
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
+import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -56,15 +57,22 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
 
+  public static List<SegmentIdentifier> bonsaiWorldStateSegments(
+      final DataStorageConfiguration dataStorageConfiguration) {
+    if (dataStorageConfiguration
+        .getPathBasedExtraStorageConfiguration()
+        .getUnstable()
+        .getMergedFlatWorldStateColumnFamilyEnabled()) {
+      return List.of(ACCOUNT_INFO_STATE, CODE_STORAGE, TRIE_BRANCH_STORAGE);
+    }
+    return List.of(ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE);
+  }
+
   public BonsaiWorldStateKeyValueStorage(
       final StorageProvider provider,
       final MetricsSystem metricsSystem,
       final DataStorageConfiguration dataStorageConfiguration) {
-    super(
-        provider.getStorageBySegmentIdentifiers(
-            List.of(
-                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE)),
-        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
+    super(provider, bonsaiWorldStateSegments(dataStorageConfiguration));
     this.flatDbStrategyProvider =
         new BonsaiFlatDbStrategyProvider(metricsSystem, dataStorageConfiguration);
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
