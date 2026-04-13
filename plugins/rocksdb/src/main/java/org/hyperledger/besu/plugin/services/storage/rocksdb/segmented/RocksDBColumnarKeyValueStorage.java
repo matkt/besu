@@ -59,6 +59,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.IndexType;
 import org.rocksdb.InfoLogLevel;
 import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
@@ -293,8 +294,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         .setFormatVersion(ROCKSDB_FORMAT_VERSION)
         .setBlockCache(sharedBlockCache)
         .setFilterPolicy(new BloomFilter(BLOOM_FILTER_BITS_PER_KEY, false))
+        .setIndexType(IndexType.kTwoLevelIndexSearch)
         .setPartitionFilters(true)
-        .setCacheIndexAndFilterBlocks(false)
+        .setCacheIndexAndFilterBlocks(true)
+        .setCacheIndexAndFilterBlocksWithHighPriority(true)
+        .setPinL0FilterAndIndexBlocksInCache(true)
         .setBlockSize(ROCKSDB_BLOCK_SIZE);
   }
 
