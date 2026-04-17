@@ -44,12 +44,17 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
   private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
   /**
-   * Cap on concurrent preload tasks. Each preload descends a full trie path (6-8 chained RocksDB
-   * reads), so allowing unbounded virtual threads causes IO queue saturation and cache thrash.
-   * Capping at {@code CPU × 2} keeps the IO pipeline full without over-subscribing the disk.
+   * Cap on concurrent preload tasks. Preloads are I/O-bound: each preload chain is ~7 serial
+   * RocksDB reads (parent → child), so the effective disk queue depth at steady state is roughly
+   * equal to the number of concurrent preloads. We target {@code ~256} in-flight preloads, which
+   * keeps a modern NVMe at or above its optimal queue depth (64-128) with margin to absorb
+   * latency variance, while still acting as a back-pressure safety net against pathological
+   * wide-block bursts that could otherwise blow up the heap (one {@code CompletableFuture} per
+   * access), multiply storage subscribers, and cache-thrash the block cache. On large hosts we
+   * scale further with {@code CPU × 16}.
    */
   private static final int MAX_CONCURRENT_PRELOADS =
-      Math.max(4, Runtime.getRuntime().availableProcessors() * 2);
+      Math.max(256, Runtime.getRuntime().availableProcessors() * 16);
 
   private final Semaphore preloadPermits = new Semaphore(MAX_CONCURRENT_PRELOADS);
 
