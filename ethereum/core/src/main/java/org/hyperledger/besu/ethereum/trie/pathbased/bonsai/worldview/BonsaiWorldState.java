@@ -44,13 +44,18 @@ import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import jakarta.validation.constraints.NotNull;
@@ -61,6 +66,36 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 @SuppressWarnings("rawtypes")
 public class BonsaiWorldState extends PathBasedWorldState {
+
+  /**
+   * Executor used to parallelize per-account storage trie updates during {@link
+   * #applyUpdatesAndComputeRoot} Phase 2. We use virtual threads rather than {@code parallelStream}
+   * (which binds to {@link java.util.concurrent.ForkJoinPool#commonPool()}) because each outer
+   * task blocks synchronously on {@code ParallelStoredMerklePatriciaTrie.FORK_JOIN_POOL.invoke}
+   * while the inner parallel trie walk completes. With {@code commonPool} capped at {@code
+   * NCPU - 1}, the outer parallelism would be effectively bounded to 31 on a 32-core host even
+   * though the inner pool has hundreds of workers available, starving the inner pool of work and
+   * serialising the per-account preamble ({@code loadNode(root)} RocksDB read + slot iteration).
+   * Virtual threads remove that plafond: every touched account gets its own cheap carrier-less
+   * thread, and {@code FJP.invoke} parks the virtual thread without consuming a platform thread.
+   */
+  private static final ExecutorService STORAGE_COMMIT_POOL =
+      Executors.newVirtualThreadPerTaskExecutor();
+
+  /**
+   * Back-pressure safety net for Phase 2 storage commits. Virtual threads are cheap but not free:
+   * each one carries a {@code ParallelStoredMerklePatriciaTrie}, a {@code CommitCache}, and the
+   * pending update list for its account. On pathological blocks that touch several thousand
+   * distinct contracts, spawning them all at once would transiently allocate tens of MiB in a
+   * phase already under GC pressure. {@code max(512, CPU × 32)} gives effectively unlimited
+   * concurrency for every realistic mainnet block (typically 100-400 touched accounts) while
+   * capping the worst case at ~1024 in-flight on a 32-core host.
+   */
+  private static final int MAX_CONCURRENT_STORAGE_COMMITS =
+      Math.max(512, Runtime.getRuntime().availableProcessors() * 32);
+
+  private static final Semaphore STORAGE_COMMIT_PERMITS =
+      new Semaphore(MAX_CONCURRENT_STORAGE_COMMITS);
 
   protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
   private final CodeCache codeCache;
@@ -145,15 +180,35 @@ public class BonsaiWorldState extends PathBasedWorldState {
     clearStorage(maybeStateUpdater, worldStateUpdater);
 
     // Phase 2 — update every account's storage trie (must happen before account updates
-    //           because the storage root is embedded in the account node)
+    //           because the storage root is embedded in the account node). Parallelism is gated
+    //           on the absence of an updater to preserve the long-standing "no concurrent writes
+    //           to the BonsaiUpdater WriteBatch" invariant; when we are only computing the root
+    //           speculatively we can fan out freely.
     final boolean canParallelize = maybeStateUpdater.isEmpty();
-    Stream<Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>>
-        storageStream = worldStateUpdater.getStorageToUpdate().entrySet().stream();
+    final var storageEntries = worldStateUpdater.getStorageToUpdate().entrySet();
     if (canParallelize) {
-      storageStream = storageStream.parallel();
+      final List<CompletableFuture<Void>> futures = new ArrayList<>(storageEntries.size());
+      for (final var entry : storageEntries) {
+        futures.add(
+            CompletableFuture.runAsync(
+                () -> {
+                  STORAGE_COMMIT_PERMITS.acquireUninterruptibly();
+                  try {
+                    updateAccountStorageState(maybeStateUpdater, worldStateUpdater, entry);
+                  } finally {
+                    STORAGE_COMMIT_PERMITS.release();
+                  }
+                },
+                STORAGE_COMMIT_POOL));
+      }
+      for (final CompletableFuture<Void> f : futures) {
+        f.join();
+      }
+    } else {
+      for (final var entry : storageEntries) {
+        updateAccountStorageState(maybeStateUpdater, worldStateUpdater, entry);
+      }
     }
-    storageStream.forEach(
-        entry -> updateAccountStorageState(maybeStateUpdater, worldStateUpdater, entry));
 
     // Phase 3 — persist contract code changes (also computes code hashes)
     updateCode(maybeStateUpdater, worldStateUpdater);

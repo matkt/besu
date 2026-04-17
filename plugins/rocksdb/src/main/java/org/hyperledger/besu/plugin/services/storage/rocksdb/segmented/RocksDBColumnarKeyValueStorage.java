@@ -87,13 +87,24 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /**
    * Block size for {@code TRIE_BRANCH_STORAGE}. Trie reads are random point lookups over keccak
-   * hashes (maximum entropy keys), so locality inside a data block is effectively zero. A 32 KiB
-   * block forces each GET to materialise 32 KiB in the block cache just to extract a ~300 B node,
-   * which wastes cache capacity and inflates read amplification by ~100x. An 8 KiB block packs
-   * ~4x more hot entries in the same cache budget; the additional index size is absorbed by the
-   * two-level partitioned index.
+   * hashes (maximum entropy keys), so locality inside a data block is effectively zero. A single
+   * ~300 B node is extracted per GET; the rest of the block is pulled into the block cache for
+   * nothing. We size at 4 KiB because:
+   *
+   * <ul>
+   *   <li>It is the RocksDB default precisely tuned for point-lookup workloads on high-entropy
+   *       keys — larger blocks (16-64 KiB) only pay off with compressed scans or spatially local
+   *       access patterns, neither of which applies here.
+   *   <li>It aligns with NVMe sector size and OS page size, so each read is a single aligned I/O.
+   *   <li>Read amplification drops to ~14x (vs ~27x at 8 KiB and ~109x at 32 KiB), freeing block
+   *       cache capacity to hold more distinct hot nodes.
+   * </ul>
+   *
+   * The cost of a larger index is absorbed by {@link IndexType#kTwoLevelIndexSearch} combined
+   * with {@code setCacheIndexAndFilterBlocks(true)}, and the compression penalty is negligible
+   * since keccak+RLP payload is high-entropy (LZ4 gains <5% regardless of block size).
    */
-  private static final long TRIE_BRANCH_BLOCK_SIZE = 8192;
+  private static final long TRIE_BRANCH_BLOCK_SIZE = 4096;
 
   private static final int BLOOM_FILTER_BITS_PER_KEY = 10;
 
@@ -262,7 +273,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       cfProps.setProperty(key, userCfProps.getProperty(key));
     }
 
-    final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
+    final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps, segment);
     columnOpts.setTableFormatConfig(buildBlockBasedTableConfig(segment, sharedBlockCache));
 
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
@@ -388,11 +399,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
   /**
    * Always builds from {@code getColumnFamilyOptionsFromProps} (including when the properties map
-   * is empty), then applies Besu's fixed {@code ttl=0} and LZ4 compression on top so they are never
-   * omitted. On null or parse failure, starts from a bare {@link ColumnFamilyOptions}.
+   * is empty), then applies Besu's fixed {@code ttl=0} and the segment-appropriate compression on
+   * top so they are never omitted. On null or parse failure, starts from a bare {@link
+   * ColumnFamilyOptions}.
+   *
+   * <p>Compression is disabled for {@code TRIE_BRANCH_STORAGE}: trie nodes are keccak + RLP, i.e.
+   * near-maximum entropy, so LZ4 typically delivers a compression ratio of 0.95-1.00 while adding
+   * CPU on every block read and write. Skipping compression on this hot-read CF removes that
+   * overhead without any meaningful size trade-off.
    */
   private static ColumnFamilyOptions columnFamilyOptionsFromNativeProperties(
-      final Properties nativeCfProps) {
+      final Properties nativeCfProps, final SegmentIdentifier segment) {
     ColumnFamilyOptions base;
     try {
       final ColumnFamilyOptions fromNative;
@@ -416,7 +433,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
           ex.getMessage());
       base = new ColumnFamilyOptions();
     }
-    return base.setTtl(0).setCompressionType(CompressionType.LZ4_COMPRESSION);
+    final CompressionType compression =
+        TRIE_BRANCH_STORAGE.getName().equals(segment.getName())
+            ? CompressionType.NO_COMPRESSION
+            : CompressionType.LZ4_COMPRESSION;
+    return base.setTtl(0).setCompressionType(compression);
   }
 
   private static void configureBlobDBForSegment(

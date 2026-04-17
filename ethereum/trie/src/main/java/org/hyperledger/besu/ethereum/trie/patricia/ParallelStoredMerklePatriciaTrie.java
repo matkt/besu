@@ -58,10 +58,20 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   private static final int NCPU = Runtime.getRuntime().availableProcessors();
 
   /**
-   * Shared ForkJoinPool with 2x cores for I/O-bound operations. This choice was validated by
-   * testing, and that ForkJoinPool performed best despite not being an obvious fit.
+   * Shared ForkJoinPool for the parallel trie commit. The work is dominated by RocksDB reads on
+   * {@code loadNode} when the trie node cache is cold (e.g. during a fresh traversal or a block
+   * that touches previously unreached subtrees), with only a thin layer of CPU work on top
+   * (keccak, RLP encode, branch rewiring). Since this pool does not use {@link
+   * java.util.concurrent.ForkJoinPool.ManagedBlocker} around blocking I/O, any worker that stalls
+   * on a RocksDB read consumes a parallelism slot for the duration of the stall. Sizing at
+   * {@code NCPU × 2} leaves disk queue depth starved: with commit chains of several sequential
+   * reads, the effective in-flight disk depth caps at roughly {@code NCPU × 2 ÷ chain_depth ≈ 3-5}
+   * on a modern NVMe, well below its 64-128 sweet spot. Sizing at {@code NCPU × 8} raises that
+   * ceiling by 4× and still keeps the permanent thread-stack cost bounded (~1 MiB × 8 × NCPU).
+   * The CPU-bound portion is not hurt because the ForkJoinPool's work-stealing only keeps ready
+   * tasks running on available carriers; idle workers that are merely blocked do not burn CPU.
    */
-  private static final ForkJoinPool FORK_JOIN_POOL = new ForkJoinPool(NCPU * 2);
+  private static final ForkJoinPool FORK_JOIN_POOL = new ForkJoinPool(NCPU * 8);
 
   /** Pending updates accumulated between commits */
   private final Map<K, Optional<V>> pendingUpdates = new ConcurrentHashMap<>();
