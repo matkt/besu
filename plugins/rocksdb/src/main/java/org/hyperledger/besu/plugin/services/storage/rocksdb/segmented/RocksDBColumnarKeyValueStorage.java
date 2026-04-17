@@ -16,6 +16,7 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -84,6 +85,15 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
   private static final int BLOOM_FILTER_BITS_PER_KEY = 10;
+
+  /**
+   * Memtable sizing for {@code TRIE_BRANCH_STORAGE}. Default RocksDB is 64 MiB × 2 memtables; we
+   * bump to 128 MiB × 4 so that newly written trie nodes stay served from RAM longer (avoids
+   * flushing hot branches to L0 too early, which would force "new reads" to hit SST files).
+   */
+  private static final long TRIE_BRANCH_WRITE_BUFFER_SIZE = 134_217_728L; // 128 MiB
+  private static final int TRIE_BRANCH_MAX_WRITE_BUFFER_NUMBER = 4;
+  private static final int TRIE_BRANCH_MIN_WRITE_BUFFER_NUMBER_TO_MERGE = 2;
 
   /** Shared block-cache capacity for the whole DB. */
   private static final long ROCKSDB_BLOCKCACHE_SIZE = 2_147_483_648L;
@@ -242,7 +252,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     }
 
     final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
-    columnOpts.setTableFormatConfig(buildBlockBasedTableConfig(sharedBlockCache));
+    columnOpts.setTableFormatConfig(buildBlockBasedTableConfig(segment, sharedBlockCache));
 
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
     if (segment.containsStaticData()) {
@@ -260,9 +270,21 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
       final SegmentIdentifier segment) {
-    // intentionally empty — all CF options are now set through Java API or left at defaults.
-    // optimize_filters_for_hits is NOT set: it skips bloom filters on the last compaction level,
-    // which destroys negative-lookup performance during snap sync healing.
+    // Table-level settings (bloom filters, block size, block cache, checksums) are set in Java
+    // via buildBlockBasedTableConfig. optimize_filters_for_hits is NOT set: it skips bloom filters
+    // on the last compaction level, which destroys negative-lookup performance during snap sync.
+
+    // Memtable tuning for TRIE_BRANCH_STORAGE: keep recently written trie nodes in RAM longer
+    // so that "new reads" (traversals of freshly written branches) hit the memtable instead of
+    // L0 SST files. User-supplied values in additional-column-family-options can still override.
+    if (TRIE_BRANCH_STORAGE.getName().equals(segment.getName())) {
+      cfProps.setProperty("write_buffer_size", Long.toString(TRIE_BRANCH_WRITE_BUFFER_SIZE));
+      cfProps.setProperty(
+          "max_write_buffer_number", Integer.toString(TRIE_BRANCH_MAX_WRITE_BUFFER_NUMBER));
+      cfProps.setProperty(
+          "min_write_buffer_number_to_merge",
+          Integer.toString(TRIE_BRANCH_MIN_WRITE_BUFFER_NUMBER_TO_MERGE));
+    }
   }
 
   /**
@@ -288,19 +310,30 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * and the shared block cache are all set on the same object before a single
    * {@link ColumnFamilyOptions#setTableFormatConfig} call pushes everything to the native side
    * atomically. Settings match the pre-branch baseline that synced correctly.
+   *
+   * <p>{@code TRIE_BRANCH_STORAGE} is a special case: trie reads on the hot path are driven by
+   * parent-to-child hash references, so every lookup is guaranteed to hit. Bloom filters add zero
+   * value and only cost SST size, CPU (hashing) and block-cache occupancy. The filter policy is
+   * therefore dropped for that CF; index blocks are still cached because they remain required to
+   * locate keys inside SST data blocks.
    */
   private static BlockBasedTableConfig buildBlockBasedTableConfig(
-      final Cache sharedBlockCache) {
-    return new BlockBasedTableConfig()
-        .setFormatVersion(ROCKSDB_FORMAT_VERSION)
-        .setBlockCache(sharedBlockCache)
-        .setFilterPolicy(new BloomFilter(BLOOM_FILTER_BITS_PER_KEY, false))
-        .setIndexType(IndexType.kTwoLevelIndexSearch)
-        .setPartitionFilters(true)
-        .setCacheIndexAndFilterBlocks(true)
-        .setCacheIndexAndFilterBlocksWithHighPriority(true)
-        .setPinL0FilterAndIndexBlocksInCache(true)
-        .setBlockSize(ROCKSDB_BLOCK_SIZE);
+      final SegmentIdentifier segment, final Cache sharedBlockCache) {
+    final BlockBasedTableConfig cfg =
+        new BlockBasedTableConfig()
+            .setFormatVersion(ROCKSDB_FORMAT_VERSION)
+            .setBlockCache(sharedBlockCache)
+            .setIndexType(IndexType.kTwoLevelIndexSearch)
+            .setCacheIndexAndFilterBlocks(true)
+            .setCacheIndexAndFilterBlocksWithHighPriority(true)
+            .setPinL0FilterAndIndexBlocksInCache(true)
+            .setBlockSize(ROCKSDB_BLOCK_SIZE);
+
+    if (!TRIE_BRANCH_STORAGE.getName().equals(segment.getName())) {
+      cfg.setFilterPolicy(new BloomFilter(BLOOM_FILTER_BITS_PER_KEY, false))
+          .setPartitionFilters(true);
+    }
+    return cfg;
   }
 
   /**
