@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -42,8 +43,40 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
 
   private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
+  /**
+   * Cap on concurrent preload tasks. Each preload descends a full trie path (6-8 chained RocksDB
+   * reads), so allowing unbounded virtual threads causes IO queue saturation and cache thrash.
+   * Capping at {@code CPU × 2} keeps the IO pipeline full without over-subscribing the disk.
+   */
+  private static final int MAX_CONCURRENT_PRELOADS =
+      Math.max(4, Runtime.getRuntime().availableProcessors() * 2);
+
+  private final Semaphore preloadPermits = new Semaphore(MAX_CONCURRENT_PRELOADS);
+
+  /**
+   * Depth threshold (in nibbles, i.e. {@code location.size()}) below which trie nodes are routed
+   * to the high-priority "top-level" caches. Nodes near the root are re-read on every traversal
+   * and must never be evicted by cold lower-level reads. At depth 4 the theoretical maximum is
+   * {@code 16^4 = 65k} nodes; real-world trie sparsity gives a few thousand.
+   */
+  private static final int TOP_LEVEL_MAX_LOCATION_NIBBLES = 4;
+
+  /** Oversized budget for top-level caches so they effectively never evict in practice. */
+  private static final int TOP_LEVEL_ACCOUNT_CACHE_SIZE = 20_000;
+
+  private static final int TOP_LEVEL_STORAGE_CACHE_SIZE = 20_000;
+
   private static final int ACCOUNT_CACHE_SIZE = 100_000;
   private static final int STORAGE_CACHE_SIZE = 200_000;
+
+  /** Top-level account trie nodes (depth ≤ {@link #TOP_LEVEL_MAX_LOCATION_NIBBLES}). */
+  private final Cache<Bytes, Bytes> topLevelAccountNodes =
+      CacheBuilder.newBuilder().recordStats().maximumSize(TOP_LEVEL_ACCOUNT_CACHE_SIZE).build();
+
+  /** Top-level storage trie nodes (depth ≤ {@link #TOP_LEVEL_MAX_LOCATION_NIBBLES}). */
+  private final Cache<Bytes, Bytes> topLevelStorageNodes =
+      CacheBuilder.newBuilder().recordStats().maximumSize(TOP_LEVEL_STORAGE_CACHE_SIZE).build();
+
   private final Cache<Bytes, Bytes> accountNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(ACCOUNT_CACHE_SIZE).build();
   private final Cache<Bytes, Bytes> storageNodes =
@@ -52,6 +85,10 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
   public BonsaiCachedMerkleTrieLoader(final ObservableMetricsSystem metricsSystem) {
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "accountsNodes", accountNodes);
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "storageNodes", storageNodes);
+    metricsSystem.createGuavaCacheCollector(
+        BLOCKCHAIN, "topLevelAccountNodes", topLevelAccountNodes);
+    metricsSystem.createGuavaCacheCollector(
+        BLOCKCHAIN, "topLevelStorageNodes", topLevelStorageNodes);
   }
 
   public void preLoadAccount(
@@ -59,7 +96,14 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Hash worldStateRootHash,
       final Address account) {
     CompletableFuture.runAsync(
-        () -> cacheAccountNodes(worldStateKeyValueStorage, worldStateRootHash, account),
+        () -> {
+          preloadPermits.acquireUninterruptibly();
+          try {
+            cacheAccountNodes(worldStateKeyValueStorage, worldStateRootHash, account);
+          } finally {
+            preloadPermits.release();
+          }
+        },
         VIRTUAL_POOL);
   }
 
@@ -75,7 +119,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
               (location, hash) -> {
                 Optional<Bytes> node =
                     getAccountStateTrieNode(worldStateKeyValueStorage, location, hash);
-                node.ifPresent(bytes -> accountNodes.put(Hash.hash(bytes).getBytes(), bytes));
+                node.ifPresent(bytes -> putAccountNode(location, bytes));
                 return node;
               },
               Bytes32.wrap(worldStateRootHash.getBytes()),
@@ -94,7 +138,15 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Address account,
       final StorageSlotKey slotKey) {
     CompletableFuture.runAsync(
-        () -> cacheStorageNodes(worldStateKeyValueStorage, account, slotKey), VIRTUAL_POOL);
+        () -> {
+          preloadPermits.acquireUninterruptibly();
+          try {
+            cacheStorageNodes(worldStateKeyValueStorage, account, slotKey);
+          } finally {
+            preloadPermits.release();
+          }
+        },
+        VIRTUAL_POOL);
   }
 
   @VisibleForTesting
@@ -116,8 +168,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
                             Optional<Bytes> node =
                                 getAccountStorageTrieNode(
                                     worldStateKeyValueStorage, accountHash, location, hash);
-                            node.ifPresent(
-                                bytes -> storageNodes.put(Hash.hash(bytes).getBytes(), bytes));
+                            node.ifPresent(bytes -> putStorageNode(location, bytes));
                             return node;
                           },
                           Bytes32.wrap(Hash.hash(storageRoot).getBytes()),
@@ -139,10 +190,16 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Bytes32 nodeHash) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return Optional.ofNullable(accountNodes.getIfPresent(nodeHash))
-          .or(() -> worldStateKeyValueStorage.getAccountStateTrieNode(location, nodeHash));
     }
+    final Bytes fromTop = topLevelAccountNodes.getIfPresent(nodeHash);
+    if (fromTop != null) {
+      return Optional.of(fromTop);
+    }
+    final Bytes fromLru = accountNodes.getIfPresent(nodeHash);
+    if (fromLru != null) {
+      return Optional.of(fromLru);
+    }
+    return worldStateKeyValueStorage.getAccountStateTrieNode(location, nodeHash);
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -152,12 +209,38 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Bytes32 nodeHash) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
+    }
+    final Bytes fromTop = topLevelStorageNodes.getIfPresent(nodeHash);
+    if (fromTop != null) {
+      return Optional.of(fromTop);
+    }
+    final Bytes fromLru = storageNodes.getIfPresent(nodeHash);
+    if (fromLru != null) {
+      return Optional.of(fromLru);
+    }
+    return worldStateKeyValueStorage.getAccountStorageTrieNode(accountHash, location, nodeHash);
+  }
+
+  /**
+   * Routes a freshly loaded account trie node to the right cache based on its depth. Nodes near
+   * the root (depth ≤ {@link #TOP_LEVEL_MAX_LOCATION_NIBBLES}) land in the high-priority cache
+   * where they effectively never evict; deeper nodes use the standard LRU.
+   */
+  private void putAccountNode(final Bytes location, final Bytes node) {
+    final Bytes key = Hash.hash(node).getBytes();
+    if (location.size() <= TOP_LEVEL_MAX_LOCATION_NIBBLES) {
+      topLevelAccountNodes.put(key, node);
     } else {
-      return Optional.ofNullable(storageNodes.getIfPresent(nodeHash))
-          .or(
-              () ->
-                  worldStateKeyValueStorage.getAccountStorageTrieNode(
-                      accountHash, location, nodeHash));
+      accountNodes.put(key, node);
+    }
+  }
+
+  private void putStorageNode(final Bytes location, final Bytes node) {
+    final Bytes key = Hash.hash(node).getBytes();
+    if (location.size() <= TOP_LEVEL_MAX_LOCATION_NIBBLES) {
+      topLevelStorageNodes.put(key, node);
+    } else {
+      storageNodes.put(key, node);
     }
   }
 }

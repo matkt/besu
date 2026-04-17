@@ -84,6 +84,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
+
+  /**
+   * Block size for {@code TRIE_BRANCH_STORAGE}. Trie reads are random point lookups over keccak
+   * hashes (maximum entropy keys), so locality inside a data block is effectively zero. A 32 KiB
+   * block forces each GET to materialise 32 KiB in the block cache just to extract a ~300 B node,
+   * which wastes cache capacity and inflates read amplification by ~100x. An 8 KiB block packs
+   * ~4x more hot entries in the same cache budget; the additional index size is absorbed by the
+   * two-level partitioned index.
+   */
+  private static final long TRIE_BRANCH_BLOCK_SIZE = 8192;
+
   private static final int BLOOM_FILTER_BITS_PER_KEY = 10;
 
   /**
@@ -319,6 +330,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private static BlockBasedTableConfig buildBlockBasedTableConfig(
       final SegmentIdentifier segment, final Cache sharedBlockCache) {
+    final boolean isTrieBranch = TRIE_BRANCH_STORAGE.getName().equals(segment.getName());
+    final long blockSize = isTrieBranch ? TRIE_BRANCH_BLOCK_SIZE : ROCKSDB_BLOCK_SIZE;
+
     final BlockBasedTableConfig cfg =
         new BlockBasedTableConfig()
             .setFormatVersion(ROCKSDB_FORMAT_VERSION)
@@ -327,9 +341,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCacheIndexAndFilterBlocks(true)
             .setCacheIndexAndFilterBlocksWithHighPriority(true)
             .setPinL0FilterAndIndexBlocksInCache(true)
-            .setBlockSize(ROCKSDB_BLOCK_SIZE);
+            .setBlockSize(blockSize);
 
-    if (!TRIE_BRANCH_STORAGE.getName().equals(segment.getName())) {
+    if (!isTrieBranch) {
       cfg.setFilterPolicy(new BloomFilter(BLOOM_FILTER_BITS_PER_KEY, false))
           .setPartitionFilters(true);
     }
