@@ -39,6 +39,28 @@ public interface SegmentedKeyValueStorage extends Closeable {
   Optional<byte[]> get(SegmentIdentifier segment, byte[] key) throws StorageException;
 
   /**
+   * Variant of {@link #get(SegmentIdentifier, byte[])} that lets the backend short-circuit reads
+   * for keys that are guaranteed absent, using its fast absence check (e.g. RocksDB's {@code
+   * keyMayExist} which consults memtable, block cache and SST bloom filters without touching the
+   * data blocks).
+   *
+   * <p>Semantically equivalent to {@link #get(SegmentIdentifier, byte[])}. Only worth using on
+   * columns where a significant fraction of lookups are expected to be misses, otherwise the
+   * pre-check adds unnecessary CPU work.
+   *
+   * <p>Default implementation delegates to {@link #get(SegmentIdentifier, byte[])}.
+   *
+   * @param segment the segment
+   * @param key Index into persistent data repository.
+   * @return The value persisted at the key index, or {@link Optional#empty()} when absent.
+   * @throws StorageException the storage exception
+   */
+  default Optional<byte[]> getWithKeyMayExist(final SegmentIdentifier segment, final byte[] key)
+      throws StorageException {
+    return get(segment, key);
+  }
+
+  /**
    * Finds the key and corresponding value that is "nearest before" the specified key. "Nearest
    * before" is defined as the closest key that is either exactly matching the supplied key or
    * lexicographically before it.

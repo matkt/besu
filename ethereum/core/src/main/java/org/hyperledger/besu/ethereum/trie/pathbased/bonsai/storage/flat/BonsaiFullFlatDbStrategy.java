@@ -80,9 +80,11 @@ public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
       final StorageSlotKey storageSlotKey,
       final SegmentedKeyValueStorage storage) {
     getStorageValueCounter.inc();
+    // Storage slots have a large fraction of misses (contracts reading never-written slots),
+    // so we use the keyMayExist pre-filter to short-circuit disk I/O when the slot is absent.
     final Optional<Bytes> storageFound =
         storage
-            .get(
+            .getWithKeyMayExist(
                 ACCOUNT_STORAGE_STORAGE,
                 Bytes.concatenate(accountHash.getBytes(), storageSlotKey.getSlotHash().getBytes())
                     .toArrayUnsafe())

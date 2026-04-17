@@ -59,6 +59,7 @@ import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.Holder;
 import org.rocksdb.IndexType;
 import org.rocksdb.InfoLogLevel;
 import org.rocksdb.LRUCache;
@@ -552,6 +553,29 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
     try (final OperationTimer.TimingContext ignored = metrics.getReadLatency().startTimer()) {
       return Optional.ofNullable(getDB().get(safeColumnHandle(segment), readOptions, key));
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
+  @Override
+  public Optional<byte[]> getWithKeyMayExist(final SegmentIdentifier segment, final byte[] key)
+      throws StorageException {
+    throwIfClosed();
+
+    try (final OperationTimer.TimingContext ignored = metrics.getReadLatency().startTimer()) {
+      final ColumnFamilyHandle cf = safeColumnHandle(segment);
+      final Holder<byte[]> valueHolder = new Holder<>();
+      // keyMayExist consults memtable, block cache and SST bloom filters only; if it returns
+      // false we skip the data-block I/O that a full get would trigger.
+      if (!getDB().keyMayExist(cf, readOptions, key, valueHolder)) {
+        return Optional.empty();
+      }
+      final byte[] inlineValue = valueHolder.getValue();
+      if (inlineValue != null) {
+        return Optional.of(inlineValue);
+      }
+      return Optional.ofNullable(getDB().get(cf, readOptions, key));
     } catch (final RocksDBException e) {
       throw new StorageException(e);
     }

@@ -40,6 +40,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.rocksdb.AbstractRocksIterator;
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.Holder;
 import org.rocksdb.OptimisticTransactionDB;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
@@ -110,6 +111,31 @@ public class RocksDBColumnarKeyValueSnapshot
       } else {
         return Optional.ofNullable(snapshot.get(handle, readOptions, key));
       }
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
+  @Override
+  public Optional<byte[]> getWithKeyMayExist(final SegmentIdentifier segment, final byte[] key)
+      throws StorageException {
+    throwIfClosed();
+    try (final OperationTimer.TimingContext ignored = metrics.getReadLatency().startTimer()) {
+      final ColumnFamilyHandle handle = columnFamilyMapper.apply(segment);
+      // When the snapshot read cache is enabled we already avoid disk I/O on repeated lookups,
+      // so keep the cache path rather than going through keyMayExist.
+      if (isReadCacheEnabledForSnapshots && segment.isEligibleToHighSpecFlag()) {
+        return getFromCacheOrRead(segment.getId(), key, handle, maybeCache.get());
+      }
+      final Holder<byte[]> valueHolder = new Holder<>();
+      if (!snapshot.keyMayExist(handle, readOptions, key, valueHolder)) {
+        return Optional.empty();
+      }
+      final byte[] inlineValue = valueHolder.getValue();
+      if (inlineValue != null) {
+        return Optional.of(inlineValue);
+      }
+      return Optional.ofNullable(snapshot.get(handle, readOptions, key));
     } catch (final RocksDBException e) {
       throw new StorageException(e);
     }

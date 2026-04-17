@@ -15,6 +15,7 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.Holder;
 import org.rocksdb.OptimisticTransactionDB;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
@@ -48,5 +49,18 @@ class RocksDBSnapshot {
       final ColumnFamilyHandle columnFamilyHandle, final ReadOptions readOptions, final byte[] key)
       throws RocksDBException {
     return db.get(columnFamilyHandle, readOptions, key);
+  }
+
+  /**
+   * Performs a keyMayExist pre-check against the snapshot. Returns false when the key is
+   * guaranteed absent (no data-block I/O performed). Returns true otherwise; the holder may
+   * already contain the value if it was found in memtable or block cache.
+   */
+  public boolean keyMayExist(
+      final ColumnFamilyHandle columnFamilyHandle,
+      final ReadOptions readOptions,
+      final byte[] key,
+      final Holder<byte[]> valueHolder) {
+    return db.keyMayExist(columnFamilyHandle, readOptions, key, valueHolder);
   }
 }
