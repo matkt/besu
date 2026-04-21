@@ -15,11 +15,14 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
 
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetrics;
@@ -75,6 +78,14 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final Logger LOG = LoggerFactory.getLogger(RocksDBColumnarKeyValueStorage.class);
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
+
+  /**
+   * SST data block size for Bonsai flat account / storage column families. Slightly larger than the
+   * default improves locality when reading an account and its storage slots (adjacent keys often
+   * land in the same block), without the memory and compaction cost of multi-megabyte or maximal
+   * {@code block_size} values.
+   */
+  private static final long ROCKSDB_BONSAI_FLAT_STATE_TABLE_BLOCK_SIZE_BYTES = 1L << 21; // 2 MiB
 
   /** RocksDb blockcache size when using the high spec option */
   protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
@@ -282,18 +293,53 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    */
   private BlockBasedTableConfig createBlockBasedTableConfig(
       final SegmentIdentifier segment, final RocksDBConfiguration config) {
-    final LRUCache cache =
-        new LRUCache(
-            config.isHighSpec() && segment.isEligibleToHighSpecFlag()
-                ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
-                : config.getCacheCapacity());
+    final LRUCache cache = new LRUCache(blockCacheCapacityBytesForSegment(segment, config));
     return new BlockBasedTableConfig()
         .setFormatVersion(ROCKSDB_FORMAT_VERSION)
         .setBlockCache(cache)
         .setFilterPolicy(new BloomFilter(10, false))
         .setPartitionFilters(true)
         .setCacheIndexAndFilterBlocks(false)
-        .setBlockSize(ROCKSDB_BLOCK_SIZE);
+        .setBlockSize(tableBlockSizeForSegment(segment));
+  }
+
+  /**
+   * Bonsai flat account ({@link KeyValueSegmentIdentifier#ACCOUNT_INFO_STATE}) and flat storage
+   * slot ({@link KeyValueSegmentIdentifier#ACCOUNT_STORAGE_STORAGE}) column families use a larger
+   * SST block size than the global default; see {@link #ROCKSDB_BONSAI_FLAT_STATE_TABLE_BLOCK_SIZE_BYTES}.
+   */
+  private static long tableBlockSizeForSegment(final SegmentIdentifier segment) {
+    return isBonsaiFlatStateSegment(segment)
+        ? ROCKSDB_BONSAI_FLAT_STATE_TABLE_BLOCK_SIZE_BYTES
+        : ROCKSDB_BLOCK_SIZE;
+  }
+
+  private static boolean isBonsaiFlatStateSegment(final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    return name.equals(ACCOUNT_INFO_STATE.getName());
+  }
+
+  /**
+   * Flat Bonsai CFs use a larger {@link #ROCKSDB_BONSAI_FLAT_STATE_TABLE_BLOCK_SIZE_BYTES} than
+   * {@link #ROCKSDB_BLOCK_SIZE}; scale the per-CF block cache by the same ratio so a similar number
+   * of hot blocks can stay resident.
+   */
+  private static long blockCacheCapacityBytesForSegment(
+      final SegmentIdentifier segment, final RocksDBConfiguration config) {
+    final long baseCapacity =
+        config.isHighSpec() && segment.isEligibleToHighSpecFlag()
+            ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
+            : config.getCacheCapacity();
+    if (!isBonsaiFlatStateSegment(segment)) {
+      return baseCapacity;
+    }
+    final long blockSizeRatio =
+        ROCKSDB_BONSAI_FLAT_STATE_TABLE_BLOCK_SIZE_BYTES / ROCKSDB_BLOCK_SIZE;
+    try {
+      return Math.multiplyExact(baseCapacity, blockSizeRatio);
+    } catch (final ArithmeticException ignored) {
+      return Long.MAX_VALUE;
+    }
   }
 
   /***
