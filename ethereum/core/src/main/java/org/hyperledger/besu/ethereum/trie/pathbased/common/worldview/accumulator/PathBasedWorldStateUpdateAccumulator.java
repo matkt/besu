@@ -77,6 +77,12 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
   protected boolean isAccumulatorStateChanged;
 
+  /**
+   * When non-null, state from prior transactions in the same block (from a block access list) is
+   * merged on first read instead of being applied eagerly.
+   */
+  private PriorTransactionStateOverlay priorTransactionOverlay;
+
   public PathBasedWorldStateUpdateAccumulator(
       final PathBasedWorldView world,
       final Consumer<PathBasedValue<ACCOUNT>> accountPreloader,
@@ -90,7 +96,20 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     this.evmConfiguration = evmConfiguration;
   }
 
+  /**
+   * Sets overlay state from prior in-block transactions. Cleared by {@link
+   * #clearPriorTransactionOverlay()}. Not copied by {@link #cloneFromUpdater}.
+   */
+  public void setPriorTransactionOverlay(final PriorTransactionStateOverlay overlay) {
+    this.priorTransactionOverlay = overlay;
+  }
+
+  public void clearPriorTransactionOverlay() {
+    this.priorTransactionOverlay = null;
+  }
+
   public void cloneFromUpdater(final PathBasedWorldStateUpdateAccumulator<ACCOUNT> source) {
+    // priorTransactionOverlay is intentionally not copied (see setPriorTransactionOverlay).
     accountsToUpdate.putAll(source.getAccountsToUpdate());
     codeToUpdate.putAll(source.codeToUpdate);
     storageToClear.addAll(source.storageToClear);
@@ -310,10 +329,39 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
         }
         if (account instanceof PathBasedAccount pathBasedAccount) {
           ACCOUNT mutableAccount = copyAccount((ACCOUNT) pathBasedAccount, this, true);
+          if (priorTransactionOverlay != null) {
+            priorTransactionOverlay
+                .accountEntry(address)
+                .ifPresent(
+                    e -> {
+                      PriorTransactionStateOverlay.applyAccountHeaderOverlay(e, mutableAccount);
+                    });
+          }
           accountsToUpdate.put(
               address, new PathBasedValue<>((ACCOUNT) pathBasedAccount, mutableAccount));
           return mutableAccount;
         } else {
+          if (priorTransactionOverlay != null) {
+            final var maybeEntry = priorTransactionOverlay.accountEntry(address);
+            if (maybeEntry.isPresent()) {
+              final ACCOUNT emptyAccount =
+                  createAccount(
+                      this,
+                      address,
+                      hashAndSaveAccountPreImage(address),
+                      Account.DEFAULT_NONCE,
+                      Account.DEFAULT_BALANCE,
+                      Hash.EMPTY_TRIE_HASH,
+                      Hash.EMPTY,
+                      true);
+              PriorTransactionStateOverlay.applyAccountHeaderOverlay(
+                  maybeEntry.get(), emptyAccount);
+              materializePriorOverlayStorage(address, maybeEntry.get());
+              final PathBasedValue<ACCOUNT> created = new PathBasedValue<>(null, emptyAccount);
+              accountsToUpdate.put(address, created);
+              return accountFunction.apply(created);
+            }
+          }
           // add the empty read in accountsToUpdate
           accountsToUpdate.put(address, new PathBasedValue<>(null, null));
           return null;
@@ -505,6 +553,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   public Optional<Bytes> getCode(final Address address, final Hash codeHash) {
     final PathBasedValue<Bytes> localCode = codeToUpdate.get(address);
     if (localCode == null) {
+      if (priorTransactionOverlay != null) {
+        final Optional<Bytes> overlayCode = priorTransactionOverlay.overlayCode(address);
+        if (overlayCode.isPresent()) {
+          final Bytes bytes = overlayCode.get();
+          codeToUpdate.put(address, new PathBasedValue<>(null, bytes));
+          return Optional.of(bytes);
+        }
+      }
       final Optional<Bytes> code = wrappedWorldView().getCode(address, codeHash);
       if (code.isEmpty() && !codeHash.equals(Hash.EMPTY)) {
         throw new MerkleTrieException(
@@ -542,14 +598,19 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
           (wrappedWorldView() instanceof PathBasedWorldState worldState)
               ? worldState.getStorageValueByStorageSlotKey(address, storageSlotKey)
               : wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
+      final UInt256 worldValue = valueUInt.orElse(null);
+      final UInt256 updatedValue =
+          priorTransactionOverlay != null
+                  && priorTransactionOverlay.hasStorageOverride(address, storageSlotKey)
+              ? priorTransactionOverlay.effectiveStorage(address, storageSlotKey, worldValue)
+              : worldValue;
       storageToUpdate
           .computeIfAbsent(
               address,
               key ->
                   new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader))
-          .put(
-              storageSlotKey, new PathBasedValue<>(valueUInt.orElse(null), valueUInt.orElse(null)));
-      return valueUInt;
+          .put(storageSlotKey, new PathBasedValue<>(worldValue, updatedValue));
+      return Optional.ofNullable(updatedValue);
     } catch (MerkleTrieException e) {
       // need to throw to trigger the heal
       throw new MerkleTrieException(
@@ -722,6 +783,16 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
         final PathBasedValue<ACCOUNT> loadedAccountValue =
             new PathBasedValue<>(copyAccount((ACCOUNT) account), ((ACCOUNT) account));
         accountsToUpdate.put(address, loadedAccountValue);
+        if (priorTransactionOverlay != null) {
+          priorTransactionOverlay
+              .accountEntry(address)
+              .ifPresent(
+                  e -> {
+                    PriorTransactionStateOverlay.applyAccountHeaderOverlay(
+                        e, loadedAccountValue.getUpdated());
+                    materializePriorOverlayStorage(address, e);
+                  });
+        }
         return loadedAccountValue;
       } else {
         return defaultValue;
@@ -730,6 +801,34 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       // need to throw to trigger the heal
       throw new MerkleTrieException(
           e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+    }
+  }
+
+  /**
+   * Records prior-transaction storage overrides in {@link #storageToUpdate} so they participate in
+   * trie commits the same way as an eager {@code setStorageValue} + {@code commit} sequence.
+   */
+  private void materializePriorOverlayStorage(
+      final Address address, final PriorTransactionStateOverlay.AccountEntry entry) {
+    if (entry.storage().isEmpty()) {
+      return;
+    }
+    final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> slotMap =
+        storageToUpdate.computeIfAbsent(
+            address,
+            k -> new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader));
+    for (final Map.Entry<StorageSlotKey, UInt256> e : entry.storage().entrySet()) {
+      final StorageSlotKey slotKey = e.getKey();
+      if (slotMap.containsKey(slotKey)) {
+        continue;
+      }
+      final UInt256 overlayValue = e.getValue();
+      final Optional<UInt256> priorWorld =
+          (wrappedWorldView() instanceof PathBasedWorldState worldState)
+              ? worldState.getStorageValueByStorageSlotKey(address, slotKey)
+              : wrappedWorldView().getStorageValueByStorageSlotKey(address, slotKey);
+      final UInt256 worldVal = priorWorld.orElse(null);
+      slotMap.put(slotKey, new PathBasedValue<>(worldVal, overlayValue));
     }
   }
 
@@ -908,6 +1007,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     updatedAccounts.clear();
     deletedAccounts.clear();
     storageKeyHashLookup.clear();
+    priorTransactionOverlay = null;
   }
 
   protected Hash hashAndSaveAccountPreImage(final Address address) {

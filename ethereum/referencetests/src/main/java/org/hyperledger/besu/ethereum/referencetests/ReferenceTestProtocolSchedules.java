@@ -208,7 +208,7 @@ public class ReferenceTestProtocolSchedules {
             evmConfiguration,
             MiningConfiguration.MINING_DISABLED,
             new BadBlockManager(),
-            false,
+            true,
             BalConfiguration.DEFAULT,
             new NoOpMetricsSystem())
         .createProtocolSchedule();
