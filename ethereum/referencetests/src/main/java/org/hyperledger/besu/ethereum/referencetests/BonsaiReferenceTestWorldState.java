@@ -303,8 +303,8 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
   }
 
   @Override
-  protected Hash hashAndSavePreImage(final Bytes value) {
+  protected Hash hashAndSavePreImage(final Address value) {
     // by default do not save has preImages
-    return preImageProxy.hashAndSavePreImage(value);
+    return preImageProxy.hashAndSavePreImage(value.getBytes());
   }
 }

@@ -492,9 +492,9 @@ public class BonsaiWorldState extends PathBasedWorldState {
         nodeLoader, rootHash, Function.identity(), Function.identity());
   }
 
-  protected Hash hashAndSavePreImage(final Bytes value) {
+  protected Hash hashAndSavePreImage(final Address value) {
     // by default do not save has preImages
-    return Hash.hash(value);
+    return Hash.hash(value.getBytes());
   }
 
   @Override
