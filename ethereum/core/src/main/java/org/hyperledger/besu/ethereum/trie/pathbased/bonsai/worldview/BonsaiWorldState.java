@@ -185,7 +185,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final MerkleTrie<Bytes, Bytes> accountTrie) {
     for (final Map.Entry<Address, PathBasedValue<BonsaiAccount>> accountUpdate :
         worldStateUpdater.getAccountsToUpdate().entrySet()) {
-      final Bytes accountKey = accountUpdate.getKey().getBytes();
+      final Address accountKey = accountUpdate.getKey();
       final PathBasedValue<BonsaiAccount> bonsaiValue = accountUpdate.getValue();
       final BonsaiAccount updatedAccount = bonsaiValue.getUpdated();
       try {
@@ -205,7 +205,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
       } catch (MerkleTrieException e) {
         // need to throw to trigger the heal
         throw new MerkleTrieException(
-            e.getMessage(), Optional.of(Address.wrap(accountKey)), e.getHash(), e.getLocation());
+            e.getMessage(), Optional.of(accountKey), e.getHash(), e.getLocation());
       }
     }
   }
