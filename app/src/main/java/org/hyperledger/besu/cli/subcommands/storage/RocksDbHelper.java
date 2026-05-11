@@ -127,6 +127,8 @@ public class RocksDbHelper {
       final String dbstats = "dbstats";
       final String db_write_stall_stats = "db-write-stall-stats";
       final String levelstats = "levelstats";
+      /* SST file count in L0 for this column family (instant T when this command runs). */
+      final String num_files_at_level0 = "num-files-at-level0";
       final String block_cache_entry_stats = "block-cache-entry-stats";
       final String fast_block_cache_entry_stats = "fast-block-cache-entry-stats";
       final String num_immutable_mem_table = "num-immutable-mem-table";
@@ -184,6 +186,7 @@ public class RocksDbHelper {
               dbstats,
               db_write_stall_stats,
               levelstats,
+              num_files_at_level0,
               block_cache_entry_stats,
               fast_block_cache_entry_stats,
               num_immutable_mem_table,

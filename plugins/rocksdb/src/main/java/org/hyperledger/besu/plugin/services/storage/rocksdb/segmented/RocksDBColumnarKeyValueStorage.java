@@ -79,6 +79,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   /** RocksDb blockcache size when using the high spec option */
   protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
 
+  /**
+   * Extra block-cache headroom for Bonsai hot world-state column families when index and filter
+   * blocks are held in the block cache ({@code cache_index_and_filter_blocks=true}).
+   */
+  private static final double HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER = 1.125d;
+
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
 
@@ -232,17 +238,37 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
       final SegmentIdentifier segment,
       final RocksDBConfiguration configuration) {
-    final long blockCacheBytes =
+    final boolean hotBonsaiWorldState = isHotBonsaiWorldStateSegment(segment);
+    long blockCacheBytes =
         configuration.isHighSpec() && segment.isEligibleToHighSpecFlag()
             ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
             : configuration.getCacheCapacity();
+    if (hotBonsaiWorldState) {
+      blockCacheBytes =
+          (long) (blockCacheBytes * HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER);
+    }
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
     cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
     cfProps.setProperty("block_based_table_factory.partition_filters", "false");
-    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
+    if (hotBonsaiWorldState) {
+      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
+      cfProps.setProperty(
+          "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
+      cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "true");
+      cfProps.setProperty("block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
+    } else {
+      cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
+    }
     cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
     cfProps.setProperty("block_based_table_factory.block_cache", Long.toString(blockCacheBytes));
+  }
+
+  private static boolean isHotBonsaiWorldStateSegment(final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    return "ACCOUNT_INFO_STATE".equals(name)
+        || "ACCOUNT_STORAGE_STORAGE".equals(name)
+        || "TRIE_BRANCH_STORAGE".equals(name);
   }
 
   /**

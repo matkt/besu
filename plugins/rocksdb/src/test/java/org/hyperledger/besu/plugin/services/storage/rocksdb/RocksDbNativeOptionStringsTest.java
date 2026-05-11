@@ -136,4 +136,38 @@ public class RocksDbNativeOptionStringsTest {
       assertThat(opts).isNotNull();
     }
   }
+
+  @Test
+  public void getColumnFamilyOptionsFromPropsAcceptsHotBonsaiWorldStateBlockTableKeys() {
+    RocksDbUtil.loadNativeLibrary();
+    final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps =
+        new RocksDbNativeOptionStrings.InsertionOrderedProperties();
+    cfProps.setProperty("block_based_table_factory.format_version", "5");
+    cfProps.setProperty("block_based_table_factory.filter_policy", "bloomfilter:10:false");
+    cfProps.setProperty("block_based_table_factory.partition_filters", "false");
+    cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
+    cfProps.setProperty(
+        "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
+    cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "true");
+    cfProps.setProperty("block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
+    cfProps.setProperty("block_based_table_factory.block_size", "32768");
+    cfProps.setProperty(
+        "block_based_table_factory.block_cache",
+        Long.toString((long) (134_217_728L * 1.125d)));
+    try (ColumnFamilyOptions opts =
+        ColumnFamilyOptions.getColumnFamilyOptionsFromProps(new ConfigOptions(), cfProps)) {
+      assertThat(opts).isNotNull();
+    }
+  }
+
+  @Test
+  public void getDBOptionsFromPropsAcceptsMaxOpenFilesUnlimited() {
+    RocksDbUtil.loadNativeLibrary();
+    final Properties dbProps = new Properties();
+    dbProps.setProperty("max_open_files", "-1");
+    try (DBOptions opts = DBOptions.getDBOptionsFromProps(new ConfigOptions(), dbProps)) {
+      assertThat(opts).isNotNull();
+      assertThat(opts.maxOpenFiles()).isEqualTo(-1);
+    }
+  }
 }
