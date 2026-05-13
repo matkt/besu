@@ -229,6 +229,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * code). Must run on an empty {@link RocksDbNativeOptionStrings.InsertionOrderedProperties}
    * before user keys are added.
    *
+   * <p>Hot Bonsai world-state CFs may set {@code pin_l0_filter_and_index_blocks_in_cache} so
+   * level-0 index and filter blocks stay in the block cache when
+   * {@code cache_index_and_filter_blocks=true}, reducing repeated meta reads for fresh SSTs.
    */
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
@@ -251,6 +254,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       cfProps.setProperty(
           "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
       cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "true");
+      cfProps.setProperty(
+          "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
       cfProps.setProperty("block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
     } else {
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");

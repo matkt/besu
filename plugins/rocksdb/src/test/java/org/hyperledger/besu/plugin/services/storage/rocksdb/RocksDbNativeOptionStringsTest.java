@@ -149,6 +149,8 @@ public class RocksDbNativeOptionStringsTest {
     cfProps.setProperty(
         "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "false");
     cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "false");
+    cfProps.setProperty(
+        "block_based_table_factory.pin_l0_filter_and_index_blocks_in_cache", "true");
     cfProps.setProperty("block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
     cfProps.setProperty("block_based_table_factory.block_size", "32768");
     cfProps.setProperty(
