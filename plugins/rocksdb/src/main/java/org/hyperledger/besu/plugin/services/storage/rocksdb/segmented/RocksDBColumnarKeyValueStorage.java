@@ -86,7 +86,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * with {@code cache_index_and_filter_blocks_with_high_priority=false} to limit eviction pressure
    * on data (see {@link #mergeBesuNativeColumnFamilyOptionsBeforeParse}).
    */
-  private static final double HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER = 1.2d;
+  private static final double HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER = 3d;
 
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
