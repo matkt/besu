@@ -243,7 +243,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
             : configuration.getCacheCapacity();
     if (hotBonsaiWorldState) {
-      blockCacheBytes = ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC;
+      blockCacheBytes =
+          (long) hotBonsaiWorldStateBlockCacheMultiplier(segment);
     }
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
@@ -269,6 +270,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     return "ACCOUNT_INFO_STATE".equals(name)
         || "ACCOUNT_STORAGE_STORAGE".equals(name)
         || "TRIE_BRANCH_STORAGE".equals(name);
+  }
+
+  private static double hotBonsaiWorldStateBlockCacheMultiplier(final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    if ("ACCOUNT_INFO_STATE".equals(name)) {
+      return ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC/4.0d;
+    }
+    if ("ACCOUNT_STORAGE_STORAGE".equals(name) || "TRIE_BRANCH_STORAGE".equals(name)) {
+      return ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC*2.0d;
+    }
+    return ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC;
   }
 
   /**
