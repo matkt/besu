@@ -79,14 +79,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   /** RocksDb blockcache size when using the high spec option */
   protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
 
-  /**
-   * Per-CF block-cache bump for Bonsai hot world-state column families when index and filter
-   * blocks are charged to that cache ({@code cache_index_and_filter_blocks=true}). Larger than the
-   * default cache so data blocks retain headroom alongside meta blocks in the same LRU; combined
-   * with {@code cache_index_and_filter_blocks_with_high_priority=false} to limit eviction pressure
-   * on data (see {@link #mergeBesuNativeColumnFamilyOptionsBeforeParse}).
-   */
-  private static final double HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER = 3d;
 
   /** Max total size of all WAL file, after which a flush is triggered */
   protected static final long WAL_MAX_TOTAL_SIZE = 1_073_741_824L;
@@ -237,13 +229,6 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
    * code). Must run on an empty {@link RocksDbNativeOptionStrings.InsertionOrderedProperties}
    * before user keys are added.
    *
-   * <p>Hot Bonsai world-state CFs use {@code cache_index_and_filter_blocks=true} so index/filter
-   * bytes stay in the per-CF LRU instead of unbounded table-reader memory. {@code
-   * cache_index_and_filter_blocks_with_high_priority=false} and {@code
-   * pin_top_level_index_and_filter=false} avoid evicting data blocks aggressively (RocksDB
-   * otherwise tends to reserve a large high-priority pool when those flags are true). Hot CFs use
-   * {@link #HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER} on {@code block_cache} so data blocks
-   * retain headroom alongside meta blocks in the same LRU.
    */
   private static void mergeBesuNativeColumnFamilyOptionsBeforeParse(
       final RocksDbNativeOptionStrings.InsertionOrderedProperties cfProps,
@@ -255,8 +240,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             ? ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC
             : configuration.getCacheCapacity();
     if (hotBonsaiWorldState) {
-      blockCacheBytes =
-          (long) (blockCacheBytes * HOT_BONSAI_WORLD_STATE_BLOCK_CACHE_MULTIPLIER);
+      blockCacheBytes = ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC;
     }
     cfProps.setProperty(
         "block_based_table_factory.format_version", Integer.toString(ROCKSDB_FORMAT_VERSION));
@@ -265,8 +249,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     if (hotBonsaiWorldState) {
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "true");
       cfProps.setProperty(
-          "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "false");
-      cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "false");
+          "block_based_table_factory.cache_index_and_filter_blocks_with_high_priority", "true");
+      cfProps.setProperty("block_based_table_factory.pin_top_level_index_and_filter", "true");
       cfProps.setProperty("block_based_table_factory.prepopulate_block_cache", "kFlushOnly");
     } else {
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
