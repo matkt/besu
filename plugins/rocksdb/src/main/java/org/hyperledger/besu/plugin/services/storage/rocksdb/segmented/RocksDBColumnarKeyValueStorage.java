@@ -76,6 +76,9 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   private static final int ROCKSDB_FORMAT_VERSION = 5;
   private static final long ROCKSDB_BLOCK_SIZE = 32768;
 
+  /** SST data block size for hot Bonsai account and trie column families (smaller blocks for state keys). */
+  private static final long BONSAI_ACCOUNT_TRIE_TABLE_BLOCK_SIZE = 4096L;
+
   /** RocksDb blockcache size when using the high spec option */
   protected static final long ROCKSDB_BLOCKCACHE_SIZE_HIGH_SPEC = 1_073_741_824L;
 
@@ -215,9 +218,18 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
 
     final ColumnFamilyOptions columnOpts = columnFamilyOptionsFromNativeProperties(cfProps);
 
+    if (isHotBonsaiWorldStateSegment(segment)) {
+      columnOpts
+          .setCompressionType(CompressionType.NO_COMPRESSION)
+          .setBottommostCompressionType(CompressionType.NO_COMPRESSION);
+    }
+
     columnOpts.setLevelCompactionDynamicLevelBytes(dynamicLevelCompaction);
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, columnOpts);
+    }
+    if (isHotBonsaiWorldStateSegment(segment)) {
+      columnOpts.setBlobCompressionType(CompressionType.NO_COMPRESSION);
     }
     return new ColumnFamilyDescriptor(segment.getId(), columnOpts);
   }
@@ -261,7 +273,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     } else {
       cfProps.setProperty("block_based_table_factory.cache_index_and_filter_blocks", "false");
     }
-    cfProps.setProperty("block_based_table_factory.block_size", Long.toString(ROCKSDB_BLOCK_SIZE));
+    cfProps.setProperty(
+        "block_based_table_factory.block_size",
+        Long.toString(
+            hotBonsaiWorldState
+                ? bonsaiStateSegmentTableBlockSize(segment)
+                : ROCKSDB_BLOCK_SIZE));
     cfProps.setProperty("block_based_table_factory.block_cache", Long.toString(blockCacheBytes));
   }
 
@@ -270,6 +287,14 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     return "ACCOUNT_INFO_STATE".equals(name)
         || "ACCOUNT_STORAGE_STORAGE".equals(name)
         || "TRIE_BRANCH_STORAGE".equals(name);
+  }
+
+  private static long bonsaiStateSegmentTableBlockSize(final SegmentIdentifier segment) {
+    final String name = segment.getName();
+    if ("ACCOUNT_INFO_STATE".equals(name) || "TRIE_BRANCH_STORAGE".equals(name)) {
+      return BONSAI_ACCOUNT_TRIE_TABLE_BLOCK_SIZE;
+    }
+    return ROCKSDB_BLOCK_SIZE;
   }
 
   private static double hotBonsaiWorldStateBlockCacheMultiplier(final SegmentIdentifier segment) {
