@@ -19,8 +19,10 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.MutableWorldState;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetcher;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BalStateRootCalculator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedLayeredWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
@@ -32,6 +34,7 @@ import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -64,8 +67,21 @@ public final class BalStateRootCommitterFactory implements StateRootCommitterFac
       return StateRootCommitter.SYNCHRONOUS;
     }
 
+    final Optional<BalPrefetcher> maybeBalPrefetcher =
+        balConfiguration.isBalPreFetchReadingEnabled()
+            ? Optional.of(
+                new BalPrefetcher(
+                    balConfiguration.isBalPreFetchSortingEnabled(),
+                    balConfiguration.getBalPreFetchBatchSize()))
+            : Optional.empty();
+
     final CompletableFuture<BalRootComputation> balFuture =
-        BalStateRootCalculator.computeAsync(protocolContext, blockHeader, maybeBal.get());
+        BalStateRootCalculator.computeAsync(
+            protocolContext,
+            blockHeader,
+            maybeBal.get(),
+            maybeBalPrefetcher,
+            ForkJoinPool.commonPool());
     final Duration timeout = balConfiguration.getBalStateRootTimeout();
 
     if (balConfiguration.isBalStateRootTrusted()) {

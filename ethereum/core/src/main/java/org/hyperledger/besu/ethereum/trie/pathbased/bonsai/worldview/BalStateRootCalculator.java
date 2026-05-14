@@ -19,6 +19,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListChanges;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetcher;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalRootComputation;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
@@ -29,19 +30,57 @@ import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("rawtypes")
 public class BalStateRootCalculator {
 
+  private static final Logger LOG = LoggerFactory.getLogger(BalStateRootCalculator.class);
+
   private BalStateRootCalculator() {}
 
+  /**
+   * Computes the BAL state root asynchronously, without BAL read prefetch.
+   *
+   * @see #computeAsync(ProtocolContext, BlockHeader, BlockAccessList, Optional, Executor)
+   */
   public static CompletableFuture<BalRootComputation> computeAsync(
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final BlockAccessList bal) {
+    return computeAsync(
+        protocolContext, blockHeader, bal, Optional.empty(), ForkJoinPool.commonPool());
+  }
+
+  /**
+   * Computes the BAL state root asynchronously. When {@code maybePrefetcher} is non-empty, BAL
+   * read prefetch runs to completion on the parent world state before applying BAL writes and
+   * computing the root hash.
+   */
+  public static CompletableFuture<BalRootComputation> computeAsync(
+      final ProtocolContext protocolContext,
+      final BlockHeader blockHeader,
+      final BlockAccessList bal,
+      final Optional<BalPrefetcher> maybePrefetcher,
+      final Executor prefetchOuterExecutor) {
     return CompletableFuture.supplyAsync(
         () -> {
           try (BonsaiWorldState ws = openParentWorldState(protocolContext, blockHeader)) {
+            maybePrefetcher.ifPresent(
+                prefetcher ->
+                    prefetcher
+                        .prefetch(ws, bal, prefetchOuterExecutor)
+                        .exceptionally(
+                            ex -> {
+                              LOG.warn(
+                                  "BAL state root prefetch failed; continuing without warmup", ex);
+                              return null;
+                            })
+                        .join());
             applyBalChanges(ws.getAccumulator(), bal);
             return computeRoot(ws);
           }

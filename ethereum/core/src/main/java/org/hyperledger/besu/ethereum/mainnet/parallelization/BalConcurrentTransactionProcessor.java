@@ -26,7 +26,6 @@ import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
-import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetcher;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
@@ -59,7 +58,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
   private final MainnetTransactionProcessor transactionProcessor;
   private final BlockAccessList blockAccessList;
   private final Duration balProcessingTimeout;
-  private final Optional<BalPrefetcher> maybePrefetcher;
 
   public BalConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
@@ -68,13 +66,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
     this.transactionProcessor = transactionProcessor;
     this.blockAccessList = blockAccessList;
     this.balProcessingTimeout = balConfiguration.getBalProcessingTimeout();
-    this.maybePrefetcher =
-        balConfiguration.isBalPreFetchReadingEnabled()
-            ? Optional.of(
-                new BalPrefetcher(
-                    balConfiguration.isBalPreFetchSortingEnabled(),
-                    balConfiguration.getBalPreFetchBatchSize()))
-            : Optional.empty();
   }
 
   @Override
@@ -88,24 +79,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
       final Executor executor,
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockHeader> maybeParentHeader) {
-
-    maybePrefetcher.ifPresent(
-        balPrefetchMechanism -> {
-          final Optional<BonsaiWorldState> maybeWorldState =
-              getWorldState(protocolContext, maybeParentHeader);
-          if (maybeWorldState.isPresent()) {
-            balPrefetchMechanism
-                .prefetch(maybeWorldState.get(), blockAccessList, executor)
-                .exceptionally(
-                    ex -> {
-                      LOG.error("Prefetch failed", ex);
-                      return null;
-                    })
-                .whenComplete((result, ex) -> maybeWorldState.get().close());
-          } else {
-            LOG.info("Prefetcher block header for block not loaded {}", blockHeader);
-          }
-        });
     super.runAsyncBlock(
         protocolContext,
         blockHeader,
@@ -134,7 +107,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
     if (ws == null) {
       return null;
     }
-
     try {
       ws.disableCacheMerkleTrieLoader();
       final ParallelizedTransactionContext.Builder ctxBuilder =
