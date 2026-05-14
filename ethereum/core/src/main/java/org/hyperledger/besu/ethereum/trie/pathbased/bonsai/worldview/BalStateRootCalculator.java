@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQu
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.patricia.ParallelStoredMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 
@@ -53,7 +54,7 @@ public class BalStateRootCalculator {
       final BlockHeader blockHeader,
       final BlockAccessList bal) {
     return computeAsync(
-        protocolContext, blockHeader, bal, Optional.empty(), ForkJoinPool.commonPool());
+        protocolContext, blockHeader, bal, Optional.empty(), ParallelStoredMerklePatriciaTrie.FORK_JOIN_POOL);
   }
 
   /**

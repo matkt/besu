@@ -61,7 +61,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
    * Shared ForkJoinPool with 2x cores for I/O-bound operations. This choice was validated by
    * testing, and that ForkJoinPool performed best despite not being an obvious fit.
    */
-  private static final ForkJoinPool FORK_JOIN_POOL = new ForkJoinPool(NCPU * 2);
+  public static final ForkJoinPool FORK_JOIN_POOL = new ForkJoinPool(NCPU * 2);
 
   /** Pending updates accumulated between commits */
   private final Map<K, Optional<V>> pendingUpdates = new ConcurrentHashMap<>();
