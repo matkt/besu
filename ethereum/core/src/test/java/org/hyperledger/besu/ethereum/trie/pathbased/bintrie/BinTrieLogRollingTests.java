@@ -34,6 +34,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWor
 import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
+import org.hyperledger.besu.ethereum.worldstate.BinTrieFlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
@@ -174,7 +175,7 @@ class BinTrieLogRollingTests {
                 ImmutablePathBasedExtraStorageConfiguration.builder()
                     .unstable(
                         ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
-                            .fullFlatDbEnabled(true)
+                            .binTrieFlatDbMode(BinTrieFlatDbMode.FULL)
                             .codeStoredByCodeHashEnabled(true)
                             .build())
                     .build())
@@ -188,7 +189,7 @@ class BinTrieLogRollingTests {
                 ImmutablePathBasedExtraStorageConfiguration.builder()
                     .unstable(
                         ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
-                            .fullFlatDbEnabled(false)
+                            .binTrieFlatDbMode(BinTrieFlatDbMode.STEM)
                             .codeStoredByCodeHashEnabled(true)
                             .build())
                     .build())

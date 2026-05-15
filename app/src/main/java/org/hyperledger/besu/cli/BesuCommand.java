@@ -1961,14 +1961,14 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
       logger.warn("--sync-min-peers is ignored in FULL sync-mode");
     }
 
+    final DataStorageConfiguration snapFlatDataStorage = dataStorageOptions.toDomainObject();
     CommandLineUtils.failIfOptionDoesntMeetRequirement(
         commandLine,
-        "--Xsnapsync-synchronizer-flat option can only be used when --Xbonsai-full-flat-db-enabled is true",
-        dataStorageOptions
-            .toDomainObject()
+        "--Xsnapsync-synchronizer-flat options require full flat DB (Bonsai: "
+            + "--Xbonsai-full-flat-db-enabled=true, BinTrie: --Xbintrie-flat-db-mode=FULL)",
+        snapFlatDataStorage
             .getPathBasedExtraStorageConfiguration()
-            .getUnstable()
-            .getFullFlatDbEnabled(),
+            .isSnapSynchronizerFlatModeCompatible(snapFlatDataStorage.getDataStorageFormat()),
         asList(
             "--Xsnapsync-synchronizer-flat-account-healed-count-per-request",
             "--Xsnapsync-synchronizer-flat-slot-healed-count-per-request"));

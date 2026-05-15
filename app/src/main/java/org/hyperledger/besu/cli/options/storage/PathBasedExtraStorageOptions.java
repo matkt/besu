@@ -25,6 +25,7 @@ import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConf
 
 import org.hyperledger.besu.cli.options.CLIOptions;
 import org.hyperledger.besu.cli.util.CommandLineUtils;
+import org.hyperledger.besu.ethereum.worldstate.BinTrieFlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -117,6 +118,13 @@ public class PathBasedExtraStorageOptions
             "Enables code storage using code hash instead of by account hash. (default: ${DEFAULT-VALUE})")
     private boolean codeUsingCodeHashEnabled = DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 
+    @Option(
+        hidden = true,
+        names = {"--Xbintrie-flat-db-mode"},
+        description =
+            "BinTrie flat database layout: STEM (default) or FULL. Snap-sync flat healing requires FULL. (default: ${DEFAULT-VALUE})")
+    private BinTrieFlatDbMode binTrieFlatDbMode = BinTrieFlatDbMode.STEM;
+
     /** Default Constructor. */
     Unstable() {}
   }
@@ -182,6 +190,8 @@ public class PathBasedExtraStorageOptions
     dataStorageOptions.trieLogPruningWindowSize = domainObject.getTrieLogPruningWindowSize();
     dataStorageOptions.unstableOptions.fullFlatDbEnabled =
         domainObject.getUnstable().getFullFlatDbEnabled();
+    dataStorageOptions.unstableOptions.binTrieFlatDbMode =
+        domainObject.getUnstable().getBinTrieFlatDbMode();
     dataStorageOptions.unstableOptions.codeUsingCodeHashEnabled =
         domainObject.getUnstable().getCodeStoredByCodeHashEnabled();
     dataStorageOptions.isParallelTxProcessingEnabled =
@@ -203,6 +213,7 @@ public class PathBasedExtraStorageOptions
         .unstable(
             ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
                 .fullFlatDbEnabled(unstableOptions.fullFlatDbEnabled)
+                .binTrieFlatDbMode(unstableOptions.binTrieFlatDbMode)
                 .codeStoredByCodeHashEnabled(unstableOptions.codeUsingCodeHashEnabled)
                 .build())
         .build();

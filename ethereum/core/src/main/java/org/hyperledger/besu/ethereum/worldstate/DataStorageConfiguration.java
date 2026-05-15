@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.worldstate;
 
-import org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import org.immutables.value.Value;
@@ -44,7 +43,7 @@ public interface DataStorageConfiguration {
           .dataStorageFormat(DataStorageFormat.BONSAI)
           .pathBasedExtraStorageConfiguration(
               ImmutablePathBasedExtraStorageConfiguration.builder()
-                  .unstable(PathBasedUnstable.PARTIAL_MODE)
+                  .unstable(PathBasedExtraStorageConfiguration.PathBasedUnstable.PARTIAL_MODE)
                   .build())
           .build();
 
@@ -57,7 +56,6 @@ public interface DataStorageConfiguration {
   DataStorageConfiguration DEFAULT_BINTRIE_CONFIG =
       ImmutableDataStorageConfiguration.builder()
           .dataStorageFormat(DataStorageFormat.BINTRIE)
-          .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DEFAULT)
           .build();
 
   DataStorageFormat getDataStorageFormat();

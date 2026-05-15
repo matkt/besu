@@ -81,8 +81,8 @@ class BinTrieWorldStateKeyValueStorageTest {
   }
 
   @Test
-  void shouldReturnFullFlatDbMode() {
-    assertThat(storage.getFlatDbMode()).isEqualTo(FlatDbMode.FULL);
+  void shouldReturnStemFlatDbModeByDefault() {
+    assertThat(storage.getFlatDbMode()).isEqualTo(FlatDbMode.STEM);
   }
 
   @Test

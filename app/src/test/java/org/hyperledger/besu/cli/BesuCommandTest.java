@@ -2565,7 +2565,8 @@ public class BesuCommandTest extends CommandTestAbstract {
         "100");
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains(
-            "--Xsnapsync-synchronizer-flat option can only be used when --Xbonsai-full-flat-db-enabled is true");
+            "--Xsnapsync-synchronizer-flat options require full flat DB (Bonsai: "
+                + "--Xbonsai-full-flat-db-enabled=true, BinTrie: --Xbintrie-flat-db-mode=FULL)");
 
     parseCommand(
         "--Xbonsai-full-flat-db-enabled",
@@ -2574,7 +2575,8 @@ public class BesuCommandTest extends CommandTestAbstract {
         "100");
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains(
-            "--Xsnapsync-synchronizer-flat option can only be used when --Xbonsai-full-flat-db-enabled is true");
+            "--Xsnapsync-synchronizer-flat options require full flat DB (Bonsai: "
+                + "--Xbonsai-full-flat-db-enabled=true, BinTrie: --Xbintrie-flat-db-mode=FULL)");
   }
 
   @Test

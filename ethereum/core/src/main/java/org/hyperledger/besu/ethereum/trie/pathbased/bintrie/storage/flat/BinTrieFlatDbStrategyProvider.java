@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.flat;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategyProvider;
+import org.hyperledger.besu.ethereum.worldstate.BinTrieFlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -47,9 +48,10 @@ public class BinTrieFlatDbStrategyProvider extends FlatDbStrategyProvider {
   protected FlatDbMode getRequestedFlatDbMode(
       final DataStorageConfiguration dataStorageConfiguration) {
     return dataStorageConfiguration
-            .getPathBasedExtraStorageConfiguration()
-            .getUnstable()
-            .getFullFlatDbEnabled()
+                .getPathBasedExtraStorageConfiguration()
+                .getUnstable()
+                .getBinTrieFlatDbMode()
+            == BinTrieFlatDbMode.FULL
         ? FlatDbMode.FULL
         : FlatDbMode.STEM;
   }

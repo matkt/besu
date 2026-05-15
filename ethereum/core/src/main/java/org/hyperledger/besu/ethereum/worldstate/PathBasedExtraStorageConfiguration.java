@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.worldstate;
 
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
+
 import org.immutables.value.Value;
 
 @Value.Immutable
@@ -68,29 +70,51 @@ public interface PathBasedExtraStorageConfiguration {
     return PathBasedUnstable.DEFAULT;
   }
 
+  /**
+   * Whether snap-sync flat healing options are allowed for the given storage format (requires a
+   * full flat layout for Bonsai and BinTrie FULL mode for {@link DataStorageFormat#BINTRIE}).
+   */
+  default boolean isSnapSynchronizerFlatModeCompatible(final DataStorageFormat dataStorageFormat) {
+    return switch (dataStorageFormat) {
+      case BONSAI, X_BONSAI_ARCHIVE -> getUnstable().getFullFlatDbEnabled();
+      case BINTRIE -> getUnstable().getBinTrieFlatDbMode() == BinTrieFlatDbMode.FULL;
+      default -> false;
+    };
+  }
+
   @Value.Immutable
   interface PathBasedUnstable {
 
     PathBasedExtraStorageConfiguration.PathBasedUnstable DEFAULT =
-        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder().build();
+        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+            .binTrieFlatDbMode(BinTrieFlatDbMode.STEM)
+            .build();
 
     PathBasedExtraStorageConfiguration.PathBasedUnstable PARTIAL_MODE =
         ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
             .fullFlatDbEnabled(false)
+            .binTrieFlatDbMode(BinTrieFlatDbMode.STEM)
             .build();
 
     PathBasedExtraStorageConfiguration.PathBasedUnstable DISABLED =
         ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
             .fullFlatDbEnabled(false)
             .codeStoredByCodeHashEnabled(false)
+            .binTrieFlatDbMode(BinTrieFlatDbMode.STEM)
             .build();
 
     boolean DEFAULT_FULL_FLAT_DB_ENABLED = true;
     boolean DEFAULT_CODE_USING_CODE_HASH_ENABLED = true;
+    BinTrieFlatDbMode DEFAULT_BINTRIE_FLAT_DB_MODE = BinTrieFlatDbMode.STEM;
 
     @Value.Default
     default boolean getFullFlatDbEnabled() {
       return DEFAULT_FULL_FLAT_DB_ENABLED;
+    }
+
+    @Value.Default
+    default BinTrieFlatDbMode getBinTrieFlatDbMode() {
+      return DEFAULT_BINTRIE_FLAT_DB_MODE;
     }
 
     @Value.Default
