@@ -26,6 +26,7 @@ import org.hyperledger.besu.datatypes.VersionedHash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
+import org.hyperledger.besu.evm.gascalculator.stateless.Eip4762AccessWitness;
 import org.hyperledger.besu.evm.internal.MemoryEntry;
 import org.hyperledger.besu.evm.internal.OperandStack;
 import org.hyperledger.besu.evm.internal.StorageEntry;
@@ -876,6 +877,15 @@ public class MessageFrame {
   }
 
   /**
+   * Returns the EIP-4762 access witness for this transaction, or null if not applicable.
+   *
+   * @return the {@link Eip4762AccessWitness}, or null
+   */
+  public Eip4762AccessWitness getAccessWitness() {
+    return txValues.eip4762Witness();
+  }
+
+  /**
    * Add refund to the refunds map if not already present.
    *
    * @param beneficiary the beneficiary of the refund.
@@ -1303,6 +1313,8 @@ public class MessageFrame {
 
     private Optional<List<VersionedHash>> versionedHashes = Optional.empty();
 
+    private Eip4762AccessWitness eip4762Witness = null;
+
     /** Instantiates a new Builder. */
     public Builder() {
       // constructor added to deal with JavaDoc linting rules.
@@ -1596,6 +1608,17 @@ public class MessageFrame {
       return this;
     }
 
+    /**
+     * Sets the EIP-4762 access witness for BinTrie gas accounting.
+     *
+     * @param witness the access witness
+     * @return the builder
+     */
+    public Builder eip4762Witness(final Eip4762AccessWitness witness) {
+      this.eip4762Witness = witness;
+      return this;
+    }
+
     private void validate() {
       if (parentMessageFrame == null) {
         checkState(worldUpdater != null, "Missing message frame world updater");
@@ -1649,7 +1672,8 @@ public class MessageFrame {
                 UndoTable.of(HashBasedTable.create()),
                 UndoSet.of(new HashSet<>()),
                 UndoSet.of(new HashSet<>()),
-                new UndoScalar<>(0L));
+                new UndoScalar<>(0L),
+                eip4762Witness);
         updater = worldUpdater;
         newStatic = isStatic;
       } else {

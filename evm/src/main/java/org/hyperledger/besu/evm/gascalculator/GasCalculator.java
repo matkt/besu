@@ -672,4 +672,202 @@ public interface GasCalculator {
       final MessageFrame frame, final Account targetAccount) {
     return 0L;
   }
+
+  // ---- Frame-aware methods for EIP-4762 / BinTrie witness gas accounting ----
+
+  /**
+   * Returns an optional new AccessWitness for this transaction. Non-BinTrie calculators return
+   * null.
+   *
+   * @return a new AccessWitness, or null if not applicable
+   */
+  default org.hyperledger.besu.datatypes.AccessWitness newAccessWitness() {
+    return null;
+  }
+
+  /**
+   * Returns the cost for a BALANCE operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param accountIsWarm whether the account is warm
+   * @param address the address being accessed
+   * @return the gas cost
+   */
+  default long balanceOperationGasCost(
+      final MessageFrame frame, final boolean accountIsWarm, final Address address) {
+    return getBalanceOperationGasCost();
+  }
+
+  /**
+   * Returns the cost for an EXTCODEHASH operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param accountIsWarm whether the account is warm
+   * @param address the address being accessed
+   * @return the gas cost
+   */
+  default long extCodeHashOperationGasCost(
+      final MessageFrame frame, final boolean accountIsWarm, final Address address) {
+    return extCodeHashOperationGasCost();
+  }
+
+  /**
+   * Returns the cost for an EXTCODESIZE operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param accountIsWarm whether the account is warm
+   * @param address the address being accessed
+   * @return the gas cost
+   */
+  default long extCodeSizeOperationGasCost(
+      final MessageFrame frame, final boolean accountIsWarm, final Address address) {
+    return getExtCodeSizeOperationGasCost();
+  }
+
+  /**
+   * Returns the cost for a SELFDESTRUCT operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param recipient the recipient account (may be null)
+   * @param recipientAddress the recipient address
+   * @param value the value being transferred
+   * @param originatorAddress the originator address
+   * @return the gas cost
+   */
+  default long selfDestructOperationGasCost(
+      final MessageFrame frame,
+      final Account recipient,
+      final Address recipientAddress,
+      final Wei value,
+      final Address originatorAddress) {
+    return selfDestructOperationGasCost(recipient, value);
+  }
+
+  /**
+   * Returns the cost for code deposit during contract creation, potentially charging an access
+   * witness.
+   *
+   * @param frame the current message frame
+   * @param codeSize the size of the code in bytes
+   * @return the gas cost
+   */
+  default long codeDepositGasCost(final MessageFrame frame, final int codeSize) {
+    return codeDepositGasCost(codeSize);
+  }
+
+  /**
+   * Returns the cost for completing contract creation (touching all code chunks), potentially
+   * charging an access witness.
+   *
+   * @param frame the current message frame
+   * @return the gas cost
+   */
+  default long completedCreateContractGasCost(final MessageFrame frame) {
+    return 0L;
+  }
+
+  /**
+   * Returns the cost to prove absence of an account (for CREATE operations), potentially charging
+   * an access witness.
+   *
+   * @param frame the current message frame
+   * @param address the address being checked
+   * @return the gas cost
+   */
+  default long proofOfAbsenceCost(final MessageFrame frame, final Address address) {
+    return 0L;
+  }
+
+  /**
+   * Returns the cost for an EXTCODECOPY operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param address the target address
+   * @param accountIsWarm whether the account is warm
+   * @param memOffset the memory offset for the copy
+   * @param codeOffset the offset in code to start copying from
+   * @param readSize the number of bytes to read
+   * @param codeSize the total size of the target code
+   * @return the gas cost
+   */
+  default long extCodeCopyOperationGasCost(
+      final MessageFrame frame,
+      final Address address,
+      final boolean accountIsWarm,
+      final long memOffset,
+      final long codeOffset,
+      final long readSize,
+      final long codeSize) {
+    return extCodeCopyOperationGasCost(frame, memOffset, readSize);
+  }
+
+  /**
+   * Returns the cost for a CODECOPY operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param memOffset the memory offset for the copy
+   * @param codeOffset the offset in code to start copying from
+   * @param readSize the number of bytes to read
+   * @param codeSize the total size of the code
+   * @return the gas cost
+   */
+  default long codeCopyOperationGasCost(
+      final MessageFrame frame,
+      final long memOffset,
+      final long codeOffset,
+      final long readSize,
+      final long codeSize) {
+    return dataCopyOperationGasCost(frame, memOffset, readSize);
+  }
+
+  /**
+   * Returns the cost for a PUSH operation, potentially charging an access witness for code chunk
+   * reads.
+   *
+   * @param frame the current message frame
+   * @param codeOffset the code offset of the PUSH instruction
+   * @param readSize the number of bytes to push
+   * @param codeSize the total code size
+   * @return the gas cost
+   */
+  default long pushOperationGasCost(
+      final MessageFrame frame, final long codeOffset, final long readSize, final long codeSize) {
+    return getVeryLowTierGasCost();
+  }
+
+  /**
+   * Returns the cost for an SLOAD operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param key the storage key
+   * @param slotIsWarm whether the slot is warm
+   * @return the gas cost
+   */
+  default long sloadOperationGasCost(
+      final MessageFrame frame, final UInt256 key, final boolean slotIsWarm) {
+    if (slotIsWarm) {
+      return getWarmStorageReadCost();
+    } else {
+      return getColdSloadCost();
+    }
+  }
+
+  /**
+   * Returns the cost for an SSTORE operation, potentially charging an access witness.
+   *
+   * @param frame the current message frame
+   * @param key the storage key
+   * @param newValue the new value
+   * @param currentValue the supplier of the current value
+   * @param originalValue the supplier of the original value
+   * @return the gas cost
+   */
+  default long calculateStorageCost(
+      final MessageFrame frame,
+      final UInt256 key,
+      final UInt256 newValue,
+      final Supplier<UInt256> currentValue,
+      final Supplier<UInt256> originalValue) {
+    return calculateStorageCost(newValue, currentValue, originalValue);
+  }
 }

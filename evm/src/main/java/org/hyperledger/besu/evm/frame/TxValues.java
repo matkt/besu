@@ -21,6 +21,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.VersionedHash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
+import org.hyperledger.besu.evm.gascalculator.stateless.Eip4762AccessWitness;
 
 import java.util.Deque;
 import java.util.List;
@@ -48,6 +49,7 @@ import org.apache.tuweni.bytes.Bytes32;
  * @param creates The set of addresses that creates
  * @param selfDestructs The set of addresses that self-destructs
  * @param gasRefunds The gas refunds
+ * @param eip4762Witness The optional EIP-4762 access witness for BinTrie gas accounting
  */
 public record TxValues(
     BlockHashLookup blockHashLookup,
@@ -64,7 +66,8 @@ public record TxValues(
     UndoTable<Address, Bytes32, Bytes32> transientStorage,
     UndoSet<Address> creates,
     UndoSet<Address> selfDestructs,
-    UndoScalar<Long> gasRefunds) {
+    UndoScalar<Long> gasRefunds,
+    Eip4762AccessWitness eip4762Witness) {
 
   /**
    * For all data stored in this record, undo the changes since the mark.

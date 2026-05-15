@@ -21,6 +21,9 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.cache.NoOpBinTrieCachedWorldStorageManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.storage.BinTrieWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bintrie.worldview.BinTrieWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.NoOpBonsaiCachedWorldStorageManager;
@@ -55,6 +58,10 @@ public class GenesisWorldStateProvider {
         == DataStorageFormat.X_BONSAI_ARCHIVE) {
       return createGenesisBonsaiWorldState(
           DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache);
+    } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
+        == DataStorageFormat.BINTRIE) {
+      return createGenesisBinTrieWorldState(
+          DataStorageConfiguration.DEFAULT_BINTRIE_CONFIG, codeCache);
     } else {
       return createGenesisForestWorldState();
     }
@@ -82,6 +89,31 @@ public class GenesisWorldStateProvider {
         bonsaiCachedMerkleTrieLoader,
         new NoOpBonsaiCachedWorldStorageManager(
             bonsaiWorldStateKeyValueStorage, EvmConfiguration.DEFAULT, codeCache),
+        new NoOpTrieLogManager(),
+        EvmConfiguration.DEFAULT,
+        createStatefulConfigWithTrie(),
+        codeCache);
+  }
+
+  /**
+   * Creates a Genesis world state using the BinTrie data storage format.
+   *
+   * @return a mutable world state for the Genesis block
+   */
+  private static MutableWorldState createGenesisBinTrieWorldState(
+      final DataStorageConfiguration storageConfiguration, final CodeCache codeCache) {
+    final BinTrieWorldStateKeyValueStorage binTrieWorldStateKeyValueStorage =
+        new BinTrieWorldStateKeyValueStorage(
+            new KeyValueStorageProvider(
+                segmentIdentifiers -> new SegmentedInMemoryKeyValueStorage(),
+                new InMemoryKeyValueStorage(),
+                new NoOpMetricsSystem()),
+            new NoOpMetricsSystem(),
+            storageConfiguration);
+    return new BinTrieWorldState(
+        binTrieWorldStateKeyValueStorage,
+        new NoOpBinTrieCachedWorldStorageManager(
+            binTrieWorldStateKeyValueStorage, EvmConfiguration.DEFAULT, codeCache),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
         createStatefulConfigWithTrie(),

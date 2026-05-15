@@ -38,6 +38,7 @@ import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
+import org.hyperledger.besu.evm.gascalculator.stateless.Eip4762AccessWitness;
 import org.hyperledger.besu.evm.log.TransferLogEmitter;
 import org.hyperledger.besu.evm.processor.AbstractMessageProcessor;
 import org.hyperledger.besu.evm.processor.ContractCreationProcessor;
@@ -317,6 +318,10 @@ public class MainnetTransactionProcessor {
           transaction.getGasLimit(),
           intrinsicGas);
 
+      final Eip4762AccessWitness newWitness =
+          (Eip4762AccessWitness) gasCalculator.newAccessWitness();
+      newWitness.touchBaseTx(senderAddress, transaction.getTo(), transaction.getValue());
+
       final WorldUpdater worldUpdater = worldState.updater();
 
       operationTracer.traceStartTransaction(worldUpdater, transaction);
@@ -336,6 +341,7 @@ public class MainnetTransactionProcessor {
               .completer(__ -> {})
               .miningBeneficiary(miningBeneficiary)
               .blockHashLookup(blockHashLookup)
+              .eip4762Witness(newWitness)
               .eip2930AccessListWarmStorage(eip2930StorageList);
 
       accessLocationTracker.ifPresent(commonMessageFrameBuilder::eip7928AccessList);

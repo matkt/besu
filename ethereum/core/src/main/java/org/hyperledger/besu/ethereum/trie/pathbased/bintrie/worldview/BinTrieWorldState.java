@@ -39,7 +39,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
-import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -51,8 +50,6 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.jspecify.annotations.NonNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * World state implementation using Binary Trie structure.
@@ -61,8 +58,6 @@ import org.slf4j.LoggerFactory;
  * with account and storage data embedded.
  */
 public class BinTrieWorldState extends PathBasedWorldState {
-
-  private static final Logger LOG = LoggerFactory.getLogger(BinTrieWorldState.class);
 
   private final CodeCache codeCache;
   private final TrieKeyFactory trieKeyFactory;
@@ -147,67 +142,6 @@ public class BinTrieWorldState extends PathBasedWorldState {
   }
 
   @Override
-  public void persist(final BlockHeader blockHeader) {
-    LOG.atDebug()
-        .setMessage("Persist world state for block {}")
-        .addArgument(() -> blockHeader)
-        .log();
-
-    boolean success = false;
-    final PathBasedWorldStateKeyValueStorage.Updater stateUpdater =
-        worldStateKeyValueStorage.updater();
-    Runnable saveTrieLog = () -> {};
-
-    try {
-      final Hash calculatedRootHash;
-      if (blockHeader == null) {
-        // No block header: calculate root from current state unless storage is frozen
-        calculatedRootHash =
-            calculateRootHash(
-                isStorageFrozen ? Optional.empty() : Optional.of(stateUpdater), accumulator);
-      } else if (!worldStateConfig.isTrieDisabled()) {
-        // Normal case: calculate root using the block header
-        calculatedRootHash = unsafeRootHashUpdate(blockHeader, stateUpdater);
-      } else {
-        // Trie is disabled: fallback to block's root hash, assuming trusted context
-        calculatedRootHash = unsafeRootHashUpdate(blockHeader, stateUpdater);
-      }
-
-      if (blockHeader != null) {
-        verifyWorldStateRoot(calculatedRootHash, blockHeader);
-        final PathBasedWorldStateUpdateAccumulator<?> localCopy = accumulator.copy();
-        saveTrieLog =
-            () -> {
-              trieLogManager.saveTrieLog(localCopy, calculatedRootHash, blockHeader, this);
-              if (!isStorageFrozen) {
-                cachedWorldStorageManager.addCachedLayer(blockHeader, calculatedRootHash, this);
-              }
-            };
-        stateUpdater.saveWorldState(
-            blockHeader.getBlockHash().getBytes(),
-            Bytes32.wrap(calculatedRootHash.getBytes()),
-            Bytes.EMPTY);
-        worldStateBlockHash = blockHeader.getBlockHash();
-      } else {
-        stateUpdater.saveWorldState(
-            Hash.ZERO.getBytes(), Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes()), Bytes.EMPTY);
-        worldStateBlockHash = Hash.ZERO;
-      }
-      worldStateRootHash = calculatedRootHash;
-      success = true;
-    } finally {
-      if (success) {
-        stateUpdater.commit();
-        accumulator.reset();
-        saveTrieLog.run();
-      } else {
-        stateUpdater.rollback();
-        accumulator.reset();
-      }
-    }
-  }
-
-  @Override
   public Hash calculateRootHash(
       final Optional<PathBasedWorldStateKeyValueStorage.Updater> maybeStateUpdater,
       final PathBasedWorldStateUpdateAccumulator<?> worldStateUpdater) {
@@ -238,7 +172,9 @@ public class BinTrieWorldState extends PathBasedWorldState {
                     tx.put(BINTRIE_BRANCH_STORAGE, location.toArrayUnsafe(), value.toArrayUnsafe());
                   }
                 }));
-
+    stateTrie.getRootHash();
+    System.out.println("rootHash: " + stateTrie.getRootHash());
+    // System.out.println(stateTrie.toDotTree());
     return Hash.wrap(stateTrie.getRootHash());
   }
 
@@ -264,7 +200,6 @@ public class BinTrieWorldState extends PathBasedWorldState {
         applyCodeUpdates(address, leafBuilder, maybeUpdater, worldStateUpdater);
     final boolean hasStorageUpdate =
         applyStorageUpdates(address, leafBuilder, maybeUpdater, worldStateUpdater);
-
     applyAccountUpdates(
         address, leafBuilder, hasStorageUpdate, hasCodeUpdate, maybeUpdater, worldStateUpdater);
 
@@ -325,7 +260,7 @@ public class BinTrieWorldState extends PathBasedWorldState {
 
     for (final var entry : storageUpdates.entrySet()) {
       final PathBasedValue<UInt256> storageData = entry.getValue();
-      if (storageData.isUnchanged()) {
+      if (isStorageNoOp(storageData)) {
         continue;
       }
 
@@ -333,7 +268,6 @@ public class BinTrieWorldState extends PathBasedWorldState {
       final StorageSlotKey slotKey = entry.getKey();
       final Hash slotHash = slotKey.getSlotHash();
       final UInt256 newValue = storageData.getUpdated();
-
       if (newValue == null) {
         leafBuilder.addStorageRemoval(address, slotKey);
         maybeUpdater.ifPresent(u -> u.removeStorageValueBySlotHash(addressHash, slotHash));
@@ -446,6 +380,11 @@ public class BinTrieWorldState extends PathBasedWorldState {
                 () -> storageUpdate.setPrior(null));
       }
     }
+  }
+
+  private static boolean isStorageNoOp(final PathBasedValue<UInt256> storageData) {
+    return storageData.isUnchanged()
+        || (storageData.getPrior() == null && UInt256.ZERO.equals(storageData.getUpdated()));
   }
 
   private static boolean isEmpty(final Bytes value) {

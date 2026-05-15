@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecAdapters;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
 import org.hyperledger.besu.ethereum.storage.keyvalue.VariablesKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.cache.CodeCache;
+import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -59,9 +60,14 @@ public class ExecutionContextTestFixture {
       final ProtocolSchedule protocolSchedule,
       final KeyValueStorage blockchainKeyValueStorage,
       final KeyValueStorage variablesKeyValueStorage,
-      final Optional<DataStorageFormat> dataStorageFormat) {
+      final Optional<DataStorageFormat> dataStorageFormat,
+      final Optional<DataStorageConfiguration> dataStorageConfiguration) {
     final GenesisState genesisState =
-        GenesisState.fromConfig(genesisConfig, protocolSchedule, new CodeCache());
+        GenesisState.fromConfig(
+            dataStorageConfiguration.orElse(DataStorageConfiguration.DEFAULT_CONFIG),
+            genesisConfig,
+            protocolSchedule,
+            new CodeCache());
     this.genesis = genesisState.getBlock();
     this.blockchainKeyValueStorage = blockchainKeyValueStorage;
     this.variablesKeyValueStorage = variablesKeyValueStorage;
@@ -138,6 +144,7 @@ public class ExecutionContextTestFixture {
     private KeyValueStorage blockchainKeyValueStorage;
     private ProtocolSchedule protocolSchedule;
     private Optional<DataStorageFormat> dataStorageFormat = Optional.empty();
+    private Optional<DataStorageConfiguration> dataStorageConfiguration = Optional.empty();
 
     public Builder(final GenesisConfig genesisConfig) {
       this.genesisConfig = genesisConfig;
@@ -160,6 +167,12 @@ public class ExecutionContextTestFixture {
 
     public Builder dataStorageFormat(final DataStorageFormat dataStorageFormat) {
       this.dataStorageFormat = Optional.of(dataStorageFormat);
+      return this;
+    }
+
+    public Builder dataStorageConfiguration(
+        final DataStorageConfiguration dataStorageConfiguration) {
+      this.dataStorageConfiguration = Optional.of(dataStorageConfiguration);
       return this;
     }
 
@@ -191,7 +204,8 @@ public class ExecutionContextTestFixture {
           protocolSchedule,
           blockchainKeyValueStorage,
           variablesKeyValueStorage,
-          dataStorageFormat);
+          dataStorageFormat,
+          dataStorageConfiguration);
     }
   }
 }
