@@ -173,7 +173,7 @@ dependencies {
 
     api 'org.owasp.encoder:encoder:1.4.0'
 
-    api 'io.github.mirgee:rocksdbjni:10.10.1-c1'
+    api 'io.github.mirgee:rocksdbjni:10.2.1-c0'
 
     api 'org.springframework.security:spring-security-crypto:6.4.9'
 
