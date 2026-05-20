@@ -63,7 +63,7 @@ dependencies {
   implementation 'io.vertx:vertx-core'
   implementation 'org.apache.commons:commons-lang3'
   implementation 'org.apache.commons:commons-collections4'
-  implementation 'org.rocksdb:rocksdbjni'
+  implementation 'io.github.mirgee:rocksdbjni'
   annotationProcessor 'com.google.dagger:dagger-compiler'
 
   annotationProcessor "org.immutables:value"
