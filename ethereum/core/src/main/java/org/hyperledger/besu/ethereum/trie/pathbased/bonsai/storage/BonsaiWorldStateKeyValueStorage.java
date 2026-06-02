@@ -544,10 +544,12 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final int batchSize = pendingFrozenTrieNodePuts.size();
       worldStateStorage.frozenSnapTrieNodeStorage.putAll(pendingFrozenTrieNodePuts);
       pendingFrozenTrieNodePuts.clear();
+      final long mapSize = worldStateStorage.frozenSnapTrieNodeStorage.entryCount();
+      worldStateStorage.frozenSnapTrieNodeStorage.releaseMappedMemoryAfterFlush();
       LOG.info(
           "Flushed {} snap-sync trie nodes to frozen Chronicle Map (longSize={})",
           batchSize,
-          worldStateStorage.frozenSnapTrieNodeStorage.entryCount());
+          mapSize);
     }
 
     public synchronized Updater putStorageValueBySlotHash(

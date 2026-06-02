@@ -38,11 +38,6 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
 
   private static final String FROZEN_MARKER_FILE = ".frozen";
   private static final String MAP_FILE_NAME = "snap_trie_nodes.dat";
-  private static final int KEY_SIZE_BYTES = 32;
-  /** Typical MPT node size; Chronicle Map uses this for on-disk sizing estimates. */
-  private static final int AVERAGE_VALUE_SIZE_BYTES = 128;
-  /** Upper bound on distinct trie nodes during snap sync (map file is pre-sized). */
-  private static final long DEFAULT_MAX_ENTRIES = 64_000_000L;
 
   private final Path directory;
   private ChronicleMap<byte[], byte[]> map;
@@ -66,8 +61,11 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     final boolean alreadyFrozen = Files.exists(directory.resolve(FROZEN_MARKER_FILE));
     final ChronicleMapFrozenSnapTrieNodeStorage storage =
         new ChronicleMapFrozenSnapTrieNodeStorage(directory);
-    storage.map = storage.openMap(alreadyFrozen);
     storage.frozen.set(alreadyFrozen);
+    if (alreadyFrozen) {
+      storage.map = storage.openMap(true);
+    }
+    // Writable snap capture: lazy open until first put/flush to avoid mapping an empty store.
     if (!alreadyFrozen) {
       OPEN_WRITABLE.add(storage);
       registerShutdownHookIfNeeded();
@@ -84,10 +82,12 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
                     for (final ChronicleMapFrozenSnapTrieNodeStorage storage :
                         java.util.List.copyOf(OPEN_WRITABLE)) {
                       if (!storage.closed.get()) {
-                        LOG.info(
-                            "Shutdown hook closing frozen Chronicle Map at {} (longSize={})",
-                            storage.directory,
-                            storage.entryCount());
+                        if (storage.map != null) {
+                          LOG.info(
+                              "Shutdown hook closing frozen Chronicle Map at {} (longSize={})",
+                              storage.directory,
+                              storage.map.longSize());
+                        }
                         storage.close();
                       }
                     }
@@ -114,8 +114,17 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
   }
 
   @Override
+  public void releaseMappedMemoryAfterFlush() {
+    if (frozen.get() || closed.get() || map == null) {
+      return;
+    }
+    map.close();
+    map = null;
+  }
+
+  @Override
   public Optional<Bytes> get(final Bytes32 hash) {
-    ensureOpen();
+    ensureMapOpen();
     final byte[] value = map.get(keyBytes(hash));
     if (value == null) {
       return Optional.empty();
@@ -129,7 +138,7 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
       return;
     }
     OPEN_WRITABLE.remove(this);
-    ensureOpen();
+    ensureMapOpen();
     map.close();
     map = null;
     try {
@@ -148,7 +157,7 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
 
   @Override
   public long entryCount() {
-    ensureOpen();
+    ensureMapOpen();
     return map.longSize();
   }
 
@@ -163,12 +172,7 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
 
   private ChronicleMap<byte[], byte[]> openMap(final boolean readOnly) {
     final File mapFile = directory.resolve(MAP_FILE_NAME).toFile();
-    final ChronicleMapBuilder<byte[], byte[]> builder =
-        ChronicleMap.of(byte[].class, byte[].class)
-            .name("snap-trie-nodes")
-            .entries(DEFAULT_MAX_ENTRIES)
-            .averageKeySize(KEY_SIZE_BYTES)
-            .averageValueSize(AVERAGE_VALUE_SIZE_BYTES);
+    final ChronicleMapBuilder<byte[], byte[]> builder = FrozenSnapTrieNodeChronicleConfig.newBuilder();
     try {
       if (readOnly || mapFile.exists()) {
         return builder.recoverPersistedTo(mapFile, readOnly);
@@ -183,17 +187,20 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     if (frozen.get()) {
       throw new IllegalStateException("Frozen snap-sync trie node storage is read-only");
     }
-    ensureOpen();
+    ensureMapOpen();
   }
 
-  private void ensureOpen() {
+  private void ensureMapOpen() {
     if (closed.get()) {
       throw new IllegalStateException("Frozen snap-sync trie node storage is closed");
+    }
+    if (map == null) {
+      map = openMap(frozen.get());
     }
   }
 
   private static byte[] keyBytes(final Bytes32 hash) {
-    return Arrays.copyOf(hash.toArrayUnsafe(), KEY_SIZE_BYTES);
+    return Arrays.copyOf(hash.toArrayUnsafe(), FrozenSnapTrieNodeChronicleConfig.KEY_SIZE_BYTES);
   }
 
   private static byte[] valueBytes(final Bytes value) {

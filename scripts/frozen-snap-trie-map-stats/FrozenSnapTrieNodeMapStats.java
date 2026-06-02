@@ -19,17 +19,16 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import net.openhft.chronicle.map.ChronicleMap;
 
+import org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeChronicleConfig;
+
 /**
- * Read-only stats for {@code frozen_snap_trie_nodes/snap_trie_nodes.dat}. Builder settings must
- * match {@code ChronicleMapFrozenSnapTrieNodeStorage}.
+ * Read-only stats for {@code frozen_snap_trie_nodes/snap_trie_nodes.dat}. Uses {@link
+ * FrozenSnapTrieNodeChronicleConfig} (must match the Besu kvstore jar on the classpath).
  */
 public final class FrozenSnapTrieNodeMapStats {
 
   private static final String MAP_FILE_NAME = "snap_trie_nodes.dat";
   private static final String FROZEN_MARKER = ".frozen";
-  private static final int KEY_SIZE_BYTES = 32;
-  private static final int AVERAGE_VALUE_SIZE_BYTES = 128;
-  private static final long DEFAULT_MAX_ENTRIES = 64_000_000L;
 
   private FrozenSnapTrieNodeMapStats() {}
 
@@ -105,11 +104,6 @@ public final class FrozenSnapTrieNodeMapStats {
 
   private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile)
       throws java.io.IOException {
-    return ChronicleMap.of(byte[].class, byte[].class)
-        .name("snap-trie-nodes")
-        .entries(DEFAULT_MAX_ENTRIES)
-        .averageKeySize(KEY_SIZE_BYTES)
-        .averageValueSize(AVERAGE_VALUE_SIZE_BYTES)
-        .recoverPersistedTo(mapFile, true);
+    return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(mapFile, true);
   }
 }

@@ -52,6 +52,29 @@ class ChronicleMapFrozenSnapTrieNodeStorageTest {
   }
 
   @Test
+  void releaseMappedMemoryAfterFlushReopensOnNextAccess() {
+    final Bytes32 hash = Bytes32.random();
+    final Bytes node = Bytes.fromHexString("0x820120");
+    try (FrozenSnapTrieNodeStorage storage =
+        FrozenSnapTrieNodeStorage.open(tempDir.resolve("unmap"))) {
+      storage.put(hash, node);
+      storage.releaseMappedMemoryAfterFlush();
+      assertThat(storage.get(hash)).contains(node);
+    }
+  }
+
+  @Test
+  void putLargeBranchSizedNode() {
+    final Bytes32 hash = Bytes32.random();
+    final Bytes branchLikeNode = Bytes.repeat((byte) 0xab, 600);
+    try (FrozenSnapTrieNodeStorage storage =
+        FrozenSnapTrieNodeStorage.open(tempDir.resolve("large-branch"))) {
+      storage.put(hash, branchLikeNode);
+      assertThat(storage.get(hash)).contains(branchLikeNode);
+    }
+  }
+
+  @Test
   void putAllBatch() {
     final Bytes32 hash1 = Bytes32.fromHexString(
         "0x1111111111111111111111111111111111111111111111111111111111111111");
