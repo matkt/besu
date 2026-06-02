@@ -18,14 +18,17 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import net.openhft.chronicle.map.ChronicleMap;
@@ -35,8 +38,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Single-file Chronicle Map for snap-sync trie nodes. All map access runs on one writer thread so
- * parallel snap-sync pipeline threads can call {@link #putAll} without corrupting the map.
+ * {@value FrozenSnapTrieNodeChronicleConfig#NUM_SHARDS} Chronicle Map files; each shard has a
+ * dedicated writer thread so parallel snap-sync {@code commit()} flushes do not queue on one mmap.
  */
 public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNodeStorage {
 
@@ -44,31 +47,22 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
       LoggerFactory.getLogger(ChronicleMapFrozenSnapTrieNodeStorage.class);
 
   private static final String FROZEN_MARKER_FILE = ".frozen";
-  private static final String SHARD_FILE_GLOB_PREFIX = "snap_trie_nodes_";
 
   private final Path directory;
-  private final Path mapFile;
-  private final ExecutorService mapExecutor;
+  private final Shard[] shards;
   private final AtomicBoolean frozen = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
-  private final AtomicLong flushPutCount = new AtomicLong();
-
-  private volatile ChronicleMap<byte[], byte[]> map;
 
   private ChronicleMapFrozenSnapTrieNodeStorage(final Path directory, final boolean readOnly) {
     this.directory = directory;
-    this.mapFile = directory.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME);
-    this.mapExecutor =
-        Executors.newSingleThreadExecutor(
-            r -> {
-              final Thread t = new Thread(r, "frozen-snap-trie-map");
-              t.setDaemon(true);
-              return t;
-            });
     if (readOnly) {
       frozen.set(true);
-      if (Files.exists(mapFile)) {
-        map = runOnMapThread(() -> openMap(true));
+    }
+    this.shards = new Shard[FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS];
+    for (int i = 0; i < shards.length; i++) {
+      shards[i] = new Shard(i, directory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(i)));
+      if (readOnly && Files.exists(shards[i].mapFile)) {
+        shards[i].map = shards[i].openMap(true);
       }
     }
   }
@@ -80,41 +74,31 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
       throw new IllegalStateException(
           "Failed to create Chronicle Map directory " + directory, e);
     }
-    warnIfShardedMapsPresent(directory);
+    warnIfLegacySingleFilePresent(directory);
     final boolean alreadyFrozen = Files.exists(directory.resolve(FROZEN_MARKER_FILE));
     return new ChronicleMapFrozenSnapTrieNodeStorage(directory, alreadyFrozen);
   }
 
-  private static void warnIfShardedMapsPresent(final Path directory) {
-    try (var stream = Files.list(directory)) {
-      final boolean hasShards =
-          stream
-              .map(path -> path.getFileName().toString())
-              .anyMatch(
-                  name ->
-                      name.startsWith(SHARD_FILE_GLOB_PREFIX)
-                          && name.endsWith(".dat")
-                          && !name.equals(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME));
-      if (hasShards) {
-        LOG.warn(
-            "Sharded frozen trie map files detected under {}; delete the directory and re-run snap"
-                + " sync for single-file mode",
-            directory);
-      }
-    } catch (final IOException e) {
-      LOG.debug("Could not list {}", directory, e);
+  private static void warnIfLegacySingleFilePresent(final Path directory) {
+    final Path legacy = directory.resolve(FrozenSnapTrieNodeChronicleConfig.LEGACY_MAP_FILE_NAME);
+    if (Files.exists(legacy)) {
+      LOG.warn(
+          "Legacy single-file map {} found; delete {} and re-run snap sync for sharded storage",
+          legacy,
+          directory);
     }
   }
 
   @Override
   public void put(final Bytes32 hash, final Bytes value) {
-    runOnMapThread(
-        () -> {
-          ensureWritable();
-          ensureMapOpen(false).put(keyBytes(hash), valueBytes(value));
-          flushPutCount.incrementAndGet();
-          return null;
-        });
+    ensureWritable();
+    final int shard = FrozenSnapTrieNodeChronicleConfig.shardIndex(hash);
+    join(
+        shards[shard].run(
+            () -> {
+              shards[shard].ensureMapOpen(false).put(keyBytes(hash), valueBytes(value));
+              return null;
+            }));
   }
 
   @Override
@@ -122,29 +106,49 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     if (entries.isEmpty()) {
       return;
     }
-    runOnMapThread(
-        () -> {
-          ensureWritable();
-          final ChronicleMap<byte[], byte[]> openMap = ensureMapOpen(false);
-          try {
-            for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
-              openMap.put(keyBytes(entry.getKey()), valueBytes(entry.getValue()));
-            }
-          } catch (final IllegalStateException e) {
-            if (e.getMessage() != null && e.getMessage().contains("extra segment tier")) {
-              throw new IllegalStateException(
-                  e.getMessage()
-                      + "\nDelete "
-                      + directory
-                      + " and re-run snap sync after upgrading, or raise"
-                      + " FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES / MAX_BLOAT_FACTOR.",
-                  e);
-            }
-            throw e;
-          }
-          flushPutCount.addAndGet(entries.size());
-          return null;
-        });
+    ensureWritable();
+
+    final List<Map<Bytes32, Bytes>> byShard = new ArrayList<>();
+    for (int i = 0; i < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; i++) {
+      byShard.add(new HashMap<>());
+    }
+    for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
+      byShard.get(FrozenSnapTrieNodeChronicleConfig.shardIndex(entry.getKey()))
+          .put(entry.getKey(), entry.getValue());
+    }
+
+    final List<CompletableFuture<Void>> writes = new ArrayList<>();
+    for (int i = 0; i < byShard.size(); i++) {
+      final Map<Bytes32, Bytes> shardBatch = byShard.get(i);
+      if (shardBatch.isEmpty()) {
+        continue;
+      }
+      final Shard shard = shards[i];
+      writes.add(
+          CompletableFuture.runAsync(
+              () -> putAllOnShard(shard, shardBatch), shard.executor));
+    }
+    awaitAll(writes);
+  }
+
+  private void putAllOnShard(final Shard shard, final Map<Bytes32, Bytes> shardBatch) {
+    final ChronicleMap<byte[], byte[]> openMap = shard.ensureMapOpen(false);
+    try {
+      for (final Map.Entry<Bytes32, Bytes> entry : shardBatch.entrySet()) {
+        openMap.put(keyBytes(entry.getKey()), valueBytes(entry.getValue()));
+      }
+    } catch (final IllegalStateException e) {
+      if (e.getMessage() != null && e.getMessage().contains("extra segment tier")) {
+        throw new IllegalStateException(
+            e.getMessage()
+                + "\nDelete "
+                + directory
+                + " and re-run snap sync, or raise"
+                + " FrozenSnapTrieNodeChronicleConfig.TOTAL_ENTRIES / MAX_BLOAT_FACTOR.",
+            e);
+      }
+      throw e;
+    }
   }
 
   @Override
@@ -152,44 +156,62 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     if (closed.get()) {
       throw new IllegalStateException("Frozen snap-sync trie node storage is closed");
     }
-    return runOnMapThread(
-        () -> {
-          if (!Files.exists(mapFile)) {
-            return Optional.empty();
-          }
-          final byte[] value = ensureMapOpen(frozen.get()).get(keyBytes(hash));
-          if (value == null) {
-            return Optional.empty();
-          }
-          return Optional.of(Bytes.wrap(Arrays.copyOf(value, value.length)));
-        });
+    final Shard shard = shards[FrozenSnapTrieNodeChronicleConfig.shardIndex(hash)];
+    if (!Files.exists(shard.mapFile)) {
+      return Optional.empty();
+    }
+    return shard
+        .run(
+            () -> {
+              final byte[] value = shard.ensureMapOpen(frozen.get()).get(keyBytes(hash));
+              if (value == null) {
+                return Optional.<Bytes>empty();
+              }
+              return Optional.of(Bytes.wrap(Arrays.copyOf(value, value.length)));
+            })
+        .join();
   }
 
   @Override
   public void freeze() {
-    runOnMapThread(
-        () -> {
-          if (!frozen.compareAndSet(false, true)) {
-            return null;
-          }
-          if (map != null) {
-            map.close();
-            map = null;
-          }
-          try {
-            Files.createFile(directory.resolve(FROZEN_MARKER_FILE));
-          } catch (final IOException e) {
-            throw new IllegalStateException("Failed to write frozen marker at " + directory, e);
-          }
-          if (Files.exists(mapFile)) {
-            map = openMap(true);
-          }
-          LOG.info(
-              "Frozen snap-sync trie node Chronicle Map at {} (longSize={})",
-              directory,
-              entryCountOnMapThread());
-          return null;
-        });
+    if (!frozen.compareAndSet(false, true)) {
+      return;
+    }
+    final List<CompletableFuture<Void>> closeTasks = new ArrayList<>();
+    for (final Shard shard : shards) {
+      closeTasks.add(
+          CompletableFuture.runAsync(
+              () -> {
+                if (shard.map != null) {
+                  shard.map.close();
+                  shard.map = null;
+                }
+              },
+              shard.executor));
+    }
+    awaitAll(closeTasks);
+
+    try {
+      Files.createFile(directory.resolve(FROZEN_MARKER_FILE));
+    } catch (final IOException e) {
+      throw new IllegalStateException("Failed to write frozen marker at " + directory, e);
+    }
+
+    final List<CompletableFuture<Void>> reopen = new ArrayList<>();
+    for (final Shard shard : shards) {
+      if (!Files.exists(shard.mapFile)) {
+        continue;
+      }
+      reopen.add(
+          CompletableFuture.runAsync(() -> shard.map = shard.openMap(true), shard.executor));
+    }
+    awaitAll(reopen);
+
+    LOG.info(
+        "Frozen snap-sync trie node Chronicle Map at {} (shards={}, longSize={})",
+        directory,
+        FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS,
+        entryCount());
   }
 
   @Override
@@ -199,15 +221,18 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
 
   @Override
   public long entryCount() {
-    if (!Files.exists(mapFile)) {
-      return 0;
+    long total = 0;
+    final List<CompletableFuture<Long>> counts = new ArrayList<>();
+    for (final Shard shard : shards) {
+      if (!Files.exists(shard.mapFile)) {
+        continue;
+      }
+      counts.add(shard.run(() -> shard.ensureMapOpen(frozen.get()).longSize()));
     }
-    return runOnMapThread(this::entryCountOnMapThread);
-  }
-
-  /** Cumulative puts from flush batches (includes overwrites); cheap for logging. */
-  public long flushPutCount() {
-    return flushPutCount.get();
+    for (final CompletableFuture<Long> count : counts) {
+      total += count.join();
+    }
+    return total;
   }
 
   @Override
@@ -215,57 +240,29 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    runOnMapThread(
-        () -> {
-          if (map != null) {
-            map.close();
-            map = null;
-          }
-          return null;
-        });
-    mapExecutor.shutdown();
-    try {
-      if (!mapExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-        mapExecutor.shutdownNow();
-      }
-    } catch (final InterruptedException e) {
-      Thread.currentThread().interrupt();
-      mapExecutor.shutdownNow();
+    final List<CompletableFuture<Void>> tasks = new ArrayList<>();
+    for (final Shard shard : shards) {
+      tasks.add(
+          CompletableFuture.runAsync(
+              () -> {
+                if (shard.map != null) {
+                  shard.map.close();
+                  shard.map = null;
+                }
+                shard.executor.shutdown();
+              },
+              shard.executor));
     }
-  }
-
-  private long entryCountOnMapThread() {
-    return map == null ? 0 : map.longSize();
-  }
-
-  private ChronicleMap<byte[], byte[]> ensureMapOpen(final boolean readOnly) {
-    if (map == null) {
-      map = openMap(readOnly);
-    }
-    return map;
-  }
-
-  private ChronicleMap<byte[], byte[]> openMap(final boolean readOnly) {
-    final File file = mapFile.toFile();
-    try {
-      if (readOnly || file.exists()) {
-        return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(file, readOnly);
+    awaitAll(tasks);
+    for (final Shard shard : shards) {
+      try {
+        if (!shard.executor.awaitTermination(30, TimeUnit.SECONDS)) {
+          shard.executor.shutdownNow();
+        }
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        shard.executor.shutdownNow();
       }
-      final ChronicleMap<byte[], byte[]> created =
-          FrozenSnapTrieNodeChronicleConfig.newBuilder().createPersistedTo(file);
-      LOG.info(
-          "Created snap-sync trie Chronicle Map at {} (sparse={}, initialEntries={},"
-              + " maxBloatFactor={}, approxMaxEntries={})",
-          file,
-          FrozenSnapTrieNodeChronicleConfig.USE_SPARSE_FILE,
-          FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES,
-          FrozenSnapTrieNodeChronicleConfig.MAX_BLOAT_FACTOR,
-          (long)
-              (FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES
-                  * FrozenSnapTrieNodeChronicleConfig.MAX_BLOAT_FACTOR));
-      return created;
-    } catch (final IOException e) {
-      throw new IllegalStateException("Failed to open Chronicle Map at " + file, e);
     }
   }
 
@@ -278,14 +275,18 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     }
   }
 
-  private <T> T runOnMapThread(final Supplier<T> action) {
+  private static void awaitAll(final List<CompletableFuture<Void>> futures) {
+    join(CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)));
+  }
+
+  private static void join(final CompletableFuture<?> future) {
     try {
-      return mapExecutor.submit(action::get).get();
-    } catch (final Exception e) {
+      future.join();
+    } catch (final java.util.concurrent.CompletionException e) {
       if (e.getCause() instanceof RuntimeException runtime) {
         throw runtime;
       }
-      throw new IllegalStateException("Chronicle Map operation failed", e);
+      throw e;
     }
   }
 
@@ -296,5 +297,56 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
   private static byte[] valueBytes(final Bytes value) {
     final byte[] raw = value.toArrayUnsafe();
     return Arrays.copyOf(raw, raw.length);
+  }
+
+  private static final class Shard {
+    private final int index;
+    private final Path mapFile;
+    private final ExecutorService executor;
+    private ChronicleMap<byte[], byte[]> map;
+
+    private Shard(final int index, final Path mapFile) {
+      this.index = index;
+      this.mapFile = mapFile;
+      this.executor =
+          Executors.newSingleThreadExecutor(
+              r -> {
+                final Thread t = new Thread(r, "frozen-snap-trie-shard-" + index);
+                t.setDaemon(true);
+                return t;
+              });
+    }
+
+    private ChronicleMap<byte[], byte[]> ensureMapOpen(final boolean readOnly) {
+      if (map == null) {
+        map = openMap(readOnly);
+      }
+      return map;
+    }
+
+    private ChronicleMap<byte[], byte[]> openMap(final boolean readOnly) {
+      final File file = mapFile.toFile();
+      try {
+        if (readOnly || file.exists()) {
+          return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(index)
+              .recoverPersistedTo(file, readOnly);
+        }
+        final ChronicleMap<byte[], byte[]> created =
+            FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(index).createPersistedTo(file);
+        LOG.info(
+            "Created snap-sync trie shard {} at {} (entriesPerShard={}, sparse={})",
+            index,
+            file,
+            FrozenSnapTrieNodeChronicleConfig.ENTRIES_PER_SHARD,
+            FrozenSnapTrieNodeChronicleConfig.USE_SPARSE_FILE);
+        return created;
+      } catch (final IOException e) {
+        throw new IllegalStateException("Failed to open Chronicle Map at " + file, e);
+      }
+    }
+
+    private <T> CompletableFuture<T> run(final Supplier<T> action) {
+      return CompletableFuture.supplyAsync(action, executor);
+    }
   }
 }

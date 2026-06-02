@@ -101,13 +101,22 @@ JVM_OPTS=(
 )
 
 if command -v lsof >/dev/null 2>&1; then
-  RESOLVED="$MAP_ARG"
-  if [[ -d "$MAP_ARG" ]]; then
-    RESOLVED="${MAP_ARG%/}/snap_trie_nodes.dat"
+  STATS_DIR="$MAP_ARG"
+  if [[ -f "$MAP_ARG" ]]; then
+    STATS_DIR="$(dirname "$MAP_ARG")"
   fi
-  if [[ -f "$RESOLVED" ]] && lsof "$RESOLVED" 2>/dev/null | grep -q java; then
-    echo "warning: snap_trie_nodes.dat is open by a Java process (likely Besu); longSize may be 0." >&2
-    echo "         Stop Besu for a reliable count, or pass --scan-sample (slower)." >&2
+  if [[ -d "$STATS_DIR" ]]; then
+    OPEN_BY_BESU=0
+    for shard in "$STATS_DIR"/snap_trie_nodes_*.dat; do
+      [[ -f "$shard" ]] || continue
+      if lsof "$shard" 2>/dev/null | grep -q java; then
+        OPEN_BY_BESU=1
+      fi
+    done
+    if [[ "$OPEN_BY_BESU" -eq 1 ]]; then
+      echo "warning: shard map files are open by Besu; longSize may be 0." >&2
+      echo "         Stop Besu for a reliable count, or pass --scan-sample (slower)." >&2
+    fi
   fi
 fi
 

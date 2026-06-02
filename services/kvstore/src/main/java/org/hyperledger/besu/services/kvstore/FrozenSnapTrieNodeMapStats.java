@@ -43,42 +43,55 @@ public final class FrozenSnapTrieNodeMapStats {
       System.exit(2);
     }
     final Path mapDirectory = resolveMapDirectory(Path.of(args[0]));
-    final Path mapFile = mapDirectory.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME);
-    if (!Files.isRegularFile(mapFile)) {
-      System.err.println("Map file not found: " + mapFile);
+    final boolean frozen = Files.exists(mapDirectory.resolve(FROZEN_MARKER_FILE));
+    long totalBytes = 0;
+    long totalEntries = 0;
+    int shards = 0;
+    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
+      final Path mapFile = mapDirectory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard));
+      if (!Files.isRegularFile(mapFile)) {
+        continue;
+      }
+      shards++;
+      totalBytes += Files.size(mapFile);
+      try (ChronicleMap<byte[], byte[]> map = openReadOnly(mapFile.toFile(), shard)) {
+        totalEntries += map.longSize();
+      }
+    }
+    if (shards == 0) {
+      System.err.println("No shard map files found under " + mapDirectory);
       System.exit(1);
     }
 
-    final boolean frozen = Files.exists(mapDirectory.resolve(FROZEN_MARKER_FILE));
-    try (ChronicleMap<byte[], byte[]> map = openReadOnly(mapFile.toFile())) {
-      final long entries = map.longSize();
-      final long bytesOnDisk = Files.size(mapFile);
-
-      System.out.println("directory=" + mapDirectory.toAbsolutePath());
-      System.out.println("mapFile=" + mapFile.getFileName());
-      System.out.println("frozen=" + frozen);
-      System.out.println("entries=" + entries);
-      System.out.println("bytesOnDisk=" + bytesOnDisk);
-    }
+    System.out.println("directory=" + mapDirectory.toAbsolutePath());
+    System.out.println("frozen=" + frozen);
+    System.out.println("shards=" + shards);
+    System.out.println("entries=" + totalEntries);
+    System.out.println("bytesOnDisk=" + totalBytes);
   }
 
   static Path resolveMapDirectory(final Path input) {
-    if (Files.isRegularFile(input.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME))) {
-      return input;
+    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
+      if (Files.isRegularFile(input.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard)))) {
+        return input;
+      }
     }
     if (input.getFileName() != null
         && DEFAULT_SUBDIR.equals(input.getFileName().toString())) {
       return input;
     }
     final Path nested = input.resolve(DEFAULT_SUBDIR);
-    if (Files.isRegularFile(nested.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME))) {
-      return nested;
+    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
+      if (Files.isRegularFile(nested.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard)))) {
+        return nested;
+      }
     }
     return input;
   }
 
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile)
+  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile, final int shard)
       throws IOException {
-    return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(mapFile, true);
+    return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(shard)
+        .recoverPersistedTo(mapFile, true);
   }
 }
