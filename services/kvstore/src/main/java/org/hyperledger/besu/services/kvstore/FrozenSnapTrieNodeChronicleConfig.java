@@ -38,12 +38,16 @@ public final class FrozenSnapTrieNodeChronicleConfig {
   public static final int CHRONICLE_CHUNK_SIZE_BYTES = 32;
 
   /**
-   * Expected entry count at create time (lower = less upfront mmap). The map grows when full but
-   * extra tiers cost memory; tune for your chain (e.g. ~1M for testnets, raise for mainnet snap).
+   * Expected trie node count for snap sync (mainnet-class chains often need ~25–35M). Chronicle
+   * allocates segment tiers from this and {@link #MAX_BLOAT_FACTOR}; too low causes {@code Attempt
+   * to allocate extra segment tier} at runtime. Lower only for small testnets.
    */
-  public static final long INITIAL_ENTRIES = 1_000_000L;
+  public static final long INITIAL_ENTRIES = 32_000_000L;
 
-  /** Caps tier expansion vs {@link #INITIAL_ENTRIES} to limit mmap growth. */
+  /**
+   * Headroom above {@link #INITIAL_ENTRIES} when segments fill (Chronicle {@code maxExtraTiers} ≈
+   * {@code maxBloatFactor × segments}). Must be &gt; 1.0; 4× allows growth if sizing was low.
+   */
   public static final double MAX_BLOAT_FACTOR = 4.0;
 
   /** Sparse file: large on-disk footprint does not map all pages into RAM until touched. */

@@ -126,8 +126,21 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
         () -> {
           ensureWritable();
           final ChronicleMap<byte[], byte[]> openMap = ensureMapOpen(false);
-          for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
-            openMap.put(keyBytes(entry.getKey()), valueBytes(entry.getValue()));
+          try {
+            for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
+              openMap.put(keyBytes(entry.getKey()), valueBytes(entry.getValue()));
+            }
+          } catch (final IllegalStateException e) {
+            if (e.getMessage() != null && e.getMessage().contains("extra segment tier")) {
+              throw new IllegalStateException(
+                  e.getMessage()
+                      + "\nDelete "
+                      + directory
+                      + " and re-run snap sync after upgrading, or raise"
+                      + " FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES / MAX_BLOAT_FACTOR.",
+                  e);
+            }
+            throw e;
           }
           flushPutCount.addAndGet(entries.size());
           return null;
@@ -242,11 +255,14 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
           FrozenSnapTrieNodeChronicleConfig.newBuilder().createPersistedTo(file);
       LOG.info(
           "Created snap-sync trie Chronicle Map at {} (sparse={}, initialEntries={},"
-              + " maxBloatFactor={})",
+              + " maxBloatFactor={}, approxMaxEntries={})",
           file,
           FrozenSnapTrieNodeChronicleConfig.USE_SPARSE_FILE,
           FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES,
-          FrozenSnapTrieNodeChronicleConfig.MAX_BLOAT_FACTOR);
+          FrozenSnapTrieNodeChronicleConfig.MAX_BLOAT_FACTOR,
+          (long)
+              (FrozenSnapTrieNodeChronicleConfig.INITIAL_ENTRIES
+                  * FrozenSnapTrieNodeChronicleConfig.MAX_BLOAT_FACTOR));
       return created;
     } catch (final IOException e) {
       throw new IllegalStateException("Failed to open Chronicle Map at " + file, e);
