@@ -48,7 +48,10 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
         segmentedWorldStateStorage,
         trieLogStorage,
         parentWorldStateStorage.getCacheManager(),
-        parentWorldStateStorage.getCurrentVersion());
+        parentWorldStateStorage.getCurrentVersion(),
+        parentWorldStateStorage.getFrozenSnapTrieNodeDirectory(),
+        parentWorldStateStorage.getFrozenSnapTrieNodeStorage().orElse(null),
+        parentWorldStateStorage.isSnapSyncTrieNodeCaptureEnabled());
 
     this.parentWorldStateStorage = parentWorldStateStorage;
     this.subscribeParentId = parentWorldStateStorage.subscribe(this);
@@ -77,7 +80,8 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
         ((SnappedKeyValueStorage) composedWorldStateStorage).getSnapshotTransaction(),
         trieLogStorage.startTransaction(),
         getFlatDbStrategy(),
-        composedWorldStateStorage);
+        composedWorldStateStorage,
+        parentWorldStateStorage);
   }
 
   // All read methods just delegate to parent (via super) - NO cache reading

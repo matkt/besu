@@ -759,6 +759,17 @@ subprojects {
   tasks.withType(Test) {
     // If GRADLE_MAX_TEST_FORKS is not set, use half the available processors
     maxParallelForks = (System.getenv('GRADLE_MAX_TEST_FORKS') ?: (Runtime.runtime.availableProcessors().intdiv(2) ?: 1)).toInteger()
+    // Required by Chronicle Map / off-heap access on JDK 22+
+    jvmArgs(
+      '--enable-native-access=ALL-UNNAMED',
+      '-Dchronicle.analytics.disable=true',
+      '--add-opens=java.base/java.nio=ALL-UNNAMED',
+      '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+      '--add-opens=java.base/java.lang=ALL-UNNAMED',
+      '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+      '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+      '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED'
+    )
   }
 
   tasks.withType(JavaCompile) {
@@ -807,7 +818,24 @@ subprojects {
       var asyncProfilerOptions = _strCmdArg('asyncProfilerOptions', 'output=flamegraph')
       zip64.set(true)
       jvmArgs = [
-        '-XX:+EnableDynamicAgentLoading'
+        '-XX:+EnableDynamicAgentLoading',
+        '--enable-native-access=ALL-UNNAMED',
+        '-Dchronicle.analytics.disable=true',
+        '--add-opens=java.base/java.nio=ALL-UNNAMED',
+        '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+        '--add-opens=java.base/java.lang=ALL-UNNAMED',
+        '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+        '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+        '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
+        // Chronicle Map generates value classes at runtime via CachedCompiler
+        '--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+        '--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED'
       ]
       if (asyncProfiler != null) {
         profilers = [

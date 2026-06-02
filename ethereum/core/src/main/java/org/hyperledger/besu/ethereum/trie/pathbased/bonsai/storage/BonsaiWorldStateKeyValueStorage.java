@@ -42,7 +42,10 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
+import org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeStorage;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +65,9 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
   protected final CacheManager cacheManager;
   private volatile long cacheVersion;
+  private final Optional<Path> frozenSnapTrieNodeDirectory;
+  private volatile FrozenSnapTrieNodeStorage frozenSnapTrieNodeStorage;
+  private volatile boolean snapSyncTrieNodeCapture;
 
   public BonsaiWorldStateKeyValueStorage(
       final StorageProvider provider,
@@ -71,6 +77,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
         provider,
         metricsSystem,
         dataStorageConfiguration,
+        Optional.<Path>empty(),
         createCacheManager(dataStorageConfiguration, metricsSystem));
   }
 
@@ -78,6 +85,28 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final StorageProvider provider,
       final MetricsSystem metricsSystem,
       final DataStorageConfiguration dataStorageConfiguration,
+      final Path frozenSnapTrieNodeDirectory) {
+    this(
+        provider,
+        metricsSystem,
+        dataStorageConfiguration,
+        Optional.of(frozenSnapTrieNodeDirectory),
+        createCacheManager(dataStorageConfiguration, metricsSystem));
+  }
+
+  public BonsaiWorldStateKeyValueStorage(
+      final StorageProvider provider,
+      final MetricsSystem metricsSystem,
+      final DataStorageConfiguration dataStorageConfiguration,
+      final CacheManager cacheManager) {
+    this(provider, metricsSystem, dataStorageConfiguration, Optional.empty(), cacheManager);
+  }
+
+  public BonsaiWorldStateKeyValueStorage(
+      final StorageProvider provider,
+      final MetricsSystem metricsSystem,
+      final DataStorageConfiguration dataStorageConfiguration,
+      final Optional<Path> frozenSnapTrieNodeDirectory,
       final CacheManager cacheManager) {
     super(
         provider.getStorageBySegmentIdentifiers(
@@ -90,6 +119,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     this.cacheManager = cacheManager;
     this.cacheVersion = cacheManager.getCurrentVersion();
+    this.frozenSnapTrieNodeDirectory = frozenSnapTrieNodeDirectory;
   }
 
   public BonsaiWorldStateKeyValueStorage(
@@ -98,10 +128,101 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final KeyValueStorage trieLogStorage,
       final CacheManager cacheManager,
       final long cacheVersion) {
+    this(
+        flatDbStrategyProvider,
+        composedWorldStateStorage,
+        trieLogStorage,
+        cacheManager,
+        cacheVersion,
+        Optional.empty(),
+        null,
+        false);
+  }
+
+  public BonsaiWorldStateKeyValueStorage(
+      final BonsaiFlatDbStrategyProvider flatDbStrategyProvider,
+      final SegmentedKeyValueStorage composedWorldStateStorage,
+      final KeyValueStorage trieLogStorage,
+      final CacheManager cacheManager,
+      final long cacheVersion,
+      final Optional<Path> frozenSnapTrieNodeDirectory,
+      final FrozenSnapTrieNodeStorage frozenSnapTrieNodeStorage,
+      final boolean snapSyncTrieNodeCapture) {
     super(composedWorldStateStorage, trieLogStorage);
     this.flatDbStrategyProvider = flatDbStrategyProvider;
     this.cacheManager = cacheManager;
     this.cacheVersion = cacheVersion;
+    this.frozenSnapTrieNodeDirectory = frozenSnapTrieNodeDirectory;
+    this.frozenSnapTrieNodeStorage = frozenSnapTrieNodeStorage;
+    this.snapSyncTrieNodeCapture = snapSyncTrieNodeCapture;
+  }
+
+  /**
+   * During snap sync, trie nodes are written by hash into a frozen Chronicle Map (not RocksDB). Flat
+   * account / storage data continues to use RocksDB.
+   */
+  public synchronized void enableSnapSyncFrozenTrieNodeCapture() {
+    if (frozenSnapTrieNodeDirectory.isEmpty()) {
+      LOG.warn(
+          "Frozen snap-sync trie node directory is not configured; skipping Chronicle Map capture");
+      return;
+    }
+    if (frozenSnapTrieNodeStorage == null) {
+      frozenSnapTrieNodeStorage = FrozenSnapTrieNodeStorage.open(frozenSnapTrieNodeDirectory.get());
+    }
+    snapSyncTrieNodeCapture = true;
+    LOG.info(
+        "Capturing snap-sync trie nodes by hash in Chronicle Map at {}",
+        frozenSnapTrieNodeDirectory.get());
+  }
+
+  /** Seals the frozen Chronicle Map; post-sync trie nodes are written by location in RocksDB. */
+  public synchronized void freezeSnapSyncFrozenTrieNodes() {
+    snapSyncTrieNodeCapture = false;
+    if (frozenSnapTrieNodeStorage != null && !frozenSnapTrieNodeStorage.isFrozen()) {
+      frozenSnapTrieNodeStorage.freeze();
+      LOG.info(
+          "Snap-sync trie node Chronicle Map frozen at {}",
+          frozenSnapTrieNodeDirectory.orElse(null));
+    }
+  }
+
+  public boolean isSnapSyncTrieNodeCaptureEnabled() {
+    return snapSyncTrieNodeCapture;
+  }
+
+  public Optional<FrozenSnapTrieNodeStorage> getFrozenSnapTrieNodeStorage() {
+    return Optional.ofNullable(frozenSnapTrieNodeStorage);
+  }
+
+  public Optional<Path> getFrozenSnapTrieNodeDirectory() {
+    return frozenSnapTrieNodeDirectory;
+  }
+
+  private void ensureFrozenStorageLoadedIfPresent() {
+    if (frozenSnapTrieNodeStorage != null || frozenSnapTrieNodeDirectory.isEmpty()) {
+      return;
+    }
+    final Path directory = frozenSnapTrieNodeDirectory.get();
+    if (Files.exists(directory.resolve(".frozen"))) {
+      frozenSnapTrieNodeStorage = FrozenSnapTrieNodeStorage.open(directory);
+      LOG.info("Loaded frozen snap-sync trie node Chronicle Map from {}", directory);
+    }
+  }
+
+  private Optional<Bytes> getFrozenTrieNodeByHash(final Bytes32 nodeHash) {
+    ensureFrozenStorageLoadedIfPresent();
+    final FrozenSnapTrieNodeStorage storage = frozenSnapTrieNodeStorage;
+    if (storage == null) {
+      return Optional.empty();
+    }
+    return storage.get(nodeHash);
+  }
+
+  private Optional<Bytes> getLiveTrieNodeByLocation(final Bytes location) {
+    return composedWorldStateStorage
+        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
+        .map(Bytes::wrap);
   }
 
   private static CacheManager createCacheManager(
@@ -195,10 +316,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
-        .map(Bytes::wrap)
-        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    return getFrozenTrieNodeByHash(nodeHash)
+        .or(
+            () ->
+                getLiveTrieNodeByLocation(location)
+                    .filter(b -> Hash.hash(b).getBytes().equals(nodeHash)));
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -206,16 +328,15 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return composedWorldStateStorage
-        .get(
-            TRIE_BRANCH_STORAGE,
-            Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe())
-        .map(Bytes::wrap)
-        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    return getFrozenTrieNodeByHash(nodeHash)
+        .or(
+            () ->
+                getLiveTrieNodeByLocation(Bytes.concatenate(accountHash.getBytes(), location))
+                    .filter(b -> Hash.hash(b).getBytes().equals(nodeHash)));
   }
 
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
-    return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
+    return getFrozenTrieNodeByHash(Bytes32.wrap(key)).or(() -> getLiveTrieNodeByLocation(key));
   }
 
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(
@@ -256,6 +377,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     cacheManager.clear(ACCOUNT_INFO_STATE);
     cacheManager.clear(ACCOUNT_STORAGE_STORAGE);
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
+    if (frozenSnapTrieNodeStorage != null) {
+      frozenSnapTrieNodeStorage.close();
+      frozenSnapTrieNodeStorage = null;
+    }
+    snapSyncTrieNodeCapture = false;
   }
 
   @Override
@@ -277,7 +403,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
         composedWorldStateStorage.startTransaction(),
         trieLogStorage.startTransaction(),
         getFlatDbStrategy(),
-        composedWorldStateStorage);
+        composedWorldStateStorage,
+        this);
   }
 
   public long getCacheSize(final SegmentIdentifier segment) {
@@ -308,17 +435,21 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     protected final KeyValueStorageTransaction trieLogStorageTransaction;
     protected final FlatDbStrategy flatDbStrategy;
     protected final SegmentedKeyValueStorage worldStorage;
+    protected final BonsaiWorldStateKeyValueStorage worldStateStorage;
+    private final Map<Bytes32, Bytes> pendingFrozenTrieNodePuts = new HashMap<>();
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
         final FlatDbStrategy flatDbStrategy,
-        final SegmentedKeyValueStorage worldStorage) {
+        final SegmentedKeyValueStorage worldStorage,
+        final BonsaiWorldStateKeyValueStorage worldStateStorage) {
 
       this.composedWorldStateTransaction = composedWorldStateTransaction;
       this.trieLogStorageTransaction = trieLogStorageTransaction;
       this.flatDbStrategy = flatDbStrategy;
       this.worldStorage = worldStorage;
+      this.worldStateStorage = worldStateStorage;
     }
 
     public Updater removeCode(final Hash accountHash, final Hash codeHash) {
@@ -371,6 +502,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         return this;
       }
+      if (worldStateStorage.snapSyncTrieNodeCapture
+          && worldStateStorage.frozenSnapTrieNodeStorage != null) {
+        pendingFrozenTrieNodePuts.put(nodeHash, node);
+        return this;
+      }
       composedWorldStateTransaction.put(
           TRIE_BRANCH_STORAGE, location.toArrayUnsafe(), node.toArrayUnsafe());
       return this;
@@ -386,11 +522,24 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         return this;
       }
+      if (worldStateStorage.snapSyncTrieNodeCapture
+          && worldStateStorage.frozenSnapTrieNodeStorage != null) {
+        pendingFrozenTrieNodePuts.put(nodeHash, node);
+        return this;
+      }
       composedWorldStateTransaction.put(
           TRIE_BRANCH_STORAGE,
           Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe(),
           node.toArrayUnsafe());
       return this;
+    }
+
+    protected void flushPendingFrozenTrieNodes() {
+      if (pendingFrozenTrieNodePuts.isEmpty()) {
+        return;
+      }
+      worldStateStorage.frozenSnapTrieNodeStorage.putAll(pendingFrozenTrieNodePuts);
+      pendingFrozenTrieNodePuts.clear();
     }
 
     public synchronized Updater putStorageValueBySlotHash(
@@ -418,6 +567,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     @Override
     public void commit() {
+      flushPendingFrozenTrieNodes();
       trieLogStorageTransaction.commit();
       composedWorldStateTransaction.commit();
     }
@@ -457,8 +607,14 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
         final FlatDbStrategy flatDbStrategy,
-        final SegmentedKeyValueStorage worldStorage) {
-      super(composedWorldStateTransaction, trieLogStorageTransaction, flatDbStrategy, worldStorage);
+        final SegmentedKeyValueStorage worldStorage,
+        final BonsaiWorldStateKeyValueStorage worldStateStorage) {
+      super(
+          composedWorldStateTransaction,
+          trieLogStorageTransaction,
+          flatDbStrategy,
+          worldStorage,
+          worldStateStorage);
     }
 
     @Override

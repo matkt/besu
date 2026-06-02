@@ -61,6 +61,7 @@ public class KeyValueStorageProviderBuilder {
     return new KeyValueStorageProvider(
         segments -> storageFactory.create(segments, commonConfiguration, metricsSystem),
         worldStatePreImageStorage,
-        (ObservableMetricsSystem) metricsSystem);
+        (ObservableMetricsSystem) metricsSystem,
+        commonConfiguration.getDataPath());
   }
 }

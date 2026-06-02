@@ -41,13 +41,16 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
+import java.nio.file.Path;
+
 public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
 
   public InMemoryKeyValueStorageProvider() {
     super(
         segmentIdentifiers -> new SegmentedInMemoryKeyValueStorage(),
         new InMemoryKeyValueStorage(),
-        new NoOpMetricsSystem());
+        new NoOpMetricsSystem(),
+        Path.of(System.getProperty("java.io.tmpdir"), "besu-inmemory-frozen-trie"));
   }
 
   public static MutableBlockchain createInMemoryBlockchain(final Block genesisBlock) {

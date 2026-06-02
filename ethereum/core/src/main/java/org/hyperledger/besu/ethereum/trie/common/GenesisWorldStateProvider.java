@@ -74,7 +74,8 @@ public class GenesisWorldStateProvider {
             new KeyValueStorageProvider(
                 segmentIdentifiers -> new SegmentedInMemoryKeyValueStorage(),
                 new InMemoryKeyValueStorage(),
-                new NoOpMetricsSystem()),
+                new NoOpMetricsSystem(),
+                java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "besu-genesis-frozen-trie")),
             new NoOpMetricsSystem(),
             storageConfiguration);
     return new BonsaiWorldState(

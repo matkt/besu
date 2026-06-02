@@ -32,6 +32,7 @@ import org.hyperledger.besu.plugin.services.storage.WorldStatePreimageStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageAdapter;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,14 +51,17 @@ public class KeyValueStorageProvider implements StorageProvider {
   protected final Map<List<SegmentIdentifier>, SegmentedKeyValueStorage> storageInstances =
       new HashMap<>();
   private final ObservableMetricsSystem metricsSystem;
+  private final Path dataDirectory;
 
   public KeyValueStorageProvider(
       final Function<List<SegmentIdentifier>, SegmentedKeyValueStorage> segmentedStorageCreator,
       final KeyValueStorage worldStatePreimageStorage,
-      final ObservableMetricsSystem metricsSystem) {
+      final ObservableMetricsSystem metricsSystem,
+      final Path dataDirectory) {
     this.segmentedStorageCreator = segmentedStorageCreator;
     this.worldStatePreimageStorage = worldStatePreimageStorage;
     this.metricsSystem = metricsSystem;
+    this.dataDirectory = dataDirectory;
   }
 
   @Override
@@ -83,7 +87,11 @@ public class KeyValueStorageProvider implements StorageProvider {
   public WorldStateKeyValueStorage createWorldStateStorage(
       final DataStorageConfiguration dataStorageConfiguration) {
     if (dataStorageConfiguration.getDataStorageFormat().isBonsaiFormat()) {
-      return new BonsaiWorldStateKeyValueStorage(this, metricsSystem, dataStorageConfiguration);
+      return new BonsaiWorldStateKeyValueStorage(
+          this,
+          metricsSystem,
+          dataStorageConfiguration,
+          dataDirectory.resolve("frozen_snap_trie_nodes"));
     } else {
       return new ForestWorldStateKeyValueStorage(
           getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.WORLD_STATE));

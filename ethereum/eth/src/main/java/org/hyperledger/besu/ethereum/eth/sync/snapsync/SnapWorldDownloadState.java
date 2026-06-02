@@ -127,6 +127,8 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest>
     this.blockObserverId = blockchain.observeBlockAdded(createBlockchainObserver());
     this.ethContext = ethContext;
 
+    worldStateStorageCoordinator.enableSnapSyncFrozenTrieNodeCapture();
+
     final MetricsSystem metricsSystem = metricsManager.getMetricsSystem();
     metricsSystem.createLongGauge(
         BesuMetricCategory.SYNCHRONIZER,
@@ -204,6 +206,7 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest>
         }
         // If the flat database healing process is in progress or the flat database mode is not FULL
         else {
+          worldStateStorageCoordinator.freezeSnapSyncFrozenTrieNodes();
           final WorldStateKeyValueStorage.Updater updater = worldStateStorageCoordinator.updater();
           applyForStrategy(
               updater,

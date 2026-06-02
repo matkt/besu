@@ -32,6 +32,8 @@ dependencies {
   api project(':plugin-api')
   api 'org.slf4j:slf4j-api'
   implementation 'com.google.guava:guava'
+  implementation 'net.openhft:chronicle-map:3.26ea4'
+  implementation 'io.consensys.tuweni:tuweni-bytes'
 
   testImplementation project(':testutil')
   testImplementation 'org.junit.jupiter:junit-jupiter'
