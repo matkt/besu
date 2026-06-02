@@ -212,6 +212,9 @@ public class SnapWorldStateDownloader implements WorldStateDownloader {
                     createAccountRangeDataRequest(stateRoot, key, value)));
       }
 
+      // After optional clear(): enable capture so trie nodes go to Chronicle, not RocksDB.
+      worldStateStorageCoordinator.enableSnapSyncFrozenTrieNodeCapture();
+
       Optional<CompleteTaskStep> maybeCompleteTask =
           Optional.of(new CompleteTaskStep(snapSyncState, metricsSystem));
 

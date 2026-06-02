@@ -127,8 +127,6 @@ public class SnapWorldDownloadState extends WorldDownloadState<SnapDataRequest>
     this.blockObserverId = blockchain.observeBlockAdded(createBlockchainObserver());
     this.ethContext = ethContext;
 
-    worldStateStorageCoordinator.enableSnapSyncFrozenTrieNodeCapture();
-
     final MetricsSystem metricsSystem = metricsManager.getMetricsSystem();
     metricsSystem.createLongGauge(
         BesuMetricCategory.SYNCHRONIZER,

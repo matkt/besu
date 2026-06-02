@@ -183,13 +183,13 @@ public class WorldStateStorageCoordinator {
     return worldStateKeyValueStorage;
   }
 
-  /** Routes snap-sync trie nodes to frozen LMDB (hash-keyed) instead of RocksDB. */
+  /** Routes snap-sync trie nodes to frozen Chronicle Map (hash-keyed) instead of RocksDB. */
   public void enableSnapSyncFrozenTrieNodeCapture() {
     consumeForStrategy(
         bonsai -> bonsai.enableSnapSyncFrozenTrieNodeCapture(), forest -> {});
   }
 
-  /** Seals frozen LMDB; subsequent trie writes use RocksDB keyed by location. */
+  /** Seals frozen Chronicle Map; subsequent trie writes use RocksDB keyed by location. */
   public void freezeSnapSyncFrozenTrieNodes() {
     consumeForStrategy(bonsai -> bonsai.freezeSnapSyncFrozenTrieNodes(), forest -> {});
   }
