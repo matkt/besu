@@ -17,23 +17,19 @@ package org.hyperledger.besu.services.kvstore;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 
-import org.apache.tuweni.bytes.Bytes32;
-
 /**
- * Chronicle Map sizing for snap-sync frozen trie nodes. Persisted maps embed these parameters;
- * changing them requires deleting {@code frozen_snap_trie_nodes} and re-running snap sync.
+ * Chronicle Map sizing for snap-sync frozen trie nodes (single file {@link #MAP_FILE_NAME}).
  *
- * <p>Writes are sharded across {@link #NUM_SHARDS} files so snap-sync pipeline threads can persist
- * in parallel (one Chronicle file per shard, each with a dedicated writer thread).
+ * <p>Memory is dominated by mmap of the map file. {@link #INITIAL_ENTRIES} and {@link
+ * #MAX_BLOAT_FACTOR} bound reserved / tier growth; {@link #USE_SPARSE_FILE} keeps on-disk size from
+ * committing unused pages to RSS until written. Changing these requires deleting {@code
+ * frozen_snap_trie_nodes} and re-running snap sync.
  */
 public final class FrozenSnapTrieNodeChronicleConfig {
 
-  public static final String MAP_FILE_PREFIX = "snap_trie_nodes";
-  public static final String MAP_NAME_PREFIX = "snap-trie-nodes";
+  public static final String MAP_FILE_NAME = "snap_trie_nodes.dat";
+  public static final String MAP_NAME = "snap-trie-nodes";
   public static final int KEY_SIZE_BYTES = 32;
-
-  /** Parallel shard count (must be a power of two). */
-  public static final int NUM_SHARDS = 16;
 
   /** Blend of small leaves/extensions and larger branches. */
   public static final int AVERAGE_VALUE_SIZE_BYTES = 384;
@@ -41,10 +37,16 @@ public final class FrozenSnapTrieNodeChronicleConfig {
   public static final int MAX_VALUE_SIZE_BYTES = 1024;
   public static final int CHRONICLE_CHUNK_SIZE_BYTES = 32;
 
-  /** Per-shard entry capacity; total ≈ {@code ENTRIES_PER_SHARD * NUM_SHARDS}. */
-  public static final long ENTRIES_PER_SHARD = 2_000_000L;
+  /**
+   * Expected entry count at create time (lower = less upfront mmap). The map grows when full but
+   * extra tiers cost memory; tune for your chain (e.g. ~1M for testnets, raise for mainnet snap).
+   */
+  public static final long INITIAL_ENTRIES = 1_000_000L;
 
-  public static final double MAX_BLOAT_FACTOR = 16.0;
+  /** Caps tier expansion vs {@link #INITIAL_ENTRIES} to limit mmap growth. */
+  public static final double MAX_BLOAT_FACTOR = 4.0;
+
+  /** Sparse file: large on-disk footprint does not map all pages into RAM until touched. */
   public static final boolean USE_SPARSE_FILE = true;
 
   public static final int MAX_CHUNKS_PER_ENTRY =
@@ -52,18 +54,10 @@ public final class FrozenSnapTrieNodeChronicleConfig {
 
   private FrozenSnapTrieNodeChronicleConfig() {}
 
-  public static int shardIndex(final Bytes32 hash) {
-    return hash.get(31) & (NUM_SHARDS - 1);
-  }
-
-  public static String shardFileName(final int shardIndex) {
-    return String.format("%s_%02x.dat", MAP_FILE_PREFIX, shardIndex);
-  }
-
-  public static ChronicleMapBuilder<byte[], byte[]> newBuilderForShard(final int shardIndex) {
+  public static ChronicleMapBuilder<byte[], byte[]> newBuilder() {
     return ChronicleMap.of(byte[].class, byte[].class)
-        .name(MAP_NAME_PREFIX + "-" + shardIndex)
-        .entries(ENTRIES_PER_SHARD)
+        .name(MAP_NAME)
+        .entries(INITIAL_ENTRIES)
         .averageKeySize(KEY_SIZE_BYTES)
         .averageValueSize(AVERAGE_VALUE_SIZE_BYTES)
         .maxBloatFactor(MAX_BLOAT_FACTOR)

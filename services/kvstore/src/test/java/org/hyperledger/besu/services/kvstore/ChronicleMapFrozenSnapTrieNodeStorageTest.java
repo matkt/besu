@@ -63,8 +63,7 @@ class ChronicleMapFrozenSnapTrieNodeStorageTest {
       assertThat(reopened.isFrozen()).isTrue();
       assertThat(reopened.get(hash)).contains(node);
     }
-    final int shard = FrozenSnapTrieNodeChronicleConfig.shardIndex(hash);
-    assertThat(Files.exists(dbPath.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard))))
+    assertThat(Files.exists(dbPath.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME)))
         .isTrue();
   }
 

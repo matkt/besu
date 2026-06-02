@@ -22,12 +22,11 @@ import net.openhft.chronicle.map.ChronicleMap;
 import org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeChronicleConfig;
 
 /**
- * Read-only stats for sharded {@code frozen_snap_trie_nodes/snap_trie_nodes_XX.dat} files.
+ * Read-only stats for {@code frozen_snap_trie_nodes/snap_trie_nodes.dat}.
  */
 public final class FrozenSnapTrieNodeMapStats {
 
   private static final String FROZEN_MARKER = ".frozen";
-  private static final String LEGACY_MAP_FILE = "snap_trie_nodes.dat";
 
   private FrozenSnapTrieNodeMapStats() {}
 
@@ -45,62 +44,39 @@ public final class FrozenSnapTrieNodeMapStats {
       }
     }
     if (input == null) {
-      System.err.println("Usage: FrozenSnapTrieNodeMapStats [--scan-sample] <frozen_snap_trie_nodes-dir>");
+      System.err.println(
+          "Usage: FrozenSnapTrieNodeMapStats [--scan-sample] <frozen_snap_trie_nodes-dir>");
       System.exit(2);
     }
 
     final Path directory = Files.isDirectory(input) ? input : input.getParent();
-    if (!Files.isDirectory(directory)) {
-      System.err.println("Directory not found: " + directory);
+    final Path mapPath = directory.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME);
+    if (!Files.isRegularFile(mapPath)) {
+      System.err.println("Map file not found: " + mapPath);
       System.exit(1);
     }
 
     final boolean frozen = Files.exists(directory.resolve(FROZEN_MARKER));
-    long totalFileBytes = 0;
-    long totalLongSize = 0;
-    int openShards = 0;
-
-    if (Files.isRegularFile(directory.resolve(LEGACY_MAP_FILE))) {
-      System.err.println("note=legacy single-file map present; stats below are sharded files only");
-    }
-
-    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
-      final Path mapPath = directory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard));
-      if (!Files.isRegularFile(mapPath)) {
-        continue;
+    final ChronicleMap<byte[], byte[]> map = openReadOnly(mapPath.toFile());
+    try {
+      final long longSize = map.longSize();
+      System.out.printf("directory=%s%n", directory.toAbsolutePath());
+      System.out.printf("mapFile=%s%n", mapPath.getFileName());
+      System.out.printf("frozen=%s%n", frozen);
+      System.out.printf("file_bytes=%d%n", Files.size(mapPath));
+      System.out.printf("longSize=%d%n", longSize);
+      if (scanSample) {
+        final AtomicLong scanned = new AtomicLong();
+        map.forEach((k, v) -> scanned.incrementAndGet());
+        System.out.printf("scanCount=%d%n", scanned.get());
       }
-      openShards++;
-      totalFileBytes += Files.size(mapPath);
-      final ChronicleMap<byte[], byte[]> map = openReadOnly(mapPath.toFile(), shard);
-      try {
-        final long longSize = map.longSize();
-        totalLongSize += longSize;
-        System.out.printf("shard=%02x path=%s file_bytes=%d longSize=%d%n", shard, mapPath, Files.size(mapPath), longSize);
-        if (scanSample) {
-          final AtomicLong scanned = new AtomicLong();
-          map.forEach((k, v) -> scanned.incrementAndGet());
-          System.out.printf("shard=%02x scanCount=%d%n", shard, scanned.get());
-        }
-      } finally {
-        map.close();
-      }
+    } finally {
+      map.close();
     }
-
-    if (openShards == 0) {
-      System.err.println("No shard map files found under " + directory);
-      System.exit(1);
-    }
-
-    System.out.printf("directory=%s%n", directory.toAbsolutePath());
-    System.out.printf("frozen=%s%n", frozen);
-    System.out.printf("shards=%d%n", openShards);
-    System.out.printf("total_file_bytes=%d%n", totalFileBytes);
-    System.out.printf("total_longSize=%d%n", totalLongSize);
   }
 
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile, final int shardIndex)
+  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile)
       throws java.io.IOException {
-    return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(shardIndex)
-        .recoverPersistedTo(mapFile, true);
+    return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(mapFile, true);
   }
 }

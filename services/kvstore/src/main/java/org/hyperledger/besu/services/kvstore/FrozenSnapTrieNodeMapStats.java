@@ -20,7 +20,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import net.openhft.chronicle.map.ChronicleMap;
-import net.openhft.chronicle.map.ChronicleMapBuilder;
 
 /**
  * Prints entry count and on-disk size for a snap-sync frozen trie node Chronicle Map. Usage:
@@ -32,12 +31,8 @@ import net.openhft.chronicle.map.ChronicleMapBuilder;
  */
 public final class FrozenSnapTrieNodeMapStats {
 
-  private static final String MAP_FILE_NAME = "snap_trie_nodes.dat";
   private static final String FROZEN_MARKER_FILE = ".frozen";
   private static final String DEFAULT_SUBDIR = "frozen_snap_trie_nodes";
-  private static final int KEY_SIZE_BYTES = 32;
-  private static final int AVERAGE_VALUE_SIZE_BYTES = 128;
-  private static final long DEFAULT_MAX_ENTRIES = 64_000_000L;
 
   private FrozenSnapTrieNodeMapStats() {}
 
@@ -48,15 +43,15 @@ public final class FrozenSnapTrieNodeMapStats {
       System.exit(2);
     }
     final Path mapDirectory = resolveMapDirectory(Path.of(args[0]));
-    final Path mapFile = mapDirectory.resolve(MAP_FILE_NAME);
+    final Path mapFile = mapDirectory.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME);
     if (!Files.isRegularFile(mapFile)) {
       System.err.println("Map file not found: " + mapFile);
       System.exit(1);
     }
 
     final boolean frozen = Files.exists(mapDirectory.resolve(FROZEN_MARKER_FILE));
-    try (ChronicleMap<byte[], byte[]> map = openReadOnly(mapFile)) {
-      final long entries = map.size();
+    try (ChronicleMap<byte[], byte[]> map = openReadOnly(mapFile.toFile())) {
+      final long entries = map.longSize();
       final long bytesOnDisk = Files.size(mapFile);
 
       System.out.println("directory=" + mapDirectory.toAbsolutePath());
@@ -68,7 +63,7 @@ public final class FrozenSnapTrieNodeMapStats {
   }
 
   static Path resolveMapDirectory(final Path input) {
-    if (Files.isDirectory(input.resolve(MAP_FILE_NAME))) {
+    if (Files.isRegularFile(input.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME))) {
       return input;
     }
     if (input.getFileName() != null
@@ -76,20 +71,14 @@ public final class FrozenSnapTrieNodeMapStats {
       return input;
     }
     final Path nested = input.resolve(DEFAULT_SUBDIR);
-    if (Files.isRegularFile(nested.resolve(MAP_FILE_NAME))) {
+    if (Files.isRegularFile(nested.resolve(FrozenSnapTrieNodeChronicleConfig.MAP_FILE_NAME))) {
       return nested;
     }
     return input;
   }
 
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final Path mapFile)
+  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile)
       throws IOException {
-    final ChronicleMapBuilder<byte[], byte[]> builder =
-        ChronicleMap.of(byte[].class, byte[].class)
-            .name("snap-trie-nodes")
-            .entries(DEFAULT_MAX_ENTRIES)
-            .averageKeySize(KEY_SIZE_BYTES)
-            .averageValueSize(AVERAGE_VALUE_SIZE_BYTES);
-    return builder.recoverPersistedTo(mapFile.toFile(), true);
+    return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(mapFile, true);
   }
 }
