@@ -39,3 +39,33 @@ dependencies {
   testImplementation 'org.junit.jupiter:junit-jupiter'
   testImplementation 'org.assertj:assertj-core'
 }
+
+def chronicleJvmArgs = [
+  '--enable-native-access=ALL-UNNAMED',
+  '-Dchronicle.analytics.disable=true',
+  '--add-opens=java.base/java.nio=ALL-UNNAMED',
+  '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+  '--add-opens=java.base/java.lang=ALL-UNNAMED',
+  '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+  '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+  '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+  '--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED'
+]
+
+tasks.register('frozenSnapTrieMapStats', JavaExec) {
+  group = 'application'
+  description = 'Print Chronicle Map entry count for frozen_snap_trie_nodes (pass -PmapPath=...)'
+  classpath = sourceSets.main.runtimeClasspath
+  mainClass = 'org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeMapStats'
+  jvmArgs = chronicleJvmArgs
+  if (project.hasProperty('mapPath')) {
+    args project.property('mapPath').toString()
+  }
+}

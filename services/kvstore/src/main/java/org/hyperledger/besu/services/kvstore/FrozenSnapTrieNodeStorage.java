@@ -43,6 +43,9 @@ public interface FrozenSnapTrieNodeStorage extends AutoCloseable {
 
   boolean isFrozen();
 
+  /** Number of hash-keyed trie nodes currently in the map. */
+  long entryCount();
+
   @Override
   void close();
 }

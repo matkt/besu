@@ -378,6 +378,9 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     cacheManager.clear(ACCOUNT_STORAGE_STORAGE);
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
     if (frozenSnapTrieNodeStorage != null) {
+      LOG.info(
+          "Closing frozen snap-sync trie node Chronicle Map (longSize={})",
+          frozenSnapTrieNodeStorage.entryCount());
       frozenSnapTrieNodeStorage.close();
       frozenSnapTrieNodeStorage = null;
     }
@@ -538,8 +541,13 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       if (pendingFrozenTrieNodePuts.isEmpty()) {
         return;
       }
+      final int batchSize = pendingFrozenTrieNodePuts.size();
       worldStateStorage.frozenSnapTrieNodeStorage.putAll(pendingFrozenTrieNodePuts);
       pendingFrozenTrieNodePuts.clear();
+      LOG.info(
+          "Flushed {} snap-sync trie nodes to frozen Chronicle Map (longSize={})",
+          batchSize,
+          worldStateStorage.frozenSnapTrieNodeStorage.entryCount());
     }
 
     public synchronized Updater putStorageValueBySlotHash(

@@ -48,6 +48,9 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
   private ChronicleMap<byte[], byte[]> map;
   private final AtomicBoolean frozen = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
+  private static final AtomicBoolean SHUTDOWN_HOOK_REGISTERED = new AtomicBoolean(false);
+  private static final java.util.Set<ChronicleMapFrozenSnapTrieNodeStorage> OPEN_WRITABLE =
+      java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
   private ChronicleMapFrozenSnapTrieNodeStorage(final Path directory) {
     this.directory = directory;
@@ -65,7 +68,32 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
         new ChronicleMapFrozenSnapTrieNodeStorage(directory);
     storage.map = storage.openMap(alreadyFrozen);
     storage.frozen.set(alreadyFrozen);
+    if (!alreadyFrozen) {
+      OPEN_WRITABLE.add(storage);
+      registerShutdownHookIfNeeded();
+    }
     return storage;
+  }
+
+  private static void registerShutdownHookIfNeeded() {
+    if (SHUTDOWN_HOOK_REGISTERED.compareAndSet(false, true)) {
+      Runtime.getRuntime()
+          .addShutdownHook(
+              new Thread(
+                  () -> {
+                    for (final ChronicleMapFrozenSnapTrieNodeStorage storage :
+                        java.util.List.copyOf(OPEN_WRITABLE)) {
+                      if (!storage.closed.get()) {
+                        LOG.info(
+                            "Shutdown hook closing frozen Chronicle Map at {} (longSize={})",
+                            storage.directory,
+                            storage.entryCount());
+                        storage.close();
+                      }
+                    }
+                  },
+                  "frozen-snap-trie-chronicle-close"));
+    }
   }
 
   @Override
@@ -100,6 +128,7 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
     if (!frozen.compareAndSet(false, true)) {
       return;
     }
+    OPEN_WRITABLE.remove(this);
     ensureOpen();
     map.close();
     map = null;
@@ -118,7 +147,14 @@ public class ChronicleMapFrozenSnapTrieNodeStorage implements FrozenSnapTrieNode
   }
 
   @Override
+  public long entryCount() {
+    ensureOpen();
+    return map.longSize();
+  }
+
+  @Override
   public void close() {
+    OPEN_WRITABLE.remove(this);
     if (closed.compareAndSet(false, true) && map != null) {
       map.close();
       map = null;
