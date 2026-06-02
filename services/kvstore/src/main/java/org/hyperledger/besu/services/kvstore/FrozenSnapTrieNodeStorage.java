@@ -46,13 +46,6 @@ public interface FrozenSnapTrieNodeStorage extends AutoCloseable {
   /** Number of hash-keyed trie nodes currently in the map. */
   long entryCount();
 
-  /**
-   * Drops the process mapping of the persisted map (closes Chronicle). The next {@link #put},
-   * {@link #putAll}, or {@link #get} reopens the file. Used after snap-sync flush batches to cap
-   * RSS while the on-disk file may still grow via sparse allocation.
-   */
-  void releaseMappedMemoryAfterFlush();
-
   @Override
   void close();
 }

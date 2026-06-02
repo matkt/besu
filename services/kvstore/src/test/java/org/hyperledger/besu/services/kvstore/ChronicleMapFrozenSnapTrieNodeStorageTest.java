@@ -20,6 +20,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -29,6 +33,17 @@ import org.junit.jupiter.api.io.TempDir;
 class ChronicleMapFrozenSnapTrieNodeStorageTest {
 
   @TempDir Path tempDir;
+
+  private static void awaitStart(final CountDownLatch start) {
+    try {
+      if (!start.await(10, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for concurrent putAll start");
+      }
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new RuntimeException(e);
+    }
+  }
 
   @Test
   void putGetAndFreeze() throws Exception {
@@ -48,18 +63,42 @@ class ChronicleMapFrozenSnapTrieNodeStorageTest {
       assertThat(reopened.isFrozen()).isTrue();
       assertThat(reopened.get(hash)).contains(node);
     }
-    assertThat(Files.exists(dbPath.resolve("snap_trie_nodes.dat"))).isTrue();
+    final int shard = FrozenSnapTrieNodeChronicleConfig.shardIndex(hash);
+    assertThat(Files.exists(dbPath.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard))))
+        .isTrue();
   }
 
   @Test
-  void releaseMappedMemoryAfterFlushReopensOnNextAccess() {
-    final Bytes32 hash = Bytes32.random();
-    final Bytes node = Bytes.fromHexString("0x820120");
+  void concurrentPutAll() throws Exception {
     try (FrozenSnapTrieNodeStorage storage =
-        FrozenSnapTrieNodeStorage.open(tempDir.resolve("unmap"))) {
-      storage.put(hash, node);
-      storage.releaseMappedMemoryAfterFlush();
-      assertThat(storage.get(hash)).contains(node);
+        FrozenSnapTrieNodeStorage.open(tempDir.resolve("concurrent"))) {
+      final var executor = Executors.newFixedThreadPool(3);
+      final CountDownLatch start = new CountDownLatch(1);
+      final Future<?> f1 =
+          executor.submit(
+              () -> {
+                awaitStart(start);
+                storage.putAll(
+                    Map.of(
+                        Bytes32.fromHexString(
+                            "0x1111111111111111111111111111111111111111111111111111111111111111"),
+                        Bytes.fromHexString("0x01")));
+              });
+      final Future<?> f2 =
+          executor.submit(
+              () -> {
+                awaitStart(start);
+                storage.putAll(
+                    Map.of(
+                        Bytes32.fromHexString(
+                            "0x2222222222222222222222222222222222222222222222222222222222222222"),
+                        Bytes.fromHexString("0x02")));
+              });
+      start.countDown();
+      f1.get(30, TimeUnit.SECONDS);
+      f2.get(30, TimeUnit.SECONDS);
+      executor.shutdown();
+      assertThat(storage.entryCount()).isEqualTo(2);
     }
   }
 

@@ -22,13 +22,12 @@ import net.openhft.chronicle.map.ChronicleMap;
 import org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeChronicleConfig;
 
 /**
- * Read-only stats for {@code frozen_snap_trie_nodes/snap_trie_nodes.dat}. Uses {@link
- * FrozenSnapTrieNodeChronicleConfig} (must match the Besu kvstore jar on the classpath).
+ * Read-only stats for sharded {@code frozen_snap_trie_nodes/snap_trie_nodes_XX.dat} files.
  */
 public final class FrozenSnapTrieNodeMapStats {
 
-  private static final String MAP_FILE_NAME = "snap_trie_nodes.dat";
   private static final String FROZEN_MARKER = ".frozen";
+  private static final String LEGACY_MAP_FILE = "snap_trie_nodes.dat";
 
   private FrozenSnapTrieNodeMapStats() {}
 
@@ -46,64 +45,62 @@ public final class FrozenSnapTrieNodeMapStats {
       }
     }
     if (input == null) {
-      System.err.println(
-          "Usage: FrozenSnapTrieNodeMapStats [--scan-sample] <data-dir-or-map-file>");
+      System.err.println("Usage: FrozenSnapTrieNodeMapStats [--scan-sample] <frozen_snap_trie_nodes-dir>");
       System.exit(2);
     }
 
-    final Path mapPath = resolveMapPath(input);
-    if (!Files.isRegularFile(mapPath)) {
-      System.err.println("Map file not found: " + mapPath);
+    final Path directory = Files.isDirectory(input) ? input : input.getParent();
+    if (!Files.isDirectory(directory)) {
+      System.err.println("Directory not found: " + directory);
       System.exit(1);
     }
-    final Path directory = mapPath.getParent();
+
     final boolean frozen = Files.exists(directory.resolve(FROZEN_MARKER));
-    final long fileBytes = Files.size(mapPath);
+    long totalFileBytes = 0;
+    long totalLongSize = 0;
+    int openShards = 0;
 
-    if (!frozen) {
-      System.err.println(
-          "note=frozen=false: map may still be open for writing by Besu; longSize() can read 0"
-              + " until the file is reopened read-only. Prefer stopping Besu, or use --scan-sample.");
-    }
-    if (fileBytes > 1_000_000_000L) {
-      System.err.println(
-          "note=large file_bytes with few entries usually means Chronicle pre-allocated the map"
-              + " (64M max entries); file size is not entry count.");
+    if (Files.isRegularFile(directory.resolve(LEGACY_MAP_FILE))) {
+      System.err.println("note=legacy single-file map present; stats below are sharded files only");
     }
 
-    final ChronicleMap<byte[], byte[]> map = openReadOnly(mapPath.toFile());
-    try {
-      final long longSize = map.longSize();
-      final int mapSize = map.size();
-
-      System.out.printf("path=%s%n", mapPath.toAbsolutePath());
-      System.out.printf("frozen=%s%n", frozen);
-      System.out.printf("file_bytes=%d%n", fileBytes);
-      System.out.printf("longSize=%d%n", longSize);
-      System.out.printf("mapSize=%d%n", mapSize);
-
-      if (scanSample) {
-        final AtomicLong scanned = new AtomicLong();
-        map.forEach((k, v) -> scanned.incrementAndGet());
-        System.out.printf("scanCount=%d%n", scanned.get());
+    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
+      final Path mapPath = directory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard));
+      if (!Files.isRegularFile(mapPath)) {
+        continue;
       }
-    } finally {
-      map.close();
+      openShards++;
+      totalFileBytes += Files.size(mapPath);
+      final ChronicleMap<byte[], byte[]> map = openReadOnly(mapPath.toFile(), shard);
+      try {
+        final long longSize = map.longSize();
+        totalLongSize += longSize;
+        System.out.printf("shard=%02x path=%s file_bytes=%d longSize=%d%n", shard, mapPath, Files.size(mapPath), longSize);
+        if (scanSample) {
+          final AtomicLong scanned = new AtomicLong();
+          map.forEach((k, v) -> scanned.incrementAndGet());
+          System.out.printf("shard=%02x scanCount=%d%n", shard, scanned.get());
+        }
+      } finally {
+        map.close();
+      }
     }
+
+    if (openShards == 0) {
+      System.err.println("No shard map files found under " + directory);
+      System.exit(1);
+    }
+
+    System.out.printf("directory=%s%n", directory.toAbsolutePath());
+    System.out.printf("frozen=%s%n", frozen);
+    System.out.printf("shards=%d%n", openShards);
+    System.out.printf("total_file_bytes=%d%n", totalFileBytes);
+    System.out.printf("total_longSize=%d%n", totalLongSize);
   }
 
-  private static Path resolveMapPath(final Path input) {
-    if (Files.isDirectory(input)) {
-      return input.resolve(MAP_FILE_NAME);
-    }
-    if (input.getFileName().toString().equals(MAP_FILE_NAME)) {
-      return input;
-    }
-    return input.resolve(MAP_FILE_NAME);
-  }
-
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile)
+  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile, final int shardIndex)
       throws java.io.IOException {
-    return FrozenSnapTrieNodeChronicleConfig.newBuilder().recoverPersistedTo(mapFile, true);
+    return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(shardIndex)
+        .recoverPersistedTo(mapFile, true);
   }
 }
