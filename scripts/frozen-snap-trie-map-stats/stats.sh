@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only Chronicle Map stats for frozen snap-sync trie nodes (no Besu rebuild).
+# Read-only PlainTable RocksDB stats for frozen snap-sync trie nodes (no Besu rebuild).
 #
 # Usage:
 #   ./scripts/frozen-snap-trie-map-stats/stats.sh /path/to/data/frozen_snap_trie_nodes
@@ -15,23 +15,11 @@ MAIN_CLASS="FrozenSnapTrieNodeMapStats"
 SOURCE="$SCRIPT_DIR/$MAIN_CLASS.java"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 [--scan-sample] <frozen_snap_trie_nodes-dir>" >&2
+  echo "Usage: $0 <frozen_snap_trie_nodes-dir>" >&2
   exit 2
 fi
 
-EXTRA_ARGS=()
-MAP_ARG=""
-for arg in "$@"; do
-  if [[ "$arg" == "--scan-sample" ]]; then
-    EXTRA_ARGS+=("$arg")
-  else
-    MAP_ARG="$arg"
-  fi
-done
-if [[ -z "$MAP_ARG" ]]; then
-  echo "Usage: $0 [--scan-sample] <frozen_snap_trie_nodes-dir>" >&2
-  exit 2
-fi
+MAP_ARG="$1"
 
 if [[ -z "${JAVA_HOME:-}" ]] && [[ -x "$HOME/.jdks/jdk-25.0.3+9/Contents/Home/bin/java" ]]; then
   export JAVA_HOME="$HOME/.jdks/jdk-25.0.3+9/Contents/Home"
@@ -68,16 +56,16 @@ EOF
   exit 1
 fi
 
+ROCKSDB_JAR="$(find "$BESU_LIB_DIR" -maxdepth 1 -name 'rocksdbjni-*.jar' -print -quit)"
+if [[ -z "$ROCKSDB_JAR" ]]; then
+  echo "rocksdbjni jar not found under $BESU_LIB_DIR — installDist from this branch required." >&2
+  exit 1
+fi
+
 CLASSPATH="$BUILD_DIR"
 while IFS= read -r -d '' jar; do
   CLASSPATH="${CLASSPATH}:${jar}"
 done < <(find "$BESU_LIB_DIR" -maxdepth 1 -name '*.jar' -print0)
-
-CHRONICLE_JAR="$(find "$BESU_LIB_DIR" -maxdepth 1 -name 'chronicle-map-*.jar' -print -quit)"
-if [[ -z "$CHRONICLE_JAR" ]]; then
-  echo "chronicle-map jar not found under $BESU_LIB_DIR — installDist from this branch required." >&2
-  exit 1
-fi
 
 mkdir -p "$BUILD_DIR"
 CLASS_FILE="$BUILD_DIR/${MAIN_CLASS}.class"
@@ -89,39 +77,8 @@ fi
 
 JVM_OPTS=(
   "--enable-native-access=ALL-UNNAMED"
-  "-Dchronicle.analytics.disable=true"
   "--add-opens=java.base/java.nio=ALL-UNNAMED"
-  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-  "--add-opens=java.base/java.lang=ALL-UNNAMED"
-  "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
   "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
-  "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED"
-  "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"
-  "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
 )
 
-if command -v lsof >/dev/null 2>&1; then
-  STATS_DIR="$MAP_ARG"
-  if [[ -f "$MAP_ARG" ]]; then
-    STATS_DIR="$(dirname "$MAP_ARG")"
-  fi
-  if [[ -d "$STATS_DIR" ]]; then
-    OPEN_BY_BESU=0
-    for shard in "$STATS_DIR"/snap_trie_nodes_*.dat; do
-      [[ -f "$shard" ]] || continue
-      if lsof "$shard" 2>/dev/null | grep -q java; then
-        OPEN_BY_BESU=1
-      fi
-    done
-    if [[ "$OPEN_BY_BESU" -eq 1 ]]; then
-      echo "warning: shard map files are open by Besu; longSize may be 0." >&2
-      echo "         Stop Besu for a reliable count, or pass --scan-sample (slower)." >&2
-    fi
-  fi
-fi
-
-if ((${#EXTRA_ARGS[@]} > 0)); then
-  exec "$JAVA" "${JVM_OPTS[@]}" -cp "$CLASSPATH" "$MAIN_CLASS" "${EXTRA_ARGS[@]}" "$MAP_ARG"
-else
-  exec "$JAVA" "${JVM_OPTS[@]}" -cp "$CLASSPATH" "$MAIN_CLASS" "$MAP_ARG"
-fi
+exec "$JAVA" "${JVM_OPTS[@]}" -cp "$CLASSPATH" "$MAIN_CLASS" "$MAP_ARG"

@@ -12,95 +12,113 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
 
-import net.openhft.chronicle.map.ChronicleMap;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.DBOptions;
+import org.rocksdb.PlainTableConfig;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
 
-import org.hyperledger.besu.services.kvstore.FrozenSnapTrieNodeChronicleConfig;
-
-/** Read-only stats for sharded {@code frozen_snap_trie_nodes/snap_trie_nodes_XX.dat}. */
+/** Read-only stats for the frozen snap-sync trie node PlainTable RocksDB. */
 public final class FrozenSnapTrieNodeMapStats {
 
   private static final String FROZEN_MARKER = ".frozen";
+  private static final String DEFAULT_SUBDIR = "frozen_snap_trie_nodes";
 
   private FrozenSnapTrieNodeMapStats() {}
 
   public static void main(final String[] args) throws Exception {
-    boolean scanSample = false;
-    Path input = null;
-    for (final String arg : args) {
-      if ("--scan-sample".equals(arg)) {
-        scanSample = true;
-      } else if (!arg.startsWith("-")) {
-        input = Path.of(arg);
-      } else {
-        System.err.println("Unknown option: " + arg);
-        System.exit(2);
-      }
-    }
-    if (input == null) {
+    if (args.length != 1 || args[0].startsWith("-")) {
       System.err.println(
-          "Usage: FrozenSnapTrieNodeMapStats [--scan-sample] <frozen_snap_trie_nodes-dir>");
+          "Usage: FrozenSnapTrieNodeMapStats <besu-data-dir|frozen_snap_trie_nodes-dir>");
       System.exit(2);
     }
 
-    final Path directory = Files.isDirectory(input) ? input : input.getParent();
-    if (!Files.isDirectory(directory)) {
-      System.err.println("Directory not found: " + directory);
+    RocksDB.loadLibrary();
+
+    final Path dbDirectory = resolveDbDirectory(Path.of(args[0]));
+    if (!Files.isDirectory(dbDirectory)) {
+      System.err.println("No RocksDB directory found under " + dbDirectory);
       System.exit(1);
     }
 
-    final boolean frozen = Files.exists(directory.resolve(FROZEN_MARKER));
-    long totalFileBytes = 0;
-    long totalLongSize = 0;
-    int openShards = 0;
+    final boolean frozen = Files.exists(dbDirectory.resolve(FROZEN_MARKER));
 
-    if (Files.isRegularFile(directory.resolve(FrozenSnapTrieNodeChronicleConfig.LEGACY_MAP_FILE_NAME))) {
-      System.err.println("note=legacy single-file map present; stats below are for shard files only");
+    long totalBytes = 0;
+    try (Stream<Path> stream = Files.walk(dbDirectory)) {
+      totalBytes =
+          stream
+              .filter(Files::isRegularFile)
+              .mapToLong(
+                  p -> {
+                    try {
+                      return Files.size(p);
+                    } catch (IOException e) {
+                      return 0L;
+                    }
+                  })
+              .sum();
     }
 
-    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
-      final Path mapPath = directory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard));
-      if (!Files.isRegularFile(mapPath)) {
-        continue;
-      }
-      openShards++;
-      totalFileBytes += Files.size(mapPath);
-      final ChronicleMap<byte[], byte[]> map = openReadOnly(mapPath.toFile(), shard);
-      try {
-        final long longSize = map.longSize();
-        totalLongSize += longSize;
-        System.out.printf(
-            "shard=%02x path=%s file_bytes=%d longSize=%d%n",
-            shard, mapPath, Files.size(mapPath), longSize);
-        if (scanSample) {
-          final AtomicLong scanned = new AtomicLong();
-          map.forEach((k, v) -> scanned.incrementAndGet());
-          System.out.printf("shard=%02x scanCount=%d%n", shard, scanned.get());
-        }
-      } finally {
-        map.close();
-      }
-    }
+    final long entries = readEntryCount(dbDirectory);
 
-    if (openShards == 0) {
-      System.err.println("No shard map files found under " + directory);
-      System.exit(1);
-    }
-
-    System.out.printf("directory=%s%n", directory.toAbsolutePath());
+    System.out.printf("directory=%s%n", dbDirectory.toAbsolutePath());
     System.out.printf("frozen=%s%n", frozen);
-    System.out.printf("shards=%d%n", openShards);
-    System.out.printf("total_file_bytes=%d%n", totalFileBytes);
-    System.out.printf("total_longSize=%d%n", totalLongSize);
+    System.out.printf("entries=%d%n", entries);
+    System.out.printf("bytesOnDisk=%d%n", totalBytes);
   }
 
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile, final int shardIndex)
-      throws java.io.IOException {
-    return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(shardIndex)
-        .recoverPersistedTo(mapFile, true);
+  private static long readEntryCount(final Path dbDirectory) throws RocksDBException {
+    final PlainTableConfig tableConfig =
+        new PlainTableConfig()
+            .setKeySize(32)
+            .setBloomBitsPerKey(10)
+            .setHashTableRatio(0.75)
+            .setIndexSparseness(16)
+            .setFullScanMode(false)
+            .setStoreIndexInFile(false);
+
+    try (DBOptions dbOptions =
+            new DBOptions()
+                .setCreateIfMissing(false)
+                .setAllowMmapReads(true)
+                .setAllowMmapWrites(false)
+                .setMaxOpenFiles(-1);
+        org.rocksdb.ColumnFamilyOptions cfOptions =
+            new org.rocksdb.ColumnFamilyOptions().setTableFormatConfig(tableConfig)) {
+
+      final List<ColumnFamilyDescriptor> cfDescriptors =
+          List.of(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOptions));
+      final List<ColumnFamilyHandle> cfHandles = new ArrayList<>();
+
+      try (RocksDB db =
+          RocksDB.openReadOnly(dbOptions, dbDirectory.toString(), cfDescriptors, cfHandles)) {
+        final ColumnFamilyHandle cfHandle = cfHandles.get(0);
+        try {
+          final String prop = db.getProperty(cfHandle, "rocksdb.estimate-num-keys");
+          return prop == null ? 0L : Long.parseLong(prop.trim());
+        } finally {
+          cfHandle.close();
+        }
+      }
+    }
+  }
+
+  private static Path resolveDbDirectory(final Path input) {
+    if (Files.isRegularFile(input.resolve("CURRENT"))) {
+      return input;
+    }
+    final Path nested = input.resolve(DEFAULT_SUBDIR);
+    if (Files.isRegularFile(nested.resolve("CURRENT"))) {
+      return nested;
+    }
+    return input;
   }
 }

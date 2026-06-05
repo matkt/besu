@@ -23,13 +23,13 @@ import org.apache.tuweni.bytes.Bytes32;
 
 /**
  * Immutable-by-convention trie node store populated during snap sync (keyed by node hash). After
- * {@link #freeze()}, writes are rejected and the backing Chronicle Map is reopened read-only.
+ * {@link #freeze()}, writes are rejected and the backing store is reopened read-only.
  */
 public interface FrozenSnapTrieNodeStorage extends AutoCloseable {
 
-  /** Opens or creates a persisted Chronicle Map at {@code directory}. */
+  /** Opens or creates a persisted PlainTable RocksDB at {@code directory}. */
   static FrozenSnapTrieNodeStorage open(final Path directory) {
-    return ChronicleMapFrozenSnapTrieNodeStorage.open(directory);
+    return RocksDBPlainTableFrozenSnapTrieNodeStorage.open(directory);
   }
 
   void put(Bytes32 hash, Bytes value);

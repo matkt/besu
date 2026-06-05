@@ -14,15 +14,13 @@
  */
 package org.hyperledger.besu.services.kvstore;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
-import net.openhft.chronicle.map.ChronicleMap;
+import java.util.stream.Stream;
 
 /**
- * Prints entry count and on-disk size for a snap-sync frozen trie node Chronicle Map. Usage:
+ * Prints entry count and on-disk size for a snap-sync frozen trie node PlainTable RocksDB. Usage:
  *
  * <pre>
  * frozen-snap-trie-map-stats.sh /path/to/data-dir
@@ -42,56 +40,51 @@ public final class FrozenSnapTrieNodeMapStats {
           "Usage: FrozenSnapTrieNodeMapStats <besu-data-dir|frozen_snap_trie_nodes-dir>");
       System.exit(2);
     }
-    final Path mapDirectory = resolveMapDirectory(Path.of(args[0]));
-    final boolean frozen = Files.exists(mapDirectory.resolve(FROZEN_MARKER_FILE));
-    long totalBytes = 0;
-    long totalEntries = 0;
-    int shards = 0;
-    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
-      final Path mapFile = mapDirectory.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard));
-      if (!Files.isRegularFile(mapFile)) {
-        continue;
-      }
-      shards++;
-      totalBytes += Files.size(mapFile);
-      try (ChronicleMap<byte[], byte[]> map = openReadOnly(mapFile.toFile(), shard)) {
-        totalEntries += map.longSize();
-      }
-    }
-    if (shards == 0) {
-      System.err.println("No shard map files found under " + mapDirectory);
+    final Path dbDirectory = resolveDbDirectory(Path.of(args[0]));
+    if (!Files.isDirectory(dbDirectory)) {
+      System.err.println("No RocksDB found under " + dbDirectory);
       System.exit(1);
     }
 
-    System.out.println("directory=" + mapDirectory.toAbsolutePath());
+    final boolean frozen = Files.exists(dbDirectory.resolve(FROZEN_MARKER_FILE));
+
+    long totalBytes = 0;
+    try (Stream<Path> stream = Files.walk(dbDirectory)) {
+      totalBytes =
+          stream
+              .filter(Files::isRegularFile)
+              .mapToLong(
+                  p -> {
+                    try {
+                      return Files.size(p);
+                    } catch (final IOException e) {
+                      return 0L;
+                    }
+                  })
+              .sum();
+    }
+
+    long entries = 0;
+    try (FrozenSnapTrieNodeStorage storage = FrozenSnapTrieNodeStorage.open(dbDirectory)) {
+      entries = storage.entryCount();
+    }
+
+    System.out.println("directory=" + dbDirectory.toAbsolutePath());
     System.out.println("frozen=" + frozen);
-    System.out.println("shards=" + shards);
-    System.out.println("entries=" + totalEntries);
+    System.out.println("entries=" + entries);
     System.out.println("bytesOnDisk=" + totalBytes);
   }
 
-  static Path resolveMapDirectory(final Path input) {
-    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
-      if (Files.isRegularFile(input.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard)))) {
-        return input;
-      }
-    }
-    if (input.getFileName() != null
-        && DEFAULT_SUBDIR.equals(input.getFileName().toString())) {
+  static Path resolveDbDirectory(final Path input) {
+    // Check if a RocksDB CURRENT file exists directly in the given directory
+    if (Files.isRegularFile(input.resolve("CURRENT"))) {
       return input;
     }
+    // Check the default sub-directory
     final Path nested = input.resolve(DEFAULT_SUBDIR);
-    for (int shard = 0; shard < FrozenSnapTrieNodeChronicleConfig.NUM_SHARDS; shard++) {
-      if (Files.isRegularFile(nested.resolve(FrozenSnapTrieNodeChronicleConfig.shardFileName(shard)))) {
-        return nested;
-      }
+    if (Files.isRegularFile(nested.resolve("CURRENT"))) {
+      return nested;
     }
     return input;
-  }
-
-  private static ChronicleMap<byte[], byte[]> openReadOnly(final File mapFile, final int shard)
-      throws IOException {
-    return FrozenSnapTrieNodeChronicleConfig.newBuilderForShard(shard)
-        .recoverPersistedTo(mapFile, true);
   }
 }

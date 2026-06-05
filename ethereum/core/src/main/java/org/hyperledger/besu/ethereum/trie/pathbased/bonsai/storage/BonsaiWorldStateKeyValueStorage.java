@@ -158,13 +158,13 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   }
 
   /**
-   * During snap sync, trie nodes are written by hash into a frozen Chronicle Map (not RocksDB). Flat
-   * account / storage data continues to use RocksDB.
+   * During snap sync, trie nodes are written by hash into a frozen PlainTable RocksDB (not the
+   * main Bonsai RocksDB). Flat account / storage data continues to use the main RocksDB.
    */
   public synchronized void enableSnapSyncFrozenTrieNodeCapture() {
     if (frozenSnapTrieNodeDirectory.isEmpty()) {
       LOG.warn(
-          "Frozen snap-sync trie node directory is not configured; skipping Chronicle Map capture");
+          "Frozen snap-sync trie node directory is not configured; skipping PlainTable RocksDB capture");
       return;
     }
     if (frozenSnapTrieNodeStorage == null) {
@@ -172,17 +172,17 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     }
     snapSyncTrieNodeCapture = true;
     LOG.info(
-        "Capturing snap-sync trie nodes by hash in Chronicle Map at {}",
+        "Capturing snap-sync trie nodes by hash in PlainTable RocksDB at {}",
         frozenSnapTrieNodeDirectory.get());
   }
 
-  /** Seals the frozen Chronicle Map; post-sync trie nodes are written by location in RocksDB. */
+  /** Seals the frozen PlainTable RocksDB; post-sync trie nodes are written by location in the main RocksDB. */
   public synchronized void freezeSnapSyncFrozenTrieNodes() {
     snapSyncTrieNodeCapture = false;
     if (frozenSnapTrieNodeStorage != null && !frozenSnapTrieNodeStorage.isFrozen()) {
       frozenSnapTrieNodeStorage.freeze();
       LOG.info(
-          "Snap-sync trie node Chronicle Map frozen at {}",
+          "Snap-sync trie node PlainTable RocksDB frozen at {}",
           frozenSnapTrieNodeDirectory.orElse(null));
     }
   }
@@ -206,7 +206,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     final Path directory = frozenSnapTrieNodeDirectory.get();
     if (Files.exists(directory.resolve(".frozen"))) {
       frozenSnapTrieNodeStorage = FrozenSnapTrieNodeStorage.open(directory);
-      LOG.info("Loaded frozen snap-sync trie node Chronicle Map from {}", directory);
+      LOG.info("Loaded frozen snap-sync trie node PlainTable RocksDB from {}", directory);
     }
   }
 
@@ -379,7 +379,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
     if (frozenSnapTrieNodeStorage != null) {
       LOG.info(
-          "Closing frozen snap-sync trie node Chronicle Map (longSize={})",
+          "Closing frozen snap-sync trie node PlainTable RocksDB (entries={})",
           frozenSnapTrieNodeStorage.entryCount());
       frozenSnapTrieNodeStorage.close();
       frozenSnapTrieNodeStorage = null;
@@ -546,11 +546,11 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       pendingFrozenTrieNodePuts.clear();
       if (LOG.isDebugEnabled()) {
         LOG.debug(
-            "Flushed {} snap-sync trie nodes to frozen Chronicle Map (longSize={})",
+            "Flushed {} snap-sync trie nodes to frozen PlainTable RocksDB (entries={})",
             batchSize,
             worldStateStorage.frozenSnapTrieNodeStorage.entryCount());
       } else {
-        LOG.info("Flushed {} snap-sync trie nodes to frozen Chronicle Map", batchSize);
+        LOG.info("Flushed {} snap-sync trie nodes to frozen PlainTable RocksDB", batchSize);
       }
     }
 

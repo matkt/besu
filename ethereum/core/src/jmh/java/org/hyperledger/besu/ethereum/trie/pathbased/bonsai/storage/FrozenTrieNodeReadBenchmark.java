@@ -43,9 +43,9 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Disk-to-disk comparison: frozen Chronicle Map read by hash (snap-sync snapshot) vs RocksDB trie
- * branch read by location (Bonsai post-sync). Both datasets are persisted on disk; Chronicle is
- * frozen and reopened read-only before measurement.
+ * Disk-to-disk comparison: frozen PlainTable RocksDB read by hash (snap-sync snapshot, keyed by
+ * node hash) vs. main Bonsai RocksDB trie-branch read by location (post-sync). Both datasets are
+ * persisted on disk; the PlainTable store is frozen and reopened read-only before measurement.
  */
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
@@ -60,7 +60,7 @@ public class FrozenTrieNodeReadBenchmark {
   private List<Bytes> locations;
   private List<byte[]> nodePayloads;
   private SegmentedKeyValueStorage rocksDbStorage;
-  private FrozenSnapTrieNodeStorage chronicleMapStorage;
+  private FrozenSnapTrieNodeStorage plainTableStorage;
   private Path benchRootDirectory;
   private int cursor;
 
@@ -77,8 +77,8 @@ public class FrozenTrieNodeReadBenchmark {
     }
 
     benchRootDirectory = Files.createTempDirectory("besu-trie-node-disk-bench");
-    final Path rocksDbDirectory = benchRootDirectory.resolve("rocksdb");
-    final Path chronicleMapDirectory = benchRootDirectory.resolve("chronicle-map");
+    final Path rocksDbDirectory = benchRootDirectory.resolve("rocksdb-trie-branch");
+    final Path plainTableDirectory = benchRootDirectory.resolve("rocksdb-plain-table");
 
     final FrozenTrieNodeDiskBenchmarkStorage diskRocksDb =
         FrozenTrieNodeDiskBenchmarkStorage.create(rocksDbDirectory);
@@ -90,13 +90,13 @@ public class FrozenTrieNodeReadBenchmark {
     rocksTx.commit();
     // Keep RocksDB open: the factory shares one DB instance; close() would break reads.
 
-    chronicleMapStorage = FrozenSnapTrieNodeStorage.open(chronicleMapDirectory);
+    plainTableStorage = FrozenSnapTrieNodeStorage.open(plainTableDirectory);
     for (int i = 0; i < nodeCount; i++) {
-      chronicleMapStorage.put(hashes.get(i), Bytes.wrap(nodePayloads.get(i)));
+      plainTableStorage.put(hashes.get(i), Bytes.wrap(nodePayloads.get(i)));
     }
-    chronicleMapStorage.freeze();
-    chronicleMapStorage.close();
-    chronicleMapStorage = FrozenSnapTrieNodeStorage.open(chronicleMapDirectory);
+    plainTableStorage.freeze();
+    plainTableStorage.close();
+    plainTableStorage = FrozenSnapTrieNodeStorage.open(plainTableDirectory);
 
     cursor = 0;
   }
@@ -107,9 +107,9 @@ public class FrozenTrieNodeReadBenchmark {
       rocksDbStorage.close();
       rocksDbStorage = null;
     }
-    if (chronicleMapStorage != null) {
-      chronicleMapStorage.close();
-      chronicleMapStorage = null;
+    if (plainTableStorage != null) {
+      plainTableStorage.close();
+      plainTableStorage = null;
     }
     FrozenTrieNodeDiskBenchmarkStorage.deleteRecursively(benchRootDirectory);
   }
@@ -120,8 +120,8 @@ public class FrozenTrieNodeReadBenchmark {
   }
 
   @Benchmark
-  public void readChronicleMapByHash(final Blackhole blackhole) {
-    final Bytes value = chronicleMapStorage.get(hashes.get(cursor)).orElseThrow();
+  public void readPlainTableByHash(final Blackhole blackhole) {
+    final Bytes value = plainTableStorage.get(hashes.get(cursor)).orElseThrow();
     blackhole.consume(value);
   }
 

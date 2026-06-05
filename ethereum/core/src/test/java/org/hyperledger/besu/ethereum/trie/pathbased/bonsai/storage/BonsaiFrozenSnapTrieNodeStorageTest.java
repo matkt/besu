@@ -33,7 +33,7 @@ class BonsaiFrozenSnapTrieNodeStorageTest {
   @TempDir Path tempDir;
 
   @Test
-  void snapSyncWritesChronicleMapPostSyncWritesRocksDbAndReadsChronicleFirst() {
+  void snapSyncWritesPlainTablePostSyncWritesRocksDbAndReadsPlainTableFirst() {
     final Path frozenDir = tempDir.resolve("frozen");
     final InMemoryKeyValueStorageProvider provider = new InMemoryKeyValueStorageProvider();
     final BonsaiWorldStateKeyValueStorage storage =
