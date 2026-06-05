@@ -72,7 +72,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
                 new PlainTableConfig()
                     .setKeySize(KEY_SIZE_BYTES)
                     .setBloomBitsPerKey(10)
-                    .setHashTableRatio(0.75)
+                    .setHashTableRatio(0)
                     .setIndexSparseness(16))
             .setCompressionType(CompressionType.NO_COMPRESSION)
             .setMemTableConfig(new HashLinkedListMemTableConfig())

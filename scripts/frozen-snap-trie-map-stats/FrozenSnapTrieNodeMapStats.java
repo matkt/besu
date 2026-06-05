@@ -80,7 +80,7 @@ public final class FrozenSnapTrieNodeMapStats {
         new PlainTableConfig()
             .setKeySize(32)
             .setBloomBitsPerKey(10)
-            .setHashTableRatio(0.75)
+            .setHashTableRatio(0)
             .setIndexSparseness(16)
             .setFullScanMode(false)
             .setStoreIndexInFile(false);
