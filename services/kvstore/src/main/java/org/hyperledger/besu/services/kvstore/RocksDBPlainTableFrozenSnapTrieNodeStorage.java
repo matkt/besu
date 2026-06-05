@@ -48,7 +48,12 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
 
   private static final String FROZEN_MARKER_FILE = ".frozen";
   private static final int KEY_SIZE_BYTES = 32;
-  private static final long WRITE_BUFFER_SIZE = 256L * 1024 * 1024;
+
+  /** Smaller memtables flush more often → lower peak RAM, smoother ingest. */
+  private static final long WRITE_BUFFER_SIZE = 64L * 1024 * 1024;
+
+  /** Hard cap on total memtable memory for this DB. */
+  private static final long DB_WRITE_BUFFER_SIZE = 128L * 1024 * 1024;
 
   static {
     RocksDB.loadLibrary();
@@ -57,6 +62,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   private final Path directory;
   private final AtomicBoolean frozen = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
+  private final WriteOptions writeOptions = new WriteOptions().setDisableWAL(true);
   private final RocksDB db;
   private final ColumnFamilyHandle cfHandle;
   private final DBOptions dbOptions;
@@ -76,7 +82,8 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
                     .setIndexSparseness(16))
             .setCompressionType(CompressionType.NO_COMPRESSION)
             .setMemTableConfig(new HashLinkedListMemTableConfig())
-            .setWriteBufferSize(WRITE_BUFFER_SIZE);
+            .setWriteBufferSize(WRITE_BUFFER_SIZE)
+            .setMaxWriteBufferNumber(2);
 
     dbOptions =
         new DBOptions()
@@ -85,6 +92,9 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
             .setAllowMmapReads(true)
             .setAllowMmapWrites(false)
             .setAllowConcurrentMemtableWrite(false)
+            .setEnablePipelinedWrite(true)
+            .setDbWriteBufferSize(DB_WRITE_BUFFER_SIZE)
+            .setMaxTotalWalSize(0)
             .setMaxOpenFiles(-1);
 
     final List<ColumnFamilyHandle> handles = new ArrayList<>();
@@ -115,10 +125,8 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   @Override
   public void put(final Bytes32 hash, final Bytes value) {
     ensureWritable();
-    final byte[] key = keyBytes(hash);
-    final byte[] val = value.toArray();
     try {
-      db.put(cfHandle, key, val);
+      db.put(cfHandle, writeOptions, keyBytes(hash), value.toArray());
     } catch (final RocksDBException e) {
       throw new IllegalStateException("RocksDB put failed: " + e.getMessage(), e);
     }
@@ -130,12 +138,11 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
       return;
     }
     ensureWritable();
-    try (WriteBatch batch = new WriteBatch();
-        WriteOptions wo = new WriteOptions()) {
+    try (WriteBatch batch = new WriteBatch()) {
       for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
         batch.put(cfHandle, keyBytes(entry.getKey()), entry.getValue().toArray());
       }
-      db.write(wo, batch);
+      db.write(writeOptions, batch);
     } catch (final RocksDBException e) {
       throw new IllegalStateException("RocksDB batch write failed: " + e.getMessage(), e);
     }
@@ -190,6 +197,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    writeOptions.close();
     cfHandle.close();
     db.close();
     cfOptions.close();

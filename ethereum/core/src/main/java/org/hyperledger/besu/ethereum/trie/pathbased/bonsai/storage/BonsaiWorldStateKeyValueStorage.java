@@ -439,6 +439,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     protected final FlatDbStrategy flatDbStrategy;
     protected final SegmentedKeyValueStorage worldStorage;
     protected final BonsaiWorldStateKeyValueStorage worldStateStorage;
+    private final Map<Bytes32, Bytes> pendingFrozenTrieNodePuts = new HashMap<>();
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
@@ -506,7 +507,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       }
       if (worldStateStorage.snapSyncTrieNodeCapture
           && worldStateStorage.frozenSnapTrieNodeStorage != null) {
-        worldStateStorage.frozenSnapTrieNodeStorage.put(nodeHash, node);
+        pendingFrozenTrieNodePuts.put(nodeHash, node);
         return this;
       }
       composedWorldStateTransaction.put(
@@ -526,7 +527,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       }
       if (worldStateStorage.snapSyncTrieNodeCapture
           && worldStateStorage.frozenSnapTrieNodeStorage != null) {
-        worldStateStorage.frozenSnapTrieNodeStorage.put(nodeHash, node);
+        pendingFrozenTrieNodePuts.put(nodeHash, node);
         return this;
       }
       composedWorldStateTransaction.put(
@@ -534,6 +535,14 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
           Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe(),
           node.toArrayUnsafe());
       return this;
+    }
+
+    private void flushPendingFrozenTrieNodes() {
+      if (pendingFrozenTrieNodePuts.isEmpty()) {
+        return;
+      }
+      worldStateStorage.frozenSnapTrieNodeStorage.putAll(pendingFrozenTrieNodePuts);
+      pendingFrozenTrieNodePuts.clear();
     }
 
     public synchronized Updater putStorageValueBySlotHash(
@@ -561,6 +570,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     @Override
     public void commit() {
+      flushPendingFrozenTrieNodes();
       trieLogStorageTransaction.commit();
       composedWorldStateTransaction.commit();
     }
@@ -579,6 +589,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     @Override
     public void rollback() {
+      pendingFrozenTrieNodePuts.clear();
       composedWorldStateTransaction.rollback();
       trieLogStorageTransaction.rollback();
     }
