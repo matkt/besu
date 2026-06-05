@@ -439,7 +439,6 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     protected final FlatDbStrategy flatDbStrategy;
     protected final SegmentedKeyValueStorage worldStorage;
     protected final BonsaiWorldStateKeyValueStorage worldStateStorage;
-    private final Map<Bytes32, Bytes> pendingFrozenTrieNodePuts = new HashMap<>();
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
@@ -507,7 +506,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       }
       if (worldStateStorage.snapSyncTrieNodeCapture
           && worldStateStorage.frozenSnapTrieNodeStorage != null) {
-        pendingFrozenTrieNodePuts.put(nodeHash, node);
+        worldStateStorage.frozenSnapTrieNodeStorage.put(nodeHash, node);
         return this;
       }
       composedWorldStateTransaction.put(
@@ -527,7 +526,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       }
       if (worldStateStorage.snapSyncTrieNodeCapture
           && worldStateStorage.frozenSnapTrieNodeStorage != null) {
-        pendingFrozenTrieNodePuts.put(nodeHash, node);
+        worldStateStorage.frozenSnapTrieNodeStorage.put(nodeHash, node);
         return this;
       }
       composedWorldStateTransaction.put(
@@ -535,23 +534,6 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
           Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe(),
           node.toArrayUnsafe());
       return this;
-    }
-
-    protected void flushPendingFrozenTrieNodes() {
-      if (pendingFrozenTrieNodePuts.isEmpty()) {
-        return;
-      }
-      final int batchSize = pendingFrozenTrieNodePuts.size();
-      worldStateStorage.frozenSnapTrieNodeStorage.putAll(pendingFrozenTrieNodePuts);
-      pendingFrozenTrieNodePuts.clear();
-      if (LOG.isDebugEnabled()) {
-        LOG.debug(
-            "Flushed {} snap-sync trie nodes to frozen PlainTable RocksDB (entries={})",
-            batchSize,
-            worldStateStorage.frozenSnapTrieNodeStorage.entryCount());
-      } else {
-        LOG.info("Flushed {} snap-sync trie nodes to frozen PlainTable RocksDB", batchSize);
-      }
     }
 
     public synchronized Updater putStorageValueBySlotHash(
@@ -579,7 +561,6 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     @Override
     public void commit() {
-      flushPendingFrozenTrieNodes();
       trieLogStorageTransaction.commit();
       composedWorldStateTransaction.commit();
     }
