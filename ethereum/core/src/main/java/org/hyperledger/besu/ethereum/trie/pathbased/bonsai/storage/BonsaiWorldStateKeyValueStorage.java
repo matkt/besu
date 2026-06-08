@@ -24,6 +24,8 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.NodeLoader.NodeSource;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.CacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.VersionedCacheManager;
@@ -220,9 +222,48 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   }
 
   private Optional<Bytes> getLiveTrieNodeByLocation(final Bytes location) {
+    if (location == null) {
+      return Optional.empty();
+    }
     return composedWorldStateStorage
         .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
         .map(Bytes::wrap);
+  }
+
+  private Optional<NodeLoader.LoadedNode> getAccountStateTrieNodeWithSource(
+      final Bytes location, final Bytes32 nodeHash, final NodeSource preferredSource) {
+    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      return Optional.of(new NodeLoader.LoadedNode(MerkleTrie.EMPTY_TRIE_NODE, preferredSource));
+    }
+    return getTrieNodeWithSource(location, nodeHash, preferredSource);
+  }
+
+  private Optional<NodeLoader.LoadedNode> getAccountStorageTrieNodeWithSource(
+      final Hash accountHash,
+      final Bytes location,
+      final Bytes32 nodeHash,
+      final NodeSource preferredSource) {
+    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      return Optional.of(new NodeLoader.LoadedNode(MerkleTrie.EMPTY_TRIE_NODE, preferredSource));
+    }
+    final Bytes storageLocation =
+        location == null ? null : Bytes.concatenate(accountHash.getBytes(), location);
+    return getTrieNodeWithSource(storageLocation, nodeHash, preferredSource);
+  }
+
+  private Optional<NodeLoader.LoadedNode> getTrieNodeWithSource(
+      final Bytes location, final Bytes32 nodeHash, final NodeSource preferredSource) {
+    if (preferredSource == NodeSource.COLD) {
+      return getFrozenTrieNodeByHash(nodeHash)
+          .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.COLD));
+    }
+    return getLiveTrieNodeByLocation(location)
+        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash))
+        .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.HOT))
+        .or(
+            () ->
+                getFrozenTrieNodeByHash(nodeHash)
+                    .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.COLD)));
   }
 
   private static CacheManager createCacheManager(
@@ -313,30 +354,48 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   }
 
   public Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    }
-    return getFrozenTrieNodeByHash(nodeHash)
-        .or(
-            () ->
-                getLiveTrieNodeByLocation(location)
-                    .filter(b -> Hash.hash(b).getBytes().equals(nodeHash)));
+    return getAccountStateTrieNodeWithSource(location, nodeHash, NodeSource.UNKNOWN)
+        .map(NodeLoader.LoadedNode::getBytes);
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
       final Hash accountHash, final Bytes location, final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    }
-    return getFrozenTrieNodeByHash(nodeHash)
-        .or(
-            () ->
-                getLiveTrieNodeByLocation(Bytes.concatenate(accountHash.getBytes(), location))
-                    .filter(b -> Hash.hash(b).getBytes().equals(nodeHash)));
+    return getAccountStorageTrieNodeWithSource(accountHash, location, nodeHash, NodeSource.UNKNOWN)
+        .map(NodeLoader.LoadedNode::getBytes);
+  }
+
+  public NodeLoader accountStateNodeLoader() {
+    return new NodeLoader() {
+      @Override
+      public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+        return getAccountStateTrieNode(location, hash);
+      }
+
+      @Override
+      public Optional<NodeLoader.LoadedNode> getNodeWithSource(
+          final Bytes location, final Bytes32 hash, final NodeSource preferredSource) {
+        return getAccountStateTrieNodeWithSource(location, hash, preferredSource);
+      }
+    };
+  }
+
+  public NodeLoader accountStorageNodeLoader(final Hash accountHash) {
+    return new NodeLoader() {
+      @Override
+      public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+        return getAccountStorageTrieNode(accountHash, location, hash);
+      }
+
+      @Override
+      public Optional<NodeLoader.LoadedNode> getNodeWithSource(
+          final Bytes location, final Bytes32 hash, final NodeSource preferredSource) {
+        return getAccountStorageTrieNodeWithSource(accountHash, location, hash, preferredSource);
+      }
+    };
   }
 
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
-    return getFrozenTrieNodeByHash(Bytes32.wrap(key)).or(() -> getLiveTrieNodeByLocation(key));
+    return getLiveTrieNodeByLocation(key).or(() -> getFrozenTrieNodeByHash(Bytes32.wrap(key)));
   }
 
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(

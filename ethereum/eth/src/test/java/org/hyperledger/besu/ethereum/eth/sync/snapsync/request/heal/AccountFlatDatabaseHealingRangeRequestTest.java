@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snapsync.request.heal;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.TrieGenerator;
+import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncMetricsManager;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
@@ -322,5 +323,72 @@ public class AccountFlatDatabaseHealingRangeRequestTest {
     // check add the missing account to the updater
     Mockito.verify(updater)
         .putAccountInfoState(Hash.wrap(removedAccount.getKey()), removedAccount.getValue());
+  }
+
+  @Test
+  public void shouldLimitTrieTraversalWhenHealingInvalidFlatAccounts() {
+    final StorageProvider storageProvider = new InMemoryKeyValueStorageProvider();
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
+        new BonsaiWorldStateKeyValueStorage(
+            storageProvider,
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    final WorldStateStorageCoordinator worldStateStorageCoordinator =
+        new WorldStateStorageCoordinator(worldStateKeyValueStorage);
+    final WorldStateProofProvider proofProvider =
+        new WorldStateProofProvider(worldStateStorageCoordinator);
+    final MerkleTrie<Bytes, Bytes> accountStateTrie =
+        TrieGenerator.generateTrie(worldStateStorageCoordinator, 15);
+
+    final RangeStorageEntriesCollector collector =
+        RangeStorageEntriesCollector.createCollector(
+            Bytes32.ZERO, RangeManager.MAX_RANGE, 10, Integer.MAX_VALUE);
+    final TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
+    final TreeMap<Bytes32, Bytes> accounts =
+        (TreeMap<Bytes32, Bytes>)
+            accountStateTrie.entriesFrom(
+                root ->
+                    RangeStorageEntriesCollector.collectEntries(
+                        collector, visitor, root, Bytes32.ZERO));
+    final Bytes32 originalLastKey = accounts.lastKey();
+
+    final List<Bytes> proofs =
+        proofProvider.getAccountProofRelatedNodes(
+            Hash.wrap(accountStateTrie.getRootHash()), Bytes32.ZERO);
+    proofs.addAll(
+        proofProvider.getAccountProofRelatedNodes(
+            Hash.wrap(accountStateTrie.getRootHash()), originalLastKey));
+    accounts.remove(accounts.navigableKeySet().stream().skip(5).findFirst().orElseThrow());
+    final Bytes32 preservedLaterKey =
+        accounts.navigableKeySet().stream().skip(6).findFirst().orElseThrow();
+
+    final AccountFlatDatabaseHealingRangeRequest request =
+        new AccountFlatDatabaseHealingRangeRequest(
+            Hash.wrap(accountStateTrie.getRootHash()),
+            RangeManager.MIN_RANGE,
+            RangeManager.MAX_RANGE);
+    request.addLocalData(proofProvider, accounts, new ArrayDeque<>(proofs));
+
+    final BonsaiWorldStateKeyValueStorage.Updater updater =
+        Mockito.spy(worldStateKeyValueStorage.updater());
+    request.doPersist(
+        worldStateStorageCoordinator,
+        updater,
+        downloadState,
+        snapSyncState,
+        ImmutableSnapSyncConfiguration.builder()
+            .localFlatAccountCountToHealPerRequest(3)
+            .build());
+
+    final List<SnapDataRequest> childRequests =
+        request
+            .getChildRequests(downloadState, worldStateStorageCoordinator, snapSyncState)
+            .toList();
+    Assertions.assertThat(childRequests)
+        .hasAtLeastOneElementOfType(AccountFlatDatabaseHealingRangeRequest.class);
+    Assertions.assertThat(
+            ((AccountFlatDatabaseHealingRangeRequest) childRequests.get(0)).getStartKeyHash())
+        .isLessThanOrEqualTo(originalLastKey);
+    Mockito.verify(updater, Mockito.never()).removeAccountInfoState(Hash.wrap(preservedLaterKey));
   }
 }

@@ -21,4 +21,33 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public interface NodeLoader {
   Optional<Bytes> getNode(Bytes location, Bytes32 hash);
+
+  default Optional<LoadedNode> getNodeWithSource(
+      final Bytes location, final Bytes32 hash, final NodeSource preferredSource) {
+    return getNode(location, hash).map(bytes -> new LoadedNode(bytes, NodeSource.UNKNOWN));
+  }
+
+  enum NodeSource {
+    UNKNOWN,
+    HOT,
+    COLD
+  }
+
+  class LoadedNode {
+    private final Bytes bytes;
+    private final NodeSource source;
+
+    public LoadedNode(final Bytes bytes, final NodeSource source) {
+      this.bytes = bytes;
+      this.source = source;
+    }
+
+    public Bytes getBytes() {
+      return bytes;
+    }
+
+    public NodeSource getSource() {
+      return source;
+    }
+  }
 }

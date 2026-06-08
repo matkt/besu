@@ -19,10 +19,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.hyperledger.besu.ethereum.trie.KeyValueMerkleStorage;
 import org.hyperledger.besu.ethereum.trie.MerkleStorage;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -122,5 +127,53 @@ public class StoredMerklePatriciaTrieTest extends AbstractMerklePatriciaTrieTest
     assertThat(trie.get(key1)).isEqualTo(Optional.of("value4"));
     assertThat(trie.get(key2)).isEqualTo(Optional.of("value2"));
     assertThat(trie.get(key3)).isEqualTo(Optional.of("value3"));
+  }
+
+  @Test
+  public void propagatesLoadedNodeSourceToStoredChildren() {
+    final Map<Bytes32, Bytes> persistedNodes = new HashMap<>();
+    final Function<String, Bytes> serializer =
+        value -> Bytes.wrap(value.getBytes(StandardCharsets.UTF_8));
+    final Function<Bytes, String> deserializer =
+        bytes -> new String(bytes.toArrayUnsafe(), StandardCharsets.UTF_8);
+    final StoredMerklePatriciaTrie<Bytes, String> sourceTrie =
+        new StoredMerklePatriciaTrie<>(
+            (location, hash) -> Optional.ofNullable(persistedNodes.get(hash)),
+            serializer,
+            deserializer);
+
+    for (int i = 0; i < 16; i++) {
+      sourceTrie.put(Bytes32.leftPad(Bytes.of(i)), "value-that-forces-hashed-node-" + i);
+    }
+    final Bytes32 rootHash = sourceTrie.getRootHash();
+    sourceTrie.commit((location, hash, value) -> persistedNodes.put(hash, value));
+
+    final List<NodeLoader.NodeSource> preferredSources = new ArrayList<>();
+    final NodeLoader sourceAwareLoader =
+        new NodeLoader() {
+          @Override
+          public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+            return Optional.ofNullable(persistedNodes.get(hash));
+          }
+
+          @Override
+          public Optional<NodeLoader.LoadedNode> getNodeWithSource(
+              final Bytes location,
+              final Bytes32 hash,
+              final NodeLoader.NodeSource preferredSource) {
+            preferredSources.add(preferredSource);
+            return Optional.ofNullable(persistedNodes.get(hash))
+                .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeLoader.NodeSource.COLD));
+          }
+        };
+
+    final StoredMerklePatriciaTrie<Bytes, String> reloadedTrie =
+        new StoredMerklePatriciaTrie<>(sourceAwareLoader, rootHash, serializer, deserializer);
+    assertThat(reloadedTrie.get(Bytes32.leftPad(Bytes.of(15))))
+        .contains("value-that-forces-hashed-node-15");
+    assertThat(preferredSources).hasSizeGreaterThan(1);
+    assertThat(preferredSources.get(0)).isEqualTo(NodeLoader.NodeSource.UNKNOWN);
+    assertThat(preferredSources.subList(1, preferredSources.size()))
+        .containsOnly(NodeLoader.NodeSource.COLD);
   }
 }

@@ -152,9 +152,7 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
 
       final MerkleTrie<Bytes, Bytes> storageTrie =
           new StoredMerklePatriciaTrie<>(
-              (location, hash) ->
-                  worldStateStorageCoordinator.getAccountStorageTrieNode(
-                      accountHash, location, hash),
+              worldStateStorageCoordinator.accountStorageNodeLoader(accountHash),
               storageRoot,
               Function.identity(),
               Function.identity());
@@ -167,9 +165,7 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
           RangeStorageEntriesCollector.createCollector(
               startKeyHash,
               slots.isEmpty() ? endKeyHash : slots.lastKey(),
-              slots.isEmpty()
-                  ? snapSyncConfiguration.getLocalFlatStorageCountToHealPerRequest()
-                  : Integer.MAX_VALUE,
+              snapSyncConfiguration.getLocalFlatStorageCountToHealPerRequest(),
               Integer.MAX_VALUE);
       final TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
       slots =
@@ -178,6 +174,9 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
                   root ->
                       RangeStorageEntriesCollector.collectEntries(
                           collector, visitor, root, startKeyHash));
+      if (!slots.isEmpty()) {
+        flatDbSlots = new TreeMap<>(flatDbSlots.headMap(slots.lastKey(), true));
+      }
 
       // Process each slot
       slots.forEach(

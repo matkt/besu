@@ -160,7 +160,7 @@ public class AccountFlatDatabaseHealingRangeRequest extends SnapDataRequest {
 
       final MerkleTrie<Bytes, Bytes> accountTrie =
           new StoredMerklePatriciaTrie<>(
-              worldStateStorageCoordinator::getAccountStateTrieNode,
+              worldStateStorageCoordinator.accountStateNodeLoader(),
               Bytes32.wrap(getRootHash().getBytes()),
               Function.identity(),
               Function.identity());
@@ -170,9 +170,7 @@ public class AccountFlatDatabaseHealingRangeRequest extends SnapDataRequest {
           RangeStorageEntriesCollector.createCollector(
               startKeyHash,
               existingAccounts.isEmpty() ? endKeyHash : existingAccounts.lastKey(),
-              existingAccounts.isEmpty()
-                  ? syncConfig.getLocalFlatAccountCountToHealPerRequest()
-                  : Integer.MAX_VALUE,
+              syncConfig.getLocalFlatAccountCountToHealPerRequest(),
               Integer.MAX_VALUE);
 
       // put all flat accounts in the list, and gradually keep only those that are not in the trie
@@ -186,6 +184,9 @@ public class AccountFlatDatabaseHealingRangeRequest extends SnapDataRequest {
                   root ->
                       RangeStorageEntriesCollector.collectEntries(
                           collector, visitor, root, startKeyHash));
+      if (!existingAccounts.isEmpty()) {
+        flatDbAccounts = new TreeMap<>(flatDbAccounts.headMap(existingAccounts.lastKey(), true));
+      }
 
       // Process each existing account
       existingAccounts.forEach(

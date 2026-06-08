@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.TrieGenerator;
+import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapWorldDownloadState;
@@ -337,5 +338,69 @@ class StorageFlatDatabaseHealingRangeRequestTest {
             account0Hash,
             Hash.wrap(removedSlot.getKey()),
             Bytes32.leftPad(decodeValue(removedSlot.getValue())));
+  }
+
+  @Test
+  void shouldLimitTrieTraversalWhenHealingInvalidFlatStorages() {
+    final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
+        new StoredMerklePatriciaTrie<>(
+            (location, hash) ->
+                worldStateKeyValueStorage.getAccountStorageTrieNode(account0Hash, location, hash),
+            Bytes32.wrap(account0StorageRoot.getBytes()),
+            b -> b,
+            b -> b);
+
+    final RangeStorageEntriesCollector collector =
+        RangeStorageEntriesCollector.createCollector(
+            Bytes32.ZERO, RangeManager.MAX_RANGE, Integer.MAX_VALUE, Integer.MAX_VALUE);
+    final TrieIterator<Bytes> visitor = RangeStorageEntriesCollector.createVisitor(collector);
+    final TreeMap<Bytes32, Bytes> slots =
+        (TreeMap<Bytes32, Bytes>)
+            storageTrie.entriesFrom(
+                root ->
+                    RangeStorageEntriesCollector.collectEntries(
+                        collector, visitor, root, Bytes32.ZERO));
+    final Bytes32 originalLastKey = slots.lastKey();
+
+    final List<Bytes> proofs =
+        proofProvider.getStorageProofRelatedNodes(
+            storageTrie.getRootHash(), Bytes32.wrap(account0Hash.getBytes()), slots.firstKey());
+    proofs.addAll(
+        proofProvider.getStorageProofRelatedNodes(
+            storageTrie.getRootHash(), Bytes32.wrap(account0Hash.getBytes()), originalLastKey));
+    slots.remove(slots.firstKey());
+    final Bytes32 preservedLaterKey = slots.lastKey();
+
+    final StorageFlatDatabaseHealingRangeRequest request =
+        new StorageFlatDatabaseHealingRangeRequest(
+            Hash.wrap(trie.getRootHash()),
+            Bytes32.wrap(account0Hash.getBytes()),
+            storageTrie.getRootHash(),
+            RangeManager.MIN_RANGE,
+            RangeManager.MAX_RANGE);
+    request.addLocalData(proofProvider, slots, new ArrayDeque<>(proofs));
+
+    final BonsaiWorldStateKeyValueStorage.Updater updater =
+        Mockito.spy(worldStateKeyValueStorage.updater());
+    request.doPersist(
+        worldStateStorageCoordinator,
+        updater,
+        downloadState,
+        snapSyncState,
+        ImmutableSnapSyncConfiguration.builder()
+            .localFlatStorageCountToHealPerRequest(1)
+            .build());
+
+    final List<SnapDataRequest> childRequests =
+        request
+            .getChildRequests(downloadState, worldStateStorageCoordinator, snapSyncState)
+            .toList();
+    Assertions.assertThat(childRequests)
+        .hasAtLeastOneElementOfType(StorageFlatDatabaseHealingRangeRequest.class);
+    Assertions.assertThat(
+            ((StorageFlatDatabaseHealingRangeRequest) childRequests.get(0)).getStartKeyHash())
+        .isLessThanOrEqualTo(originalLastKey);
+    Mockito.verify(updater, Mockito.never())
+        .removeStorageValueBySlotHash(account0Hash, Hash.wrap(preservedLaterKey));
   }
 }

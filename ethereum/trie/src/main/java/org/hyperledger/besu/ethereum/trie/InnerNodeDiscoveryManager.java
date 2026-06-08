@@ -61,9 +61,10 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
       final Bytes location,
       final Bytes path,
       final RLPInput valueRlp,
-      final Supplier<String> errMessage) {
+      final Supplier<String> errMessage,
+      final NodeLoader.NodeSource source) {
     final ExtensionNode<V> vNode =
-        (ExtensionNode<V>) super.decodeExtension(location, path, valueRlp, errMessage);
+        (ExtensionNode<V>) super.decodeExtension(location, path, valueRlp, errMessage, source);
     if (isInRange(Bytes.concatenate(location, Bytes.of(0)), startKeyPath, endKeyPath)) {
       innerNodes.add(
           ImmutableInnerNode.builder()
@@ -76,8 +77,11 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
 
   @Override
   protected BranchNode<V> decodeBranch(
-      final Bytes location, final RLPInput nodeRLPs, final Supplier<String> errMessage) {
-    final BranchNode<V> vBranchNode = super.decodeBranch(location, nodeRLPs, errMessage);
+      final Bytes location,
+      final RLPInput nodeRLPs,
+      final Supplier<String> errMessage,
+      final NodeLoader.NodeSource source) {
+    final BranchNode<V> vBranchNode = super.decodeBranch(location, nodeRLPs, errMessage, source);
     final List<Node<V>> children = vBranchNode.getChildren();
     for (int i = 0; i < children.size(); i++) {
       if (isInRange(Bytes.concatenate(location, Bytes.of(i)), startKeyPath, endKeyPath)) {
@@ -96,8 +100,9 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
       final Bytes location,
       final Bytes path,
       final RLPInput valueRlp,
-      final Supplier<String> errMessage) {
-    final LeafNode<V> vLeafNode = super.decodeLeaf(location, path, valueRlp, errMessage);
+      final Supplier<String> errMessage,
+      final NodeLoader.NodeSource source) {
+    final LeafNode<V> vLeafNode = super.decodeLeaf(location, path, valueRlp, errMessage, source);
     final Bytes concatenatePath = Bytes.concatenate(location, path);
     if (isInRange(concatenatePath.slice(0, concatenatePath.size() - 1), startKeyPath, endKeyPath)) {
       innerNodes.add(ImmutableInnerNode.builder().location(location).path(path).build());
@@ -108,8 +113,14 @@ public class InnerNodeDiscoveryManager<V> extends StoredNodeFactory<V> {
   @Override
   public Optional<Node<V>> retrieve(final Bytes location, final Bytes32 hash)
       throws MerkleTrieException {
+    return retrieve(location, hash, NodeLoader.NodeSource.UNKNOWN);
+  }
 
-    return super.retrieve(location, hash)
+  @Override
+  public Optional<Node<V>> retrieve(
+      final Bytes location, final Bytes32 hash, final NodeLoader.NodeSource preferredSource)
+      throws MerkleTrieException {
+    return super.retrieve(location, hash, preferredSource)
         .map(
             vNode -> {
               vNode.markDirty();

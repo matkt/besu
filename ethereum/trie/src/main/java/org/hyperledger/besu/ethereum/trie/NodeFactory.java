@@ -33,4 +33,9 @@ public interface NodeFactory<V> {
   default Optional<Node<V>> retrieve(final Bytes location, final Bytes32 hash) {
     throw new UnsupportedOperationException("retrieve is not implemented");
   }
+
+  default Optional<Node<V>> retrieve(
+      final Bytes location, final Bytes32 hash, final NodeLoader.NodeSource preferredSource) {
+    return retrieve(location, hash);
+  }
 }

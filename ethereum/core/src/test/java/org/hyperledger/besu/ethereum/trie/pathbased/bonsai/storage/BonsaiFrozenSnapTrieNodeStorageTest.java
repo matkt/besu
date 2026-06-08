@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
+import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
@@ -65,6 +66,17 @@ class BonsaiFrozenSnapTrieNodeStorageTest {
 
     assertThat(storage.getAccountStateTrieNode(newLocation, newHash)).contains(newNode);
     assertThat(storage.getAccountStateTrieNode(location, nodeHash)).contains(node);
+    assertThat(
+            storage
+                .accountStateNodeLoader()
+                .getNodeWithSource(newLocation, newHash, NodeLoader.NodeSource.COLD))
+        .isEmpty();
+    assertThat(
+            storage
+                .accountStateNodeLoader()
+                .getNodeWithSource(newLocation, newHash, NodeLoader.NodeSource.UNKNOWN)
+                .map(NodeLoader.LoadedNode::getBytes))
+        .contains(newNode);
     assertThat(storage.getFrozenSnapTrieNodeStorage()).isPresent();
     assertThat(storage.getFrozenSnapTrieNodeStorage().get().isFrozen()).isTrue();
   }

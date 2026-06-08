@@ -21,6 +21,8 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.NodeLoader.NodeSource;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -46,8 +48,12 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
   private static final int STORAGE_CACHE_SIZE = 200_000;
   private final Cache<Bytes, Bytes> accountNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(ACCOUNT_CACHE_SIZE).build();
+  private final Cache<Bytes, NodeSource> accountNodeSources =
+      CacheBuilder.newBuilder().maximumSize(ACCOUNT_CACHE_SIZE).build();
   private final Cache<Bytes, Bytes> storageNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(STORAGE_CACHE_SIZE).build();
+  private final Cache<Bytes, NodeSource> storageNodeSources =
+      CacheBuilder.newBuilder().maximumSize(STORAGE_CACHE_SIZE).build();
 
   public BonsaiCachedMerkleTrieLoader(final ObservableMetricsSystem metricsSystem) {
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "accountsNodes", accountNodes);
@@ -72,12 +78,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
     try {
       final StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
           new StoredMerklePatriciaTrie<>(
-              (location, hash) -> {
-                Optional<Bytes> node =
-                    getAccountStateTrieNode(worldStateKeyValueStorage, location, hash);
-                node.ifPresent(bytes -> accountNodes.put(Hash.hash(bytes).getBytes(), bytes));
-                return node;
-              },
+              accountStateNodeLoader(worldStateKeyValueStorage),
               Bytes32.wrap(worldStateRootHash.getBytes()),
               Function.identity(),
               Function.identity());
@@ -112,14 +113,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
                 try {
                   final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
                       new StoredMerklePatriciaTrie<Bytes, Bytes>(
-                          (location, hash) -> {
-                            Optional<Bytes> node =
-                                getAccountStorageTrieNode(
-                                    worldStateKeyValueStorage, accountHash, location, hash);
-                            node.ifPresent(
-                                bytes -> storageNodes.put(Hash.hash(bytes).getBytes(), bytes));
-                            return node;
-                          },
+                          accountStorageNodeLoader(worldStateKeyValueStorage, accountHash),
                           Bytes32.wrap(Hash.hash(storageRoot).getBytes()),
                           Function.identity(),
                           Function.identity());
@@ -137,12 +131,7 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Bytes location,
       final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return Optional.ofNullable(accountNodes.getIfPresent(nodeHash))
-          .or(() -> worldStateKeyValueStorage.getAccountStateTrieNode(location, nodeHash));
-    }
+    return accountStateNodeLoader(worldStateKeyValueStorage).getNode(location, nodeHash);
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -150,14 +139,56 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Hash accountHash,
       final Bytes location,
       final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return Optional.ofNullable(storageNodes.getIfPresent(nodeHash))
-          .or(
-              () ->
-                  worldStateKeyValueStorage.getAccountStorageTrieNode(
-                      accountHash, location, nodeHash));
-    }
+    return accountStorageNodeLoader(worldStateKeyValueStorage, accountHash)
+        .getNode(location, nodeHash);
+  }
+
+  public NodeLoader accountStateNodeLoader(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    final NodeLoader storageLoader = worldStateKeyValueStorage.accountStateNodeLoader();
+    return cachedNodeLoader(storageLoader, accountNodes, accountNodeSources);
+  }
+
+  public NodeLoader accountStorageNodeLoader(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage, final Hash accountHash) {
+    final NodeLoader storageLoader = worldStateKeyValueStorage.accountStorageNodeLoader(accountHash);
+    return cachedNodeLoader(storageLoader, storageNodes, storageNodeSources);
+  }
+
+  private NodeLoader cachedNodeLoader(
+      final NodeLoader storageLoader,
+      final Cache<Bytes, Bytes> nodeCache,
+      final Cache<Bytes, NodeSource> sourceCache) {
+    return new NodeLoader() {
+      @Override
+      public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+        return getNodeWithSource(location, hash, NodeSource.UNKNOWN)
+            .map(NodeLoader.LoadedNode::getBytes);
+      }
+
+      @Override
+      public Optional<NodeLoader.LoadedNode> getNodeWithSource(
+          final Bytes location, final Bytes32 hash, final NodeSource preferredSource) {
+        if (hash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+          return Optional.of(
+              new NodeLoader.LoadedNode(MerkleTrie.EMPTY_TRIE_NODE, preferredSource));
+        }
+        final Bytes cachedNode = nodeCache.getIfPresent(hash);
+        if (cachedNode != null) {
+          return Optional.of(
+              new NodeLoader.LoadedNode(
+                  cachedNode,
+                  Optional.ofNullable(sourceCache.getIfPresent(hash)).orElse(preferredSource)));
+        }
+        return storageLoader
+            .getNodeWithSource(location, hash, preferredSource)
+            .map(
+                loadedNode -> {
+                  nodeCache.put(hash, loadedNode.getBytes());
+                  sourceCache.put(hash, loadedNode.getSource());
+                  return loadedNode;
+                });
+      }
+    };
   }
 }

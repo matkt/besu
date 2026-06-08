@@ -27,12 +27,22 @@ public class StoredNode<V> implements Node<V> {
   private final NodeFactory<V> nodeFactory;
   private final Bytes location;
   private final Bytes32 hash;
+  private final NodeLoader.NodeSource preferredSource;
   private Node<V> loaded;
 
   public StoredNode(final NodeFactory<V> nodeFactory, final Bytes location, final Bytes32 hash) {
+    this(nodeFactory, location, hash, NodeLoader.NodeSource.UNKNOWN);
+  }
+
+  public StoredNode(
+      final NodeFactory<V> nodeFactory,
+      final Bytes location,
+      final Bytes32 hash,
+      final NodeLoader.NodeSource preferredSource) {
     this.nodeFactory = nodeFactory;
     this.location = location;
     this.hash = hash;
+    this.preferredSource = preferredSource;
   }
 
   /**
@@ -130,7 +140,7 @@ public class StoredNode<V> implements Node<V> {
     if (loaded == null) {
       loaded =
           nodeFactory
-              .retrieve(location, hash)
+              .retrieve(location, hash, preferredSource)
               .orElseThrow(
                   () ->
                       new MerkleTrieException(

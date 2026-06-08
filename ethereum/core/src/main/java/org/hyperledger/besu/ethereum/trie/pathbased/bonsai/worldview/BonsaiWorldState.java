@@ -167,9 +167,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final BonsaiWorldStateUpdateAccumulator worldStateUpdater) {
     final MerkleTrie<Bytes, Bytes> accountTrie =
         createTrie(
-            (location, hash) ->
-                bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
-                    getWorldStateStorage(), location, hash),
+            bonsaiCachedMerkleTrieLoader.accountStateNodeLoader(getWorldStateStorage()),
             Bytes32.wrap(worldStateRootHash.getBytes()));
 
     updateTheAccounts(maybeStateUpdater, worldStateUpdater, accountTrie);
@@ -261,9 +259,8 @@ public class BonsaiWorldState extends PathBasedWorldState {
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
           createTrie(
-              (location, key) ->
-                  bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
-                      getWorldStateStorage(), updatedAddressHash, location, key),
+              bonsaiCachedMerkleTrieLoader.accountStorageNodeLoader(
+                  getWorldStateStorage(), updatedAddressHash),
               Bytes32.wrap(storageRoot.getBytes()));
 
       // for manicured tries and composting, collect branches here (not implemented)
@@ -332,7 +329,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final Hash addressHash = address.addressHash();
       final MerkleTrie<Bytes, Bytes> storageTrie =
           createTrie(
-              (location, key) -> getStorageTrieNode(addressHash, location, key),
+              getWorldStateStorage().accountStorageNodeLoader(addressHash),
               Bytes32.wrap(oldAccount.getStorageRoot().getBytes()));
       try {
         StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageToDelete = null;
@@ -465,7 +462,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
   public Map<Bytes32, Bytes> getAllAccountStorage(final Address address, final Hash rootHash) {
     final MerkleTrie<Bytes, Bytes> storageTrie =
         createTrie(
-            (location, key) -> getStorageTrieNode(address.addressHash(), location, key),
+            getWorldStateStorage().accountStorageNodeLoader(address.addressHash()),
             Bytes32.wrap(rootHash.getBytes()));
     return storageTrie.entriesFrom(Bytes32.ZERO, Integer.MAX_VALUE);
   }
