@@ -35,7 +35,6 @@ import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -157,7 +156,7 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
               Function.identity(),
               Function.identity());
 
-      Map<Bytes32, Bytes> flatDbSlots = new TreeMap<>(slots);
+      final NavigableMap<Bytes32, Bytes> originalFlatDbSlots = new TreeMap<>(slots);
 
       // Retrieve the data from the trie in order to know what needs to be fixed in the flat
       // database
@@ -174,9 +173,10 @@ public class StorageFlatDatabaseHealingRangeRequest extends SnapDataRequest {
                   root ->
                       RangeStorageEntriesCollector.collectEntries(
                           collector, visitor, root, startKeyHash));
-      if (!slots.isEmpty()) {
-        flatDbSlots = new TreeMap<>(flatDbSlots.headMap(slots.lastKey(), true));
-      }
+      final NavigableMap<Bytes32, Bytes> flatDbSlots =
+          slots.isEmpty()
+              ? originalFlatDbSlots
+              : new TreeMap<>(originalFlatDbSlots.headMap(slots.lastKey(), true));
 
       // Process each slot
       slots.forEach(
