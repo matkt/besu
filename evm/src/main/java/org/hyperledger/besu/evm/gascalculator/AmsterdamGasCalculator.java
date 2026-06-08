@@ -185,6 +185,27 @@ public class AmsterdamGasCalculator extends OsakaGasCalculator {
     return staticCallCost;
   }
 
+  /**
+   * EIP-7928: do not eagerly warm the target address. Return {@code true} so that
+   * {@link #callOperationStaticGasCost} charges only the warm-access cost upfront; the cold
+   * surcharge (if any) is deferred until after depth and balance preconditions pass.
+   */
+  @Override
+  public boolean callOperationWarmUpAddress(final MessageFrame frame, final Address address) {
+    return true;
+  }
+
+  /**
+   * EIP-7928: warm the target address after preconditions pass and charge the cold-access
+   * surcharge if the address was cold. For warm (or precompile) targets, returns 0.
+   */
+  @Override
+  public long callOperationPostPreconditionWarmUp(
+      final MessageFrame frame, final Address address) {
+    final boolean alreadyWarm = frame.warmUpAddress(address) || isPrecompile(address);
+    return alreadyWarm ? 0L : getColdAccountAccessCost() - getWarmStorageReadCost();
+  }
+
   @Override
   public long calculateStorageCost(
       final UInt256 newValue,

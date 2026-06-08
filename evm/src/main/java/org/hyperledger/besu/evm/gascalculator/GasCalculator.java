@@ -222,6 +222,44 @@ public interface GasCalculator {
       final boolean accountIsWarm);
 
   /**
+   * Called in place of {@code frame.warmUpAddress(to)} at the start of CALL-family execution.
+   *
+   * <p>Legacy forks (default): eagerly warms the address and returns whether it was already warm,
+   * so {@link #callOperationStaticGasCost} receives the actual cold/warm state.
+   *
+   * <p>Amsterdam+ (EIP-7928): returns {@code true} (treat as warm for pre-precondition gas)
+   * without mutating state; actual warming is deferred to
+   * {@link #callOperationPostPreconditionWarmUp} after depth and balance checks pass.
+   *
+   * @param frame the current message frame
+   * @param address the call target address
+   * @return whether the address should be treated as warm for the initial gas calculation
+   */
+  default boolean callOperationWarmUpAddress(final MessageFrame frame, final Address address) {
+    return frame.warmUpAddress(address);
+  }
+
+  /**
+   * Called after depth and balance preconditions pass in CALL-family execution.
+   *
+   * <p>Legacy forks (default): no-op; warming and cold/warm gas are already fully handled in
+   * {@link #callOperationWarmUpAddress} and {@link #callOperationStaticGasCost}.
+   *
+   * <p>Amsterdam+ (EIP-7928): performs the actual address warming and returns the cold-access
+   * surcharge ({@code COLD_ACCOUNT_ACCESS - WARM_STORAGE_READ}) if the address was cold, 0
+   * otherwise. This pairs the warming side-effect with the cold surcharge so that neither occurs
+   * when a soft failure (depth exceeded / insufficient balance) short-circuits the call.
+   *
+   * @param frame the current message frame
+   * @param address the call target address
+   * @return additional gas cost to charge (cold surcharge if cold, 0 if already warm)
+   */
+  default long callOperationPostPreconditionWarmUp(
+      final MessageFrame frame, final Address address) {
+    return 0L;
+  }
+
+  /**
    * Gets additional call stipend.
    *
    * @return the additional call stipend

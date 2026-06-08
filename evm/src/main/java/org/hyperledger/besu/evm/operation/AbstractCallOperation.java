@@ -186,7 +186,12 @@ public abstract class AbstractCallOperation extends AbstractOperation {
     }
 
     final Address to = to(frame);
-    final boolean accountIsWarm = frame.warmUpAddress(to) || gasCalculator().isPrecompile(to);
+    // For legacy forks: eagerly warms the address and returns the actual warm state so that
+    // callOperationStaticGasCost charges the correct cold/warm cost upfront.
+    // For Amsterdam+ (EIP-7928): returns true without touching state, deferring warming and
+    // the cold surcharge to callOperationPostPreconditionWarmUp after preconditions pass.
+    final boolean accountIsWarm =
+        gasCalculator().callOperationWarmUpAddress(frame, to) || gasCalculator().isPrecompile(to);
     final long stipend = gas(frame);
     final long inputDataOffset = inputDataOffset(frame);
     final long inputDataLength = inputDataLength(frame);
@@ -229,6 +234,41 @@ public abstract class AbstractCallOperation extends AbstractOperation {
       return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
     }
 
+    // Check depth and balance preconditions before accessing target account state.
+    // For Amsterdam (EIP-7928): target address warming, the cold-access surcharge, and
+    // chargeCallNewAccountStateGas are deferred until after these checks, preventing BAL
+    // insertion and state charges on soft failures.
+    frame.clearReturnData();
+
+    final Account callerAccount = getAccount(frame.getRecipientAddress(), frame);
+    final Wei balance = callerAccount == null ? Wei.ZERO : callerAccount.getBalance();
+
+    // If the call is sending more value than the account has or the message frame is too deep
+    // return a failed call
+    final boolean insufficientBalance = value(frame).compareTo(balance) > 0;
+    final boolean isFrameDepthTooDeep = frame.getDepth() >= 1024;
+    if (insufficientBalance || isFrameDepthTooDeep) {
+      frame.expandMemory(inputDataOffset(frame), inputDataLength(frame));
+      frame.expandMemory(outputDataOffset(frame), outputDataLength(frame));
+      // Decrement then immediately refund so gasAvailableForChildCall is computed consistently
+      // with the success path (i.e. after the overhead cost has been reserved).
+      frame.decrementRemainingGas(cost);
+      final long gasAvailableForChildCall = gasAvailableForChildCall(frame);
+      frame.incrementRemainingGas(gasAvailableForChildCall + cost);
+      frame.popStackItems(getStackItemsConsumed());
+      frame.pushStackItem(LEGACY_FAILURE_STACK_ITEM);
+      final SoftFailureReason softFailureReason =
+          insufficientBalance ? LEGACY_INSUFFICIENT_BALANCE : LEGACY_MAX_CALL_DEPTH;
+      return new OperationResult(cost, 1, softFailureReason, gasAvailableForChildCall);
+    }
+
+    // Post-precondition: for Amsterdam+ forks, warm the target address now and charge the cold
+    // surcharge if it was cold. For legacy forks this is a no-op (warming already done above).
+    cost = clampedAdd(cost, gasCalculator().callOperationPostPreconditionWarmUp(frame, to));
+    if (frame.getRemainingGas() < cost) {
+      return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
+    }
+
     final Account contract = getAccount(to, frame);
     cost = clampedAdd(cost, gasCalculator().calculateCodeDelegationResolutionGas(frame, contract));
 
@@ -242,30 +282,6 @@ public abstract class AbstractCallOperation extends AbstractOperation {
         .stateGasCostCalculator()
         .chargeCallNewAccountStateGas(frame, recipientAddress, transferValue)) {
       return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
-    }
-
-    frame.clearReturnData();
-
-    final Account account = getAccount(frame.getRecipientAddress(), frame);
-
-    final Wei balance = account == null ? Wei.ZERO : account.getBalance();
-
-    // If the call is sending more value than the account has or the message frame is too deep
-    // return a failed call
-    final boolean insufficientBalance = value(frame).compareTo(balance) > 0;
-    final boolean isFrameDepthTooDeep = frame.getDepth() >= 1024;
-    if (insufficientBalance || isFrameDepthTooDeep) {
-      frame.expandMemory(inputDataOffset(frame), inputDataLength(frame));
-      frame.expandMemory(outputDataOffset(frame), outputDataLength(frame));
-      // For the following, we either increment the gas or return zero, so we don't get double
-      // charged. If we return zero then the traces don't have the right per-opcode cost.
-      final long gasAvailableForChildCall = gasAvailableForChildCall(frame);
-      frame.incrementRemainingGas(gasAvailableForChildCall + cost);
-      frame.popStackItems(getStackItemsConsumed());
-      frame.pushStackItem(LEGACY_FAILURE_STACK_ITEM);
-      final SoftFailureReason softFailureReason =
-          insufficientBalance ? LEGACY_INSUFFICIENT_BALANCE : LEGACY_MAX_CALL_DEPTH;
-      return new OperationResult(cost, 1, softFailureReason, gasAvailableForChildCall);
     }
 
     final Bytes inputData = frame.readMutableMemory(inputDataOffset(frame), inputDataLength(frame));
