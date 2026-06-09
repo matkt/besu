@@ -41,7 +41,7 @@ public class RocksDBPlugin implements BesuPlugin {
   private final RocksDBCLIOptions options;
   private final List<SegmentIdentifier> ignorableSegments = new ArrayList<>();
   private ServiceManager context;
-  private RocksDBKeyValueStorageFactory factory;
+  private BonsaiSplitRocksDBKeyValueStorageFactory factory;
 
   /** Instantiates a newRocksDb plugin. */
   public RocksDBPlugin() {
@@ -129,7 +129,7 @@ public class RocksDBPlugin implements BesuPlugin {
     final Supplier<RocksDBFactoryConfiguration> configuration =
         Suppliers.memoize(options::toDomainObject);
     factory =
-        new RocksDBKeyValueStorageFactory(
+        new BonsaiSplitRocksDBKeyValueStorageFactory(
             configuration,
             segments,
             ignorableSegments,

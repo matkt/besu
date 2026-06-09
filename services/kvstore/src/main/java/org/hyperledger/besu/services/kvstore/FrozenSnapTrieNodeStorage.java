@@ -27,9 +27,9 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public interface FrozenSnapTrieNodeStorage extends AutoCloseable {
 
-  /** Opens or creates a persisted PlainTable RocksDB at {@code directory}. */
+  /** Opens or creates a persisted BlockBased RocksDB at {@code directory}. */
   static FrozenSnapTrieNodeStorage open(final Path directory) {
-    return RocksDBPlainTableFrozenSnapTrieNodeStorage.open(directory);
+    return RocksDBBlockBasedFrozenSnapTrieNodeStorage.open(directory);
   }
 
   void put(Bytes32 hash, Bytes value);

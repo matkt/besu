@@ -44,8 +44,8 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
 
   private static final ExecutorService VIRTUAL_POOL = Executors.newVirtualThreadPerTaskExecutor();
 
-  private static final int ACCOUNT_CACHE_SIZE = 100_000;
-  private static final int STORAGE_CACHE_SIZE = 200_000;
+  private static final int ACCOUNT_CACHE_SIZE = 500_000;
+  private static final int STORAGE_CACHE_SIZE = 1_000_000;
   private final Cache<Bytes, Bytes> accountNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(ACCOUNT_CACHE_SIZE).build();
   private final Cache<Bytes, NodeSource> accountNodeSources =
