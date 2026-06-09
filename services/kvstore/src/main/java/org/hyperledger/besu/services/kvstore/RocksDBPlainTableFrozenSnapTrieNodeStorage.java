@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +30,7 @@ import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.CompressionType;
 import org.rocksdb.DBOptions;
+import org.rocksdb.FlushOptions;
 import org.rocksdb.HashLinkedListMemTableConfig;
 import org.rocksdb.PlainTableConfig;
 import org.rocksdb.RocksDB;
@@ -55,6 +55,12 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   /** Hard cap on total memtable memory for this DB. */
   private static final long DB_WRITE_BUFFER_SIZE = 128L * 1024 * 1024;
 
+  /**
+   * Cap open SST files. {@code -1} would keep every file open and, with mmap, map the entire frozen
+   * store into the process address space (hundreds of GB after mainnet snap sync).
+   */
+  private static final int MAX_OPEN_FILES = 1024;
+
   static {
     RocksDB.loadLibrary();
   }
@@ -63,54 +69,16 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   private final AtomicBoolean frozen = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
   private final WriteOptions writeOptions = new WriteOptions().setDisableWAL(true);
-  private final RocksDB db;
-  private final ColumnFamilyHandle cfHandle;
-  private final DBOptions dbOptions;
-  private final ColumnFamilyOptions cfOptions;
+  private RocksDB db;
+  private ColumnFamilyHandle cfHandle;
+  private DBOptions dbOptions;
+  private ColumnFamilyOptions cfOptions;
 
   private RocksDBPlainTableFrozenSnapTrieNodeStorage(final Path directory) {
     this.directory = directory;
-    this.frozen.set(Files.exists(directory.resolve(FROZEN_MARKER_FILE)));
-
-    cfOptions =
-        new ColumnFamilyOptions()
-            .setTableFormatConfig(
-                new PlainTableConfig()
-                    .setKeySize(KEY_SIZE_BYTES)
-                    .setBloomBitsPerKey(10)
-                    .setHashTableRatio(0)
-                    .setIndexSparseness(16))
-            .setCompressionType(CompressionType.NO_COMPRESSION)
-            .setMemTableConfig(new HashLinkedListMemTableConfig())
-            .setWriteBufferSize(WRITE_BUFFER_SIZE)
-            .setMaxWriteBufferNumber(2);
-
-    dbOptions =
-        new DBOptions()
-            .setCreateIfMissing(true)
-            .setCreateMissingColumnFamilies(true)
-            .setAllowMmapReads(true)
-            .setAllowMmapWrites(false)
-            .setAllowConcurrentMemtableWrite(false)
-            .setEnablePipelinedWrite(true)
-            .setDbWriteBufferSize(DB_WRITE_BUFFER_SIZE)
-            .setMaxTotalWalSize(0)
-            .setMaxOpenFiles(-1);
-
-    final List<ColumnFamilyHandle> handles = new ArrayList<>();
-    final String dbPath = directory.toAbsolutePath().toString();
-    final List<ColumnFamilyDescriptor> cfDescriptors =
-        List.of(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOptions));
-    try {
-      if (frozen.get()) {
-        db = RocksDB.openReadOnly(dbOptions, dbPath, cfDescriptors, handles);
-      } else {
-        db = RocksDB.open(dbOptions, dbPath, cfDescriptors, handles);
-      }
-      cfHandle = handles.get(0);
-    } catch (final RocksDBException e) {
-      throw new IllegalStateException("Failed to open PlainTable RocksDB at " + directory, e);
-    }
+    final boolean alreadyFrozen = Files.exists(directory.resolve(FROZEN_MARKER_FILE));
+    this.frozen.set(alreadyFrozen);
+    openDB(alreadyFrozen);
   }
 
   public static RocksDBPlainTableFrozenSnapTrieNodeStorage open(final Path directory) {
@@ -126,7 +94,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   public void put(final Bytes32 hash, final Bytes value) {
     ensureWritable();
     try {
-      db.put(cfHandle, writeOptions, keyBytes(hash), value.toArray());
+      db.put(cfHandle, writeOptions, keyBytes(hash), value.toArrayUnsafe());
     } catch (final RocksDBException e) {
       throw new IllegalStateException("RocksDB put failed: " + e.getMessage(), e);
     }
@@ -140,7 +108,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
     ensureWritable();
     try (WriteBatch batch = new WriteBatch()) {
       for (final Map.Entry<Bytes32, Bytes> entry : entries.entrySet()) {
-        batch.put(cfHandle, keyBytes(entry.getKey()), entry.getValue().toArray());
+        batch.put(cfHandle, keyBytes(entry.getKey()), entry.getValue().toArrayUnsafe());
       }
       db.write(writeOptions, batch);
     } catch (final RocksDBException e) {
@@ -158,7 +126,7 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
       if (value == null) {
         return Optional.empty();
       }
-      return Optional.of(Bytes.wrap(Arrays.copyOf(value, value.length)));
+      return Optional.of(Bytes.wrap(value));
     } catch (final RocksDBException e) {
       throw new IllegalStateException("RocksDB get failed: " + e.getMessage(), e);
     }
@@ -169,11 +137,28 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
     if (!frozen.compareAndSet(false, true)) {
       return;
     }
+
+    try (FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
+      db.flush(flushOptions, cfHandle);
+    } catch (final RocksDBException e) {
+      throw new IllegalStateException("RocksDB flush failed during freeze", e);
+    }
+
+    try {
+      db.compactRange(cfHandle);
+    } catch (final RocksDBException e) {
+      throw new IllegalStateException("RocksDB compactRange failed during freeze", e);
+    }
+
+    closeDbResources();
+
     try {
       Files.createFile(directory.resolve(FROZEN_MARKER_FILE));
     } catch (final IOException e) {
       throw new IllegalStateException("Failed to write frozen marker at " + directory, e);
     }
+
+    openDB(true);
     LOG.info("Frozen snap-sync trie node PlainTable RocksDB at {} (entries={})", directory, entryCount());
   }
 
@@ -198,10 +183,92 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
       return;
     }
     writeOptions.close();
-    cfHandle.close();
-    db.close();
-    cfOptions.close();
-    dbOptions.close();
+    closeDbResources();
+  }
+
+  private void openDB(final boolean readOnly) {
+    cfOptions = readOnly ? createReadOnlyCfOptions() : createWritableCfOptions();
+    dbOptions = readOnly ? createReadOnlyDbOptions() : createWritableDbOptions();
+
+    final List<ColumnFamilyHandle> handles = new ArrayList<>();
+    final String dbPath = directory.toAbsolutePath().toString();
+    final List<ColumnFamilyDescriptor> cfDescriptors =
+        List.of(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOptions));
+    try {
+      if (readOnly) {
+        db = RocksDB.openReadOnly(dbOptions, dbPath, cfDescriptors, handles);
+      } else {
+        db = RocksDB.open(dbOptions, dbPath, cfDescriptors, handles);
+      }
+      cfHandle = handles.get(0);
+    } catch (final RocksDBException e) {
+      closeDbResources();
+      throw new IllegalStateException("Failed to open PlainTable RocksDB at " + directory, e);
+    }
+  }
+
+  private static PlainTableConfig plainTableConfig() {
+    return new PlainTableConfig()
+        .setKeySize(KEY_SIZE_BYTES)
+        .setBloomBitsPerKey(10)
+        .setHashTableRatio(0)
+        .setIndexSparseness(16);
+  }
+
+  private static ColumnFamilyOptions createReadOnlyCfOptions() {
+    return new ColumnFamilyOptions()
+        .setTableFormatConfig(plainTableConfig())
+        .setCompressionType(CompressionType.NO_COMPRESSION);
+  }
+
+  private static ColumnFamilyOptions createWritableCfOptions() {
+    return new ColumnFamilyOptions()
+        .setTableFormatConfig(plainTableConfig())
+        .setCompressionType(CompressionType.NO_COMPRESSION)
+        .setMemTableConfig(new HashLinkedListMemTableConfig())
+        .setWriteBufferSize(WRITE_BUFFER_SIZE)
+        .setMaxWriteBufferNumber(2);
+  }
+
+  private static DBOptions createReadOnlyDbOptions() {
+    // Mmap keeps point lookups fast; maxOpenFiles caps how many SSTs stay mapped at once.
+    return new DBOptions()
+        .setCreateIfMissing(false)
+        .setAllowMmapReads(true)
+        .setAllowMmapWrites(false)
+        .setMaxOpenFiles(MAX_OPEN_FILES);
+  }
+
+  private static DBOptions createWritableDbOptions() {
+    return new DBOptions()
+        .setCreateIfMissing(true)
+        .setCreateMissingColumnFamilies(true)
+        .setAllowMmapReads(false)
+        .setAllowMmapWrites(false)
+        .setAllowConcurrentMemtableWrite(false)
+        .setEnablePipelinedWrite(true)
+        .setDbWriteBufferSize(DB_WRITE_BUFFER_SIZE)
+        .setMaxTotalWalSize(0)
+        .setMaxOpenFiles(MAX_OPEN_FILES);
+  }
+
+  private void closeDbResources() {
+    if (cfHandle != null) {
+      cfHandle.close();
+      cfHandle = null;
+    }
+    if (db != null) {
+      db.close();
+      db = null;
+    }
+    if (cfOptions != null) {
+      cfOptions.close();
+      cfOptions = null;
+    }
+    if (dbOptions != null) {
+      dbOptions.close();
+      dbOptions = null;
+    }
   }
 
   private void ensureWritable() {
@@ -214,6 +281,10 @@ public class RocksDBPlainTableFrozenSnapTrieNodeStorage implements FrozenSnapTri
   }
 
   private static byte[] keyBytes(final Bytes32 hash) {
-    return Arrays.copyOf(hash.toArrayUnsafe(), KEY_SIZE_BYTES);
+    final byte[] key = hash.toArrayUnsafe();
+    if (key.length == KEY_SIZE_BYTES) {
+      return key;
+    }
+    return hash.toArray();
   }
 }

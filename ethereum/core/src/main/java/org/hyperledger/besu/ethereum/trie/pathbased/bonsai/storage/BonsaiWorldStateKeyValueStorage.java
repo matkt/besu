@@ -205,10 +205,15 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (frozenSnapTrieNodeStorage != null || frozenSnapTrieNodeDirectory.isEmpty()) {
       return;
     }
-    final Path directory = frozenSnapTrieNodeDirectory.get();
-    if (Files.exists(directory.resolve(".frozen"))) {
-      frozenSnapTrieNodeStorage = FrozenSnapTrieNodeStorage.open(directory);
-      LOG.info("Loaded frozen snap-sync trie node PlainTable RocksDB from {}", directory);
+    synchronized (this) {
+      if (frozenSnapTrieNodeStorage != null) {
+        return;
+      }
+      final Path directory = frozenSnapTrieNodeDirectory.get();
+      if (Files.exists(directory.resolve(".frozen"))) {
+        frozenSnapTrieNodeStorage = FrozenSnapTrieNodeStorage.open(directory);
+        LOG.info("Loaded frozen snap-sync trie node PlainTable RocksDB from {}", directory);
+      }
     }
   }
 
@@ -256,6 +261,15 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (preferredSource == NodeSource.COLD) {
       return getFrozenTrieNodeByHash(nodeHash)
           .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.COLD));
+    }
+    if (snapSyncTrieNodeCapture && preferredSource == NodeSource.UNKNOWN) {
+      return getFrozenTrieNodeByHash(nodeHash)
+          .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.COLD))
+          .or(
+              () ->
+                  getLiveTrieNodeByLocation(location)
+                      .filter(b -> Hash.hash(b).getBytes().equals(nodeHash))
+                      .map(bytes -> new NodeLoader.LoadedNode(bytes, NodeSource.HOT)));
     }
     return getLiveTrieNodeByLocation(location)
         .filter(b -> Hash.hash(b).getBytes().equals(nodeHash))
