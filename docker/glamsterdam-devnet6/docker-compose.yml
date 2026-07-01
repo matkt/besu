@@ -1,0 +1,112 @@
+# Glamsterdam devnet 6 — Besu (EL) + Prysm (CL)
+# Generated/managed by setup.sh — see README.md for usage.
+
+services:
+  besu:
+    image: ${BESU_IMAGE}
+    container_name: glamsterdam6-besu
+    restart: unless-stopped
+    networks:
+      - glamsterdam6
+    ports:
+      - "${BESU_RPC_PORT:-8545}:8545"
+      - "${BESU_ENGINE_PORT:-8551}:8551"
+      - "${BESU_P2P_PORT:-30303}:30303/tcp"
+      - "${BESU_P2P_PORT:-30303}:30303/udp"
+      - "${BESU_METRICS_PORT:-6060}:6060"
+    volumes:
+      - ${BESU_DATA_DIR}:/var/lib/besu
+      - ${CONFIG_DIR}:/config:ro
+      - ${JWT_DIR}/execution-auth.jwt:/execution-auth.jwt:ro
+    environment:
+      BESU_USE_STATIC_NODES: ${BESU_USE_STATIC_NODES:-false}
+      BESU_LOG_LEVEL: ${BESU_LOG_LEVEL:-INFO}
+      BESU_MAX_PEERS: ${BESU_MAX_PEERS:-}
+    # Image ENTRYPOINT is besu-entry.sh; override so the shell wrapper runs instead of
+    # being passed as Besu CLI args (which causes "Unmatched arguments: sh, -ec, ...").
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -- \
+          --genesis-file=/config/besu.json \
+          --data-path=/var/lib/besu \
+          --nat-method=NONE \
+          --p2p-host=${P2P_HOST:-0.0.0.0} \
+          --p2p-port=30303 \
+          --rpc-http-enabled \
+          --rpc-http-host=0.0.0.0 \
+          --rpc-http-port=8545 \
+          --rpc-http-cors-origins=* \
+          --host-allowlist=* \
+          --engine-jwt-secret=/execution-auth.jwt \
+          --engine-rpc-enabled \
+          --engine-rpc-port=8551 \
+          --engine-host-allowlist=* \
+          --metrics-enabled \
+          --metrics-host=0.0.0.0 \
+          --metrics-port=6060 \
+          --bootnodes=${BESU_BOOTNODES} \
+          --rpc-http-api=ADMIN,DEBUG,ETH,MINER,NET,TRACE,TXPOOL,WEB3 \
+          --sync-mode=FULL \
+          --data-storage-format=BONSAI \
+          --bonsai-limit-trie-logs-enabled=false \
+          --logging=$${BESU_LOG_LEVEL:-INFO}
+        if [ "$$BESU_USE_STATIC_NODES" = "true" ]; then
+          set -- "$$@" --static-nodes-file=/config/static-nodes.json
+        fi
+        if [ -n "$$BESU_MAX_PEERS" ]; then
+          set -- "$$@" --max-peers="$$BESU_MAX_PEERS"
+        fi
+        exec besu-entry.sh "$$@"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/127.0.0.1/8545' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+
+  prysm:
+    image: ${PRYSM_IMAGE}
+    container_name: glamsterdam6-prysm
+    restart: unless-stopped
+    networks:
+      - glamsterdam6
+    depends_on:
+      besu:
+        condition: service_healthy
+    ports:
+      - "${PRYSM_RPC_PORT:-3500}:3500"
+      - "${PRYSM_GRPC_PORT:-4000}:4000"
+      - "${PRYSM_P2P_TCP_PORT:-13000}:13000/tcp"
+      - "${PRYSM_P2P_UDP_PORT:-12000}:12000/udp"
+      - "${PRYSM_METRICS_PORT:-8080}:8080"
+    volumes:
+      - ${PRYSM_DATA_DIR}:/var/lib/prysm
+      - ${CONFIG_DIR}:/config:ro
+      - ${JWT_DIR}/execution-auth.jwt:/execution-auth.jwt:ro
+    command:
+      - --datadir=/var/lib/prysm
+      - --genesis-state=/config/genesis.ssz
+      - --chain-config-file=/config/config.yaml
+      # Prysm requires one --bootstrap-node per ENR (or a .yaml list file); comma-separated ENRs fail.
+      - --bootstrap-node=/config/prysm-bootnodes.yaml
+      - --checkpoint-sync-url=${PRYSM_CHECKPOINT_SYNC_URL}
+      - --execution-endpoint=http://besu:8551
+      - --jwt-secret=/execution-auth.jwt
+      - --chain-id=${CHAIN_ID}
+      - --contract-deployment-block=0
+      - --deposit-contract=0x00000000219ab540356cBB839Cbe05303d7705Fa
+      - --accept-terms-of-use
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0
+      - --monitoring-host=0.0.0.0
+      - --p2p-local-ip=0.0.0.0
+      - --p2p-tcp-port=13000
+      - --p2p-udp-port=12000
+      - --min-sync-peers=${PRYSM_MIN_SYNC_PEERS:-1}
+      - --verbosity=${PRYSM_LOG_LEVEL:-info}
+
+networks:
+  glamsterdam6:
+    name: glamsterdam-devnet6
+    driver: bridge
