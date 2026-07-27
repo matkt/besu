@@ -101,9 +101,7 @@ public class DebugGetRawBlockAccessListTest {
     when(blockchainQueries.getBlockHeaderByHash(blockHash)).thenReturn(Optional.of(header));
     when(blockchainQueries.isBlockAccessListSupported(header)).thenReturn(true);
     when(blockchain.getBlockAccessList(blockHash))
-        .thenReturn(
-            Optional.of(
-                new BlockAccessList(Collections.emptyList(), rawRlp)));
+        .thenReturn(Optional.of(new BlockAccessList(Collections.emptyList(), rawRlp)));
 
     final JsonRpcSuccessResponse response =
         (JsonRpcSuccessResponse) requestRawBlockAccessList(blockHash.toHexString());
