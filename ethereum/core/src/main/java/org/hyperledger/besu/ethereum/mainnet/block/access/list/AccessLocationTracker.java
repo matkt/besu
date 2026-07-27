@@ -175,7 +175,8 @@ public class AccessLocationTracker implements Eip7928AccessList {
             final boolean isWrite = isSet || isReset || isUpdate;
 
             if (isWrite) {
-              accountBuilder.addStorageChange(slotKeyObj, updatedValue);
+              accountBuilder.addStorageChange(
+                  slotKeyObj, originalValue != null ? originalValue : UInt256.ZERO, updatedValue);
             } else {
               accountBuilder.addStorageRead(slotKeyObj);
             }

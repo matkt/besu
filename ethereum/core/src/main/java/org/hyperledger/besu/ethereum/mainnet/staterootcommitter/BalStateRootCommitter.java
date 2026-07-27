@@ -22,6 +22,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
@@ -60,7 +61,8 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     this.backgroundComputation =
         CompletableFuture.supplyAsync(
             () -> {
-              try (BonsaiWorldState parent = openParentWorldState(protocolContext, blockHeader)) {
+              try (BonsaiWorldState parent =
+                  openParentWorldState(protocolContext, blockHeader, accountLookup)) {
                 return runComputation(parent, accountLookup, storageFrozen);
               }
             },
@@ -131,7 +133,9 @@ public final class BalStateRootCommitter implements StateRootCommitter {
   }
 
   private BonsaiWorldState openParentWorldState(
-      final ProtocolContext protocolContext, final BlockHeader blockHeader) {
+      final ProtocolContext protocolContext,
+      final BlockHeader blockHeader,
+      final BlockAccessListAccountLookup accountLookup) {
     final Hash parentHash = blockHeader.getParentHash();
     final BlockHeader parentHeader =
         protocolContext
@@ -147,9 +151,13 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         WorldStateQueryParams.newBuilder()
             .withBlockHeader(parentHeader)
             .withShouldWorldStateUpdateHead(false)
+            .withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE))
             .build();
-    return (BonsaiWorldState)
-        protocolContext.getWorldStateArchive().getWorldState(queryParams).orElseThrow();
+    final BonsaiWorldState worldState =
+        (BonsaiWorldState)
+            protocolContext.getWorldStateArchive().getWorldState(queryParams).orElseThrow();
+    worldState.disableCacheMerkleTrieLoader();
+    return worldState;
   }
 
   /**
@@ -216,7 +224,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
           storageFutures.put(
               address,
               CompletableFuture.supplyAsync(
-                  () -> updateStorageTrie(accountHash, changes),
+                  () -> updateStorageTrie(address, accountHash, changes),
                   BlockProcessingExecutors.storageTrieExecutor()));
         }
       }
@@ -317,22 +325,19 @@ public final class BalStateRootCommitter implements StateRootCommitter {
      * and slot/trie-node KV writes are not recorded.
      */
     private Hash updateStorageTrie(
-        final Hash accountHash, final BlockAccessList.AccountChanges accountChanges) {
+        final Address address,
+        final Hash accountHash,
+        final BlockAccessList.AccountChanges accountChanges) {
 
-      // Read the storage trie root node directly (one raw KV lookup, no account RLP parsing).
-      final Hash priorStorageRoot =
-          worldState
-              .getWorldStateStorage()
-              .getTrieNodeUnsafe(accountHash.getBytes())
-              .map(Hash::hash)
-              .orElse(Hash.EMPTY_TRIE_HASH);
+      final Hash priorStorageRoot = priorStorageRoot(address);
 
       final MerkleTrie<Bytes, Bytes> storageTrie =
           worldState.createStorageTrie(accountHash, priorStorageRoot);
 
       for (final BlockAccessList.SlotChanges slotChanges : accountChanges.storageChanges()) {
         final Hash slotHash = slotChanges.slot().getSlotHash();
-        final UInt256 value = slotChanges.changes().getLast().newValue();
+        final UInt256 rawValue = slotChanges.changes().getLast().newValue();
+        final UInt256 value = rawValue == null ? UInt256.ZERO : rawValue;
         if (value.equals(UInt256.ZERO)) {
           if (!storageFrozen) {
             writes.add(updater -> updater.removeStorageValueBySlotHash(accountHash, slotHash));
@@ -353,6 +358,14 @@ public final class BalStateRootCommitter implements StateRootCommitter {
                     u -> u.putAccountStorageTrieNode(accountHash, location, nodeHash, value)));
       }
       return Hash.wrap(storageTrie.getRootHash());
+    }
+
+    private Hash priorStorageRoot(final Address address) {
+      return worldState
+          .getWorldStateStorage()
+          .getAccount(address.addressHash())
+          .map(rlp -> PmtStateTrieAccountValue.readFrom(RLP.input(rlp)).getStorageRoot())
+          .orElse(Hash.EMPTY_TRIE_HASH);
     }
 
     private boolean isAccountEmpty(final PmtStateTrieAccountValue account) {

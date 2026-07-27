@@ -155,8 +155,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final Bytes32 rootHash,
       final Function<V, Bytes> valueSerializer,
       final Function<Bytes, V> valueDeserializer) {
-    this(
-        nodeLoader, rootHash, valueSerializer, valueDeserializer, DEFAULT_FORK_JOIN_POOL);
+    this(nodeLoader, rootHash, valueSerializer, valueDeserializer, DEFAULT_FORK_JOIN_POOL);
   }
 
   public ParallelStoredMerklePatriciaTrie(
