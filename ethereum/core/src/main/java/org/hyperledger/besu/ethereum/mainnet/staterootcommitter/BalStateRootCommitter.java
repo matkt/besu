@@ -43,7 +43,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -67,7 +66,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
                 return runComputation(parent, blockAccessListAddressView, storageFrozen);
               }
             },
-            Executors.newSingleThreadScheduledExecutor());
+            BlockProcessingExecutors.stateRootExecutor());
   }
 
   /** Cancels the background computation; {@link #compute} will throw if called afterwards. */
