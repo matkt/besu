@@ -51,6 +51,29 @@ class PathBasedWorldStateUpdateAccumulatorTest {
   private static final UInt256 V2 = UInt256.valueOf(300);
 
   @Test
+  void rollForward_zeroPriorOnExistingSlot_appliesReplacement() {
+    try (BonsaiWorldState worldState = newEmptyWorldState()) {
+      final BonsaiWorldStateUpdateAccumulator accumulator =
+          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      accumulator.createAccount(ACCOUNT, 0L, Wei.ONE);
+      accumulator.getAccount(ACCOUNT).setStorageValue(SLOT.getSlotKey().orElseThrow(), V0);
+      accumulator.commit();
+      worldState.persist(null);
+
+      final TrieLogLayer trieLog =
+          new TrieLogLayer()
+              .setBlockHash(Hash.ZERO)
+              .setBlockNumber(1)
+              .addStorageChange(ACCOUNT, SLOT, null, V1);
+
+      accumulator.rollForward(trieLog);
+
+      assertThat(accumulator.getAccount(ACCOUNT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
+          .isEqualTo(V1);
+    }
+  }
+
+  @Test
   void importPartialView_sameSlotTwoTransactions_keepsBlockStartPriorAndFinalUpdated() {
     try (BonsaiWorldState worldState = newEmptyWorldState()) {
       final BonsaiWorldStateUpdateAccumulator accumulator =

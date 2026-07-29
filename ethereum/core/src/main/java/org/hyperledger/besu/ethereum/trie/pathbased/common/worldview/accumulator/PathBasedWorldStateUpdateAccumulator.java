@@ -949,6 +949,13 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       if ((expectedValue == null || expectedValue.isZero())
           && existingSlotValue != null
           && !existingSlotValue.isZero()) {
+        if (replacementValue != null && !replacementValue.equals(existingSlotValue)) {
+          // Forward roll from a head that already contains the slot: trielogs built on
+          // frozen snapshot layers may record a zero/null prior even though the slot exists
+          // on the roll source world state.
+          slotValue.setUpdated(replacementValue);
+          return;
+        }
         throw new IllegalStateException(
             String.format(
                 "Expected to create slot, but the slot exists. Account=%s SlotKey=%s expectedValue=%s existingValue=%s",
