@@ -95,8 +95,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     final BonsaiWorldStateUpdateAccumulator accumulator =
         (BonsaiWorldStateUpdateAccumulator)
             Objects.requireNonNull(
-                worldUpdater,
-                "BAL state root committer requires a non-null WorldUpdater");
+                worldUpdater, "BAL state root committer requires a non-null WorldUpdater");
     result
         .storageRoots()
         .forEach(

@@ -71,8 +71,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
     final PathBasedWorldStateUpdateAccumulator<?> accumulator =
         (PathBasedWorldStateUpdateAccumulator<?>)
             Objects.requireNonNull(
-                worldUpdater,
-                "Path-based state root committers require a non-null WorldUpdater");
+                worldUpdater, "Path-based state root committers require a non-null WorldUpdater");
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
     final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
