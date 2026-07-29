@@ -295,14 +295,16 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       } else {
         final BlockAccessList.CodeChange codeChange = changes.codeChanges().getLast();
         newCodeHash = Hash.hash(codeChange.newCode());
-        if (!storageFrozen && codeChange.newCode().isEmpty()) {
-          // Code was cleared: load the parent account to find the prior code hash.
-          if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
-            final Hash priorCodeHash = priorAccount.getCodeHash();
-            writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+        if (!storageFrozen) {
+          if (codeChange.newCode().isEmpty()) {
+            // Code was cleared: load the parent account to find the prior code hash.
+            if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
+              final Hash priorCodeHash = priorAccount.getCodeHash();
+              writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+            }
+          } else {
+            writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));
           }
-        } else if (!storageFrozen) {
-          writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));
         }
       }
 
