@@ -39,12 +39,13 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -92,7 +93,10 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       final WorldUpdater worldUpdater) {
     final BackgroundResult result = awaitBackgroundComputation(backgroundComputation);
     final BonsaiWorldStateUpdateAccumulator accumulator =
-        (BonsaiWorldStateUpdateAccumulator) worldUpdater;
+        (BonsaiWorldStateUpdateAccumulator)
+            Objects.requireNonNull(
+                worldUpdater,
+                "BAL state root committer requires a non-null WorldUpdater");
     result
         .storageRoots()
         .forEach(
@@ -297,7 +301,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
             final Hash priorCodeHash = priorAccount.getCodeHash();
             writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
           }
-        } else {
+        } else if (!storageFrozen) {
           writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));
         }
       }

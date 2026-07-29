@@ -180,6 +180,10 @@ public class ForestMutableWorldState implements MutableWorldState {
     persist(blockHeader, ForestStateRootCommitter.INSTANCE);
   }
 
+  /**
+   * Forest committers ({@link ForestStateRootCommitter}) read accumulated changes from this world
+   * state directly and do not use a {@link WorldUpdater}; {@code null} is intentional here.
+   */
   @Override
   public void persist(final BlockHeader blockHeader, final StateRootCommitter committer) {
     committer.compute(this, blockHeader, null);

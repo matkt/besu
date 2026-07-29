@@ -69,7 +69,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       final BlockHeader blockHeader,
       final WorldUpdater worldUpdater) {
     final PathBasedWorldStateUpdateAccumulator<?> accumulator =
-        (PathBasedWorldStateUpdateAccumulator<?>) worldUpdater;
+        (PathBasedWorldStateUpdateAccumulator<?>)
+            Objects.requireNonNull(
+                worldUpdater,
+                "Path-based state root committers require a non-null WorldUpdater");
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
     final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
@@ -293,10 +296,12 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
                   new StorageSlotKey(Hash.wrap(slot.getKey()), Optional.empty());
               final UInt256 slotValue =
                   UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(slot.getValue())));
-              writes.add(
-                  updater ->
-                      updater.removeStorageValueBySlotHash(
-                          addressHash, storageSlotKey.getSlotHash()));
+              if (!storageFrozen) {
+                writes.add(
+                    updater ->
+                        updater.removeStorageValueBySlotHash(
+                            addressHash, storageSlotKey.getSlotHash()));
+              }
               storageToDelete
                   .computeIfAbsent(
                       storageSlotKey, key -> new PathBasedValue<>(slotValue, null, true))
