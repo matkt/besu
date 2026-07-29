@@ -42,7 +42,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -126,16 +126,20 @@ public final class BalStateRootCommitter implements StateRootCommitter {
   private BackgroundResult awaitBackgroundComputation(
       final CompletableFuture<BackgroundResult> future) {
     try {
-      final BackgroundResult result = future.join();
+      final BackgroundResult result = future.get();
       if (cancelled.get()) {
         throw new IllegalStateException("Background BAL state root computation was cancelled");
       }
       return result;
     } catch (final CancellationException e) {
       throw new IllegalStateException("Background BAL state root computation was cancelled", e);
-    } catch (final CompletionException e) {
+    } catch (final ExecutionException e) {
       final Throwable cause = e.getCause() != null ? e.getCause() : e;
       throw new IllegalStateException("Background BAL state root computation failed", cause);
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(
+          "Interrupted while waiting for background BAL state root computation", e);
     }
   }
 
