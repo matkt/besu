@@ -225,11 +225,6 @@ public final class PartialBlockAccessView {
     }
 
     public AccountChangesBuilder addStorageChange(
-        final StorageSlotKey slot, final UInt256 newValue) {
-      return addStorageChange(slot, null, newValue);
-    }
-
-    public AccountChangesBuilder addStorageChange(
         final StorageSlotKey slot, final UInt256 previousValue, final UInt256 newValue) {
       storageChanges.add(new SlotChange(slot, previousValue, newValue));
       return this;

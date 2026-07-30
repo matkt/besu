@@ -610,8 +610,8 @@ class BalTransactionProcessorUnitTest {
       a0.withPostBalance(tx0Balance);
       a0.withNonceChange(tx0Nonce);
       a0.withNewCode(tx0Code);
-      a0.addStorageChange(slot1, tx0Slot1Value);
-      a0.addStorageChange(slot2, tx0Slot2Value);
+      a0.addStorageChange(slot1, null, tx0Slot1Value);
+      a0.addStorageChange(slot2, null, tx0Slot2Value);
       balBuilder.apply(p0.build());
 
       final PartialBlockAccessView.PartialBlockAccessViewBuilder p1 =
@@ -621,8 +621,8 @@ class BalTransactionProcessorUnitTest {
       a1.withPostBalance(tx1Balance);
       a1.withNonceChange(tx1Nonce);
       a1.withNewCode(tx1Code);
-      a1.addStorageChange(slot1, tx1Slot1Value);
-      a1.addStorageChange(slot2, null);
+      a1.addStorageChange(slot1, null, tx1Slot1Value);
+      a1.addStorageChange(slot2, null, null);
       balBuilder.apply(p1.build());
 
       final PartialBlockAccessView.PartialBlockAccessViewBuilder p2 =
@@ -632,7 +632,7 @@ class BalTransactionProcessorUnitTest {
       a2.withPostBalance(tx2Balance);
       a2.withNonceChange(tx2Nonce);
       a2.withNewCode(tx2Code);
-      a2.addStorageChange(slot1, tx2Slot1Value);
+      a2.addStorageChange(slot1, null, tx2Slot1Value);
       balBuilder.apply(p2.build());
 
       final BlockAccessList blockAccessList = balBuilder.build();

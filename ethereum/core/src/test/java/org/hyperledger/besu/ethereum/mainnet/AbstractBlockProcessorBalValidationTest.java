@@ -269,7 +269,7 @@ class AbstractBlockProcessorBalValidationTest {
         new PartialBlockAccessView.PartialBlockAccessViewBuilder().withTxIndex(txIndex);
     builder
         .getOrCreateAccountBuilder(addr)
-        .addStorageChange(new StorageSlotKey(UInt256.valueOf(slotBase)), UInt256.ZERO);
+        .addStorageChange(new StorageSlotKey(UInt256.valueOf(slotBase)), null, UInt256.ZERO);
     return builder.build();
   }
 
