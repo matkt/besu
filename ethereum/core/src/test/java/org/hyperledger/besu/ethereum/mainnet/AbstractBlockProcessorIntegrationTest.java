@@ -94,6 +94,10 @@ class AbstractBlockProcessorIntegrationTest {
       Address.fromHexString("0x0000884d2aa32eaa155f59a2f24efa73d9008282");
   private static final Address BUILDER_EXIT_CONTRACT =
       Address.fromHexString("0x000014574a74c805590aff9499fc7a690f008282");
+  // EIP-2935 history contract. It is not deployed in this test genesis, but the pre-execution
+  // system call still reads the account, so EIP-7928 lists it in every block's access list.
+  private static final Address HISTORY_STORAGE_CONTRACT =
+      Address.fromHexString("0x0000f90827f1c53a10cb7a02335b175320002935");
 
   private static final KeyPair ACCOUNT_GENESIS_1_KEYPAIR =
       generateKeyPair("c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3");
@@ -381,7 +385,8 @@ class AbstractBlockProcessorIntegrationTest {
         WITHDRAWAL_CONTRACT,
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
-        BUILDER_EXIT_CONTRACT);
+        BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT);
 
     assertBalanceMatchesWorldState(sequentialResult, Address.fromHexStringStrict(ACCOUNT_2));
     assertBalanceMatchesWorldState(sequentialResult, Address.fromHexStringStrict(ACCOUNT_3));
@@ -404,7 +409,8 @@ class AbstractBlockProcessorIntegrationTest {
         WITHDRAWAL_CONTRACT,
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
-        BUILDER_EXIT_CONTRACT);
+        BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT);
 
     assertBalanceMatchesWorldState(parallelResult, Address.fromHexStringStrict(ACCOUNT_2));
     assertBalanceMatchesWorldState(parallelResult, Address.fromHexStringStrict(ACCOUNT_3));
@@ -465,6 +471,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, Address.fromHexStringStrict(ACCOUNT_2));
@@ -529,6 +536,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         Address.fromHexStringStrict(ACCOUNT_GENESIS_1),
         coinbase);
 
@@ -610,6 +618,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, Address.fromHexStringStrict(ACCOUNT_2));
@@ -685,6 +694,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, Address.fromHexStringStrict(ACCOUNT_2));
@@ -744,6 +754,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     // contract balance is unchanged so no balance changes recorded
@@ -806,6 +817,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     // contract balance is unchanged so no balance changes recorded
@@ -878,6 +890,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, contractAddress);
@@ -948,6 +961,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, contractAddress);
@@ -1018,6 +1032,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, contractAddress);
@@ -1089,6 +1104,7 @@ class AbstractBlockProcessorIntegrationTest {
         CONSOLIDATION_CONTRACT,
         BUILDER_DEPOSIT_CONTRACT,
         BUILDER_EXIT_CONTRACT,
+        HISTORY_STORAGE_CONTRACT,
         coinbase);
 
     assertBalanceMatchesWorldState(blockProcessingResult, contractAddress);
