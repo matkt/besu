@@ -1371,7 +1371,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final ProtocolSchedule protocolSchedule) {
     final Optional<Long> amsterdamMilestone = protocolSchedule.milestoneFor(AMSTERDAM);
     return switch (dataStorageConfiguration.getDataStorageFormat()) {
-      case BONSAI -> {
+      case BONSAI, BINARY -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
             worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
 

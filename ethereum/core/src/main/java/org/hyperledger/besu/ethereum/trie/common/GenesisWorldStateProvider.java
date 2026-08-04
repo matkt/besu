@@ -52,6 +52,10 @@ public class GenesisWorldStateProvider {
       return createGenesisBonsaiWorldState(
           DataStorageConfiguration.DEFAULT_BONSAI_CONFIG, codeCache);
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
+        == DataStorageFormat.BINARY) {
+      return createGenesisBonsaiWorldState(
+          DataStorageConfiguration.DEFAULT_BINARY_CONFIG, codeCache);
+    } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.X_BONSAI_ARCHIVE) {
       return createGenesisBonsaiWorldState(
           DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache);
