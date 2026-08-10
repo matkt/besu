@@ -192,8 +192,8 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     private final BonsaiWorldState worldState;
     private final BlockAccessListAccountLookup accountLookup;
 
-    /** When {@code true}, trie updates are in-memory only; no deferred KV writes are collected. */
-    private final boolean storageFrozen;
+    /** Strategy that persists deferred writes, or drops them when storage is frozen. */
+    private final WriteSink sink;
 
     /** Lock-free queue; storage futures and account resolution may append concurrently. */
     private final ConcurrentLinkedQueue<StateRootComputations.UpdaterWrite> writes =
@@ -214,7 +214,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         final boolean storageFrozen) {
       this.worldState = worldState;
       this.accountLookup = accountLookup;
-      this.storageFrozen = storageFrozen;
+      this.sink = storageFrozen ? new FrozenSink() : new PersistingSink(writes);
     }
 
     /**
@@ -223,7 +223,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
      * <ol>
      *   <li>Launch storage-trie updates concurrently for accounts with storage changes.
      *   <li>Resolve each changed account in the account trie via {@code putDeferred}.
-     *   <li>Unless {@link #storageFrozen}, commit the account trie and collect deferred writes.
+     *   <li>Commit the account trie; deferred writes are collected unless storage is frozen.
      * </ol>
      */
     BackgroundResult execute() {
@@ -255,12 +255,10 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         }
       }
 
-      if (!storageFrozen) {
-        // Step 3: commit the account trie.
-        accountTrie.commit(
-            (location, hash, value) ->
-                writes.add(u -> u.putAccountStateTrieNode(location, hash, value)));
-      }
+      // Step 3: commit the account trie.
+      sink.commitTrie(
+          accountTrie,
+          (location, hash, value) -> u -> u.putAccountStateTrieNode(location, hash, value));
       return new BackgroundResult(
           Hash.wrap(accountTrie.getRootHash()), new ArrayList<>(writes), storageRoots);
     }
@@ -294,15 +292,15 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       } else {
         final BlockAccessList.CodeChange codeChange = changes.codeChanges().getLast();
         newCodeHash = Hash.hash(codeChange.newCode());
-        if (!storageFrozen) {
+        if (!sink.isFrozen()) {
           if (codeChange.newCode().isEmpty()) {
             // Code was cleared: load the parent account to find the prior code hash.
             if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
               final Hash priorCodeHash = priorAccount.getCodeHash();
-              writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+              sink.removeCode(accountHash, priorCodeHash);
             }
           } else {
-            writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));
+            sink.putCode(accountHash, newCodeHash, codeChange.newCode());
           }
         }
       }
@@ -322,23 +320,19 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       final PmtStateTrieAccountValue updatedAccount =
           new PmtStateTrieAccountValue(newNonce, newBalance, newStorageRoot, newCodeHash);
       if (isAccountEmpty(updatedAccount)) {
-        if (!storageFrozen) {
-          writes.add(updater -> updater.removeAccountInfoState(accountHash));
-        }
+        sink.removeAccountInfoState(accountHash);
         return Optional.empty();
       } else {
         final Bytes encoded = RLP.encode(updatedAccount::writeTo);
-        if (!storageFrozen) {
-          writes.add(updater -> updater.putAccountInfoState(accountHash, encoded));
-        }
+        sink.putAccountInfoState(accountHash, encoded);
         return Optional.of(encoded);
       }
     }
 
     /**
      * Replays storage slot changes from the BAL on the parent storage trie and returns the new
-     * storage root. When {@link #storageFrozen} is {@code true}, the trie is updated in memory only
-     * and slot/trie-node KV writes are not recorded.
+     * storage root. When storage is frozen, the trie is updated in memory only and slot/trie-node
+     * KV writes are not recorded.
      */
     private Hash updateStorageTrie(
         final Address address,
@@ -355,24 +349,18 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         final UInt256 rawValue = slotChanges.changes().getLast().newValue();
         final UInt256 value = rawValue == null ? UInt256.ZERO : rawValue;
         if (value.equals(UInt256.ZERO)) {
-          if (!storageFrozen) {
-            writes.add(updater -> updater.removeStorageValueBySlotHash(accountHash, slotHash));
-          }
+          sink.removeStorageValueBySlotHash(accountHash, slotHash);
           storageTrie.remove(slotHash.getBytes());
         } else {
-          if (!storageFrozen) {
-            writes.add(updater -> updater.putStorageValueBySlotHash(accountHash, slotHash, value));
-          }
+          sink.putStorageValueBySlotHash(accountHash, slotHash, value);
           storageTrie.put(slotHash.getBytes(), encodeTrieValue(value));
         }
       }
 
-      if (!storageFrozen) {
-        storageTrie.commit(
-            (location, nodeHash, value) ->
-                writes.add(
-                    u -> u.putAccountStorageTrieNode(accountHash, location, nodeHash, value)));
-      }
+      sink.commitTrie(
+          storageTrie,
+          (location, nodeHash, value) ->
+              u -> u.putAccountStorageTrieNode(accountHash, location, nodeHash, value));
       return Hash.wrap(storageTrie.getRootHash());
     }
 

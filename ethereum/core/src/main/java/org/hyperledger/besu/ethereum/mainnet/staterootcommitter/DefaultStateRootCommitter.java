@@ -73,14 +73,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
             Objects.requireNonNull(
                 worldUpdater, "Path-based state root committers require a non-null WorldUpdater");
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
-    final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
     final Hash root =
         new DefaultComputation(
-                bonsai,
-                (BonsaiWorldStateUpdateAccumulator) accumulator,
-                storageFrozen,
-                addressHasher)
+                bonsai, (BonsaiWorldStateUpdateAccumulator) accumulator, addressHasher)
             .executeInto(writes);
     if (blockHeader != null && bonsai.isTrieDisabled()) {
       return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
@@ -92,7 +88,6 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
 
     private final BonsaiWorldState bonsai;
     private final BonsaiWorldStateUpdateAccumulator worldStateUpdater;
-    private final boolean storageFrozen;
     private final BiFunction<BonsaiWorldState, Address, Hash> addressHasher;
 
     /** Lock-free queue; storage futures and account staging may append concurrently. */
@@ -105,20 +100,22 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
      */
     private final Map<Address, CompletableFuture<Hash>> storageFutures = new ConcurrentHashMap<>();
 
+    /** Strategy that persists deferred writes, or drops them when storage is frozen. */
+    private final WriteSink sink;
+
     DefaultComputation(
         final BonsaiWorldState bonsai,
         final BonsaiWorldStateUpdateAccumulator worldStateUpdater,
-        final boolean storageFrozen,
         final BiFunction<BonsaiWorldState, Address, Hash> addressHasher) {
       this.bonsai = bonsai;
       this.worldStateUpdater = worldStateUpdater;
-      this.storageFrozen = storageFrozen;
       this.addressHasher = addressHasher;
+      this.sink = bonsai.isStorageFrozen() ? new FrozenSink() : new PersistingSink(writes);
     }
 
     Hash executeInto(final List<StateRootComputations.UpdaterWrite> writeSink) {
       clearStorage();
-      if (!storageFrozen) {
+      if (!sink.isFrozen()) {
         collectCodeWrites();
       }
 
@@ -149,9 +146,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
             if (storageFuture != null) {
               storageFuture.join();
             }
-            if (!storageFrozen) {
-              writes.add(updater -> updater.removeAccountInfoState(addressHash));
-            }
+            sink.removeAccountInfoState(addressHash);
             accountTrie.remove(addressHash.getBytes());
           } else {
             accountTrie.putDeferred(
@@ -164,11 +159,9 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         }
       }
 
-      if (!storageFrozen) {
-        accountTrie.commit(
-            (location, hash, value) ->
-                writes.add(u -> u.putAccountStateTrieNode(location, hash, value)));
-      }
+      sink.commitTrie(
+          accountTrie,
+          (location, hash, value) -> u -> u.putAccountStateTrieNode(location, hash, value));
       writeSink.addAll(writes);
       return Hash.wrap(accountTrie.getRootHash());
     }
@@ -187,9 +180,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       }
 
       final Bytes accountValueBytes = updatedAccount.serializeAccount();
-      if (!storageFrozen) {
-        writes.add(updater -> updater.putAccountInfoState(addressHash, accountValueBytes));
-      }
+      sink.putAccountInfoState(addressHash, accountValueBytes);
       return Optional.of(accountValueBytes);
     }
 
@@ -199,7 +190,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
 
       final boolean accountDeleted =
           worldStateUpdater.getAccountsToUpdate().get(updatedAddress).getUpdated() == null;
-      if (storageFrozen && accountDeleted) {
+      if (accountDeleted && sink.isFrozen()) {
         return Hash.EMPTY_TRIE_HASH;
       }
 
@@ -221,18 +212,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         try {
           if (!storageUpdate.getValue().isUnchanged()) {
             if (updatedStorage == null || updatedStorage.equals(UInt256.ZERO)) {
-              if (!storageFrozen) {
-                writes.add(
-                    updater -> updater.removeStorageValueBySlotHash(updatedAddressHash, slotHash));
-              }
+              sink.removeStorageValueBySlotHash(updatedAddressHash, slotHash);
               storageTrie.remove(slotHash.getBytes());
             } else {
-              if (!storageFrozen) {
-                writes.add(
-                    updater ->
-                        updater.putStorageValueBySlotHash(
-                            updatedAddressHash, slotHash, updatedStorage));
-              }
+              sink.putStorageValueBySlotHash(updatedAddressHash, slotHash, updatedStorage);
               storageTrie.put(slotHash.getBytes(), encodeTrieValue(updatedStorage));
             }
           }
@@ -242,14 +225,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         }
       }
 
-      if (!storageFrozen) {
-        storageTrie.commit(
-            (location, nodeHash, value) ->
-                writes.add(
-                    u ->
-                        u.putAccountStorageTrieNode(
-                            updatedAddressHash, location, nodeHash, value)));
-      }
+      sink.commitTrie(
+          storageTrie,
+          (location, nodeHash, value) ->
+              u -> u.putAccountStorageTrieNode(updatedAddressHash, location, nodeHash, value));
       return Hash.wrap(storageTrie.getRootHash());
     }
 
@@ -295,12 +274,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
                   new StorageSlotKey(Hash.wrap(slot.getKey()), Optional.empty());
               final UInt256 slotValue =
                   UInt256.fromBytes(Bytes32.leftPad(RLP.decodeValue(slot.getValue())));
-              if (!storageFrozen) {
-                writes.add(
-                    updater ->
-                        updater.removeStorageValueBySlotHash(
-                            addressHash, storageSlotKey.getSlotHash()));
-              }
+              sink.removeStorageValueBySlotHash(addressHash, storageSlotKey.getSlotHash());
               storageToDelete
                   .computeIfAbsent(
                       storageSlotKey, key -> new PathBasedValue<>(slotValue, null, true))
@@ -338,10 +312,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
 
         if (codeIsEmpty(updatedCode)) {
           final Hash priorCodeHash = Hash.hash(priorCode);
-          writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+          sink.removeCode(accountHash, priorCodeHash);
         } else {
           final Hash codeHash = Hash.hash(updatedCode);
-          writes.add(updater -> updater.putCode(accountHash, codeHash, updatedCode));
+          sink.putCode(accountHash, codeHash, updatedCode);
         }
       }
     }
