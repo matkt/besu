@@ -473,7 +473,8 @@ class StateRootCommitterIntegrationTest {
         worldState.freezeStorage();
         final BalStateRootCommitter committer =
             new BalStateRootCommitter(
-                harness.protocolContext(), blockHeader, BlockAccessListAccountLookup.of(bal), true);
+                harness.protocolContext(), blockHeader, BlockAccessListAccountLookup.of(bal), true)
+                .start();
         worldState.persist(blockHeader, committer);
       }
 

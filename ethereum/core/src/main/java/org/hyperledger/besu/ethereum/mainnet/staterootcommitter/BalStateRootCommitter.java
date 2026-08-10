@@ -53,14 +53,35 @@ import org.apache.tuweni.units.bigints.UInt256;
 
 public final class BalStateRootCommitter implements StateRootCommitter {
 
-  private final CompletableFuture<BackgroundResult> backgroundComputation;
+  private final ProtocolContext protocolContext;
+  private final BlockHeader blockHeader;
+  private final BlockAccessListAccountLookup accountLookup;
+  private final boolean storageFrozen;
+
   private final AtomicBoolean cancelled = new AtomicBoolean(false);
+  // Assigned by start(); null until then. start() must be called before compute()/cancel().
+  private CompletableFuture<BackgroundResult> backgroundComputation;
 
   public BalStateRootCommitter(
       final ProtocolContext protocolContext,
       final BlockHeader blockHeader,
       final BlockAccessListAccountLookup accountLookup,
       final boolean storageFrozen) {
+    this.protocolContext = protocolContext;
+    this.blockHeader = blockHeader;
+    this.accountLookup = accountLookup;
+    this.storageFrozen = storageFrozen;
+  }
+
+  /**
+   * Launches the background BAL state root computation and returns this committer.
+   *
+   * <p>Separated from the constructor so the background thread is not started during object
+   * construction — the constructor only captures its arguments, and the asynchronous work (which
+   * calls back into this instance) only begins once construction is complete and {@code start()}
+   * is invoked. Must be called exactly once before {@link #compute} or {@link #cancel}.
+   */
+  public BalStateRootCommitter start() {
     this.backgroundComputation =
         CompletableFuture.supplyAsync(
             () -> {
@@ -70,6 +91,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
               }
             },
             BlockProcessingExecutors.stateRootExecutor());
+    return this;
   }
 
   /** Cancels the background computation; {@link #compute} will throw if called afterwards. */
@@ -165,6 +187,10 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         WorldStateQueryParams.newBuilder()
             .withBlockHeader(parentHeader)
             .withShouldWorldStateUpdateHead(false)
+            // The BAL overlay is attached for consistency with other BAL world-state callers, but
+            // this computation path does not read through the world-state accumulator: it replays
+            // the BAL directly onto tries/storage (see BalComputation), so the overlay is not
+            // consumed here. Kept so the parent is opened the same way as for EVM execution.
             .withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE))
             .build();
     final BonsaiWorldState worldState =

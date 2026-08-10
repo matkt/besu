@@ -25,6 +25,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
@@ -153,11 +154,11 @@ class BonsaiWorldStateTest {
 
   @Test
   void incrementBytes32_returnsNextValue() {
-    assertThat(BonsaiWorldState.incrementBytes32(Bytes32.ZERO)).hasValue(UInt256.ONE);
+    assertThat(RangeManager.incrementBytes32(Bytes32.ZERO)).hasValue(UInt256.ONE);
   }
 
   @Test
   void incrementBytes32_returnsEmpty_whenMaxValue() {
-    assertThat(BonsaiWorldState.incrementBytes32(UInt256.MAX_VALUE)).isEmpty();
+    assertThat(RangeManager.incrementBytes32(UInt256.MAX_VALUE)).isEmpty();
   }
 }

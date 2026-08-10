@@ -56,10 +56,11 @@ public final class StateRootCommitterFactory {
     return switch (resolveMode(protocolContext, maybeBal)) {
       case BAL ->
           new BalStateRootCommitter(
-              protocolContext,
-              blockHeader,
-              BlockAccessListAccountLookup.of(maybeBal.get()),
-              storageFrozen);
+                  protocolContext,
+                  blockHeader,
+                  BlockAccessListAccountLookup.of(maybeBal.get()),
+                  storageFrozen)
+              .start();
       case DEFAULT -> new DefaultStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
     };

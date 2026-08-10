@@ -28,7 +28,7 @@ public final class StateRootComputations {
 
   /** Deferred Bonsai storage write applied at persist time. */
   @FunctionalInterface
-  public interface UpdaterWrite {
+  protected interface UpdaterWrite {
     void applyTo(BonsaiWorldStateKeyValueStorage.Updater updater);
   }
 

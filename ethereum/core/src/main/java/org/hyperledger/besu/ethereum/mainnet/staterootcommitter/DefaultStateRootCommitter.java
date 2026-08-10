@@ -22,6 +22,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
@@ -285,7 +286,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
             if (entriesToDelete.size() < 256) {
               break;
             }
-            final Optional<Bytes32> maybeNextKeyHash = incrementBytes32(lastKeyHash);
+            final Optional<Bytes32> maybeNextKeyHash = RangeManager.incrementBytes32(lastKeyHash);
             if (maybeNextKeyHash.isEmpty()) {
               break;
             }
@@ -322,11 +323,6 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
 
     private static boolean codeIsEmpty(final Bytes value) {
       return value == null || value.isEmpty();
-    }
-
-    private Optional<Bytes32> incrementBytes32(final Bytes32 value) {
-      final UInt256 incremented = UInt256.fromBytes(value).add(UInt256.ONE);
-      return incremented.isZero() ? Optional.empty() : Optional.of(incremented);
     }
   }
 }

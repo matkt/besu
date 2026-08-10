@@ -118,10 +118,6 @@ public class BonsaiWorldState extends PathBasedWorldState {
     return (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage;
   }
 
-  public EvmConfiguration getEvmConfiguration() {
-    return evmConfiguration;
-  }
-
   @Override
   public Account get(final Address address) {
     return getWorldStateStorage()
@@ -208,7 +204,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
         BlockProcessingExecutors.storageTrieForkJoinPool());
   }
 
-  public MerkleTrie<Bytes, Bytes> createTrie(final NodeLoader nodeLoader, final Bytes32 rootHash) {
+  private MerkleTrie<Bytes, Bytes> createTrie(final NodeLoader nodeLoader, final Bytes32 rootHash) {
     return createTrie(nodeLoader, rootHash, BlockProcessingExecutors.accountTrieForkJoinPool());
   }
 
@@ -238,10 +234,5 @@ public class BonsaiWorldState extends PathBasedWorldState {
   @Override
   public PathBasedCodeCache codeCache() {
     return codeCache;
-  }
-
-  static Optional<Bytes32> incrementBytes32(final Bytes32 value) {
-    final UInt256 incremented = UInt256.fromBytes(value).add(UInt256.ONE);
-    return incremented.isZero() ? Optional.empty() : Optional.of(incremented);
   }
 }

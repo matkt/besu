@@ -1346,10 +1346,11 @@ class AbstractBlockProcessorIntegrationTest {
 
     final BalStateRootCommitter committer =
         new BalStateRootCommitter(
-            protocolContext,
-            block.getHeader(),
-            BlockAccessListAccountLookup.of(blockAccessList),
-            false);
+                protocolContext,
+                block.getHeader(),
+                BlockAccessListAccountLookup.of(blockAccessList),
+                false)
+            .start();
 
     final BlockHeader parentHeader =
         protocolContext

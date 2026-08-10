@@ -305,7 +305,7 @@ class BalStateRootCalculatorTest {
     try {
       final BalStateRootCommitter committer =
           new BalStateRootCommitter(
-              protocolContext, blockHeader, BlockAccessListAccountLookup.of(bal), false);
+              protocolContext, blockHeader, BlockAccessListAccountLookup.of(bal), false).start();
       return committer.compute(worldState, null, worldState.updater()).root();
     } finally {
       worldState.close();
