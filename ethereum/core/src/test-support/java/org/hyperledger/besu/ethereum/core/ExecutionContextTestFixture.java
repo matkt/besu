@@ -74,9 +74,10 @@ public class ExecutionContextTestFixture {
                 false),
             new NoOpMetricsSystem(),
             0);
-    if (dataStorageFormat.isPresent() && dataStorageFormat.get().equals(DataStorageFormat.BONSAI))
-      this.stateArchive = createBonsaiInMemoryWorldStateArchive(blockchain);
-    else this.stateArchive = createInMemoryWorldStateArchive();
+    if (dataStorageFormat.isPresent() && dataStorageFormat.get().isBonsaiFormat()) {
+      this.stateArchive =
+          createBonsaiInMemoryWorldStateArchive(blockchain, dataStorageFormat.get());
+    } else this.stateArchive = createInMemoryWorldStateArchive();
     this.protocolSchedule = protocolSchedule;
     this.protocolContext =
         new ProtocolContext.Builder()

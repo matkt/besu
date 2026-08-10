@@ -173,6 +173,9 @@ configure(allprojects - project(':platform')) {
   }
 
   repositories {
+    mavenLocal {
+      content { includeGroupByRegex('org\\.hyperledger\\..*') }
+    }
     maven {
       url = 'https://hyperledger.jfrog.io/hyperledger/besu-maven'
       content { includeGroupByRegex('org\\.hyperledger\\..*') }

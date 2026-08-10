@@ -61,6 +61,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
   protected final FlatDbCacheManager cacheManager;
+  private final DataStorageFormat dataStorageFormat;
   private volatile long cacheVersion;
 
   public BonsaiWorldStateKeyValueStorage(
@@ -90,6 +91,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
     this.cacheManager = cacheManager;
     this.cacheVersion = cacheManager.getCurrentVersion();
+    this.dataStorageFormat = dataStorageConfiguration.getDataStorageFormat();
   }
 
   public BonsaiWorldStateKeyValueStorage(
@@ -98,10 +100,27 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final KeyValueStorage trieLogStorage,
       final FlatDbCacheManager cacheManager,
       final long cacheVersion) {
+    this(
+        flatDbStrategyProvider,
+        composedWorldStateStorage,
+        trieLogStorage,
+        cacheManager,
+        cacheVersion,
+        DataStorageFormat.BONSAI);
+  }
+
+  public BonsaiWorldStateKeyValueStorage(
+      final BonsaiFlatDbStrategyProvider flatDbStrategyProvider,
+      final SegmentedKeyValueStorage composedWorldStateStorage,
+      final KeyValueStorage trieLogStorage,
+      final FlatDbCacheManager cacheManager,
+      final long cacheVersion,
+      final DataStorageFormat dataStorageFormat) {
     super(composedWorldStateStorage, trieLogStorage);
     this.flatDbStrategyProvider = flatDbStrategyProvider;
     this.cacheManager = cacheManager;
     this.cacheVersion = cacheVersion;
+    this.dataStorageFormat = dataStorageFormat;
   }
 
   private static FlatDbCacheManager createCacheManager(
@@ -127,7 +146,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   @Override
   public DataStorageFormat getDataStorageFormat() {
-    return DataStorageFormat.BONSAI;
+    return dataStorageFormat;
   }
 
   @Override

@@ -55,6 +55,12 @@ public interface DataStorageConfiguration {
           .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DISABLED)
           .build();
 
+  DataStorageConfiguration DEFAULT_BINARY_CONFIG =
+      ImmutableDataStorageConfiguration.builder()
+          .dataStorageFormat(DataStorageFormat.BINARY)
+          .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DEFAULT)
+          .build();
+
   DataStorageFormat getDataStorageFormat();
 
   @Value.Default

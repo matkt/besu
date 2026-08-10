@@ -20,7 +20,9 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.plugin.data.BlockHeader;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.Optional;
@@ -38,6 +40,7 @@ public final class StateRootCommitterFactory {
 
   private enum Mode {
     BAL,
+    BINARY,
     DEFAULT,
     FOREST
   }
@@ -60,6 +63,7 @@ public final class StateRootCommitterFactory {
               blockHeader,
               BlockAccessListAccountLookup.of(maybeBal.get()),
               storageFrozen);
+      case BINARY -> new BinaryStateRootCommitter();
       case DEFAULT -> new DefaultStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
     };
@@ -69,6 +73,9 @@ public final class StateRootCommitterFactory {
       final ProtocolContext protocolContext, final Optional<BlockAccessList> maybeBal) {
     if (protocolContext.getWorldStateArchive() instanceof ForestWorldStateArchive) {
       return Mode.FOREST;
+    }
+    if (isBinaryTrie(protocolContext)) {
+      return Mode.BINARY;
     }
     if (maybeBal.isPresent()
         && balConfiguration.isBalStateRootEnabled()
@@ -81,5 +88,13 @@ public final class StateRootCommitterFactory {
   private static boolean isTrieDisabled(final ProtocolContext protocolContext) {
     return protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider provider
         && provider.getWorldStateSharedSpec().isTrieDisabled();
+  }
+
+  private static boolean isBinaryTrie(final ProtocolContext protocolContext) {
+    if (protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider provider
+        && provider.getWorldState() instanceof PathBasedWorldState worldState) {
+      return worldState.getWorldStateStorage().getDataStorageFormat() == DataStorageFormat.BINARY;
+    }
+    return false;
   }
 }

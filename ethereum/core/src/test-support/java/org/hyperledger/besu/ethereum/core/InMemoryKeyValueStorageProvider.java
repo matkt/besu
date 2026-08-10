@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.ServiceManager;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
@@ -89,29 +90,50 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
 
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain) {
-    return createBonsaiInMemoryWorldStateArchive(blockchain, EvmConfiguration.DEFAULT, null);
+    return createBonsaiInMemoryWorldStateArchive(blockchain, DataStorageFormat.BONSAI);
+  }
+
+  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
+      final Blockchain blockchain, final DataStorageFormat dataStorageFormat) {
+    return createBonsaiInMemoryWorldStateArchive(
+        blockchain, EvmConfiguration.DEFAULT, null, dataStorageFormat);
   }
 
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain, final ServiceManager serviceManager) {
     return createBonsaiInMemoryWorldStateArchive(
-        blockchain, EvmConfiguration.DEFAULT, serviceManager);
+        blockchain, EvmConfiguration.DEFAULT, serviceManager, DataStorageFormat.BONSAI);
   }
 
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain,
       final EvmConfiguration evmConfiguration,
       final ServiceManager serviceManager) {
+    return createBonsaiInMemoryWorldStateArchive(
+        blockchain, evmConfiguration, serviceManager, DataStorageFormat.BONSAI);
+  }
+
+  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
+      final Blockchain blockchain,
+      final EvmConfiguration evmConfiguration,
+      final ServiceManager serviceManager,
+      final DataStorageFormat dataStorageFormat) {
+    final DataStorageConfiguration storageConfiguration =
+        switch (dataStorageFormat) {
+          case BINARY -> DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
+          case X_BONSAI_ARCHIVE -> DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG;
+          case BONSAI -> DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
+          case FOREST -> DataStorageConfiguration.DEFAULT_FOREST_CONFIG;
+        };
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider();
     final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader =
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem());
     return new BonsaiWorldStateProvider(
         (BonsaiWorldStateKeyValueStorage)
-            inMemoryKeyValueStorageProvider.createWorldStateStorage(
-                DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
+            inMemoryKeyValueStorageProvider.createWorldStateStorage(storageConfiguration),
         blockchain,
-        DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getPathBasedExtraStorageConfiguration(),
+        storageConfiguration.getPathBasedExtraStorageConfiguration(),
         bonsaiCachedMerkleTrieLoader,
         serviceManager,
         evmConfiguration,

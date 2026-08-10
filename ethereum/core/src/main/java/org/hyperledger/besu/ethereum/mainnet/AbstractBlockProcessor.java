@@ -202,6 +202,25 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
         protocolContext, blockchain, worldState, block, blockAccessList, new NoPreprocessing());
   }
 
+  /**
+   * Executes block body processing (through coinbase reward) without persisting world state.
+   * Package-private for tests that must pre-compute the state root before sealing the header.
+   */
+  BlockProcessingResult processBlockBodyWithoutPersist(
+      final ProtocolContext protocolContext,
+      final Blockchain blockchain,
+      final MutableWorldState worldState,
+      final Block block) {
+    return processBlock(
+        protocolContext,
+        blockchain,
+        worldState,
+        block,
+        Optional.empty(),
+        new NoPreprocessing(),
+        false);
+  }
+
   @Override
   public BlockProcessingResult processBlock(
       final ProtocolContext protocolContext,
@@ -210,6 +229,24 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       final Block block,
       final Optional<BlockAccessList> blockAccessList,
       final PreprocessingFunction preprocessingBlockFunction) {
+    return processBlock(
+        protocolContext,
+        blockchain,
+        worldState,
+        block,
+        blockAccessList,
+        preprocessingBlockFunction,
+        true);
+  }
+
+  private BlockProcessingResult processBlock(
+      final ProtocolContext protocolContext,
+      final Blockchain blockchain,
+      final MutableWorldState worldState,
+      final Block block,
+      final Optional<BlockAccessList> blockAccessList,
+      final PreprocessingFunction preprocessingBlockFunction,
+      final boolean persistWorldState) {
     final List<TransactionReceipt> receipts = new ArrayList<>();
     // EIP-7778: Track two separate cumulative gas values
     // cumulativeRegularGasUsed: For block gas limit enforcement (uses protocol-specific strategy)
@@ -535,6 +572,18 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       LOG.trace("traceEndBlock for {}", blockHeader.getNumber());
       blockTracer.traceEndBlock(blockHeader, blockBody);
 
+      // EIP-8037: gas_metered = max(cumulative_regular, cumulative_state)
+      final long gasMetered = Math.max(cumulativeRegularGasUsed, cumulativeStateGasUsed);
+      final BlockProcessingOutputs blockProcessingOutputs =
+          new BlockProcessingOutputs(
+              worldState, receipts, maybeRequests, maybeBlockAccessList, gasMetered);
+
+      if (!persistWorldState) {
+        return new BlockProcessingResult(
+            Optional.of(blockProcessingOutputs),
+            parallelizedTxFound ? Optional.of(nbParallelTx) : Optional.empty());
+      }
+
       try {
         worldState.persist(blockHeader, stateRootCommitter);
       } catch (MerkleTrieException e) {
@@ -557,13 +606,8 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
         return new BlockProcessingResult(Optional.empty(), e);
       }
 
-      // EIP-8037: gas_metered = max(cumulative_regular, cumulative_state)
-      final long gasMetered = Math.max(cumulativeRegularGasUsed, cumulativeStateGasUsed);
-
       return new BlockProcessingResult(
-          Optional.of(
-              new BlockProcessingOutputs(
-                  worldState, receipts, maybeRequests, maybeBlockAccessList, gasMetered)),
+          Optional.of(blockProcessingOutputs),
           parallelizedTxFound ? Optional.of(nbParallelTx) : Optional.empty());
     } finally {
       stateRootCommitter.cancel();
