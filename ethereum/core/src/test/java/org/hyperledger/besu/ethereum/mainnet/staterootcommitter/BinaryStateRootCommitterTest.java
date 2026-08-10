@@ -36,6 +36,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.evm.account.MutableAccount;
+import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
@@ -56,6 +57,8 @@ class BinaryStateRootCommitterTest {
   private ExecutionContextTestFixture contextTestFixture;
   private ProtocolContext protocolContext;
   private BlockHeader chainHeadHeader;
+  /** Archive head after BINARY empty-root init; used for non-frozen persist tests. */
+  private BlockHeader emptyBinaryHead;
   private StateRootCommitterFactory factory;
 
   @BeforeEach
@@ -85,14 +88,13 @@ class BinaryStateRootCommitterTest {
           .remove(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe());
       updater.commit();
     }
-    protocolContext
-        .getWorldStateArchive()
-        .resetArchiveStateTo(
-            new BlockHeaderTestFixture()
-                .parentHash(chainHeadHeader.getHash())
-                .number(chainHeadHeader.getNumber())
-                .stateRoot(Hash.ZERO)
-                .buildHeader());
+    emptyBinaryHead =
+        new BlockHeaderTestFixture()
+            .parentHash(chainHeadHeader.getHash())
+            .number(chainHeadHeader.getNumber())
+            .stateRoot(Hash.ZERO)
+            .buildHeader();
+    protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
   }
 
   @AfterEach
@@ -293,6 +295,232 @@ class BinaryStateRootCommitterTest {
               });
 
       assertThat(rootAfterReplacement).isEqualTo(rootDirect);
+    }
+
+    @Test
+    void eip7702DelegationUsesHeaderLeafNotCodeZone() {
+      final Address authority = testAddress("70");
+      final Address target = testAddress("71");
+      final Bytes delegationCode =
+          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+
+      final Hash rootWithDelegation =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+              });
+
+      final Hash rootCleared =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+                account.setCode(Bytes.EMPTY);
+              });
+
+      final Hash rootEmptyAccount =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
+
+      assertThat(rootWithDelegation).isNotEqualTo(rootEmptyAccount);
+      assertThat(rootCleared).isEqualTo(rootEmptyAccount);
+    }
+
+    @Test
+    void eoaToDelegationToClearRestoresEmptyAccountRoot() {
+      final Address authority = testAddress("74");
+      final Address target = testAddress("75");
+      final Bytes delegationCode =
+          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+
+      final Hash rootEmptyAccount =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
+
+      final Hash rootAfterSwitchAndClear =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                // EOA empty → delegation → clear back to empty code-hash mode
+                account.setBalance(Wei.ZERO);
+                account.setCode(delegationCode);
+                account.setCode(Bytes.EMPTY);
+              });
+
+      assertThat(rootAfterSwitchAndClear).isEqualTo(rootEmptyAccount);
+    }
+
+    @Test
+    void delegationToContractCodeMatchesDirectDeploy() {
+      final Address authority = testAddress("76");
+      final Address target = testAddress("77");
+      final Bytes delegationCode =
+          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+      final Bytes contractCode = Bytes.fromHexString("0x600160005260016000f3");
+
+      final Hash rootDirect =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority).setCode(contractCode));
+
+      final Hash rootViaDelegationSwitch =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+                account.setCode(contractCode);
+              });
+
+      assertThat(rootViaDelegationSwitch).isEqualTo(rootDirect);
+    }
+
+    @Test
+    void sameModeBalanceUpdateMatchesDirectDelegatedAccount() {
+      final Address authority = testAddress("78");
+      final Address target = testAddress("79");
+      final Bytes delegationCode =
+          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+      final Wei balance = Wei.of(42);
+
+      final Hash rootDirect =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+                account.setBalance(balance);
+              });
+
+      // Same final mode (delegation): balance-only churn must not disturb header mutual exclusion.
+      final Hash rootAfterBalanceChurn =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+                account.setBalance(Wei.of(1));
+                account.setBalance(balance);
+              });
+
+      assertThat(rootAfterBalanceChurn).isEqualTo(rootDirect);
+    }
+
+    @Test
+    void accountDeletionClearsHeaderLeaves() {
+      final Address address = testAddress("80");
+      final Wei balance = Wei.of(100);
+      final long nonce = 1L;
+
+      final Hash rootWithAccount =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(address);
+                account.setBalance(balance);
+                account.setNonce(nonce);
+              });
+      final BlockHeader headerWithAccount = childHeader(rootWithAccount);
+
+      // Non-frozen head: persist writes flat-DB + trie so delete loads prior (invariant).
+      try (BonsaiWorldState worldState =
+          (BonsaiWorldState)
+              protocolContext
+                  .getWorldStateArchive()
+                  .getWorldState(
+                      WorldStateQueryParams.newBuilder()
+                          .withBlockHeader(emptyBinaryHead)
+                          .withShouldWorldStateUpdateHead(true)
+                          .build())
+                  .orElseThrow()) {
+        applyBalanceAndNonce(worldState, address, balance, nonce);
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext, headerWithAccount, Optional.empty(), worldState.isStorageFrozen());
+        worldState.persist(headerWithAccount, committer);
+        assertThat(worldState.rootHash()).isEqualTo(rootWithAccount);
+        assertThat(worldState.get(address)).isNotNull();
+
+        final BonsaiWorldStateUpdateAccumulator accumulator =
+            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        accumulator.deleteAccount(address);
+        accumulator.commit();
+        assertThat(accumulator.getAccountsToUpdate().get(address).getPrior()).isNotNull();
+
+        final Hash rootAfterDelete =
+            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        assertThat(rootAfterDelete).isNotEqualTo(rootWithAccount);
+        assertThat(rootAfterDelete).isEqualTo(Hash.ZERO);
+      }
+    }
+
+    @Test
+    void createThenDeleteAccountInSameBatchRestoresEmptyRoot() {
+      final Address address = testAddress("81");
+
+      final Hash rootAfterCreateAndDelete =
+          computeBinaryRoot(
+              accumulator -> {
+                accumulator.getOrCreate(address).setBalance(Wei.of(7));
+                accumulator.deleteAccount(address);
+              });
+
+      assertThat(rootAfterCreateAndDelete).isEqualTo(Hash.ZERO);
+    }
+
+    @Test
+    void storageRollbackAfterPersistRestoresAccountOnlyRoot() {
+      final Address address = testAddress("82");
+      final StorageSlotKey slotKey = new StorageSlotKey(UInt256.valueOf(9));
+      final UInt256 slotValue = UInt256.valueOf(123);
+
+      final Hash rootAccountOnly =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(address));
+      final Hash rootWithSlot =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(address);
+                account.setStorageValue(slotKey.getSlotKey().orElseThrow(), slotValue);
+              });
+      final BlockHeader headerWithSlot = childHeader(rootWithSlot);
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        final WorldUpdater updater = worldState.updater();
+        final MutableAccount account = updater.getOrCreate(address);
+        account.setStorageValue(slotKey.getSlotKey().orElseThrow(), slotValue);
+        updater.commit();
+
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext, headerWithSlot, Optional.empty(), worldState.isStorageFrozen());
+        worldState.persist(headerWithSlot, committer);
+        assertThat(worldState.rootHash()).isEqualTo(rootWithSlot);
+
+        final BonsaiWorldStateUpdateAccumulator accumulator =
+            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        accumulator
+            .getOrCreate(address)
+            .setStorageValue(slotKey.getSlotKey().orElseThrow(), UInt256.ZERO);
+        accumulator.commit();
+
+        final Hash rootAfterZero =
+            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        assertThat(rootAfterZero).isEqualTo(rootAccountOnly);
+      }
+    }
+
+    @Test
+    void codeClearOfDelegationRestoresEmptyAccountRoot() {
+      final Address authority = testAddress("83");
+      final Address target = testAddress("84");
+      final Bytes delegationCode =
+          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+
+      final Hash rootEmptyAccount =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
+
+      final Hash rootCleared =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount account = accumulator.getOrCreate(authority);
+                account.setCode(delegationCode);
+                account.setCode(Bytes.EMPTY);
+              });
+
+      assertThat(rootCleared).isEqualTo(rootEmptyAccount);
     }
 
     @Test

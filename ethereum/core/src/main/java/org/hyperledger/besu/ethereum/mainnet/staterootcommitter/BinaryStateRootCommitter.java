@@ -14,13 +14,17 @@
  */
 package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
 
+import static org.hyperledger.besu.evm.worldstate.CodeDelegationHelper.hasCodeDelegation;
+
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.DelegationEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.ParallelStoredPartitionedBinaryTrie;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitionedBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
@@ -29,6 +33,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
+import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
@@ -51,15 +56,20 @@ import org.apache.tuweni.units.bigints.UInt256;
  * Path-based state-root committer that materializes updates into the partitioned binary trie
  * (EIP-8297).
  *
- * <p><b>Account deletion</b> ({@code updated == null}) is out of scope for the current fork:
- * post-EIP-6780, full account deletion is extremely rare. When the path fires, only account header
- * leaves ({@code BASIC_DATA}, {@code CODE_HASH}) and flat-db account info are cleared; storage
- * leaves and {@code CODE_ZONE} chunks are not removed.
+ * <p><b>Account deletion</b> ({@code updated == null}): when {@code prior != null}, clears account
+ * header leaves ({@code BASIC_DATA}, and whichever of {@code CODE_HASH}/{@code DELEGATION} was
+ * present) and removes flat-db account info. Storage leaves and {@code CODE_ZONE} chunks are not
+ * removed here (post-EIP-6780 full account deletion is rare; storage clears arrive via the storage
+ * accumulator when in scope).
  *
  * <p><b>Code updates</b>: {@code CODE_ZONE} chunks are content-addressed and may be shared across
  * accounts (EIP-8297). This committer never removes code-chunk leaves from the trie; it only writes
- * new code via {@link BinaryComputation#putCodeLeaves}. The account header {@code code_hash} leaf
- * is updated through {@link BinaryComputation#applyAccount} when the account changes.
+ * new contract code via {@link BinaryComputation#putCodeLeaves}. EIP-7702 delegation indicators are
+ * stored in the account header {@code DELEGATION} leaf instead of {@code CODE_ZONE}.
+ *
+ * <p><b>Delegation vs code-hash</b>: an existing account holds exactly one of {@code
+ * CODE_HASH_LEAF_KEY} and {@code DELEGATION_LEAF_KEY}. Mutual-exclusion removes run only on a real
+ * mode transition (delegation ↔ code-hash), not on every account write.
  */
 public class BinaryStateRootCommitter implements StateRootCommitter {
 
@@ -130,33 +140,91 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
     private void applyAccount(final Address address) {
       final PathBasedValue<BonsaiAccount> accountUpdate =
           worldStateUpdater.getAccountsToUpdate().get(address);
-      if (accountUpdate == null || accountUpdate.isUnchanged()) {
+      if (accountUpdate == null) {
         return;
       }
 
       final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(address.getBytes());
       final Bytes basicDataKey = TrieKeyDerivation.getTreeKeyForBasicData(address32);
       final Bytes codeHashKey = TrieKeyDerivation.getTreeKeyForCodeHash(address32);
+      final Bytes delegationKey = TrieKeyDerivation.getTreeKeyForDelegation(address32);
       final Hash addressHash = address.addressHash();
+      final BonsaiAccount priorAccount = accountUpdate.getPrior();
+      final BonsaiAccount updatedAccount = accountUpdate.getUpdated();
 
-      // Out-of-scope: storage and CODE_ZONE cleanup (post-EIP-6780 account deletion is rare).
-      if (accountUpdate.getUpdated() == null) {
-        // should not exist
+      // Handle deletion before isUnchanged(): prior == updated == null is "unchanged" but still a
+      // clear. Flat-DB and trie stay consistent, so cleanup runs only when prior exists.
+      if (updatedAccount == null) {
+        if (priorAccount != null) {
+          clearAccountHeader(address, basicDataKey, codeHashKey, delegationKey, priorAccount);
+          if (!storageFrozen) {
+            writes.add(updater -> updater.removeAccountInfoState(addressHash));
+          }
+        }
         return;
       }
 
-      final BonsaiAccount updatedAccount = accountUpdate.getUpdated();
-      final Bytes code =
-          resolveCurrentCode(address, updatedAccount.getCodeHash()).orElse(Bytes.EMPTY);
-      stateTrie.writeState(
+      if (accountUpdate.isUnchanged()) {
+        return;
+      }
+
+      final Bytes priorCode = resolvePriorCode(address, priorAccount);
+      final Bytes updatedCode = resolveUpdatedCode(address, updatedAccount);
+      final boolean priorDelegation = hasCodeDelegation(priorCode);
+      final boolean updatedDelegation = hasCodeDelegation(updatedCode);
+
+      final long codeSize =
+          updatedDelegation ? EmbeddingParameters.DELEGATION_CODE_SIZE : updatedCode.size();
+      stateTrie.put(
           basicDataKey,
           BasicDataEncoder.encodeBasicData(
-              code.size(), updatedAccount.getNonce(), updatedAccount.getBalance().toUInt256()));
-      stateTrie.writeState(codeHashKey, updatedAccount.getCodeHash().getBytes());
+              codeSize, updatedAccount.getNonce(), updatedAccount.getBalance().toUInt256()));
+
+      if (updatedDelegation) {
+        final Bytes32 delegationValue =
+            DelegationEncoder.encodeDelegation(
+                CodeDelegationHelper.getTargetAddress(updatedCode).getBytes());
+        if (!priorDelegation || !delegationLeafUnchanged(priorCode, updatedCode)) {
+          stateTrie.put(delegationKey, delegationValue);
+        }
+        // Mutual exclusion: only when leaving code-hash mode for an existing account.
+        if (priorAccount != null && !priorDelegation) {
+          stateTrie.remove(codeHashKey);
+        }
+      } else {
+        final Hash updatedCodeHash = updatedAccount.getCodeHash();
+        final boolean codeHashChanged =
+            priorAccount == null
+                || priorDelegation
+                || !updatedCodeHash.equals(priorAccount.getCodeHash());
+        if (codeHashChanged) {
+          stateTrie.put(codeHashKey, updatedCodeHash.getBytes());
+        }
+        // Mutual exclusion: only when leaving delegation mode.
+        if (priorDelegation) {
+          stateTrie.remove(delegationKey);
+        }
+      }
 
       if (!storageFrozen) {
         writes.add(
             updater -> updater.putAccountInfoState(addressHash, updatedAccount.serializeAccount()));
+      }
+    }
+
+    private void clearAccountHeader(
+        final Address address,
+        final Bytes basicDataKey,
+        final Bytes codeHashKey,
+        final Bytes delegationKey,
+        final BonsaiAccount priorAccount) {
+      stateTrie.remove(basicDataKey);
+      // Caller guarantees priorAccount != null; remove only the active header leaf.
+      final Bytes priorCode = resolvePriorCode(address, priorAccount);
+      if (hasCodeDelegation(priorCode)) {
+        stateTrie.remove(delegationKey);
+      } else {
+        stateTrie.remove(codeHashKey);
       }
     }
 
@@ -173,11 +241,11 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
           codeUpdate.getPrior() == null ? Hash.EMPTY : Hash.hash(codeUpdate.getPrior());
       final Hash updatedCodeHash =
           codeUpdate.getUpdated() == null ? Hash.EMPTY : Hash.hash(codeUpdate.getUpdated());
-      final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(address.getBytes());
 
+      // Delegation indicators live in the header DELEGATION leaf (applyAccount), not CODE_ZONE.
       // Never remove CODE_ZONE leaves: content-addressed code may be shared (EIP-8297).
-      if (!isEmpty(codeUpdate.getUpdated())) {
-        putCodeLeaves(address32, Bytes32.wrap(updatedCodeHash.getBytes()), codeUpdate.getUpdated());
+      if (!isEmpty(codeUpdate.getUpdated()) && !hasCodeDelegation(codeUpdate.getUpdated())) {
+        putCodeLeaves(Bytes32.wrap(updatedCodeHash.getBytes()), codeUpdate.getUpdated());
       }
 
       if (!storageFrozen) {
@@ -218,7 +286,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
             writes.add(updater -> updater.removeStorageValueBySlotHash(accountHash, slotHash));
           }
         } else {
-          stateTrie.writeState(storageKey, Bytes32.leftPad(updatedStorage));
+          stateTrie.put(storageKey, Bytes32.leftPad(updatedStorage));
           if (!storageFrozen) {
             writes.add(
                 updater ->
@@ -228,19 +296,49 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       }
     }
 
+    private Bytes resolvePriorCode(final Address address, final BonsaiAccount priorAccount) {
+      final PathBasedValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
+      if (codeUpdate != null) {
+        return isEmpty(codeUpdate.getPrior()) ? Bytes.EMPTY : codeUpdate.getPrior();
+      }
+      if (priorAccount == null || Hash.EMPTY.equals(priorAccount.getCodeHash())) {
+        return Bytes.EMPTY;
+      }
+      // Read from flat storage, not the accumulator (getCode returns the updated value).
+      return bonsai.getCode(address, priorAccount.getCodeHash()).orElse(Bytes.EMPTY);
+    }
+
+    private Bytes resolveUpdatedCode(final Address address, final BonsaiAccount updatedAccount) {
+      final PathBasedValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
+      if (codeUpdate != null) {
+        return isEmpty(codeUpdate.getUpdated()) ? Bytes.EMPTY : codeUpdate.getUpdated();
+      }
+      return resolveCurrentCode(address, updatedAccount.getCodeHash()).orElse(Bytes.EMPTY);
+    }
+
     private Optional<Bytes> resolveCurrentCode(final Address address, final Hash codeHash) {
       final Optional<Bytes> pendingCode = worldStateUpdater.getCode(address, codeHash);
       return pendingCode.isPresent() ? pendingCode : bonsai.getCode(address, codeHash);
     }
 
-    private void putCodeLeaves(
-        final Bytes32 address32, final Bytes32 codeHash, final Bytes codeBytes) {
+    private void putCodeLeaves(final Bytes32 codeHash, final Bytes codeBytes) {
       final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(codeBytes);
-      stateTrie.writeState(TrieKeyDerivation.getTreeKeyForCodeHash(address32), codeHash);
+      // Header mutual exclusion (delegation ↔ code-hash) is owned by applyAccount.
       for (int i = 0; i < chunks.size(); i++) {
-        stateTrie.writeState(
-            TrieKeyDerivation.getTreeKeyForCodeChunk(address32, codeHash, i), chunks.get(i));
+        final Bytes32 chunk = chunks.get(i);
+        final Bytes chunkKey = TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i);
+        // EIP-8297: a zero chunk is absent from the tree.
+        if (Bytes32.ZERO.equals(chunk)) {
+          stateTrie.remove(chunkKey);
+        } else {
+          stateTrie.put(chunkKey, chunk);
+        }
       }
+    }
+
+    private static boolean delegationLeafUnchanged(final Bytes priorCode, final Bytes updatedCode) {
+      return CodeDelegationHelper.getTargetAddress(priorCode)
+          .equals(CodeDelegationHelper.getTargetAddress(updatedCode));
     }
 
     private static boolean isEmpty(final Bytes value) {
