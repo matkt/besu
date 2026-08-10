@@ -351,6 +351,38 @@ class StateRootCommitterIntegrationTest {
     }
 
     @Test
+    void trieDisabledPersist_writesAccountStorageAndCodeToFlatDb() {
+      final BlockChange blockChange = BlockChange.complex();
+      final BlockHeader parent = harness.persistParent();
+      final BlockHeader blockHeader =
+          new BlockHeaderTestFixture()
+              .parentHash(parent.getHash())
+              .number(parent.getNumber() + 1L)
+              .stateRoot(Hash.EMPTY_TRIE_HASH)
+              .buildHeader();
+
+      try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
+        worldState.disableTrie();
+        assertThat(worldState.isTrieDisabled()).isTrue();
+        blockChange.apply(worldState.updater());
+        worldState.updater().commit();
+        // No-arg persist routes through resolveDefaultCommitter() ->
+        // TrieDisabledStateRootCommitter.
+        worldState.persist(blockHeader);
+      }
+
+      assertThat(harness.trieLogExists(blockHeader)).isTrue();
+
+      try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
+        assertThat(worldState.get(CONTRACT)).isNotNull();
+        assertThat(worldState.get(EOA)).isNotNull();
+        assertThat(worldState.get(CONTRACT).getCode()).isEqualTo(CONTRACT_CODE);
+        assertThat(worldState.get(CONTRACT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
+            .isEqualTo(SLOT_VALUE);
+      }
+    }
+
+    @Test
     void frozenPersist_writesTrieLogWithoutFlatAccountData() {
       final BlockChange blockChange = BlockChange.complex();
       final BlockHeader parent = harness.persistParent();
@@ -473,7 +505,10 @@ class StateRootCommitterIntegrationTest {
         worldState.freezeStorage();
         final BalStateRootCommitter committer =
             new BalStateRootCommitter(
-                harness.protocolContext(), blockHeader, BlockAccessListAccountLookup.of(bal), true)
+                    harness.protocolContext(),
+                    blockHeader,
+                    BlockAccessListAccountLookup.of(bal),
+                    true)
                 .start();
         worldState.persist(blockHeader, committer);
       }

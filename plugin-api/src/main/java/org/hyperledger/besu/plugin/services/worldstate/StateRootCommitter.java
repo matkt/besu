@@ -48,9 +48,20 @@ public interface StateRootCommitter {
    */
   default StateRootCommitter timed(final OperationTimer timer) {
     final StateRootCommitter delegate = this;
-    return (worldState, blockHeader, accumulator) -> {
-      try (var ignored = timer.startTimer()) {
-        return delegate.compute(worldState, blockHeader, accumulator);
+    return new StateRootCommitter() {
+      @Override
+      public StateRootComputation compute(
+          final MutableWorldState worldState,
+          final BlockHeader blockHeader,
+          final WorldUpdater worldUpdater) {
+        try (var ignored = timer.startTimer()) {
+          return delegate.compute(worldState, blockHeader, worldUpdater);
+        }
+      }
+
+      @Override
+      public void cancel() {
+        delegate.cancel();
       }
     };
   }

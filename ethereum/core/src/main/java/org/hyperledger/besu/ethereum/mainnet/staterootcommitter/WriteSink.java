@@ -27,8 +27,8 @@ import org.apache.tuweni.units.bigints.UInt256;
  * Strategy for emitting deferred storage writes, or dropping them when storage is frozen.
  *
  * <p>Each write is exposed as a typed method so the frozen implementation can short-circuit
- * <em>before</em> the caller constructs a deferred-write lambda — preserving the original
- * {@code if (!storageFrozen)} optimization where frozen mode does no per-write work at all. The
+ * <em>before</em> the caller constructs a deferred-write lambda — preserving the original {@code if
+ * (!storageFrozen)} optimization where frozen mode does no per-write work at all. The
  * persist-vs-frozen decision lives in one place (strategy selection) rather than scattered guards.
  */
 sealed interface WriteSink permits PersistingSink, FrozenSink {

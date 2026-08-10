@@ -78,8 +78,8 @@ public final class BalStateRootCommitter implements StateRootCommitter {
    *
    * <p>Separated from the constructor so the background thread is not started during object
    * construction — the constructor only captures its arguments, and the asynchronous work (which
-   * calls back into this instance) only begins once construction is complete and {@code start()}
-   * is invoked. Must be called exactly once before {@link #compute} or {@link #cancel}.
+   * calls back into this instance) only begins once construction is complete and {@code start()} is
+   * invoked. Must be called exactly once before {@link #compute} or {@link #cancel}.
    */
   public BalStateRootCommitter start() {
     this.backgroundComputation =

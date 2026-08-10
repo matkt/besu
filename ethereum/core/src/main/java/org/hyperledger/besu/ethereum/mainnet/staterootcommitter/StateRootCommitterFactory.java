@@ -31,6 +31,7 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link ForestStateRootCommitter} — Forest archive
  *   <li>{@link BalStateRootCommitter} — Bonsai + BAL background root
+ *   <li>{@link TrieDisabledStateRootCommitter} — Bonsai flat (trie-disabled) mode
  *   <li>{@link DefaultStateRootCommitter} — Bonsai accumulator at persist
  * </ul>
  */
@@ -39,7 +40,8 @@ public final class StateRootCommitterFactory {
   private enum Mode {
     BAL,
     DEFAULT,
-    FOREST
+    FOREST,
+    TRIE_DISABLED
   }
 
   private final BalConfiguration balConfiguration;
@@ -63,6 +65,7 @@ public final class StateRootCommitterFactory {
               .start();
       case DEFAULT -> new DefaultStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
+      case TRIE_DISABLED -> TrieDisabledStateRootCommitter.INSTANCE;
     };
   }
 
@@ -75,6 +78,9 @@ public final class StateRootCommitterFactory {
         && balConfiguration.isBalStateRootEnabled()
         && !isTrieDisabled(protocolContext)) {
       return Mode.BAL;
+    }
+    if (isTrieDisabled(protocolContext)) {
+      return Mode.TRIE_DISABLED;
     }
     return Mode.DEFAULT;
   }

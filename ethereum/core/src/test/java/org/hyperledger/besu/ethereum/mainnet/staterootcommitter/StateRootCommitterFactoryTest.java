@@ -158,7 +158,7 @@ class StateRootCommitterFactoryTest {
     }
 
     @Test
-    void factoryReturnsDefault_whenTrieDisabled() {
+    void factoryReturnsTrieDisabled_whenTrieDisabled() {
       final BlockAccessList bal = balanceAndNonceBal(testAddress("d1"), Wei.of(42), 2L);
       final BlockHeader blockHeader = childHeader(chainHeadHeader.getStateRoot());
       final BonsaiWorldStateProvider archive =
@@ -170,7 +170,7 @@ class StateRootCommitterFactoryTest {
             factory.forBlock(
                 protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
 
-        assertThat(committer).isInstanceOf(DefaultStateRootCommitter.class);
+        assertThat(committer).isInstanceOf(TrieDisabledStateRootCommitter.class);
       } finally {
         archive.getWorldStateSharedSpec().setTrieDisabled(false);
       }

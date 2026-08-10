@@ -79,9 +79,6 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         new DefaultComputation(
                 bonsai, (BonsaiWorldStateUpdateAccumulator) accumulator, addressHasher)
             .executeInto(writes);
-    if (blockHeader != null && bonsai.isTrieDisabled()) {
-      return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
-    }
     return StateRootComputations.pathBased(root, writes);
   }
 
@@ -175,9 +172,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       final CompletableFuture<Hash> storageFuture = storageFutures.get(address);
       if (storageFuture != null) {
         final Hash newStorageRoot = storageFuture.join();
-        if (!bonsai.isTrieDisabled()) {
-          updatedAccount.setStorageRoot(newStorageRoot);
-        }
+        updatedAccount.setStorageRoot(newStorageRoot);
       }
 
       final Bytes accountValueBytes = updatedAccount.serializeAccount();

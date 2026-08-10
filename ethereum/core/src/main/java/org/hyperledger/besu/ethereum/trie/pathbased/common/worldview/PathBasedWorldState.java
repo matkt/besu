@@ -24,6 +24,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.TrieDisabledStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedLayeredWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedSnapshotWorldStateKeyValueStorage;
@@ -60,6 +61,18 @@ public abstract class PathBasedWorldState
 
   protected static final DefaultStateRootCommitter DEFAULT_STATE_ROOT_COMMITTER =
       new DefaultStateRootCommitter();
+
+  /**
+   * Resolves the committer used by the no-arg {@link #persist(BlockHeader)} and the frozen {@link
+   * #rootHash()} / {@link #frontierRootHash()} recomputes. In flat (trie-disabled) mode the
+   * dedicated {@link TrieDisabledStateRootCommitter} collects flat writes without touching any
+   * trie; otherwise the default trie-based committer is used.
+   */
+  protected StateRootCommitter resolveDefaultCommitter() {
+    return isTrieDisabled()
+        ? TrieDisabledStateRootCommitter.INSTANCE
+        : DEFAULT_STATE_ROOT_COMMITTER;
+  }
 
   protected PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage;
   protected final PathBasedWorldStateCacheManager worldStateCacheManager;
@@ -184,7 +197,7 @@ public abstract class PathBasedWorldState
 
   @Override
   public void persist(final BlockHeader blockHeader) {
-    persist(blockHeader, DEFAULT_STATE_ROOT_COMMITTER);
+    persist(blockHeader, resolveDefaultCommitter());
   }
 
   @Override
@@ -374,14 +387,13 @@ public abstract class PathBasedWorldState
 
   @Override
   public Hash frontierRootHash() {
-    return DEFAULT_STATE_ROOT_COMMITTER.compute(this, null, accumulator.copy()).root();
+    return resolveDefaultCommitter().compute(this, null, accumulator.copy()).root();
   }
 
   @Override
   public Hash rootHash() {
     if (isStorageFrozen && accumulator.isAccumulatorStateChanged()) {
-      worldStateRootHash =
-          DEFAULT_STATE_ROOT_COMMITTER.compute(this, null, accumulator.copy()).root();
+      worldStateRootHash = resolveDefaultCommitter().compute(this, null, accumulator.copy()).root();
       accumulator.resetAccumulatorStateChanged();
     }
     return worldStateRootHash;
