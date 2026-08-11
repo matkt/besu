@@ -17,71 +17,36 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog;
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
-import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
-import org.hyperledger.besu.plugin.services.trielogs.TrieLogAccumulator;
-import org.hyperledger.besu.plugin.services.trielogs.TrieLogFactory;
 
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
-public class BonsaiTrieLogFactory implements TrieLogFactory {
-
-  @Override
-  public TrieLogLayer create(final TrieLogAccumulator accumulator, final BlockHeader blockHeader) {
-    TrieLogLayer layer = new TrieLogLayer();
-    layer.setBlockHash(blockHeader.getBlockHash());
-    layer.setBlockNumber(blockHeader.getNumber());
-    for (final var updatedAccount : accumulator.getAccountsToUpdate().entrySet()) {
-      final var bonsaiValue = updatedAccount.getValue();
-      final var oldAccountValue = bonsaiValue.getPrior();
-      final var newAccountValue = bonsaiValue.getUpdated();
-      if (oldAccountValue == null && newAccountValue == null) {
-        // by default do not persist empty reads of accounts to the trie log
-        continue;
-      }
-      layer.addAccountChange(updatedAccount.getKey(), oldAccountValue, newAccountValue);
-    }
-
-    for (final var updatedCode : accumulator.getCodeToUpdate().entrySet()) {
-      layer.addCodeChange(
-          updatedCode.getKey(),
-          updatedCode.getValue().getPrior(),
-          updatedCode.getValue().getUpdated(),
-          blockHeader.getBlockHash());
-    }
-
-    for (final var updatesStorage : accumulator.getStorageToUpdate().entrySet()) {
-      final Address address = updatesStorage.getKey();
-      for (final var slotUpdate : updatesStorage.getValue().entrySet()) {
-        var val = slotUpdate.getValue();
-
-        if (val.getPrior() == null && val.getUpdated() == null) {
-          // by default do not persist empty reads to the trie log
-          continue;
-        }
-
-        layer.addStorageChange(address, slotUpdate.getKey(), val.getPrior(), val.getUpdated());
-      }
-    }
-    return layer;
-  }
+/**
+ * Trie-log factory for the Merkle-Patricia trie (MPT, mainnet) on-disk format.
+ *
+ * <p>Accounts are serialized in the MPT 4-field RLP {@code [nonce, balance, storageRoot, codeHash]}
+ * and storage changes carry only the slot <em>hash</em> (no key preimage). The format-agnostic
+ * accumulator→{@link TrieLogLayer} builder and the RLP helpers are inherited from {@link
+ * AbstractTrieLogFactory}.
+ */
+public class PmtTrieLogFactory extends AbstractTrieLogFactory {
 
   @Override
   public byte[] serialize(final TrieLog layer) {
@@ -109,7 +74,7 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
       if (accountChange == null || accountChange.isUnchanged()) {
         output.writeNull();
       } else {
-        writeRlp(accountChange, output, (o, sta) -> sta.writeTo(o));
+        writeRlp(accountChange, output, PmtTrieLogFactory::writeAccountValue);
       }
 
       final TrieLog.LogTuple<Bytes> codeChange = layer.getCodeChanges().get(address);
@@ -141,6 +106,39 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     output.endList(); // container
   }
 
+  /**
+   * Serializes an account value into the trie log using the MPT 4-field RLP {@code [nonce, balance,
+   * storageRoot, codeHash]}.
+   *
+   * <p>The trie log's on-disk account-value format is MPT RLP (the deserialize side reads {@link
+   * PmtStateTrieAccountValue}). To keep that format stable while {@link
+   * BonsaiAccount#getStorageRoot()} throws for binary accounts (no storage root), this helper
+   * projects the {@link AccountValue} onto a {@link PmtStateTrieAccountValue} before writing. For a
+   * binary {@link BonsaiAccount} the storage root is taken as {@link Hash#EMPTY_TRIE_HASH} (the
+   * field is meaningless for binary accounts and ignored on rollback); {@link
+   * BonsaiAccount#hasStorageRoot()} gates the throwing accessor. A non-{@code BonsaiAccount} {@link
+   * MptAccountValue} (e.g. a deserialized {@link PmtStateTrieAccountValue}) contributes its own
+   * root; any other {@link AccountValue} (e.g. a binary {@code BinaryAccountValue}) contributes
+   * {@link Hash#EMPTY_TRIE_HASH}.
+   */
+  private static void writeAccountValue(final RLPOutput out, final AccountValue accountValue) {
+    final Hash storageRoot;
+    if (accountValue instanceof BonsaiAccount bonsaiAccount) {
+      storageRoot =
+          bonsaiAccount.hasStorageRoot() ? bonsaiAccount.getStorageRoot() : Hash.EMPTY_TRIE_HASH;
+    } else if (accountValue instanceof MptAccountValue mpt) {
+      storageRoot = mpt.getStorageRoot();
+    } else {
+      storageRoot = Hash.EMPTY_TRIE_HASH;
+    }
+    new PmtStateTrieAccountValue(
+            accountValue.getNonce(),
+            accountValue.getBalance(),
+            storageRoot,
+            accountValue.getCodeHash())
+        .writeTo(out);
+  }
+
   @Override
   public TrieLogLayer deserialize(final byte[] bytes) {
     return readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
@@ -166,9 +164,7 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
             nullOrValue(input, PmtStateTrieAccountValue::readFrom);
         final boolean isCleared = getOptionalIsCleared(input);
         input.leaveList();
-        newLayer
-            .getAccountChanges()
-            .put(address, new PathBasedValue<>(oldValue, newValue, isCleared));
+        newLayer.getAccountChanges().put(address, new BonsaiValue<>(oldValue, newValue, isCleared));
       }
 
       if (input.nextIsNull()) {
@@ -179,13 +175,13 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
         final Bytes newCode = nullOrValue(input, RLPInput::readBytes);
         final boolean isCleared = getOptionalIsCleared(input);
         input.leaveList();
-        newLayer.getCodeChanges().put(address, new PathBasedValue<>(oldCode, newCode, isCleared));
+        newLayer.getCodeChanges().put(address, new BonsaiValue<>(oldCode, newCode, isCleared));
       }
 
       if (input.nextIsNull()) {
         input.skipNext();
       } else {
-        final Map<StorageSlotKey, PathBasedValue<UInt256>> storageChanges = new TreeMap<>();
+        final Map<StorageSlotKey, BonsaiValue<UInt256>> storageChanges = new TreeMap<>();
         input.enterList();
         while (!input.isEndOfCurrentList()) {
           input.enterList();
@@ -194,7 +190,7 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
           final UInt256 oldValue = nullOrValue(input, RLPInput::readUInt256Scalar);
           final UInt256 newValue = nullOrValue(input, RLPInput::readUInt256Scalar);
           final boolean isCleared = getOptionalIsCleared(input);
-          storageChanges.put(storageSlotKey, new PathBasedValue<>(oldValue, newValue, isCleared));
+          storageChanges.put(storageSlotKey, new BonsaiValue<>(oldValue, newValue, isCleared));
           input.leaveList();
         }
         input.leaveList();
@@ -210,52 +206,5 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     newLayer.freeze();
 
     return newLayer;
-  }
-
-  protected static <T> T nullOrValue(final RLPInput input, final Function<RLPInput, T> reader) {
-    if (input.nextIsNull()) {
-      input.skipNext();
-      return null;
-    } else {
-      return reader.apply(input);
-    }
-  }
-
-  protected static boolean getOptionalIsCleared(final RLPInput input) {
-    return Optional.of(input.isEndOfCurrentList())
-        .filter(isEnd -> !isEnd) // isCleared is optional
-        .map(__ -> nullOrValue(input, RLPInput::readInt))
-        .filter(i -> i == 1)
-        .isPresent();
-  }
-
-  public static <T> void writeRlp(
-      final TrieLog.LogTuple<T> value,
-      final RLPOutput output,
-      final BiConsumer<RLPOutput, T> writer) {
-    output.startList();
-    writeInnerRlp(value, output, writer);
-    output.endList();
-  }
-
-  public static <T> void writeInnerRlp(
-      final TrieLog.LogTuple<T> value,
-      final RLPOutput output,
-      final BiConsumer<RLPOutput, T> writer) {
-    if (value.getPrior() == null) {
-      output.writeNull();
-    } else {
-      writer.accept(output, value.getPrior());
-    }
-    if (value.getUpdated() == null) {
-      output.writeNull();
-    } else {
-      writer.accept(output, value.getUpdated());
-    }
-    if (!value.isLastStepCleared()) {
-      output.writeNull();
-    } else {
-      output.writeInt(1);
-    }
   }
 }

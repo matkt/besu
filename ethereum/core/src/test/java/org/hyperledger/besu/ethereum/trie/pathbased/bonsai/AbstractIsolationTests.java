@@ -67,10 +67,10 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProviderBuilder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -117,7 +117,7 @@ public abstract class AbstractIsolationTests {
           new NoOpMetricsSystem());
   protected final GenesisState genesisState =
       GenesisState.fromConfig(
-          GenesisConfig.fromResource("/dev.json"), protocolSchedule, new PathBasedCodeCache());
+          GenesisConfig.fromResource("/dev.json"), protocolSchedule, new BonsaiCodeCache());
   protected final MutableBlockchain blockchain = createInMemoryBlockchain(genesisState.getBlock());
 
   protected final TransactionPoolConfiguration poolConfiguration =
@@ -158,8 +158,9 @@ public abstract class AbstractIsolationTests {
           .filter(ga -> ga.privateKey() != null)
           .toList();
 
-  KeyPair sender1 = Optional.ofNullable(accounts.get(0).privateKey()).map(asKeyPair).orElseThrow();
-  TransactionPool transactionPool;
+  protected KeyPair sender1 =
+      Optional.ofNullable(accounts.get(0).privateKey()).map(asKeyPair).orElseThrow();
+  protected TransactionPool transactionPool;
 
   @TempDir private Path tempData;
 
@@ -169,8 +170,7 @@ public abstract class AbstractIsolationTests {
         // FYI: BonsaiSnapshoIsolationTests  work with frozen/cached worldstates, using PARTIAL
         // flat db strategy allows the tests to make account assertions based on trie
         // (whereas a full db strategy will not, since the worldstates are frozen/cached)
-        createKeyValueStorageProvider()
-            .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_PARTIAL_DB_CONFIG);
+        createKeyValueStorageProvider().createWorldStateStorage(getDataStorageConfiguration());
     archive =
         new BonsaiWorldStateProvider(
             (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage,
@@ -180,7 +180,7 @@ public abstract class AbstractIsolationTests {
             null,
             EvmConfiguration.DEFAULT,
             throwingWorldStateHealerSupplier(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
     var ws = archive.getWorldState();
     genesisState.writeStateTo(ws);
     protocolContext =
@@ -250,7 +250,7 @@ public abstract class AbstractIsolationTests {
 
               @Override
               public DataStorageFormat getDatabaseFormat() {
-                return DataStorageFormat.BONSAI;
+                return getDataStorageFormat();
               }
 
               @Override
@@ -264,7 +264,7 @@ public abstract class AbstractIsolationTests {
                 return new org.hyperledger.besu.plugin.services.storage.DataStorageConfiguration() {
                   @Override
                   public DataStorageFormat getDatabaseFormat() {
-                    return DataStorageFormat.BONSAI;
+                    return getDataStorageFormat();
                   }
 
                   @Override
@@ -276,6 +276,24 @@ public abstract class AbstractIsolationTests {
             })
         .withMetricsSystem(new NoOpMetricsSystem())
         .build();
+  }
+
+  /**
+   * Format hook: the {@link DataStorageFormat} used to configure the world state storage and the
+   * storage provider. Subclasses override this to run the isolation suite against a different
+   * path-based format (e.g. {@link DataStorageFormat#BINARY}).
+   */
+  protected DataStorageFormat getDataStorageFormat() {
+    return DataStorageFormat.BONSAI;
+  }
+
+  /**
+   * Format hook: the {@link DataStorageConfiguration} used to build the world state storage.
+   * Subclasses override this to run the isolation suite against a different configuration (e.g.
+   * {@link DataStorageConfiguration#DEFAULT_BINARY_CONFIG}).
+   */
+  protected DataStorageConfiguration getDataStorageConfiguration() {
+    return DataStorageConfiguration.DEFAULT_BONSAI_PARTIAL_DB_CONFIG;
   }
 
   static class TestBlockCreator extends AbstractBlockCreator {

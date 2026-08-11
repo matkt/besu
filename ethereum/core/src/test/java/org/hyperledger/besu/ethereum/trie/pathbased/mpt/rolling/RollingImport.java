@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai;
+package org.hyperledger.besu.ethereum.trie.pathbased.mpt.rolling;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
@@ -24,12 +24,12 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.Worl
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -62,7 +62,7 @@ public class RollingImport {
                 provider, new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
     final SegmentedInMemoryKeyValueStorage worldStateKeyValueStorage =
         (SegmentedInMemoryKeyValueStorage)
             provider.getStorageBySegmentIdentifiers(
@@ -84,9 +84,8 @@ public class RollingImport {
           continue;
         }
         final TrieLogLayer layer =
-            BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
-        final BonsaiWorldStateUpdateAccumulator updater =
-            (BonsaiWorldStateUpdateAccumulator) bonsaiState.updater();
+            PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
+        final BonsaiWorldStateUpdateAccumulator updater = bonsaiState.updater();
         updater.rollForward(layer);
         updater.commit();
         bonsaiState.persist(null);
@@ -113,9 +112,8 @@ public class RollingImport {
         reader.seek(count);
         final byte[] bytes = reader.readBytes();
         final TrieLogLayer layer =
-            BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
-        final BonsaiWorldStateUpdateAccumulator updater =
-            (BonsaiWorldStateUpdateAccumulator) bonsaiState.updater();
+            PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
+        final BonsaiWorldStateUpdateAccumulator updater = bonsaiState.updater();
         updater.rollBack(layer);
         updater.commit();
         bonsaiState.persist(null);

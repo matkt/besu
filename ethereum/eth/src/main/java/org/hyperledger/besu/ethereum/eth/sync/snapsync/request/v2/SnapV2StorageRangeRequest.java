@@ -86,7 +86,9 @@ public class SnapV2StorageRangeRequest extends SnapV2DataRequest {
         (location, hash, value) -> {
           applyForStrategy(
               updater,
-              onBonsai -> onBonsai.putAccountStorageTrieNode(accountHash, location, hash, value),
+              onBonsai ->
+                  onBonsai.putTrieNode(
+                      Bytes.concatenate(accountHash.getBytes(), location), hash, value),
               onForest -> onForest.putAccountStorageTrieNode(hash, value));
           nbNodesSaved.incrementAndGet();
         };

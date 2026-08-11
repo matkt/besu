@@ -39,11 +39,10 @@ import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
@@ -289,7 +288,7 @@ class BinaryBlockImportTest {
           .getWorldStateTransaction()
           .put(
               KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
-              PathBasedWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
+              BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
               new byte[32]);
       updater
           .getWorldStateTransaction()
@@ -303,9 +302,9 @@ class BinaryBlockImportTest {
   }
 
   private static void setWorldStateRootHash(
-      final PathBasedWorldState worldState, final Hash stateRoot) {
+      final BonsaiWorldState worldState, final Hash stateRoot) {
     try {
-      final Field rootField = PathBasedWorldState.class.getDeclaredField("worldStateRootHash");
+      final Field rootField = BonsaiWorldState.class.getDeclaredField("worldStateRootHash");
       rootField.setAccessible(true);
       rootField.set(worldState, stateRoot);
     } catch (ReflectiveOperationException e) {
@@ -353,8 +352,7 @@ class BinaryBlockImportTest {
           bodyResult.isSuccessful(),
           () -> "Block body execution failed: " + bodyResult.errorMessage.orElse("(no message)"));
 
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       return new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
     }
   }

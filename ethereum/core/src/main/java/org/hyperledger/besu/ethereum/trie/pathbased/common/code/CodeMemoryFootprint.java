@@ -17,7 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.code;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.Code;
 
-class CodeMemoryFootprint {
+public class CodeMemoryFootprint {
   public static int estimate(final Hash key, final Code code) {
     // Estimate the memory usage of the Code object based on:
     // - code.getSize(): the number of bytes of the contract code

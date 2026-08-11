@@ -278,8 +278,7 @@ class BalStateRootCalculatorTest {
                     WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(chainHeadHeader))
                 .orElseThrow();
     try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulatorConsumer.accept(accumulator);
       accumulator.commit();
       return new DefaultStateRootCommitter().compute(worldState, null, accumulator).root();

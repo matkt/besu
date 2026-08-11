@@ -49,6 +49,15 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
   private final TransferLogEmitter transferLogEmitter;
 
   /**
+   * Whether {@link #accountExists(Account)} should consider an account with non-empty storage as
+   * already existing. Defaults to {@code true} for backward compatibility with all existing forks.
+   * The binaryTrie fork sets this to {@code false} because, after the one-time nonce bump at the
+   * fork block (EIP-8253, not yet implemented), EIP-684's nonce!=0 check suffices to reject CREATE
+   * collisions, making the runtime storage-empty check redundant.
+   */
+  private final boolean checkStorageEmptyOnCreate;
+
+  /**
    * Instantiates a new Contract creation processor.
    *
    * @param evm the evm
@@ -69,7 +78,8 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
         contractValidationRules,
         initialContractNonce,
         forceCommitAddresses,
-        TransferLogEmitter.NOOP);
+        TransferLogEmitter.NOOP,
+        true);
   }
 
   /**
@@ -91,7 +101,8 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
         contractValidationRules,
         initialContractNonce,
         Collections.emptySet(),
-        TransferLogEmitter.NOOP);
+        TransferLogEmitter.NOOP,
+        true);
   }
 
   /**
@@ -111,17 +122,50 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
       final long initialContractNonce,
       final Set<Address> forceCommitAddresses,
       final TransferLogEmitter transferLogEmitter) {
+    this(
+        evm,
+        requireCodeDepositToSucceed,
+        contractValidationRules,
+        initialContractNonce,
+        forceCommitAddresses,
+        transferLogEmitter,
+        true);
+  }
+
+  /**
+   * Instantiates a new contract creation processor with transfer log emission support and an
+   * explicit storage-empty check flag.
+   *
+   * @param evm the evm
+   * @param requireCodeDepositToSucceed the require code deposit to succeed
+   * @param contractValidationRules the contract validation rules
+   * @param initialContractNonce the initial contract nonce
+   * @param forceCommitAddresses the force commit addresses
+   * @param transferLogEmitter strategy for emitting transfer logs
+   * @param checkStorageEmptyOnCreate whether the account-exists check considers non-empty storage
+   */
+  public ContractCreationProcessor(
+      final EVM evm,
+      final boolean requireCodeDepositToSucceed,
+      final List<ContractValidationRule> contractValidationRules,
+      final long initialContractNonce,
+      final Set<Address> forceCommitAddresses,
+      final TransferLogEmitter transferLogEmitter,
+      final boolean checkStorageEmptyOnCreate) {
     super(evm, forceCommitAddresses);
     this.requireCodeDepositToSucceed = requireCodeDepositToSucceed;
     this.contractValidationRules = contractValidationRules;
     this.initialContractNonce = initialContractNonce;
     this.transferLogEmitter = transferLogEmitter;
+    this.checkStorageEmptyOnCreate = checkStorageEmptyOnCreate;
   }
 
-  private static boolean accountExists(final Account account) {
+  private boolean accountExists(final Account account) {
     // The account exists if it has sent a transaction
     // or already has its code initialized.
-    return account.getNonce() != 0 || !account.getCode().isEmpty() || !account.isStorageEmpty();
+    return account.getNonce() != 0
+        || !account.getCode().isEmpty()
+        || (checkStorageEmptyOnCreate && !account.isStorageEmpty());
   }
 
   @Override

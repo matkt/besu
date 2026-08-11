@@ -12,30 +12,30 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PathBasedCachedWorldStateView implements StorageSubscriber {
-  private PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage;
+public class BonsaiCachedWorldStateView implements StorageSubscriber {
+  private BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
   private final BlockHeader blockHeader;
   private long worldViewSubscriberId;
-  private static final Logger LOG = LoggerFactory.getLogger(PathBasedCachedWorldStateView.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BonsaiCachedWorldStateView.class);
 
-  public PathBasedCachedWorldStateView(
-      final BlockHeader blockHeader, final PathBasedWorldStateKeyValueStorage worldView) {
+  public BonsaiCachedWorldStateView(
+      final BlockHeader blockHeader, final BonsaiWorldStateKeyValueStorage worldView) {
     this.blockHeader = blockHeader;
     this.worldStateKeyValueStorage = worldView;
     this.worldViewSubscriberId = worldStateKeyValueStorage.subscribe(this);
   }
 
-  public PathBasedWorldStateKeyValueStorage getWorldStateStorage() {
+  public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
     return worldStateKeyValueStorage;
   }
 
@@ -57,10 +57,10 @@ public class PathBasedCachedWorldStateView implements StorageSubscriber {
   }
 
   public synchronized void updateWorldStateStorage(
-      final PathBasedWorldStateKeyValueStorage newWorldStateStorage) {
+      final BonsaiWorldStateKeyValueStorage newWorldStateStorage) {
     long newSubscriberId = newWorldStateStorage.subscribe(this);
     this.worldStateKeyValueStorage.unSubscribe(this.worldViewSubscriberId);
-    final PathBasedWorldStateKeyValueStorage oldWorldStateStorage = this.worldStateKeyValueStorage;
+    final BonsaiWorldStateKeyValueStorage oldWorldStateStorage = this.worldStateKeyValueStorage;
     this.worldStateKeyValueStorage = newWorldStateStorage;
     this.worldViewSubscriberId = newSubscriberId;
     try {

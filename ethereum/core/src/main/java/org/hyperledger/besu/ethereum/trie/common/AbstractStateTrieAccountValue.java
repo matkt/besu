@@ -16,13 +16,13 @@ package org.hyperledger.besu.ethereum.trie.common;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 /** Represents the raw values associated with an account in the world state trie. */
-public abstract class AbstractStateTrieAccountValue implements AccountValue {
+public abstract class AbstractStateTrieAccountValue implements MptAccountValue {
 
   protected final long nonce;
   protected final Wei balance;
@@ -64,16 +64,6 @@ public abstract class AbstractStateTrieAccountValue implements AccountValue {
   @Override
   public Hash getCodeHash() {
     return codeHash;
-  }
-
-  /**
-   * The hash of the root of the storage trie associated with this account.
-   *
-   * @return the hash of the root node of the storage trie.
-   */
-  @Override
-  public Hash getStorageRoot() {
-    return Hash.EMPTY_TRIE_HASH;
   }
 
   @Override

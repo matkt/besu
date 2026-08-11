@@ -56,8 +56,8 @@ import org.hyperledger.besu.ethereum.mainnet.requests.RequestProcessorCoordinato
 import org.hyperledger.besu.ethereum.mainnet.systemcall.BlockProcessingContext;
 import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallError;
 import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallException;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
@@ -586,9 +586,9 @@ public class BlockSimulator {
           tracer.traceEndBlock(finalBlockHeader, block.getBody());
         });
 
-    if (returnTrieLog && ws instanceof PathBasedWorldState pathBasedWs) {
+    if (returnTrieLog && ws instanceof BonsaiWorldState pathBasedWs) {
       // if requested and path-based worldstate, return result with trielog and serializer:
-      var pathBasedArchive = (PathBasedWorldStateProvider) worldStateArchive;
+      var pathBasedArchive = (BonsaiWorldStateProvider) worldStateArchive;
       var pathBasedAccumulator = pathBasedWs.getAccumulator();
       var trieLogFactory = pathBasedArchive.getTrieLogManager().getTrieLogFactory();
       var trieLog = trieLogFactory.create(pathBasedAccumulator, finalBlockHeader);

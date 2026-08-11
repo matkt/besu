@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.mainnet;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.ARROW_GLACIER;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BERLIN;
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BINARY_TRIE;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO1;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO2;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BPO3;
@@ -1314,6 +1315,42 @@ public abstract class MainnetProtocolSpecs {
     }
 
     return amsterdamSpecBuilder;
+  }
+
+  static ProtocolSpecBuilder binaryTrieDefinition(
+      final Optional<BigInteger> chainId,
+      final boolean enableRevertReason,
+      final GenesisConfigOptions genesisConfigOptions,
+      final EvmConfiguration evmConfiguration,
+      final MiningConfiguration miningConfiguration,
+      final boolean isParallelTxProcessingEnabled,
+      final BalConfiguration balConfiguration,
+      final MetricsSystem metricsSystem) {
+    // binaryTrie is based on Amsterdam; the only difference is that the runtime storage-empty
+    // check is removed from contract creation (EIP-8253 style). After the one-time nonce bump
+    // at the fork block (not yet implemented), EIP-684's nonce!=0 check suffices to reject CREATE
+    // collisions, making the runtime storage-empty check redundant.
+    return amsterdamDefinition(
+            chainId,
+            enableRevertReason,
+            genesisConfigOptions,
+            evmConfiguration,
+            miningConfiguration,
+            isParallelTxProcessingEnabled,
+            balConfiguration,
+            metricsSystem)
+        // Override only the contract creation processor to skip the storage-empty check.
+        .contractCreationProcessorBuilder(
+            evm ->
+                new ContractCreationProcessor(
+                    evm,
+                    true,
+                    List.of(MaxCodeSizeRule.from(evm), PrefixCodeRule.of()),
+                    1,
+                    SPURIOUS_DRAGON_FORCE_DELETE_WHEN_EMPTY_ADDRESSES,
+                    EIP7708TransferLogEmitter.INSTANCE,
+                    false))
+        .hardforkId(BINARY_TRIE);
   }
 
   private static ProtocolSpecBuilder applyBlobSchedule(

@@ -274,6 +274,17 @@ public class MiningOptions implements CLIOptions<MiningConfiguration> {
           targetGasLimit,
           genesisConfigOptions.getAmsterdamTime().getAsLong());
     }
+
+    if (targetGasLimit != null
+        && isBuiltInGenesis
+        && genesisConfigOptions.getBinaryTrieTime().isPresent()) {
+      logger.warn(
+          "--target-gas-limit is set to {} but binaryTrie is scheduled (at timestamp {}). "
+              + "From binaryTrie onwards the consensus layer supplies targetGasLimit via "
+              + "engine_forkchoiceUpdatedV4 and will override this CLI value when building payloads.",
+          targetGasLimit,
+          genesisConfigOptions.getBinaryTrieTime().getAsLong());
+    }
   }
 
   static MiningOptions fromConfig(final MiningConfiguration miningConfiguration) {

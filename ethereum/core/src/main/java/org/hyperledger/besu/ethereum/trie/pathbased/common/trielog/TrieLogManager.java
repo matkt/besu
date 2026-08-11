@@ -16,13 +16,15 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.trielog;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.TrieLogService;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogEvent;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogFactory;
@@ -42,7 +44,7 @@ public class TrieLogManager {
   private static final Logger LOG = LoggerFactory.getLogger(TrieLogManager.class);
   public static final long LOG_RANGE_LIMIT = 1000; // restrict trielog range queries to 1k logs
   protected final Blockchain blockchain;
-  protected final PathBasedWorldStateKeyValueStorage rootWorldStateStorage;
+  protected final BonsaiWorldStateKeyValueStorage rootWorldStateStorage;
 
   protected final long maxLayersToLoad;
   protected final Subscribers<TrieLogEvent.TrieLogObserver> trieLogObservers = Subscribers.create();
@@ -51,7 +53,7 @@ public class TrieLogManager {
 
   public TrieLogManager(
       final Blockchain blockchain,
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final long maxLayersToLoad,
       final ServiceManager pluginContext) {
     this.blockchain = blockchain;
@@ -61,15 +63,15 @@ public class TrieLogManager {
   }
 
   public synchronized void saveTrieLog(
-      final PathBasedWorldStateUpdateAccumulator<?> localUpdater,
+      final BonsaiWorldStateUpdateAccumulator localUpdater,
       final Hash forWorldStateRootHash,
       final BlockHeader forBlockHeader,
-      final PathBasedWorldState forWorldState) {
+      final BonsaiWorldState forWorldState) {
     // do not overwrite a trielog layer that already exists in the database.
     // if it's only in memory we need to save it
     // for example, in case of reorg we don't replace a trielog layer
     if (rootWorldStateStorage.getTrieLog(forBlockHeader.getBlockHash()).isEmpty()) {
-      final PathBasedWorldStateKeyValueStorage.Updater stateUpdater =
+      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
           forWorldState.getWorldStateStorage().updater();
       boolean success = false;
       try {
@@ -95,7 +97,7 @@ public class TrieLogManager {
   }
 
   private TrieLog prepareTrieLog(
-      final BlockHeader blockHeader, final PathBasedWorldStateUpdateAccumulator<?> localUpdater) {
+      final BlockHeader blockHeader, final BonsaiWorldStateUpdateAccumulator localUpdater) {
     LOG.atDebug()
         .setMessage("Adding layered world state for {}")
         .addArgument(blockHeader::toLogString)
@@ -109,7 +111,7 @@ public class TrieLogManager {
       final BlockHeader blockHeader,
       final Hash worldStateRootHash,
       final TrieLog trieLog,
-      final PathBasedWorldStateKeyValueStorage.Updater stateUpdater) {
+      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater) {
     LOG.atDebug()
         .setMessage("Persisting trie log for block hash {} and world state root {}")
         .addArgument(blockHeader::toLogString)
@@ -158,8 +160,15 @@ public class TrieLogManager {
         return trieLogService.getTrieLogFactory().get();
       }
     }
-    // Otherwise default to BonsaiTrieLogFactory
-    return new BonsaiTrieLogFactory();
+    // Otherwise default to the format-appropriate factory. The PBT factory carries the storage
+    // slot key preimage so the binary state root can be recomputed after a trie-log roll; the
+    // MPT (mainnet) factory serializes only the slot hash. When no storage is available
+    // (e.g. NoOpTrieLogManager used for transient genesis world-state construction) fall back
+    // to the legacy MPT factory to preserve prior behavior.
+    return rootWorldStateStorage != null
+            && rootWorldStateStorage.getDataStorageFormat() == DataStorageFormat.BINARY
+        ? new PbtTrieLogFactory()
+        : new PmtTrieLogFactory();
   }
 
   private TrieLogProvider getTrieLogProvider() {
@@ -181,7 +190,7 @@ public class TrieLogManager {
       @Override
       public void saveRawTrieLogLayer(
           final Hash blockHash, final long blockNumber, final Bytes trieLog) {
-        final PathBasedWorldStateKeyValueStorage.Updater updater = rootWorldStateStorage.updater();
+        final BonsaiWorldStateKeyValueStorage.Updater updater = rootWorldStateStorage.updater();
         updater
             .getTrieLogStorageTransaction()
             .put(blockHash.getBytes().toArrayUnsafe(), trieLog.toArrayUnsafe());

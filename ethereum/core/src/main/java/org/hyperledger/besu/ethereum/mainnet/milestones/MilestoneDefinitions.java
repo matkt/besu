@@ -145,6 +145,10 @@ public class MilestoneDefinitions {
             config.getAmsterdamTime(),
             specFactory::amsterdamDefinition),
         createTimestampMilestone(
+            MainnetHardforkId.BINARY_TRIE,
+            config.getBinaryTrieTime(),
+            specFactory::binaryTrieDefinition),
+        createTimestampMilestone(
             MainnetHardforkId.FUTURE_EIPS,
             config.getFutureEipsTime(),
             specFactory::futureEipsDefinition),

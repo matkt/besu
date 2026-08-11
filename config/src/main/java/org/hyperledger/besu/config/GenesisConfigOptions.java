@@ -315,6 +315,13 @@ public interface GenesisConfigOptions {
   OptionalLong getAmsterdamTime();
 
   /**
+   * Gets binaryTrie time.
+   *
+   * @return the binaryTrie time
+   */
+  OptionalLong getBinaryTrieTime();
+
+  /**
    * Gets future eips time.
    *
    * @return the future eips time

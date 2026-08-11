@@ -14,7 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
 
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView.encodeTrieValue;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView.encodeTrieValue;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -227,7 +227,8 @@ public final class BalStateRootCommitter implements StateRootCommitter {
      * </ol>
      */
     BackgroundResult execute() {
-      final MerkleTrie<Bytes, Bytes> accountTrie = worldState.createAccountStateTrie();
+      final MerkleTrie<Bytes, Bytes> accountTrie =
+          MptTrieFactory.createAccountStateTrie(worldState);
 
       // Step 1: for every account with storage changes, launch a storage future eagerly so
       // storage I/O overlaps with step 2.
@@ -258,8 +259,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       if (!storageFrozen) {
         // Step 3: commit the account trie.
         accountTrie.commit(
-            (location, hash, value) ->
-                writes.add(u -> u.putAccountStateTrieNode(location, hash, value)));
+            (location, hash, value) -> writes.add(u -> u.putTrieNode(location, hash, value)));
       }
       return new BackgroundResult(
           Hash.wrap(accountTrie.getRootHash()), new ArrayList<>(writes), storageRoots);
@@ -348,7 +348,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       final Hash priorStorageRoot = priorStorageRoot(address);
 
       final MerkleTrie<Bytes, Bytes> storageTrie =
-          worldState.createStorageTrie(accountHash, priorStorageRoot);
+          MptTrieFactory.createStorageTrie(worldState, accountHash, priorStorageRoot);
 
       for (final BlockAccessList.SlotChanges slotChanges : accountChanges.storageChanges()) {
         final Hash slotHash = slotChanges.slot().getSlotHash();
@@ -371,7 +371,9 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         storageTrie.commit(
             (location, nodeHash, value) ->
                 writes.add(
-                    u -> u.putAccountStorageTrieNode(accountHash, location, nodeHash, value)));
+                    u ->
+                        u.putTrieNode(
+                            Bytes.concatenate(accountHash.getBytes(), location), nodeHash, value)));
       }
       return Hash.wrap(storageTrie.getRootHash());
     }

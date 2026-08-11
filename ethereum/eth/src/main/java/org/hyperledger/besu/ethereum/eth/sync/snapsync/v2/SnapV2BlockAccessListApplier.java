@@ -323,9 +323,7 @@ public class SnapV2BlockAccessListApplier {
     final NodeUpdater nodeUpdater =
         (location, hash, value) ->
             applyForStrategy(
-                updater,
-                onBonsai -> onBonsai.putAccountStateTrieNode(location, hash, value),
-                onForest -> {});
+                updater, onBonsai -> onBonsai.putTrieNode(location, hash, value), onForest -> {});
 
     accountTrie.commit(nodeUpdater);
   }
@@ -402,7 +400,9 @@ public class SnapV2BlockAccessListApplier {
         (location, hash, value) ->
             applyForStrategy(
                 updater,
-                onBonsai -> onBonsai.putAccountStorageTrieNode(accountHash, location, hash, value),
+                onBonsai ->
+                    onBonsai.putTrieNode(
+                        Bytes.concatenate(accountHash.getBytes(), location), hash, value),
                 onForest -> {});
 
     int downloadedSlots = 0;

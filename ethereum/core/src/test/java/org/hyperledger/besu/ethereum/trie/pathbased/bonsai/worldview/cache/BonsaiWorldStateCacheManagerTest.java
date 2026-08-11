@@ -12,21 +12,19 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.LongStream;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -35,29 +33,28 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-class PathBasedWorldStateCacheManagerTest {
+class BonsaiWorldStateCacheManagerTest {
 
   private static final int BLOCK_COUNT = 2000;
   private static final long HEAD = BLOCK_COUNT;
-  private static final long WATERLINE = HEAD - PathBasedWorldStateCacheManager.RETAINED_LAYERS;
+  private static final long WATERLINE = HEAD - BonsaiWorldStateCacheManager.RETAINED_LAYERS;
 
   private final BlockHeader[] headers = new BlockHeader[BLOCK_COUNT + 1];
-  private final PathBasedWorldState[] worldStates = new PathBasedWorldState[BLOCK_COUNT + 1];
+  private final BonsaiWorldState[] worldStates = new BonsaiWorldState[BLOCK_COUNT + 1];
   private TestCacheManager cacheManager;
 
   @BeforeEach
   void setUp() {
-    final Map<Hash, PathBasedCachedWorldStateView> worldStatesByHash = new ConcurrentHashMap<>();
-    final PathBasedWorldStateKeyValueStorage mockStorage =
-        Mockito.mock(PathBasedWorldStateKeyValueStorage.class);
-    cacheManager = new TestCacheManager(mockStorage, worldStatesByHash);
+    final BonsaiWorldStateKeyValueStorage mockStorage =
+        Mockito.mock(BonsaiWorldStateKeyValueStorage.class);
+    cacheManager = new TestCacheManager(mockStorage);
 
     for (int i = 0; i <= BLOCK_COUNT; i++) {
       final BlockHeader header =
           new BlockHeaderTestFixture().number(i).stateRoot(uniqueStateRoot(i)).buildHeader();
       headers[i] = header;
 
-      final PathBasedWorldState ws = Mockito.mock(PathBasedWorldState.class);
+      final BonsaiWorldState ws = Mockito.mock(BonsaiWorldState.class);
       Mockito.when(ws.isModifyingHeadWorldState()).thenReturn(true);
       Mockito.when(ws.getWorldStateStorage()).thenReturn(mockStorage);
       worldStates[i] = ws;
@@ -117,36 +114,34 @@ class PathBasedWorldStateCacheManagerTest {
     return Hash.wrap(Bytes32.leftPad(Bytes.ofUnsignedLong(blockNumber)));
   }
 
-  private static class TestCacheManager extends PathBasedWorldStateCacheManager {
+  private static class TestCacheManager extends BonsaiWorldStateCacheManager {
 
-    TestCacheManager(
-        final PathBasedWorldStateKeyValueStorage storage,
-        final Map<Hash, PathBasedCachedWorldStateView> map) {
+    TestCacheManager(final BonsaiWorldStateKeyValueStorage storage) {
       super(
           null,
           storage,
-          map,
           EvmConfiguration.DEFAULT,
-          WorldStateConfig.createStatefulConfigWithTrie());
+          WorldStateConfig.createStatefulConfigWithTrie(),
+          null);
     }
 
     @Override
-    public PathBasedWorldState createWorldState(
-        final PathBasedWorldStateProvider archive,
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
+    public BonsaiWorldState createWorldState(
+        final BonsaiWorldStateProvider archive,
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
         final EvmConfiguration evmConfiguration) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public PathBasedWorldStateKeyValueStorage createLayeredKeyValueStorage(
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    public BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public PathBasedWorldStateKeyValueStorage createSnapshotKeyValueStorage(
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    public BonsaiWorldStateKeyValueStorage createSnapshotKeyValueStorage(
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
       return worldStateKeyValueStorage;
     }
   }

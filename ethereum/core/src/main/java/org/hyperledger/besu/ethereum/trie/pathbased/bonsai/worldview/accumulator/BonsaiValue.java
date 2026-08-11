@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator;
 
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 
@@ -21,28 +21,28 @@ import java.util.function.Supplier;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
-public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
+public class BonsaiValue<T> implements TrieLog.LogTuple<T> {
   private Supplier<T> prior;
   private Supplier<T> updated;
   private boolean lastStepCleared;
 
   private boolean clearedAtLeastOnce;
 
-  public PathBasedValue(final T prior, final T updated) {
+  public BonsaiValue(final T prior, final T updated) {
     this.prior = () -> prior;
     this.updated = () -> updated;
     this.lastStepCleared = false;
     this.clearedAtLeastOnce = false;
   }
 
-  public PathBasedValue(final T prior, final T updated, final boolean lastStepCleared) {
+  public BonsaiValue(final T prior, final T updated, final boolean lastStepCleared) {
     this.prior = () -> prior;
     this.updated = () -> updated;
     this.lastStepCleared = lastStepCleared;
     this.clearedAtLeastOnce = lastStepCleared;
   }
 
-  public PathBasedValue(
+  public BonsaiValue(
       final T prior,
       final T updated,
       final boolean lastStepCleared,
@@ -53,7 +53,7 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
     this.clearedAtLeastOnce = clearedAtLeastOnce;
   }
 
-  private PathBasedValue(
+  private BonsaiValue(
       final Supplier<T> prior,
       final Supplier<T> updated,
       final boolean lastStepCleared,
@@ -64,9 +64,9 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
     this.clearedAtLeastOnce = clearedAtLeastOnce;
   }
 
-  public static <T> PathBasedValue<T> withLazy(
+  public static <T> BonsaiValue<T> withLazy(
       final Supplier<T> priorLoader, final Supplier<T> updatedLoader) {
-    return new PathBasedValue<>(priorLoader, updatedLoader, false, false);
+    return new BonsaiValue<>(priorLoader, updatedLoader, false, false);
   }
 
   @Override
@@ -79,12 +79,12 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
     return updated.get();
   }
 
-  public PathBasedValue<T> setPrior(final T prior) {
+  public BonsaiValue<T> setPrior(final T prior) {
     this.prior = () -> prior;
     return this;
   }
 
-  public PathBasedValue<T> setUpdated(final T updated) {
+  public BonsaiValue<T> setUpdated(final T updated) {
     this.lastStepCleared = updated == null;
     if (lastStepCleared) {
       this.clearedAtLeastOnce = true;
@@ -110,7 +110,7 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
 
   @Override
   public String toString() {
-    return "PathBasedValue{"
+    return "BonsaiValue{"
         + "prior="
         + getPrior()
         + ", updated="
@@ -128,7 +128,7 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    PathBasedValue<?> that = (PathBasedValue<?>) o;
+    BonsaiValue<?> that = (BonsaiValue<?>) o;
     return new EqualsBuilder()
         .append(lastStepCleared, that.lastStepCleared)
         .append(clearedAtLeastOnce, that.clearedAtLeastOnce)
@@ -147,7 +147,7 @@ public class PathBasedValue<T> implements TrieLog.LogTuple<T> {
         .toHashCode();
   }
 
-  public PathBasedValue<T> copy() {
-    return new PathBasedValue<>(prior, updated, lastStepCleared, clearedAtLeastOnce);
+  public BonsaiValue<T> copy() {
+    return new BonsaiValue<>(prior, updated, lastStepCleared, clearedAtLeastOnce);
   }
 }

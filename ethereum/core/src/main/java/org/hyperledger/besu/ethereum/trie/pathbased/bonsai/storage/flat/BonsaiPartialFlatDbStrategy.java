@@ -20,6 +20,7 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredNodeFactory;
@@ -114,7 +115,7 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
   @Override
   public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      final Supplier<Optional<Hash>> storageRootSupplier,
+      final Supplier<Optional<Bytes>> accountSupplier,
       final NodeLoader nodeLoader,
       final Hash accountHash,
       final StorageSlotKey storageSlotKey,
@@ -128,12 +129,26 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
                     .toArrayUnsafe())
             .map(Bytes::wrap);
     if (response.isEmpty()) {
-      final Optional<Hash> storageRoot = storageRootSupplier.get();
+      // Decode the account's MPT storage root from the raw account bytes, then traverse the
+      // per-account storage trie. The node loader is raw (no key prefixing); this strategy
+      // prefixes accountHash, which is the MPT storage-trie key convention.
+      final Optional<Hash> storageRoot =
+          accountSupplier
+              .get()
+              .map(
+                  b ->
+                      PmtStateTrieAccountValue.readFrom(
+                              org.hyperledger.besu.ethereum.rlp.RLP.input(b))
+                          .getStorageRoot());
       final Optional<Bytes> worldStateRootHash = worldStateRootHashSupplier.get();
       if (storageRoot.isPresent() && worldStateRootHash.isPresent()) {
+        final NodeLoader prefixedLoader =
+            (location, hash) ->
+                nodeLoader.getNode(Bytes.concatenate(accountHash.getBytes(), location), hash);
         response =
             new StoredMerklePatriciaTrie<>(
-                    new StoredNodeFactory<>(nodeLoader, Function.identity(), Function.identity()),
+                    new StoredNodeFactory<>(
+                        prefixedLoader, Function.identity(), Function.identity()),
                     Bytes32.wrap(storageRoot.get().getBytes()))
                 .get(storageSlotKey.getSlotHash().getBytes())
                 .map(bytes -> Bytes32.leftPad(RLP.decodeValue(bytes)));

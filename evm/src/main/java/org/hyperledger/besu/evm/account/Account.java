@@ -52,6 +52,21 @@ public interface Account extends AccountState {
   boolean isStorageEmpty();
 
   /**
+   * Whether this account carries an MPT storage root.
+   *
+   * <p>MPT (BONSAI / FOREST) accounts carry a per-account storage root; binary trie accounts do
+   * not. Callers that may handle binary accounts must check this before invoking MPT-specific
+   * accessors ({@code getStorageRoot()} / {@link #isStorageEmpty()}), which throw for binary
+   * accounts. The default is {@code true} for backward compatibility with all existing account
+   * implementations that carry a storage root.
+   *
+   * @return {@code true} if the account has a storage root (MPT), {@code false} otherwise (binary).
+   */
+  default boolean hasStorageRoot() {
+    return true;
+  }
+
+  /**
    * Gets the code cache.
    *
    * @return the code cache, or null if not supported

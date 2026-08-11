@@ -23,7 +23,6 @@ import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
 
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 
@@ -63,16 +62,14 @@ public class BonsaiArchiveWorldStateLayerStorage extends BonsaiWorldStateLayerSt
     return getFlatDbStrategy()
         .getFlatAccount(
             this::getWorldStateRootHash,
-            this::getAccountStateTrieNode,
+            this::getTrieNode,
             accountHash,
             getComposedWorldStateStorage());
   }
 
   @Override
   public Optional<Bytes> getStorageValueByStorageSlotKey(
-      final Supplier<Optional<Hash>> storageRootSupplier,
-      final Hash accountHash,
-      final StorageSlotKey storageSlotKey) {
+      final Hash accountHash, final StorageSlotKey storageSlotKey) {
     if (isClosedGet()) {
       return Optional.empty();
     }
@@ -81,8 +78,8 @@ public class BonsaiArchiveWorldStateLayerStorage extends BonsaiWorldStateLayerSt
     return getFlatDbStrategy()
         .getFlatStorageValueByStorageSlotKey(
             this::getWorldStateRootHash,
-            storageRootSupplier,
-            (location, hash) -> getAccountStorageTrieNode(accountHash, location, hash),
+            () -> getAccount(accountHash),
+            this::getTrieNode,
             accountHash,
             storageSlotKey,
             getComposedWorldStateStorage());

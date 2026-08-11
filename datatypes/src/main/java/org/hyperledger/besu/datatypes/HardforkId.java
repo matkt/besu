@@ -95,6 +95,8 @@ public interface HardforkId {
     BPO5(true, "BPO5"),
     /** Amsterdam fork. */
     AMSTERDAM(false, "Amsterdam"),
+    /** binaryTrie fork, based on Amsterdam, removes the runtime storage-empty CREATE check. */
+    BINARY_TRIE(false, "binaryTrie"),
     /** Bogota fork. */
     BOGOTA(false, "Bogota"),
     /** Polis fork. (from the greek form of an earlier incarnation of the city of Istanbul. */

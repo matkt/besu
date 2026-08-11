@@ -54,7 +54,8 @@ public class StorageTrieNodeHealingRequest extends TrieNodeHealingRequest {
     applyForStrategy(
         updater,
         onBonsai -> {
-          onBonsai.putAccountStorageTrieNode(getAccountHash(), getLocation(), getNodeHash(), data);
+          onBonsai.putTrieNode(
+              Bytes.concatenate(getAccountHash().getBytes(), getLocation()), getNodeHash(), data);
         },
         onForest -> {
           onForest.putAccountStorageTrieNode(getNodeHash(), data);

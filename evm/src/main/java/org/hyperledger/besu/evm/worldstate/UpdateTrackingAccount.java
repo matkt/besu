@@ -337,8 +337,14 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
    */
   @Override
   public boolean isStorageEmpty() {
+    // Binary trie accounts have no per-account storage root; for journaling purposes they are
+    // considered storage-empty (no MPT storage trie to inspect) without invoking the MPT-specific
+    // (throwing) accessor.
     return updatedStorage.isEmpty()
-        && (storageWasCleared || account == null || account.isStorageEmpty());
+        && (storageWasCleared
+            || account == null
+            || !account.hasStorageRoot()
+            || account.isStorageEmpty());
   }
 
   @Override

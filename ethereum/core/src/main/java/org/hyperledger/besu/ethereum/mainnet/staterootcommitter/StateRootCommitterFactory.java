@@ -19,8 +19,8 @@ import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
@@ -86,13 +86,13 @@ public final class StateRootCommitterFactory {
   }
 
   private static boolean isTrieDisabled(final ProtocolContext protocolContext) {
-    return protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider provider
+    return protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider
         && provider.getWorldStateSharedSpec().isTrieDisabled();
   }
 
   private static boolean isBinaryTrie(final ProtocolContext protocolContext) {
-    if (protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider provider
-        && provider.getWorldState() instanceof PathBasedWorldState worldState) {
+    if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider
+        && provider.getWorldState() instanceof BonsaiWorldState worldState) {
       return worldState.getWorldStateStorage().getDataStorageFormat() == DataStorageFormat.BINARY;
     }
     return false;

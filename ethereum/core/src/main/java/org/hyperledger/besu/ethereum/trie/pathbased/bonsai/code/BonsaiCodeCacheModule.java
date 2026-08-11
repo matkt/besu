@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.code;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code;
 
 import javax.inject.Singleton;
 
@@ -20,25 +20,25 @@ import dagger.Module;
 import dagger.Provides;
 
 /**
- * Module for providing the PathBasedCodeCache instance. This module is used to inject a singleton
- * instance of PathBasedCodeCache into the application.
+ * Module for providing the BonsaiCodeCache instance. This module is used to inject a singleton
+ * instance of BonsaiCodeCache into the application.
  */
 @Module
-public class PathBasedCodeCacheModule {
+public class BonsaiCodeCacheModule {
 
-  /** Creates a new instance of PathBasedCodeCacheModule. */
-  public PathBasedCodeCacheModule() {
+  /** Creates a new instance of BonsaiCodeCacheModule. */
+  public BonsaiCodeCacheModule() {
     // Default constructor
   }
 
   /**
-   * Provides a singleton instance of PathBasedCodeCache.
+   * Provides a singleton instance of BonsaiCodeCache.
    *
-   * @return a new instance of PathBasedCodeCache
+   * @return a new instance of BonsaiCodeCache
    */
   @Provides
   @Singleton
-  public PathBasedCodeCache provideCodeCache() {
-    return new PathBasedCodeCache();
+  public BonsaiCodeCache provideCodeCache() {
+    return new BonsaiCodeCache();
   }
 }

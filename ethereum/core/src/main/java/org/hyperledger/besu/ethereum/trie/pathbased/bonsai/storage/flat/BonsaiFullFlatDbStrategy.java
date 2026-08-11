@@ -74,7 +74,7 @@ public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
   @Override
   public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      final Supplier<Optional<Hash>> storageRootSupplier,
+      final Supplier<Optional<Bytes>> accountSupplier,
       final NodeLoader nodeLoader,
       final Hash accountHash,
       final StorageSlotKey storageSlotKey,

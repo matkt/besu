@@ -100,8 +100,7 @@ public class PersistDataStepTest {
 
     persistDataStep.persist(List.of(new StubTask(accountTrieNodeDataRequest)));
 
-    verify(updater, times(1))
-        .putAccountStateTrieNode(location, Bytes32.wrap(hash.getBytes()), stateTrieNode);
+    verify(updater, times(1)).putTrieNode(location, Bytes32.wrap(hash.getBytes()), stateTrieNode);
     assertDataPersisted(result);
   }
 
@@ -114,7 +113,7 @@ public class PersistDataStepTest {
     assertThat(
             worldStateStorageCoordinator
                 .getStrategy(BonsaiWorldStateKeyValueStorage.class)
-                .getTrieNodeUnsafe(tasks.get(0).getData().getRootHash().getBytes()))
+                .getTrieNode(tasks.get(0).getData().getRootHash().getBytes()))
         .isEmpty();
   }
 
@@ -173,7 +172,7 @@ public class PersistDataStepTest {
             assertThat(
                     worldStateStorageCoordinator
                         .getStrategy(BonsaiWorldStateKeyValueStorage.class)
-                        .getTrieNodeUnsafe(data.getLocation()))
+                        .getTrieNode(data.getLocation()))
                 .isPresent();
           } else {
             fail("not expected message");

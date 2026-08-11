@@ -15,22 +15,30 @@
 package org.hyperledger.besu.evm.processor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.evm.frame.MessageFrame.State.CODE_EXECUTING;
 import static org.hyperledger.besu.evm.frame.MessageFrame.State.COMPLETED_SUCCESS;
 import static org.hyperledger.besu.evm.frame.MessageFrame.State.EXCEPTIONAL_HALT;
 
+import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.EvmSpecVersion;
 import org.hyperledger.besu.evm.MainnetEVMs;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.contractvalidation.MaxCodeSizeRule;
 import org.hyperledger.besu.evm.contractvalidation.PrefixCodeRule;
+import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
+import org.hyperledger.besu.evm.log.TransferLogEmitter;
 import org.hyperledger.besu.evm.testutils.TestMessageFrameBuilder;
+import org.hyperledger.besu.evm.toy.ToyWorld;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
 
 import java.util.Collections;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -197,6 +205,70 @@ class ContractCreationProcessorTest
 
     processor.codeSuccess(messageFrame, OperationTracer.NO_TRACING);
     assertThat(messageFrame.getState()).isEqualTo(COMPLETED_SUCCESS);
+  }
+
+  @Test
+  void shouldHaltWhenTargetAccountHasNonEmptyStorageAndCheckEnabled() {
+    // Default behavior (checkStorageEmptyOnCreate = true): an account with non-empty storage,
+    // nonce 0, and empty code is considered to already exist, so CREATE halts with
+    // ILLEGAL_STATE_CHANGE.
+    processor = new ContractCreationProcessor(evm, true, Collections.emptyList(), 1);
+    final Address contractAddress = Address.fromHexString("0xabc");
+    final Address senderAddress = Address.fromHexString("0xdef");
+
+    final ToyWorld world = new ToyWorld();
+    world.createAccount(null, senderAddress, 0, Wei.of(100), Bytes.EMPTY);
+    final MutableAccount contract =
+        world.createAccount(null, contractAddress, 0, Wei.ZERO, Bytes.EMPTY);
+    contract.setStorageValue(UInt256.ZERO, UInt256.ONE); // non-empty storage, nonce 0, empty code
+
+    final MessageFrame messageFrame =
+        new TestMessageFrameBuilder()
+            .worldUpdater(world)
+            .sender(senderAddress)
+            .contract(contractAddress)
+            .build();
+
+    processor.start(messageFrame, OperationTracer.NO_TRACING);
+
+    assertThat(messageFrame.getState()).isEqualTo(EXCEPTIONAL_HALT);
+    assertThat(messageFrame.getExceptionalHaltReason())
+        .contains(ExceptionalHaltReason.ILLEGAL_STATE_CHANGE);
+  }
+
+  @Test
+  void shouldProceedWhenTargetAccountHasNonEmptyStorageAndCheckDisabled() {
+    // binaryTrie behavior (checkStorageEmptyOnCreate = false): an account with non-empty storage
+    // but nonce 0 and empty code is NOT considered to already exist, so CREATE proceeds.
+    processor =
+        new ContractCreationProcessor(
+            evm,
+            true,
+            Collections.emptyList(),
+            1,
+            Collections.emptySet(),
+            TransferLogEmitter.NOOP,
+            false);
+    final Address contractAddress = Address.fromHexString("0xabc");
+    final Address senderAddress = Address.fromHexString("0xdef");
+
+    final ToyWorld world = new ToyWorld();
+    world.createAccount(null, senderAddress, 0, Wei.of(100), Bytes.EMPTY);
+    final MutableAccount contract =
+        world.createAccount(null, contractAddress, 0, Wei.ZERO, Bytes.EMPTY);
+    contract.setStorageValue(UInt256.ZERO, UInt256.ONE); // non-empty storage, nonce 0, empty code
+
+    final MessageFrame messageFrame =
+        new TestMessageFrameBuilder()
+            .worldUpdater(world)
+            .sender(senderAddress)
+            .contract(contractAddress)
+            .build();
+
+    processor.start(messageFrame, OperationTracer.NO_TRACING);
+
+    assertThat(messageFrame.getState()).isEqualTo(CODE_EXECUTING);
+    assertThat(messageFrame.getExceptionalHaltReason()).isEmpty();
   }
 
   @Override

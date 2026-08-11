@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai;
+package org.hyperledger.besu.ethereum.trie.pathbased.mpt.rolling;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig.createStatefulConfigWithTrie;
@@ -29,12 +29,12 @@ import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
@@ -172,7 +172,7 @@ class LogRollingTests {
                 provider, new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
     final WorldUpdater updater = worldState.updater();
 
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -190,15 +190,14 @@ class LogRollingTests {
                 DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
-    final BonsaiWorldStateUpdateAccumulator secondUpdater =
-        (BonsaiWorldStateUpdateAccumulator) secondWorldState.updater();
+            new BonsaiCodeCache());
+    final BonsaiWorldStateUpdateAccumulator secondUpdater = secondWorldState.updater();
 
     final Optional<byte[]> value =
         trieLogStorage.get(headerOne.getHash().getBytes().toArrayUnsafe());
 
     final TrieLogLayer layer =
-        BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
+        PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
 
     secondUpdater.rollForward(layer);
     secondUpdater.commit();
@@ -225,7 +224,7 @@ class LogRollingTests {
                 provider, new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -251,9 +250,8 @@ class LogRollingTests {
                 DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
-    final BonsaiWorldStateUpdateAccumulator secondUpdater =
-        (BonsaiWorldStateUpdateAccumulator) secondWorldState.updater();
+            new BonsaiCodeCache());
+    final BonsaiWorldStateUpdateAccumulator secondUpdater = secondWorldState.updater();
 
     final TrieLogLayer layerOne = getTrieLogLayer(trieLogStorage, headerOne.getHash());
     secondUpdater.rollForward(layerOne);
@@ -286,7 +284,7 @@ class LogRollingTests {
                 provider, new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
 
     final WorldUpdater updater = worldState.updater();
     final MutableAccount mutableAccount = updater.createAccount(addressOne, 1, Wei.of(1L));
@@ -302,8 +300,7 @@ class LogRollingTests {
     updater2.commit();
 
     worldState.persist(headerTwo);
-    final BonsaiWorldStateUpdateAccumulator firstRollbackUpdater =
-        (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+    final BonsaiWorldStateUpdateAccumulator firstRollbackUpdater = worldState.updater();
 
     final TrieLogLayer layerTwo = getTrieLogLayer(trieLogStorage, headerTwo.getHash());
     firstRollbackUpdater.rollBack(layerTwo);
@@ -319,7 +316,7 @@ class LogRollingTests {
                 DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
 
     final WorldUpdater secondUpdater = secondWorldState.updater();
     final MutableAccount secondMutableAccount =
@@ -345,9 +342,7 @@ class LogRollingTests {
   private TrieLogLayer getTrieLogLayer(final KeyValueStorage storage, final Hash key) {
     return storage
         .get(key.getBytes().toArrayUnsafe())
-        .map(
-            bytes ->
-                BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
+        .map(bytes -> PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
         .get();
   }
 

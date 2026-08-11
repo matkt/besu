@@ -29,9 +29,8 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.ParallelStoredPa
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitionedBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -78,17 +77,14 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       final MutableWorldState mutableWorldState,
       final BlockHeader blockHeader,
       final WorldUpdater worldUpdater) {
-    final PathBasedWorldStateUpdateAccumulator<?> accumulator =
-        (PathBasedWorldStateUpdateAccumulator<?>)
+    final BonsaiWorldStateUpdateAccumulator accumulator =
+        (BonsaiWorldStateUpdateAccumulator)
             Objects.requireNonNull(
                 worldUpdater, "Path-based state root committers require a non-null WorldUpdater");
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
     final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
-    final Hash root =
-        new BinaryComputation(
-                bonsai, (BonsaiWorldStateUpdateAccumulator) accumulator, storageFrozen)
-            .executeInto(writes);
+    final Hash root = new BinaryComputation(bonsai, accumulator, storageFrozen).executeInto(writes);
     if (blockHeader != null && bonsai.isTrieDisabled()) {
       return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
     }
@@ -111,7 +107,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       this.storageFrozen = storageFrozen;
       this.stateTrie =
           new ParallelStoredPartitionedBinaryTrie(
-              bonsai.getWorldStateStorage()::getAccountStateTrieNode,
+              (location, hash) -> bonsai.getWorldStateStorage().getTrieNode(location, hash),
               Bytes32.wrap(bonsai.getWorldStateRootHash().getBytes()),
               BlockProcessingExecutors.accountTrieForkJoinPool());
     }
@@ -131,14 +127,14 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       if (!storageFrozen) {
         stateTrie.commit(
             (location, hash, value) ->
-                writes.add(updater -> updater.putAccountStateTrieNode(location, hash, value)));
+                writes.add(updater -> updater.putTrieNode(location, hash, value)));
       }
       writeSink.addAll(writes);
       return Hash.wrap(stateTrie.getRootHash());
     }
 
     private void applyAccount(final Address address) {
-      final PathBasedValue<BonsaiAccount> accountUpdate =
+      final BonsaiValue<BonsaiAccount> accountUpdate =
           worldStateUpdater.getAccountsToUpdate().get(address);
       if (accountUpdate == null) {
         return;
@@ -229,7 +225,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
     }
 
     private void applyCode(final Address address) {
-      final PathBasedValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
+      final BonsaiValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
       if (codeUpdate == null
           || codeUpdate.isUnchanged()
           || (isEmpty(codeUpdate.getPrior()) && isEmpty(codeUpdate.getUpdated()))) {
@@ -259,7 +255,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
     }
 
     private void applyStorage(final Address address) {
-      final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageUpdates =
+      final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> storageUpdates =
           worldStateUpdater.getStorageToUpdate().get(address);
       if (storageUpdates == null || storageUpdates.isEmpty()) {
         return;
@@ -268,7 +264,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(address.getBytes());
       final Hash accountHash = address.addressHash();
 
-      for (final Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> storageUpdate :
+      for (final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> storageUpdate :
           storageUpdates.entrySet()) {
         if (storageUpdate.getValue().isUnchanged()) {
           continue;
@@ -297,7 +293,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
     }
 
     private Bytes resolvePriorCode(final Address address, final BonsaiAccount priorAccount) {
-      final PathBasedValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
+      final BonsaiValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
       if (codeUpdate != null) {
         return isEmpty(codeUpdate.getPrior()) ? Bytes.EMPTY : codeUpdate.getPrior();
       }
@@ -309,7 +305,7 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
     }
 
     private Bytes resolveUpdatedCode(final Address address, final BonsaiAccount updatedAccount) {
-      final PathBasedValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
+      final BonsaiValue<Bytes> codeUpdate = worldStateUpdater.getCodeToUpdate().get(address);
       if (codeUpdate != null) {
         return isEmpty(codeUpdate.getUpdated()) ? Bytes.EMPTY : codeUpdate.getUpdated();
       }

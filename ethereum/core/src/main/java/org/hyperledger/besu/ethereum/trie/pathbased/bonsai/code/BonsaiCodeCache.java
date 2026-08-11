@@ -12,17 +12,18 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.code;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code;
 
 import static org.hyperledger.besu.metrics.BesuMetricCategory.BONSAI_CACHE;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.code.CodeMemoryFootprint;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.util.cache.MemoryBoundCache;
 
 /** The path-based bytecode cache. */
-public class PathBasedCodeCache implements org.hyperledger.besu.evm.internal.CodeCache {
+public class BonsaiCodeCache implements org.hyperledger.besu.evm.internal.CodeCache {
 
   private final MemoryBoundCache<Hash, Code> cache;
 
@@ -31,7 +32,7 @@ public class PathBasedCodeCache implements org.hyperledger.besu.evm.internal.Cod
   private long lastRequestTimestamp = System.nanoTime();
 
   /** Instantiates a new Code cache. */
-  public PathBasedCodeCache() {
+  public BonsaiCodeCache() {
     // Initialize the cache with a maximum size of 256 MB and a custom memory footprint estimator
     this.cache = new MemoryBoundCache<>(256 * 1024 * 1024, CodeMemoryFootprint::estimate);
   }

@@ -24,13 +24,14 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpBonsaiWorldStateCacheManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.NoOpTrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -40,8 +41,8 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link PathBasedWorldStateUpdateAccumulator#importStateChangesFromPartialView}. */
-class PathBasedWorldStateUpdateAccumulatorTest {
+/** Tests for {@link BonsaiWorldStateUpdateAccumulator#importStateChangesFromPartialView}. */
+class BonsaiWorldStateUpdateAccumulatorTest {
 
   private static final Address ACCOUNT =
       Address.fromHexString("0x1000000000000000000000000000000000000001");
@@ -53,8 +54,7 @@ class PathBasedWorldStateUpdateAccumulatorTest {
   @Test
   void importPartialView_sameSlotTwoTransactions_keepsBlockStartPriorAndFinalUpdated() {
     try (BonsaiWorldState worldState = newEmptyWorldState()) {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulator.createAccount(ACCOUNT, 0L, Wei.ONE);
       accumulator.getAccount(ACCOUNT).setStorageValue(SLOT.getSlotKey().orElseThrow(), V0);
       accumulator.commit();
@@ -66,17 +66,16 @@ class PathBasedWorldStateUpdateAccumulatorTest {
       accumulator.importStateChangesFromPartialView(tx0);
       accumulator.importStateChangesFromPartialView(tx1);
 
-      final PathBasedValue<UInt256> merged =
-          accumulator.getStorageToUpdate().get(ACCOUNT).get(SLOT);
+      final BonsaiValue<UInt256> merged = accumulator.getStorageToUpdate().get(ACCOUNT).get(SLOT);
       assertThat(merged.getPrior()).isEqualTo(V0);
       assertThat(merged.getUpdated()).isEqualTo(V2);
 
       final TrieLogLayer trieLog =
-          new BonsaiTrieLogFactory()
+          new PmtTrieLogFactory()
               .create(
                   accumulator,
                   new BlockHeaderTestFixture().number(1).stateRoot(Hash.EMPTY).buildHeader());
-      final PathBasedValue<UInt256> trieLogSlot = trieLog.getStorageChanges(ACCOUNT).get(SLOT);
+      final BonsaiValue<UInt256> trieLogSlot = trieLog.getStorageChanges(ACCOUNT).get(SLOT);
       assertThat(trieLogSlot.getPrior()).isEqualTo(V0);
       assertThat(trieLogSlot.getUpdated()).isEqualTo(V2);
     }
@@ -100,10 +99,10 @@ class PathBasedWorldStateUpdateAccumulatorTest {
         storage,
         new NoOpBonsaiCachedMerkleTrieLoader(),
         new NoOpBonsaiWorldStateCacheManager(
-            storage, EvmConfiguration.DEFAULT, new PathBasedCodeCache()),
+            storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
         createStatefulConfigWithTrie(),
-        new PathBasedCodeCache());
+        new BonsaiCodeCache());
   }
 }

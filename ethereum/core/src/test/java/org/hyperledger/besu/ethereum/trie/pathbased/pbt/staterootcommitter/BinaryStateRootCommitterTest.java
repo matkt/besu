@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
+package org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,11 +30,14 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -57,8 +60,10 @@ class BinaryStateRootCommitterTest {
   private ExecutionContextTestFixture contextTestFixture;
   private ProtocolContext protocolContext;
   private BlockHeader chainHeadHeader;
+
   /** Archive head after BINARY empty-root init; used for non-frozen persist tests. */
   private BlockHeader emptyBinaryHead;
+
   private StateRootCommitterFactory factory;
 
   @BeforeEach
@@ -81,7 +86,7 @@ class BinaryStateRootCommitterTest {
           .getWorldStateTransaction()
           .put(
               KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
-              PathBasedWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
+              BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
               new byte[32]);
       updater
           .getWorldStateTransaction()
@@ -358,7 +363,8 @@ class BinaryStateRootCommitterTest {
       final Bytes contractCode = Bytes.fromHexString("0x600160005260016000f3");
 
       final Hash rootDirect =
-          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority).setCode(contractCode));
+          computeBinaryRoot(
+              accumulator -> accumulator.getOrCreate(authority).setCode(contractCode));
 
       final Hash rootViaDelegationSwitch =
           computeBinaryRoot(
@@ -434,8 +440,7 @@ class BinaryStateRootCommitterTest {
         assertThat(worldState.rootHash()).isEqualTo(rootWithAccount);
         assertThat(worldState.get(address)).isNotNull();
 
-        final BonsaiWorldStateUpdateAccumulator accumulator =
-            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
         accumulator.deleteAccount(address);
         accumulator.commit();
         assertThat(accumulator.getAccountsToUpdate().get(address).getPrior()).isNotNull();
@@ -489,8 +494,7 @@ class BinaryStateRootCommitterTest {
         worldState.persist(headerWithSlot, committer);
         assertThat(worldState.rootHash()).isEqualTo(rootWithSlot);
 
-        final BonsaiWorldStateUpdateAccumulator accumulator =
-            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
         accumulator
             .getOrCreate(address)
             .setStorageValue(slotKey.getSlotKey().orElseThrow(), UInt256.ZERO);
@@ -521,6 +525,69 @@ class BinaryStateRootCommitterTest {
               });
 
       assertThat(rootCleared).isEqualTo(rootEmptyAccount);
+    }
+
+    @Test
+    void reloadAcrossBlocks_accumulatesPriorState() {
+      final Address addressA = testAddress("a0");
+      final Address addressB = testAddress("b0");
+      final Wei balanceA = Wei.of(111);
+      final Wei balanceB = Wei.of(222);
+      final long nonceA = 1L;
+      final long nonceB = 2L;
+
+      // Reference root: a fresh trie holding both A and B, built from empty.
+      final Hash expectedBoth =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount a = accumulator.getOrCreate(addressA);
+                a.setBalance(balanceA);
+                a.setNonce(nonceA);
+                final MutableAccount b = accumulator.getOrCreate(addressB);
+                b.setBalance(balanceB);
+                b.setNonce(nonceB);
+              });
+      // Root of A alone, used as the post-persist head for block 1.
+      final Hash rootA =
+          computeBinaryRoot(
+              accumulator -> {
+                final MutableAccount a = accumulator.getOrCreate(addressA);
+                a.setBalance(balanceA);
+                a.setNonce(nonceA);
+              });
+      final BlockHeader headerA = childHeader(rootA);
+
+      try (BonsaiWorldState worldState =
+          (BonsaiWorldState)
+              protocolContext
+                  .getWorldStateArchive()
+                  .getWorldState(
+                      WorldStateQueryParams.newBuilder()
+                          .withBlockHeader(emptyBinaryHead)
+                          .withShouldWorldStateUpdateHead(true)
+                          .build())
+                  .orElseThrow()) {
+        // Block 1: persist A only. Trie nodes for A are written to storage.
+        applyBalanceAndNonce(worldState, addressA, balanceA, nonceA);
+        final StateRootCommitter committerA =
+            factory.forBlock(
+                protocolContext, headerA, Optional.empty(), worldState.isStorageFrozen());
+        worldState.persist(headerA, committerA);
+        assertThat(worldState.rootHash()).isEqualTo(rootA);
+
+        // Block 2: add B without touching A. Correctness requires reloading A's
+        // stored trie nodes; if the KV hash filter rejects them, the root would
+        // reflect only B and fail to equal expectedBoth.
+        final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
+        final MutableAccount b = accumulator.getOrCreate(addressB);
+        b.setBalance(balanceB);
+        b.setNonce(nonceB);
+        accumulator.commit();
+
+        final Hash rootAfterB =
+            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        assertThat(rootAfterB).isEqualTo(expectedBoth);
+      }
     }
 
     @Test
@@ -604,8 +671,7 @@ class BinaryStateRootCommitterTest {
                     WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(chainHeadHeader))
                 .orElseThrow();
     try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulatorConsumer.accept(accumulator);
       accumulator.commit();
       return new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
@@ -625,8 +691,7 @@ class BinaryStateRootCommitterTest {
                 .getWorldState(WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(headHeader))
                 .orElseThrow();
     try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulatorConsumer.accept(accumulator);
       accumulator.commit();
       return new DefaultStateRootCommitter().compute(worldState, null, accumulator).root();

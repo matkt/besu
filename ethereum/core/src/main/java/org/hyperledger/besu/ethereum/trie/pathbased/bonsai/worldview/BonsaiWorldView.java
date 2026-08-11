@@ -12,25 +12,23 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 
-import java.util.Map;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
-public interface PathBasedWorldView extends WorldView {
+public interface BonsaiWorldView extends WorldView {
 
   Optional<Bytes> getCode(Address address, final Hash codeHash);
 
@@ -40,16 +38,6 @@ public interface PathBasedWorldView extends WorldView {
 
   UInt256 getPriorStorageValue(Address address, UInt256 key);
 
-  /**
-   * Retrieve all the storage values of an account.
-   *
-   * @param address the account to stream
-   * @param rootHash the root hash of the account storage trie
-   * @return A map that is a copy of the entries. The key is the hashed slot number, and the value
-   *     is the Bytes representation of the storage value.
-   */
-  Map<Bytes32, Bytes> getAllAccountStorage(final Address address, final Hash rootHash);
-
   static Bytes encodeTrieValue(final Bytes bytes) {
     final BytesValueRLPOutput out = new BytesValueRLPOutput();
     out.writeBytes(bytes.trimLeadingZeros());
@@ -58,9 +46,9 @@ public interface PathBasedWorldView extends WorldView {
 
   boolean isModifyingHeadWorldState();
 
-  PathBasedWorldStateKeyValueStorage getWorldStateStorage();
+  BonsaiWorldStateKeyValueStorage getWorldStateStorage();
 
   WorldUpdater updater();
 
-  PathBasedCodeCache codeCache();
+  BonsaiCodeCache codeCache();
 }

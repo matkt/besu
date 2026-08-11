@@ -14,19 +14,21 @@
  */
 package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
 
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView.encodeTrieValue;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView.encodeTrieValue;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
+import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -68,19 +70,15 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       final MutableWorldState mutableWorldState,
       final BlockHeader blockHeader,
       final WorldUpdater worldUpdater) {
-    final PathBasedWorldStateUpdateAccumulator<?> accumulator =
-        (PathBasedWorldStateUpdateAccumulator<?>)
+    final BonsaiWorldStateUpdateAccumulator accumulator =
+        (BonsaiWorldStateUpdateAccumulator)
             Objects.requireNonNull(
                 worldUpdater, "Path-based state root committers require a non-null WorldUpdater");
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
     final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
     final Hash root =
-        new DefaultComputation(
-                bonsai,
-                (BonsaiWorldStateUpdateAccumulator) accumulator,
-                storageFrozen,
-                addressHasher)
+        new DefaultComputation(bonsai, accumulator, storageFrozen, addressHasher)
             .executeInto(writes);
     if (blockHeader != null && bonsai.isTrieDisabled()) {
       return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
@@ -122,10 +120,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         collectCodeWrites();
       }
 
-      final MerkleTrie<Bytes, Bytes> accountTrie = bonsai.createAccountStateTrie();
+      final MerkleTrie<Bytes, Bytes> accountTrie = MptTrieFactory.createAccountStateTrie(bonsai);
 
       // Step 1: launch storage trie updates concurrently for every touched account.
-      for (final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>
+      for (final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
           storageAccountUpdate : worldStateUpdater.getStorageToUpdate().entrySet()) {
         final Address address = storageAccountUpdate.getKey();
         if (worldStateUpdater.getAccountsToUpdate().containsKey(address)) {
@@ -138,10 +136,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       }
 
       // Step 2: remove deleted accounts directly; defer updates to join storage futures inline.
-      for (final Map.Entry<Address, PathBasedValue<BonsaiAccount>> accountUpdate :
+      for (final Map.Entry<Address, BonsaiValue<BonsaiAccount>> accountUpdate :
           worldStateUpdater.getAccountsToUpdate().entrySet()) {
         final Address address = accountUpdate.getKey();
-        final PathBasedValue<BonsaiAccount> accountValue = accountUpdate.getValue();
+        final BonsaiValue<BonsaiAccount> accountValue = accountUpdate.getValue();
         final Hash addressHash = addressHasher.apply(bonsai, address);
         try {
           if (accountValue.getUpdated() == null) {
@@ -166,8 +164,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
 
       if (!storageFrozen) {
         accountTrie.commit(
-            (location, hash, value) ->
-                writes.add(u -> u.putAccountStateTrieNode(location, hash, value)));
+            (location, hash, value) -> writes.add(u -> u.putTrieNode(location, hash, value)));
       }
       writeSink.addAll(writes);
       return Hash.wrap(accountTrie.getRootHash());
@@ -176,26 +173,49 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
     private Optional<Bytes> resolveUpdatedAccount(
         final Address address,
         final Hash addressHash,
-        final PathBasedValue<BonsaiAccount> accountValue) {
+        final BonsaiValue<BonsaiAccount> accountValue) {
       final BonsaiAccount updatedAccount = accountValue.getUpdated();
       final CompletableFuture<Hash> storageFuture = storageFutures.get(address);
+      final Hash storageRootForLeaf;
       if (storageFuture != null) {
-        final Hash newStorageRoot = storageFuture.join();
-        if (!bonsai.isTrieDisabled()) {
-          updatedAccount.setStorageRoot(newStorageRoot);
+        storageRootForLeaf = storageFuture.join();
+        // Patch the MPT account's held root so the MPT flat-DB encoding includes it. Binary
+        // accounts carry no storage root (their strategy rejects setStorageRoot); their MPT trie
+        // leaf still uses the computed storage root for the genesis Merkle root.
+        if (!bonsai.isTrieDisabled() && updatedAccount.hasStorageRoot()) {
+          updatedAccount.setStorageRoot(storageRootForLeaf);
         }
+      } else {
+        // No storage updates for this account: reuse the account's existing root (MPT) or, for
+        // binary accounts (no storage root), the empty-trie hash for the MPT trie leaf.
+        storageRootForLeaf =
+            updatedAccount.hasStorageRoot()
+                ? updatedAccount.getStorageRoot()
+                : Hash.EMPTY_TRIE_HASH;
       }
 
-      final Bytes accountValueBytes = updatedAccount.serializeAccount();
+      // The MPT account trie leaf uses the 4-field MPT RLP, built from a PmtStateTrieAccountValue
+      // rather than BonsaiAccount.serializeAccount() so binary accounts (no storage root) are
+      // handled without throwing. The binary flat-DB cache below uses the format-aware codec and
+      // stays storage-root-free.
+      final BytesValueRLPOutput leafOut = new BytesValueRLPOutput();
+      new PmtStateTrieAccountValue(
+              updatedAccount.getNonce(),
+              updatedAccount.getBalance(),
+              storageRootForLeaf,
+              updatedAccount.getCodeHash())
+          .writeTo(leafOut);
+      final Bytes trieLeafBytes = leafOut.encoded();
+      final Bytes flatDbBytes = updatedAccount.serializeAccount();
       if (!storageFrozen) {
-        writes.add(updater -> updater.putAccountInfoState(addressHash, accountValueBytes));
+        writes.add(updater -> updater.putAccountInfoState(addressHash, flatDbBytes));
       }
-      return Optional.of(accountValueBytes);
+      return Optional.of(trieLeafBytes);
     }
 
     private Hash updateStorageTrie(
         final Address updatedAddress,
-        final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageUpdates) {
+        final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> storageUpdates) {
 
       final boolean accountDeleted =
           worldStateUpdater.getAccountsToUpdate().get(updatedAddress).getUpdated() == null;
@@ -212,9 +232,9 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
               ? Hash.EMPTY_TRIE_HASH
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
-          bonsai.createStorageTrie(updatedAddressHash, storageRoot);
+          MptTrieFactory.createStorageTrie(bonsai, updatedAddressHash, storageRoot);
 
-      for (final Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> storageUpdate :
+      for (final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> storageUpdate :
           storageUpdates.entrySet()) {
         final Hash slotHash = storageUpdate.getKey().getSlotHash();
         final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
@@ -247,8 +267,10 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
             (location, nodeHash, value) ->
                 writes.add(
                     u ->
-                        u.putAccountStorageTrieNode(
-                            updatedAddressHash, location, nodeHash, value)));
+                        u.putTrieNode(
+                            Bytes.concatenate(updatedAddressHash.getBytes(), location),
+                            nodeHash,
+                            value)));
       }
       return Hash.wrap(storageTrie.getRootHash());
     }
@@ -261,16 +283,22 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
                 .getAccount(address.addressHash())
                 .map(
                     bytes ->
-                        BonsaiAccount.fromRLP(bonsai, address, bytes, true, bonsai.codeCache()))
+                        BonsaiAccount.fromFlatBytes(
+                            bonsai,
+                            address,
+                            bytes,
+                            true,
+                            bonsai.codeCache(),
+                            new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH)))
                 .orElse(null);
         if (oldAccount == null) {
           continue;
         }
         final Hash addressHash = addressHasher.apply(bonsai, address);
         final MerkleTrie<Bytes, Bytes> storageTrie =
-            bonsai.createStorageTrie(addressHash, oldAccount.getStorageRoot());
+            MptTrieFactory.createStorageTrie(bonsai, addressHash, oldAccount.getStorageRoot());
         try {
-          StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageToDelete = null;
+          StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> storageToDelete = null;
           Bytes32 nextKeyHash = Bytes32.ZERO;
           while (true) {
             final Map<Bytes32, Bytes> entriesToDelete = storageTrie.entriesFrom(nextKeyHash, 256);
@@ -302,8 +330,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
                             addressHash, storageSlotKey.getSlotHash()));
               }
               storageToDelete
-                  .computeIfAbsent(
-                      storageSlotKey, key -> new PathBasedValue<>(slotValue, null, true))
+                  .computeIfAbsent(storageSlotKey, key -> new BonsaiValue<>(slotValue, null, true))
                   .setPrior(slotValue);
               lastKeyHash = slot.getKey();
             }
@@ -325,7 +352,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
     }
 
     private void collectCodeWrites() {
-      for (final Map.Entry<Address, PathBasedValue<Bytes>> codeUpdate :
+      for (final Map.Entry<Address, BonsaiValue<Bytes>> codeUpdate :
           worldStateUpdater.getCodeToUpdate().entrySet()) {
         final Bytes updatedCode = codeUpdate.getValue().getUpdated();
         final Hash accountHash = codeUpdate.getKey().addressHash();

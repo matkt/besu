@@ -18,7 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
@@ -51,7 +51,7 @@ public class TrieLogPruner implements TrieLogEvent.TrieLogObserver {
 
   private final int pruningLimit;
   private final int loadingLimit;
-  private final PathBasedWorldStateKeyValueStorage rootWorldStateStorage;
+  private final BonsaiWorldStateKeyValueStorage rootWorldStateStorage;
   private final Blockchain blockchain;
   private final Consumer<Runnable> executeAsync;
   private final long numBlocksToRetain;
@@ -66,7 +66,7 @@ public class TrieLogPruner implements TrieLogEvent.TrieLogObserver {
           Comparator.comparing(Hash::getBytes, Comparator.naturalOrder()));
 
   public TrieLogPruner(
-      final PathBasedWorldStateKeyValueStorage rootWorldStateStorage,
+      final BonsaiWorldStateKeyValueStorage rootWorldStateStorage,
       final Blockchain blockchain,
       final Consumer<Runnable> executeAsync,
       final long numBlocksToRetain,

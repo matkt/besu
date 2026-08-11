@@ -49,13 +49,13 @@ import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -448,8 +448,7 @@ class StateRootCommitterIntegrationTest {
 
       try (BonsaiWorldState replayWorldState = replayHarness.newWritableWorldState()) {
         final TrieLogLayer trieLog = frozenHarness.readTrieLog(frozenBlockHeader);
-        final BonsaiWorldStateUpdateAccumulator accumulator =
-            (BonsaiWorldStateUpdateAccumulator) replayWorldState.updater();
+        final BonsaiWorldStateUpdateAccumulator accumulator = replayWorldState.updater();
         accumulator.rollForward(trieLog);
         accumulator.commit();
         replayWorldState.persist(null);
@@ -598,7 +597,7 @@ class StateRootCommitterIntegrationTest {
                       ImmutableBalConfiguration.builder().build(),
                       new NoOpMetricsSystem())
                   .createProtocolSchedule(),
-              new PathBasedCodeCache());
+              new BonsaiCodeCache());
       final MutableBlockchain blockchain =
           InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesisState.getBlock());
 
@@ -618,7 +617,7 @@ class StateRootCommitterIntegrationTest {
               null,
               EvmConfiguration.DEFAULT,
               throwingWorldStateHealerSupplier(),
-              new PathBasedCodeCache());
+              new BonsaiCodeCache());
       genesisState.writeStateTo(bonsaiArchive.getWorldState());
 
       final BonsaiWorldState bonsaiWorldState =
@@ -627,7 +626,7 @@ class StateRootCommitterIntegrationTest {
               bonsaiKv,
               EvmConfiguration.DEFAULT,
               createStatefulConfigWithTrie(),
-              new PathBasedCodeCache());
+              new BonsaiCodeCache());
 
       final InMemoryKeyValueStorageProvider forestProvider = new InMemoryKeyValueStorageProvider();
       final ForestMutableWorldState forestWorldState =
@@ -871,8 +870,7 @@ class StateRootCommitterIntegrationTest {
                   new NoOpMetricsSystem())
               .createProtocolSchedule();
       final GenesisState genesisState =
-          GenesisState.fromConfig(
-              GenesisConfig.mainnet(), protocolSchedule, new PathBasedCodeCache());
+          GenesisState.fromConfig(GenesisConfig.mainnet(), protocolSchedule, new BonsaiCodeCache());
       final MutableBlockchain blockchain =
           InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesisState.getBlock());
       final BonsaiWorldStateKeyValueStorage kvStorage =
@@ -888,7 +886,7 @@ class StateRootCommitterIntegrationTest {
               null,
               EvmConfiguration.DEFAULT,
               throwingWorldStateHealerSupplier(),
-              new PathBasedCodeCache());
+              new BonsaiCodeCache());
       genesisState.writeStateTo(archive.getWorldState());
       final ProtocolContext protocolContext =
           new ProtocolContext.Builder()
@@ -925,7 +923,7 @@ class StateRootCommitterIntegrationTest {
         worldState.updater().commit();
         final Hash root =
             new DefaultStateRootCommitter().compute(worldState, null, worldState.updater()).root();
-        ((BonsaiWorldStateUpdateAccumulator) worldState.updater()).reset();
+        (worldState.updater()).reset();
         return new BlockHeaderTestFixture()
             .parentHash(parent.getHash())
             .number(parent.getNumber() + 1L)
@@ -957,7 +955,7 @@ class StateRootCommitterIntegrationTest {
     TrieLogLayer readTrieLog(final BlockHeader blockHeader) {
       final byte[] serialized =
           trieLogStorage.get(blockHeader.getHash().getBytes().toArrayUnsafe()).orElseThrow();
-      return BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(serialized), false));
+      return PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(serialized), false));
     }
 
     KvSnapshot captureFlatDbSnapshot() {

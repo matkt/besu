@@ -17,7 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE_ARCHIVE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_ARCHIVE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -301,12 +301,15 @@ public class BonsaiArchiveFlatDbStrategy extends BonsaiFullFlatDbStrategy {
   }
 
   /*
-   * Retrieves the storage value for the given account hash and storage slot key, using the world state root hash supplier, storage root supplier, and node loader.
+   * Retrieves the storage value for the given account hash and storage slot key, using the world state
+   * root hash supplier, the account-bytes supplier, and a node loader. The archive strategy only
+   * reads from the archived flat storage and does not fall back to the trie, so the account supplier
+   * and node loader are unused here.
    */
   @Override
   public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      final Supplier<Optional<Hash>> storageRootSupplier,
+      final Supplier<Optional<Bytes>> accountSupplier,
       final NodeLoader nodeLoader,
       final Hash accountHash,
       final StorageSlotKey storageSlotKey,

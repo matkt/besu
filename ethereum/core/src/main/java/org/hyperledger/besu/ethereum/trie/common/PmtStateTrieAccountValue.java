@@ -16,8 +16,8 @@ package org.hyperledger.besu.ethereum.trie.common;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
@@ -28,7 +28,7 @@ import org.apache.tuweni.bytes.Bytes32;
 
 /** Represents the raw values associated with an account in the world state patricia merkle trie. */
 public class PmtStateTrieAccountValue extends AbstractStateTrieAccountValue
-    implements AccountValue {
+    implements MptAccountValue {
 
   protected final Hash storageRoot;
 

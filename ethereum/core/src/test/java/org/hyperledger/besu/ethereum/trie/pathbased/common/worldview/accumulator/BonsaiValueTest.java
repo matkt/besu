@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulato
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -23,7 +25,7 @@ import com.google.common.base.Suppliers;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
-class PathBasedValueTest {
+class BonsaiValueTest {
 
   @Test
   void withLazyDefersLoadUntilAccessed() {
@@ -34,7 +36,7 @@ class PathBasedValueTest {
               loads.incrementAndGet();
               return UInt256.valueOf(42);
             });
-    final PathBasedValue<UInt256> value = PathBasedValue.withLazy(loader, loader);
+    final BonsaiValue<UInt256> value = BonsaiValue.withLazy(loader, loader);
 
     assertThat(loads).hasValue(0);
     assertThat(value.getUpdated()).isEqualTo(UInt256.valueOf(42));
@@ -52,7 +54,7 @@ class PathBasedValueTest {
               loads.incrementAndGet();
               return UInt256.valueOf(42);
             });
-    final PathBasedValue<UInt256> value = PathBasedValue.withLazy(loader, loader);
+    final BonsaiValue<UInt256> value = BonsaiValue.withLazy(loader, loader);
 
     value.setUpdated(UInt256.valueOf(99));
 
@@ -69,7 +71,7 @@ class PathBasedValueTest {
               loads.incrementAndGet();
               return UInt256.valueOf(42);
             });
-    final PathBasedValue<UInt256> value = PathBasedValue.withLazy(loader, loader);
+    final BonsaiValue<UInt256> value = BonsaiValue.withLazy(loader, loader);
 
     value.setUpdated(UInt256.valueOf(99));
     assertThat(loads).hasValue(0);

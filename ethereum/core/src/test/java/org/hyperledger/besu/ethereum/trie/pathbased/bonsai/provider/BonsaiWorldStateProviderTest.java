@@ -32,11 +32,11 @@ import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiWorldStateCacheManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -136,7 +136,7 @@ class BonsaiWorldStateProviderTest {
             null,
             EvmConfiguration.DEFAULT,
             throwingWorldStateHealerSupplier(),
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
 
     final BlockHeader genesis = blockBuilder.number(0).buildHeader();
     final BlockHeader blockHeader512 =
@@ -298,7 +298,7 @@ class BonsaiWorldStateProviderTest {
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
         EvmConfiguration.DEFAULT,
         throwingWorldStateHealerSupplier(),
-        new PathBasedCodeCache());
+        new BonsaiCodeCache());
   }
 
   private BonsaiWorldState createMockWorldState(final Hash blockHash) {

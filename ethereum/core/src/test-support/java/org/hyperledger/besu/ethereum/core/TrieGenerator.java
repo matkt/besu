@@ -65,8 +65,10 @@ public class TrieGenerator {
             applyForStrategy(
                 updater,
                 onBonsai -> {
-                  onBonsai.putAccountStorageTrieNode(
-                      accounts.get(accountIndex), location, hash, value);
+                  onBonsai.putTrieNode(
+                      Bytes.concatenate(accounts.get(accountIndex).getBytes(), location),
+                      hash,
+                      value);
                 },
                 onForest -> {
                   onForest.putAccountStorageTrieNode(hash, value);
@@ -83,7 +85,8 @@ public class TrieGenerator {
           onBonsai -> {
             onBonsai.putAccountInfoState(
                 accounts.get(accountIndex), RLP.encode(accountValue::writeTo));
-            accountStateTrie.commit(onBonsai::putAccountStateTrieNode);
+            accountStateTrie.commit(
+                (location, hash, value) -> onBonsai.putTrieNode(location, hash, value));
             onBonsai.putCode(accounts.get(accountIndex), codeHash, code);
           },
           onForest -> {

@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.code;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.evm.Code;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -24,13 +25,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-class PathBasedCodeCacheTest {
+class BonsaiCodeCacheTest {
 
-  private PathBasedCodeCache codeCache;
+  private BonsaiCodeCache codeCache;
 
   @BeforeEach
   void setUp() {
-    codeCache = new PathBasedCodeCache();
+    codeCache = new BonsaiCodeCache();
   }
 
   @Test

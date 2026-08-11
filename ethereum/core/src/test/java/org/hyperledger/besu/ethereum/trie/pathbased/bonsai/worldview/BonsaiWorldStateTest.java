@@ -15,8 +15,6 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -24,10 +22,10 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
-import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -50,7 +48,6 @@ class BonsaiWorldStateTest {
   @Mock BonsaiWorldState bonsaiWorldState;
   @Mock BonsaiWorldStateUpdateAccumulator bonsaiWorldStateUpdateAccumulator;
   @Mock BonsaiWorldStateKeyValueStorage.Updater bonsaiUpdater;
-  @Mock MerkleTrie<Bytes, Bytes> accountTrie;
 
   private static final Bytes CODE = Bytes.of(10);
   private static final Hash CODE_HASH = Hash.hash(CODE);
@@ -64,9 +61,11 @@ class BonsaiWorldStateTest {
     when(accumulator.getStorageToUpdate()).thenReturn(Map.of());
     when(accumulator.getStorageToClear()).thenReturn(Set.of());
     when(bonsaiWorldState.isStorageFrozen()).thenReturn(false);
-    when(bonsaiWorldState.createAccountStateTrie()).thenReturn(accountTrie);
-    when(accountTrie.getRootHash()).thenReturn(Bytes32.ZERO);
-    doAnswer(invocation -> null).when(accountTrie).commit(any());
+    // MPT trie construction now lives in MptTrieFactory; drive it to a NoOp trie by disabling the
+    // trie, so the committer's code-write path runs without a real MPT.
+    when(bonsaiWorldState.getWorldStateRootHash()).thenReturn(Hash.wrap(Bytes32.ZERO));
+    when(bonsaiWorldState.getWorldStateConfig())
+        .thenReturn(WorldStateConfig.newBuilder().trieDisabled(true).build());
 
     committer.compute(bonsaiWorldState, null, accumulator).applyTo(bonsaiUpdater);
   }
@@ -75,8 +74,8 @@ class BonsaiWorldStateTest {
   @MethodSource("priorAndUpdatedEmptyAndNullBytes")
   void codeUpdateDoesNothingWhenMarkedAsDeletedButAlreadyDeleted(
       final Bytes prior, final Bytes updated) {
-    final Map<Address, PathBasedValue<Bytes>> codeToUpdate =
-        Map.of(Address.ZERO, new PathBasedValue<>(prior, updated));
+    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
+        Map.of(Address.ZERO, new BonsaiValue<>(prior, updated));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
@@ -85,8 +84,8 @@ class BonsaiWorldStateTest {
 
   @Test
   void codeUpdateDoesNothingWhenAddingSameAsExistingValue() {
-    final Map<Address, PathBasedValue<Bytes>> codeToUpdate =
-        Map.of(Address.ZERO, new PathBasedValue<>(CODE, CODE));
+    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
+        Map.of(Address.ZERO, new BonsaiValue<>(CODE, CODE));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
@@ -96,12 +95,12 @@ class BonsaiWorldStateTest {
   @ParameterizedTest
   @MethodSource("emptyAndNullBytes")
   void removesCodeWhenMarkedAsDeleted(final Bytes updated) {
-    final Map<Address, PathBasedValue<Bytes>> codeToUpdate =
+    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
         Map.of(
             Address.ZERO,
             updated == null
-                ? new PathBasedValue<>(CODE, null, true)
-                : new PathBasedValue<>(CODE, updated));
+                ? new BonsaiValue<>(CODE, null, true)
+                : new BonsaiValue<>(CODE, updated));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
@@ -111,8 +110,8 @@ class BonsaiWorldStateTest {
   @ParameterizedTest
   @MethodSource("codeValueAndEmptyAndNullBytes")
   void addsCodeForNewCodeValue(final Bytes prior) {
-    final Map<Address, PathBasedValue<Bytes>> codeToUpdate =
-        Map.of(ACCOUNT, new PathBasedValue<>(prior, CODE));
+    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
+        Map.of(ACCOUNT, new BonsaiValue<>(prior, CODE));
 
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
@@ -122,10 +121,10 @@ class BonsaiWorldStateTest {
 
   @Test
   void updateCodeForMultipleValues() {
-    final Map<Address, PathBasedValue<Bytes>> codeToUpdate = new HashMap<>();
-    codeToUpdate.put(Address.fromHexString("0x1"), new PathBasedValue<>(null, CODE));
-    codeToUpdate.put(Address.fromHexString("0x2"), new PathBasedValue<>(CODE, null, true));
-    codeToUpdate.put(Address.fromHexString("0x3"), new PathBasedValue<>(Bytes.of(9), CODE));
+    final Map<Address, BonsaiValue<Bytes>> codeToUpdate = new HashMap<>();
+    codeToUpdate.put(Address.fromHexString("0x1"), new BonsaiValue<>(null, CODE));
+    codeToUpdate.put(Address.fromHexString("0x2"), new BonsaiValue<>(CODE, null, true));
+    codeToUpdate.put(Address.fromHexString("0x3"), new BonsaiValue<>(Bytes.of(9), CODE));
 
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
