@@ -244,7 +244,6 @@ public class MainnetBlockValidator implements BlockValidator {
             result.getNbParallelizedTransactions());
       }
     } catch (MerkleTrieException ex) {
-      context.getWorldStateArchive().heal(ex.getMaybeAddress(), ex.getLocation());
       return new BlockProcessingResult(Optional.empty(), ex);
     } catch (StorageException ex) {
       var retval = new BlockProcessingResult(Optional.empty(), ex);
