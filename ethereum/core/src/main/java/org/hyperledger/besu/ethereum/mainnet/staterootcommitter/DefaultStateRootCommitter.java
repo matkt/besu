@@ -221,11 +221,13 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         }
       }
 
-      sink.commitTrie(
-          storageTrie,
-          (location, nodeHash, value) ->
-              u -> u.putAccountStorageTrieNode(updatedAddressHash, location, nodeHash, value));
-      return Hash.wrap(storageTrie.getRootHash());
+      if (!accountDeleted) {
+        sink.commitTrie(
+            storageTrie,
+            (location, nodeHash, value) ->
+                u -> u.putAccountStorageTrieNode(updatedAddressHash, location, nodeHash, value));
+      }
+      return accountDeleted ? Hash.EMPTY_TRIE_HASH : Hash.wrap(storageTrie.getRootHash());
     }
 
     private void clearStorage() {
