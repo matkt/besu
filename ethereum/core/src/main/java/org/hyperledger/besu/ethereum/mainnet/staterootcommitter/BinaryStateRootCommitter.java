@@ -171,10 +171,18 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
 
       final long codeSize =
           updatedDelegation ? EmbeddingParameters.DELEGATION_CODE_SIZE : updatedCode.size();
-      stateTrie.put(
-          basicDataKey,
+      final Bytes32 basicData =
           BasicDataEncoder.encodeBasicData(
-              codeSize, updatedAccount.getNonce(), updatedAccount.getBalance().toUInt256()));
+              codeSize, updatedAccount.getNonce(), updatedAccount.getBalance().toUInt256());
+      // EIP-8297: a zero-valued leaf is absent from the tree. The basic-data encoding is all zeros
+      // only when version=0, code_size=0, nonce=0, and balance=0 (e.g. an empty EOA); remove any
+      // prior leaf instead of storing the zero value, mirroring storage-slot and code-chunk
+      // zero-absent handling.
+      if (Bytes32.ZERO.equals(basicData)) {
+        stateTrie.remove(basicDataKey);
+      } else {
+        stateTrie.put(basicDataKey, basicData);
+      }
 
       if (updatedDelegation) {
         final Bytes32 delegationValue =
@@ -233,24 +241,66 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       }
 
       final Hash accountHash = address.addressHash();
-      final Hash priorCodeHash =
-          codeUpdate.getPrior() == null ? Hash.EMPTY : Hash.hash(codeUpdate.getPrior());
-      final Hash updatedCodeHash =
-          codeUpdate.getUpdated() == null ? Hash.EMPTY : Hash.hash(codeUpdate.getUpdated());
+      final Bytes priorCode = codeUpdate.getPrior();
+      final Bytes updatedCode = codeUpdate.getUpdated();
+      final Hash priorCodeHash = isEmpty(priorCode) ? Hash.EMPTY : Hash.hash(priorCode);
+      final Hash updatedCodeHash = isEmpty(updatedCode) ? Hash.EMPTY : Hash.hash(updatedCode);
 
-      // Delegation indicators live in the header DELEGATION leaf (applyAccount), not CODE_ZONE.
-      // Never remove CODE_ZONE leaves: content-addressed code may be shared (EIP-8297).
-      if (!isEmpty(codeUpdate.getUpdated()) && !hasCodeDelegation(codeUpdate.getUpdated())) {
-        putCodeLeaves(Bytes32.wrap(updatedCodeHash.getBytes()), codeUpdate.getUpdated());
+      // Delegation indicators live in the header DELEGATION leaf (applyAccount), not CODE_ZONE, so
+      // only real contract code is written to / removed from CODE_ZONE here.
+      final boolean writingCode = !isEmpty(updatedCode);
+      final boolean removingCode = isEmpty(updatedCode) && !isEmpty(priorCode);
+
+      if (writingCode && recordIfNewlyIntroduced(updatedCodeHash)) {
+        if (!hasCodeDelegation(updatedCode)) {
+          putCodeLeaves(Bytes32.wrap(updatedCodeHash.getBytes()), updatedCode);
+        }
+        if (!storageFrozen) {
+          writes.add(updater -> updater.putCode(accountHash, updatedCodeHash, updatedCode));
+        }
       }
 
-      if (!storageFrozen) {
-        if (isEmpty(codeUpdate.getUpdated())) {
-          writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
-        } else {
-          writes.add(
-              updater -> updater.putCode(accountHash, updatedCodeHash, codeUpdate.getUpdated()));
+      if (removingCode && worldStateUpdater.getIntroducedCodeHashes().contains(priorCodeHash)) {
+        if (!hasCodeDelegation(priorCode)) {
+          // Drop the chunks only for a code hash newly introduced
+          removeCodeLeaves(Bytes32.wrap(priorCodeHash.getBytes()), priorCode);
         }
+        if (!storageFrozen) {
+          writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+        }
+      }
+    }
+
+    /**
+     * Records {@code codeHash} as newly introduced by this block if it was absent from the parent
+     * flat DB, and returns whether it was newly introduced. The flat-DB read sees the parent state
+     * because flat-DB writes are queued until persist; the result is recorded in the accumulator's
+     * {@code introducedCodeHashes} set so {@code PbtTrieLogFactory} can persist it for the rollback
+     * chunk-removal decision.
+     */
+    private boolean recordIfNewlyIntroduced(final Hash codeHash) {
+      if (worldStateUpdater.getIntroducedCodeHashes().contains(codeHash)) {
+        return false;
+      }
+      if (bonsai.getWorldStateStorage().getCode(codeHash, null).isPresent()) {
+        return false;
+      }
+      worldStateUpdater.getIntroducedCodeHashes().add(codeHash);
+      return true;
+    }
+
+    /**
+     * Removes the CODE_ZONE chunk leaves for {@code codeHash}, mirroring {@link #putCodeLeaves} in
+     * reverse. Zero chunks are never written (EIP-8297 zero-absent), so they are skipped; only
+     * non-zero chunk indices are removed.
+     */
+    private void removeCodeLeaves(final Bytes32 codeHash, final Bytes codeBytes) {
+      final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(codeBytes);
+      for (int i = 0; i < chunks.size(); i++) {
+        if (Bytes32.ZERO.equals(chunks.get(i))) {
+          continue;
+        }
+        stateTrie.remove(TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i));
       }
     }
 

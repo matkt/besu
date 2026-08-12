@@ -84,6 +84,10 @@ public class BonsaiWorldStateUpdateAccumulator
       storageToUpdate = new ConcurrentHashMap<>();
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
+
+  /** Code hashes newly introduced by the block currently flowing through the accumulator. */
+  private final Set<Hash> introducedCodeHashes = Collections.synchronizedSet(new HashSet<>());
+
   protected boolean isAccumulatorStateChanged;
 
   public BonsaiWorldStateUpdateAccumulator(
@@ -108,6 +112,7 @@ public class BonsaiWorldStateUpdateAccumulator
     storageToUpdate.putAll(source.storageToUpdate);
     updatedAccounts.putAll(source.updatedAccounts);
     deletedAccounts.addAll(source.deletedAccounts);
+    introducedCodeHashes.addAll(source.introducedCodeHashes);
     this.isAccumulatorStateChanged = true;
   }
 
@@ -786,6 +791,19 @@ public class BonsaiWorldStateUpdateAccumulator
                     (storageSlotKey, value) ->
                         rollStorageChange(
                             address, storageSlotKey, value.getUpdated(), value.getPrior())));
+    introducedCodeHashes.addAll(layer.getIntroducedCodeHashes());
+  }
+
+  /**
+   * Returns the mutable set of code hashes newly introduced by the block currently flowing through
+   * the accumulator. The binary committer records into this set during the forward commit (flat-DB
+   * presence check) and reads it during rollback to drop CODE_ZONE chunks; {@code
+   * PbtTrieLogFactory.create} copies it into the trie-log layer for persistence.
+   *
+   * @return the live, mutable set.
+   */
+  public Set<Hash> getIntroducedCodeHashes() {
+    return introducedCodeHashes;
   }
 
   private void rollAccountChange(
@@ -1026,6 +1044,7 @@ public class BonsaiWorldStateUpdateAccumulator
     storageToUpdate.clear();
     codeToUpdate.clear();
     accountsToUpdate.clear();
+    introducedCodeHashes.clear();
     resetAccumulatorStateChanged();
     updatedAccounts.clear();
     deletedAccounts.clear();

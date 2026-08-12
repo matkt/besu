@@ -56,7 +56,7 @@ public abstract class FlatDbStrategyProvider {
       this.flatDbMode = newFlatDbMode;
       final CodeStorageStrategy codeStorageStrategy =
           deriveUseCodeStorageByHash(composedWorldStateStorage)
-              ? new CodeHashCodeStorageStrategy()
+              ? new CodeHashCodeStorageStrategy(dataStorageConfiguration.getDataStorageFormat())
               : new AccountHashCodeStorageStrategy();
       this.flatDbStrategy = createFlatDbStrategy(flatDbMode, metricsSystem, codeStorageStrategy);
     }

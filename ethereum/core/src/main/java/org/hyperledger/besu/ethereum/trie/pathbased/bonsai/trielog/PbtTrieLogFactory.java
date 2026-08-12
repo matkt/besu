@@ -26,6 +26,7 @@ import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
+import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 
 import java.util.Map;
@@ -36,6 +37,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
@@ -81,6 +83,26 @@ import org.apache.tuweni.units.bigints.UInt256;
  * factory.
  */
 public class PbtTrieLogFactory extends AbstractTrieLogFactory {
+
+  @Override
+  public TrieLogLayer create(
+      final org.hyperledger.besu.plugin.services.trielogs.TrieLogAccumulator accumulator,
+      final BlockHeader blockHeader) {
+    final TrieLogLayer layer = super.create(accumulator, blockHeader);
+    // Copy the accumulator's forward-detection set (populated during the forward commit by the
+    // flat-DB presence check in BinaryStateRootCommitter.applyCode) into the layer so it is
+    // persisted with the trie log and available to the binary committer on rollback.
+    if (accumulator
+        instanceof
+        org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
+                .BonsaiWorldStateUpdateAccumulator
+            bonsaiAccumulator) {
+      for (final Hash codeHash : bonsaiAccumulator.getIntroducedCodeHashes()) {
+        layer.addIntroducedCodeHash(codeHash);
+      }
+    }
+    return layer;
+  }
 
   @Override
   public byte[] serialize(final TrieLog layer) {
@@ -151,6 +173,16 @@ public class PbtTrieLogFactory extends AbstractTrieLogFactory {
 
       output.endList(); // this change
     }
+
+    // PBT extension: the set of code hashes newly introduced by this block (absent from the parent
+    // state). Default empty for non-PBT logs (MPT), so the trailing list is omitted.
+    if (!layer.getIntroducedCodeHashes().isEmpty()) {
+      output.startList();
+      for (final Hash codeHash : layer.getIntroducedCodeHashes()) {
+        output.writeBytes(codeHash.getBytes());
+      }
+      output.endList();
+    }
     output.endList(); // container
   }
 
@@ -175,6 +207,17 @@ public class PbtTrieLogFactory extends AbstractTrieLogFactory {
 
     while (!input.isEndOfCurrentList()) {
       input.enterList();
+      // PBT extension: a trailing list of 32-byte code hashes (newly introduced by this block)
+      // follows the per-address entries. An address entry's first element is always a 20-byte
+      // address, so a 32-byte first element distinguishes the introduced-set from an address entry.
+      // Legacy/MPT logs and PBT logs with an empty set omit it.
+      if (!input.nextIsNull() && input.nextSize() == Bytes32.SIZE) {
+        while (!input.isEndOfCurrentList()) {
+          newLayer.addIntroducedCodeHash(Hash.wrap(input.readBytes32()));
+        }
+        input.leaveList();
+        break;
+      }
       final Address address = Address.readFrom(input);
 
       if (input.nextIsNull()) {

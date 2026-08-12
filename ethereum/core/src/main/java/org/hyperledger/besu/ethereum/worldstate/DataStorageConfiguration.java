@@ -58,7 +58,16 @@ public interface DataStorageConfiguration {
   DataStorageConfiguration DEFAULT_BINARY_CONFIG =
       ImmutableDataStorageConfiguration.builder()
           .dataStorageFormat(DataStorageFormat.BINARY)
-          .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DEFAULT)
+          .pathBasedExtraStorageConfiguration(
+              ImmutablePathBasedExtraStorageConfiguration.builder()
+                  // The partitioned binary trie stores code content-addressed by code hash, so the
+                  // flat DB must mirror that layout (enforced; see
+                  // PathBasedExtraStorageOptions.validate).
+                  .unstable(
+                      ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                          .codeStoredByCodeHashEnabled(true)
+                          .build())
+                  .build())
           .build();
 
   DataStorageFormat getDataStorageFormat();

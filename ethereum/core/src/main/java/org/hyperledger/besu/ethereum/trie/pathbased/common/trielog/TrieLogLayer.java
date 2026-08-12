@@ -23,10 +23,13 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
@@ -62,6 +65,8 @@ public class TrieLogLayer implements TrieLog {
   protected final Map<Address, BonsaiValue<AccountValue>> accounts;
   protected final Map<Address, BonsaiValue<Bytes>> code;
   protected final Map<Address, Map<StorageSlotKey, BonsaiValue<UInt256>>> storage;
+  protected final Set<Hash> introducedCodeHashes = new HashSet<>();
+
   protected boolean frozen = false;
 
   public TrieLogLayer() {
@@ -123,6 +128,17 @@ public class TrieLogLayer implements TrieLog {
         .computeIfAbsent(address, a -> new TreeMap<>())
         .put(slot, new BonsaiValue<>(oldValue, newValue));
     return this;
+  }
+
+  public TrieLogLayer addIntroducedCodeHash(final Hash codeHash) {
+    checkState(!frozen, "Layer is Frozen");
+    introducedCodeHashes.add(codeHash);
+    return this;
+  }
+
+  @Override
+  public Set<Hash> getIntroducedCodeHashes() {
+    return Collections.unmodifiableSet(introducedCodeHashes);
   }
 
   @Override
@@ -249,6 +265,7 @@ public class TrieLogLayer implements TrieLog {
         .append(accounts, that.accounts)
         .append(code, that.code)
         .append(storage, that.storage)
+        .append(introducedCodeHashes, that.introducedCodeHashes)
         .isEquals();
   }
 
@@ -260,6 +277,7 @@ public class TrieLogLayer implements TrieLog {
         .append(accounts)
         .append(code)
         .append(storage)
+        .append(introducedCodeHashes)
         .toHashCode();
   }
 }

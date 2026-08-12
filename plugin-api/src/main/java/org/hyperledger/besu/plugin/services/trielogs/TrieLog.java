@@ -22,6 +22,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -135,6 +136,18 @@ public interface TrieLog {
    * @return an Optional containing the account value if available, otherwise an empty Optional
    */
   Optional<? extends AccountValue> getAccount(final Address address);
+
+  /**
+   * Code hashes newly introduced by this block (absent from the parent state). Populated only by
+   * the binary (PBT) path during forward commit; the binary committer reads it on rollback to
+   * decide whether CODE_ZONE chunks may be dropped. The default returns an empty set for non-PBT
+   * logs (e.g. MPT), so generic callers and serializers need no format-specific casts.
+   *
+   * @return an unmodifiable view of the newly-introduced code hashes; empty by default.
+   */
+  default Set<Hash> getIntroducedCodeHashes() {
+    return Set.of();
+  }
 
   /**
    * An interface representing a tuple of prior and updated values for a specific type T in a log.

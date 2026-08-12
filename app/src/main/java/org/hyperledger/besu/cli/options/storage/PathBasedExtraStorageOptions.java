@@ -193,6 +193,18 @@ public class PathBasedExtraStorageOptions
         }
       }
     }
+    // The partitioned binary trie stores code content-addressed by code hash (CODE_ZONE), so the
+    // flat DB must mirror that layout. The CodeHashCodeStorageStrategy removes the codeHash-keyed
+    // flat-DB entry on rollback only for BINARY (no remaining account references it); for MPT it
+    // stays a no-op (content-addressed sharing is never broken). Rejecting account-hash-keyed code
+    // storage for BINARY keeps the flat DB consistent with the trie across rollback/rollforward.
+    if (DataStorageFormat.BINARY == dataStorageFormat
+        && !unstableOptions.codeUsingCodeHashEnabled) {
+      throw new CommandLine.ParameterException(
+          commandLine,
+          "Binary trie requires code storage by code hash; cannot disable "
+              + "--Xbonsai-code-using-code-hash-enabled for --data-storage-format=BINARY");
+    }
   }
 
   /**
