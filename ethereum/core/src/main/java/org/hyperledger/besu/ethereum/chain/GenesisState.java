@@ -31,10 +31,13 @@ import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Withdrawal;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.net.URL;
@@ -183,7 +186,20 @@ public final class GenesisState {
           genesisAccount.storage().forEach(account::setStorageValue);
         });
     updater.commit();
-    target.persist(rootHeader);
+    // Genesis state root must match the storage format's committer so the genesis block is
+    // PBT-rooted from block 0 when --data-storage-format=BINARY. The default persist() path uses
+    // the MPT/Keccak committer; BINARY needs the partitioned-binary-trie committer.
+    if (isBinaryWorldState(target)) {
+      target.persist(rootHeader, new BinaryStateRootCommitter());
+    } else {
+      target.persist(rootHeader);
+    }
+  }
+
+  private static boolean isBinaryWorldState(final MutableWorldState target) {
+    return target instanceof BonsaiWorldState bonsaiWorldState
+        && bonsaiWorldState.getWorldStateStorage().getDataStorageFormat()
+            == DataStorageFormat.BINARY;
   }
 
   private static Hash calculateGenesisStateRoot(

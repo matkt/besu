@@ -130,6 +130,8 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
                 writes.add(updater -> updater.putTrieNode(location, hash, value)));
       }
       writeSink.addAll(writes);
+      System.out.println(
+          "Used ParallelStoredPartitionedBinaryTrie for  " + stateTrie.getRootHash());
       return Hash.wrap(stateTrie.getRootHash());
     }
 

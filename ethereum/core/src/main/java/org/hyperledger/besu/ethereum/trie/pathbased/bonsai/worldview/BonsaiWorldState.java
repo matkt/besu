@@ -23,6 +23,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
@@ -44,6 +45,7 @@ import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
+import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
@@ -221,7 +223,7 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
 
   @Override
   public void persist(final BlockHeader blockHeader) {
-    persist(blockHeader, DEFAULT_STATE_ROOT_COMMITTER);
+    persist(blockHeader, formatAwareCommitter());
   }
 
   @Override
@@ -411,14 +413,13 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
 
   @Override
   public Hash frontierRootHash() {
-    return DEFAULT_STATE_ROOT_COMMITTER.compute(this, null, accumulator.copy()).root();
+    return formatAwareCommitter().compute(this, null, accumulator.copy()).root();
   }
 
   @Override
   public Hash rootHash() {
     if (isStorageFrozen && accumulator.isAccumulatorStateChanged()) {
-      worldStateRootHash =
-          DEFAULT_STATE_ROOT_COMMITTER.compute(this, null, accumulator.copy()).root();
+      worldStateRootHash = formatAwareCommitter().compute(this, null, accumulator.copy()).root();
       accumulator.resetAccumulatorStateChanged();
     }
     return worldStateRootHash;
@@ -514,7 +515,29 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   }
 
   protected Hash getEmptyTrieHash() {
-    return Hash.EMPTY_TRIE_HASH;
+    // The partitioned binary trie's empty root is Bytes32.ZERO, not the MPT/Keccak empty root.
+    // Returning the MPT empty root for a fresh BINARY world state would make the
+    // BinaryStateRootCommitter try to load a non-existent node (the MPT empty node 0x80) and
+    // fail to decode it as a binary trie node. Use ZERO so the binary trie starts from an empty
+    // root instead.
+    return worldStateKeyValueStorage.getDataStorageFormat() == DataStorageFormat.BINARY
+        ? Hash.ZERO
+        : Hash.EMPTY_TRIE_HASH;
+  }
+
+  /**
+   * Returns the state-root committer matching this world state's {@link DataStorageFormat}.
+   *
+   * <p>BINARY uses {@link BinaryStateRootCommitter} (partitioned binary trie root); BONSAI/FOREST
+   * use the MPT/Keccak {@link DefaultStateRootCommitter}. This mirrors the routing done by {@link
+   * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory} for block
+   * commit, so the no-committer {@link #persist(BlockHeader)} and the frozen-recompute paths in
+   * {@link #rootHash()} / {@link #frontierRootHash()} produce the correct root for BINARY too.
+   */
+  protected StateRootCommitter formatAwareCommitter() {
+    return worldStateKeyValueStorage.getDataStorageFormat() == DataStorageFormat.BINARY
+        ? new BinaryStateRootCommitter()
+        : DEFAULT_STATE_ROOT_COMMITTER;
   }
 
   @Override

@@ -607,6 +607,70 @@ class PbtLogRollingTests {
     }
   }
 
+  @Test
+  void spamoorLikeManyNonceIncrements_rollForwardMatchesLiveRoot() {
+    final int accountCount = 32;
+    try (final BinaryFixture f = new BinaryFixture()) {
+      final PersistedBlock parent =
+          f.applyAndPersist(
+              u -> {
+                for (int i = 0; i < accountCount; i++) {
+                  u.createAccount(
+                      Address.fromHexString(String.format("0x%040x", i + 1)), i, Wei.of(i + 1));
+                }
+              });
+      final PersistedBlock block =
+          f.applyAndPersist(
+              u -> {
+                for (int i = 0; i < accountCount; i++) {
+                  final Address address = Address.fromHexString(String.format("0x%040x", i + 1));
+                  u.getAccount(address).setNonce(i + 1);
+                }
+              });
+      assertThat(f.rollback(block)).isEqualTo(parent.root);
+      assertThat(f.rollforward(block)).isEqualTo(block.root);
+    }
+  }
+
+  @Test
+  void scenarioAccountOnlyTrieLogRollForward_materializesSharedCodeZone() {
+    // Devnet block-190 shape: trie log carries account + storage replay but code=0 after
+    // deserialize because bytecode entries were unchanged reads at serialize time. FCU
+    // rollForward must still materialize CODE_ZONE for new code-hash headers.
+    final Bytes sharedCode = Bytes.repeat((byte) 0x02, 128);
+    try (final BinaryFixture f = new BinaryFixture()) {
+      final PersistedBlock b1 =
+          f.applyAndPersist(
+              u -> {
+                final MutableAccount b = u.createAccount(ADDRESS_TWO, 1, Wei.of(1L));
+                b.setCode(sharedCode);
+              });
+
+      final PersistedBlock b2 =
+          f.applyAndPersist(
+              u -> {
+                final MutableAccount a = u.createAccount(ADDRESS_ONE, 1, Wei.of(1L));
+                a.setCode(sharedCode);
+              });
+
+      final TrieLogLayer accountOnlyLayer = new TrieLogLayer();
+      accountOnlyLayer.setBlockHash(b2.layer.getBlockHash());
+      b2.layer
+          .getAccountChanges()
+          .forEach(
+              (address, change) ->
+                  accountOnlyLayer.addAccountChange(
+                      address, change.getPrior(), change.getUpdated()));
+      accountOnlyLayer.freeze();
+      assertThat(accountOnlyLayer.getCodeChanges()).isEmpty();
+
+      assertThat(f.rollback(b2)).isEqualTo(b1.root);
+      assertThat(f.rollforward(new PersistedBlock(accountOnlyLayer, b2.root)))
+          .as("account-only trielog rollforward with shared bytecode")
+          .isEqualTo(b2.root);
+    }
+  }
+
   // --------------------------------------------------------------------------------------------
   // Fixture: a fresh BINARY BonsaiWorldState backed by ExecutionContextTestFixture, reset to the
   // empty binary trie root (Hash.ZERO). Mirrors the setup of BinaryTrieVectorsTest.

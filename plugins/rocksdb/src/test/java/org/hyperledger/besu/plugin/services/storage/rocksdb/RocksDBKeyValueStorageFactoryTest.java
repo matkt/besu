@@ -76,11 +76,13 @@ public class RocksDBKeyValueStorageFactoryTest {
     try (final var storage = storageFactory.create(segment, commonConfiguration, metricsSystem)) {
       // Side effect is creation of the Metadata version file
       final BaseVersionedStorageFormat expectedVersion =
-          dataStorageFormat == BONSAI
-              ? BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION
-              : (dataStorageFormat == X_BONSAI_ARCHIVE
-                  ? BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION
-                  : BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION);
+          switch (dataStorageFormat) {
+            case BONSAI -> BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION;
+            case X_BONSAI_ARCHIVE ->
+                BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
+            case BINARY -> BaseVersionedStorageFormat.BINARY_WITH_RECEIPT_COMPACTION;
+            case FOREST -> BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION;
+          };
       assertThat(DatabaseMetadata.lookUpFrom(tempDataDir).getVersionedStorageFormat())
           .isEqualTo(expectedVersion);
     }
@@ -101,11 +103,13 @@ public class RocksDBKeyValueStorageFactoryTest {
     try (final var storage = storageFactory.create(segment, commonConfiguration, metricsSystem)) {
       // Side effect is creation of the Metadata version file
       final BaseVersionedStorageFormat expectedVersion =
-          dataStorageFormat == BONSAI
-              ? BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION
-              : (dataStorageFormat == X_BONSAI_ARCHIVE
-                  ? BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION
-                  : BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION);
+          switch (dataStorageFormat) {
+            case BONSAI -> BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION;
+            case X_BONSAI_ARCHIVE ->
+                BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
+            case BINARY -> BaseVersionedStorageFormat.BINARY_WITH_RECEIPT_COMPACTION;
+            case FOREST -> BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION;
+          };
       assertThat(DatabaseMetadata.lookUpFrom(tempDataDir).getVersionedStorageFormat())
           .isEqualTo(expectedVersion);
     }

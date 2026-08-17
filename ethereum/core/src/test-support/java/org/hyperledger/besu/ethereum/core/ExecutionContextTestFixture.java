@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecAdapters;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
 import org.hyperledger.besu.ethereum.storage.keyvalue.VariablesKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -59,8 +60,19 @@ public class ExecutionContextTestFixture {
       final KeyValueStorage blockchainKeyValueStorage,
       final KeyValueStorage variablesKeyValueStorage,
       final Optional<DataStorageFormat> dataStorageFormat) {
+    final DataStorageConfiguration genesisStorageConfiguration =
+        dataStorageFormat
+            .map(
+                format ->
+                    switch (format) {
+                      case BINARY -> DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
+                      case BONSAI -> DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
+                      default -> DataStorageConfiguration.DEFAULT_CONFIG;
+                    })
+            .orElse(DataStorageConfiguration.DEFAULT_CONFIG);
     final GenesisState genesisState =
-        GenesisState.fromConfig(genesisConfig, protocolSchedule, new BonsaiCodeCache());
+        GenesisState.fromConfig(
+            genesisStorageConfiguration, genesisConfig, protocolSchedule, new BonsaiCodeCache());
     this.genesis = genesisState.getBlock();
     this.blockchainKeyValueStorage = blockchainKeyValueStorage;
     this.variablesKeyValueStorage = variablesKeyValueStorage;
