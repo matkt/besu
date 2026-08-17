@@ -193,9 +193,9 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       final Hash updatedAddressHash = updatedAddress.addressHash();
       final BonsaiAccount accountOriginal =
           worldStateUpdater.getAccountsToUpdate().get(updatedAddress).getPrior();
+      final boolean storageCleared = worldStateUpdater.getStorageToClear().contains(updatedAddress);
       final Hash storageRoot =
-          (accountOriginal == null
-                  || worldStateUpdater.getStorageToClear().contains(updatedAddress))
+          (accountOriginal == null || storageCleared)
               ? Hash.EMPTY_TRIE_HASH
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
@@ -206,7 +206,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         final Hash slotHash = storageUpdate.getKey().getSlotHash();
         final UInt256 updatedStorage = storageUpdate.getValue().getUpdated();
         try {
-          if (!storageUpdate.getValue().isUnchanged()) {
+          if (storageCleared || !storageUpdate.getValue().isUnchanged()) {
             if (updatedStorage == null || updatedStorage.equals(UInt256.ZERO)) {
               sink.removeStorageValueBySlotHash(updatedAddressHash, slotHash);
               storageTrie.remove(slotHash.getBytes());
