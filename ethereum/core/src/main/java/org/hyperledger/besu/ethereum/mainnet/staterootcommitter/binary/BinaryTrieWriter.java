@@ -73,7 +73,13 @@ public final class BinaryTrieWriter {
   public Hash commit() {
     if (!storageFrozen) {
       stateTrie.commit(
-          (location, hash, value) -> writes.add(u -> u.putTrieNode(location, hash, value)));
+          (location, hash, value) -> writes.add(u -> {
+            if(value==null){
+              u.removeTrieNode(location);
+            } else {
+              u.putTrieNode(location, hash, value);
+            }
+          }));
     }
     return Hash.wrap(stateTrie.getRootHash());
   }
