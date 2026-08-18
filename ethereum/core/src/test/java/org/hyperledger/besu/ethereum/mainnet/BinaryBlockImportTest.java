@@ -36,7 +36,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.Transaction;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -69,10 +69,10 @@ import org.web3j.abi.datatypes.generated.Uint256;
  *
  * <p>Genesis mainnet state is written with a Merkle root; tests reset the trie root to {@link
  * Hash#ZERO} before exercising the binary state-root committer (same pattern as {@link
- * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitterTest}).
+ * org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter.DefaultBinaryStateRootCommitterTest}).
  *
  * <p>Expected post-block state roots are computed by executing the block body (without persisting)
- * and running {@link BinaryStateRootCommitter}; the resulting root is set on the block header
+ * and running {@link DefaultBinaryStateRootCommitter}; the resulting root is set on the block header
  * before {@link BlockProcessor#processBlock} is called.
  */
 @SuppressWarnings("rawtypes")
@@ -353,7 +353,7 @@ class BinaryBlockImportTest {
           () -> "Block body execution failed: " + bodyResult.errorMessage.orElse("(no message)"));
 
       final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
-      return new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+      return new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
     }
   }
 

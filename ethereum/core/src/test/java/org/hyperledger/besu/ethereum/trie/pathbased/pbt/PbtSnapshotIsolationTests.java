@@ -21,6 +21,7 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.World
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.AbstractIsolationTests;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -46,7 +47,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * don't match the block transactions and {@code appendBlock} rejects them. Making this suite
  * binary-correct requires a protocol-schedule / genesis-config hook in {@link
  * AbstractIsolationTests} (binary-trie fork + {@link
- * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter}); that
+ * DefaultBinaryStateRootCommitter}); that
  * test-infra change is deferred. The rolling semantics this would cover are already exercised
  * end-to-end by {@code PbtLogRollingTests}.
  */

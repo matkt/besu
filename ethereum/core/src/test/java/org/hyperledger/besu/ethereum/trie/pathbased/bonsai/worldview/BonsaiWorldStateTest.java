@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
@@ -54,15 +54,15 @@ class BonsaiWorldStateTest {
   private static final Hash ACCOUNT_HASH = Address.ZERO.addressHash();
   private static final Address ACCOUNT = Address.ZERO;
 
-  private final DefaultStateRootCommitter committer = new DefaultStateRootCommitter();
+  private final DefaultPatriciaStateRootCommitter committer = new DefaultPatriciaStateRootCommitter();
 
   private void applyCodeUpdate(final BonsaiWorldStateUpdateAccumulator accumulator) {
     when(accumulator.getAccountsToUpdate()).thenReturn(Map.of());
     when(accumulator.getStorageToUpdate()).thenReturn(Map.of());
     when(accumulator.getStorageToClear()).thenReturn(Set.of());
     when(bonsaiWorldState.isStorageFrozen()).thenReturn(false);
-    // MPT trie construction now lives in MptTrieFactory; drive it to a NoOp trie by disabling the
-    // trie, so the committer's code-write path runs without a real MPT.
+    // Patricia trie construction now lives in PatriciaTrieFactory; drive it to a NoOp trie by
+    // disabling the trie, so the committer's code-write path runs without a real Patricia trie.
     when(bonsaiWorldState.getWorldStateRootHash()).thenReturn(Hash.wrap(Bytes32.ZERO));
     when(bonsaiWorldState.getWorldStateConfig())
         .thenReturn(WorldStateConfig.newBuilder().trieDisabled(true).build());

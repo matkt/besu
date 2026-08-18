@@ -21,7 +21,7 @@ import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.MptTrieFactory;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.PatriciaTrieFactory;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BinaryStorageRootStrategy;
@@ -515,14 +515,14 @@ public class BonsaiWorldStateUpdateAccumulator
 
       final BonsaiAccount originalValue = accountValue.getPrior();
       if (originalValue != null) {
-        // Enumerate and delete addresses not updated. This deletion enumeration is MPT-only:
-        // binary-trie accounts carry no per-account MPT storage trie (their storage lives in the
-        // flat DB), and the binaryTrie fork removes SELFDESTRUCT, so binary accounts never reach
-        // this deletion path. Guard on hasStorageRoot() so MptTrieFactory is not invoked for
-        // binary accounts (which would have no storage root to enumerate).
+        // Enumerate and delete addresses not updated. This deletion enumeration is Patricia-only:
+        // binary-trie accounts carry no per-account Patricia storage trie (their storage lives in
+        // the flat DB), and the binaryTrie fork removes SELFDESTRUCT, so binary accounts never
+        // reach this deletion path. Guard on hasStorageRoot() so PatriciaTrieFactory is not
+        // invoked for binary accounts (which would have no storage root to enumerate).
         if (originalValue.hasStorageRoot()) {
           final Hash storageRoot = originalValue.getStorageRoot();
-          MptTrieFactory.getAllAccountStorage(
+          PatriciaTrieFactory.getAllAccountStorage(
                   (BonsaiWorldState) wrappedWorldView(), deletedAddress, storageRoot)
               .forEach(
                   (keyHash, entryValue) -> {

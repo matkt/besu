@@ -27,7 +27,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTestSupport;
@@ -59,14 +59,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * Binary-trie mirror of {@code LogRollingTests}. Exercises trie-log roll-forward / roll-back
  * against a {@link DataStorageFormat#BINARY} world state and asserts the binary state root,
- * recomputed via {@link BinaryStateRootCommitter}, matches the live-execution root after each roll.
+ * recomputed via {@link DefaultBinaryStateRootCommitter}, matches the live-execution root after each roll.
  *
  * <p>This only works because the {@link PbtTrieLogFactory} carries the storage slot key preimage;
  * the legacy MPT factory serializes only the slot hash, which would leave {@code
  * StorageSlotKey.getSlotKey()} empty and make {@code BinaryStateRootCommitter.applyStorage} throw
  * after a roll.
  *
- * <p>The scenario tests below drive the REAL {@link BinaryStateRootCommitter} against a real BINARY
+ * <p>The scenario tests below drive the REAL {@link DefaultBinaryStateRootCommitter} against a real BINARY
  * {@link BonsaiWorldState} for every root. Each scenario applies changes → persists (capturing a
  * PBT trie-log layer) → verifies the root → rolls back to the empty state (root {@link Hash#ZERO})
  * → rolls forward → verifies the root again. Multi-block scenarios chain several layers and roll
@@ -95,7 +95,7 @@ class PbtLogRollingTests {
   private InMemoryKeyValueStorageProvider secondProvider;
 
   private final Blockchain blockchain = mock(Blockchain.class);
-  private final BinaryStateRootCommitter binaryCommitter = new BinaryStateRootCommitter();
+  private final DefaultBinaryStateRootCommitter binaryCommitter = new DefaultBinaryStateRootCommitter();
 
   @BeforeEach
   void createStorage() {
@@ -127,7 +127,7 @@ class PbtLogRollingTests {
   }
 
   private Hash liveRoot(final BonsaiWorldState worldState) {
-    return new BinaryStateRootCommitter()
+    return new DefaultBinaryStateRootCommitter()
         .compute(worldState, null, worldState.updater().copy())
         .root();
   }
@@ -679,7 +679,7 @@ class PbtLogRollingTests {
   private static final class BinaryFixture implements AutoCloseable {
     private final ExecutionContextTestFixture contextFixture;
     private final BonsaiWorldState worldState;
-    private final BinaryStateRootCommitter committer = new BinaryStateRootCommitter();
+    private final DefaultBinaryStateRootCommitter committer = new DefaultBinaryStateRootCommitter();
     private BlockHeader previousHeader;
     private long blockNumber;
 

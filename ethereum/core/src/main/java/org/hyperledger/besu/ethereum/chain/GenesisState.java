@@ -31,7 +31,7 @@ import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Withdrawal;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -190,7 +190,7 @@ public final class GenesisState {
     // PBT-rooted from block 0 when --data-storage-format=BINARY. The default persist() path uses
     // the MPT/Keccak committer; BINARY needs the partitioned-binary-trie committer.
     if (isBinaryWorldState(target)) {
-      target.persist(rootHeader, new BinaryStateRootCommitter());
+      target.persist(rootHeader, new DefaultBinaryStateRootCommitter());
     } else {
       target.persist(rootHeader);
     }

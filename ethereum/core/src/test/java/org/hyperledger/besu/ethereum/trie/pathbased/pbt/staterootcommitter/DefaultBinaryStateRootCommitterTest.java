@@ -30,8 +30,9 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -55,7 +56,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-class BinaryStateRootCommitterTest {
+class DefaultBinaryStateRootCommitterTest {
 
   private ExecutionContextTestFixture contextTestFixture;
   private ProtocolContext protocolContext;
@@ -119,12 +120,12 @@ class BinaryStateRootCommitterTest {
             factory.forBlock(
                 protocolContext, blockHeader, Optional.empty(), worldState.isStorageFrozen());
 
-        assertThat(committer).isInstanceOf(BinaryStateRootCommitter.class);
+        assertThat(committer).isInstanceOf(DefaultBinaryStateRootCommitter.class);
       }
     }
 
     @Test
-    void factoryReturnsBinary_whenBalPresent() {
+    void factoryReturnsBinaryBal_whenBalPresentAndEnabled() {
       final BlockAccessList bal =
           new BlockAccessList(
               List.of(
@@ -142,7 +143,33 @@ class BinaryStateRootCommitterTest {
             factory.forBlock(
                 protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
 
-        assertThat(committer).isInstanceOf(BinaryStateRootCommitter.class);
+        assertThat(committer).isInstanceOf(BalStateRootCommitter.class);
+      }
+    }
+
+    @Test
+    void factoryReturnsBinary_whenBalPresentButDisabled() {
+      final BlockAccessList bal =
+          new BlockAccessList(
+              List.of(
+                  new AccountChanges(
+                      testAddress("a1"),
+                      List.of(),
+                      List.of(),
+                      List.of(new BalanceChange(0, Wei.of(1))),
+                      List.of(new NonceChange(0, 1L)),
+                      List.of())));
+      final BlockHeader blockHeader = childHeader(chainHeadHeader.getStateRoot());
+      final StateRootCommitterFactory disabledFactory =
+          new StateRootCommitterFactory(
+              ImmutableBalConfiguration.builder().isBalStateRootEnabled(false).build());
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        final StateRootCommitter committer =
+            disabledFactory.forBlock(
+                protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
+
+        assertThat(committer).isInstanceOf(DefaultBinaryStateRootCommitter.class);
       }
     }
   }
@@ -446,7 +473,7 @@ class BinaryStateRootCommitterTest {
         assertThat(accumulator.getAccountsToUpdate().get(address).getPrior()).isNotNull();
 
         final Hash rootAfterDelete =
-            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+            new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
         assertThat(rootAfterDelete).isNotEqualTo(rootWithAccount);
         assertThat(rootAfterDelete).isEqualTo(Hash.ZERO);
       }
@@ -501,7 +528,7 @@ class BinaryStateRootCommitterTest {
         accumulator.commit();
 
         final Hash rootAfterZero =
-            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+            new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
         assertThat(rootAfterZero).isEqualTo(rootAccountOnly);
       }
     }
@@ -585,7 +612,7 @@ class BinaryStateRootCommitterTest {
         accumulator.commit();
 
         final Hash rootAfterB =
-            new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+            new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
         assertThat(rootAfterB).isEqualTo(expectedBoth);
       }
     }
@@ -674,7 +701,7 @@ class BinaryStateRootCommitterTest {
       final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulatorConsumer.accept(accumulator);
       accumulator.commit();
-      return new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+      return new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
     } finally {
       worldState.close();
     }
@@ -694,7 +721,7 @@ class BinaryStateRootCommitterTest {
       final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
       accumulatorConsumer.accept(accumulator);
       accumulator.commit();
-      return new DefaultStateRootCommitter().compute(worldState, null, accumulator).root();
+      return new DefaultPatriciaStateRootCommitter().compute(worldState, null, accumulator).root();
     } finally {
       worldState.close();
     }

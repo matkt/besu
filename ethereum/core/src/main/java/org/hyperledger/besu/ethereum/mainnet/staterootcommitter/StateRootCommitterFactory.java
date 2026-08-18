@@ -18,6 +18,10 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.BinaryBalEngine;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.PatriciaBalEngine;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -32,8 +36,10 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>{@link ForestStateRootCommitter} — Forest archive
- *   <li>{@link BalStateRootCommitter} — Bonsai + BAL background root
- *   <li>{@link DefaultStateRootCommitter} — Bonsai accumulator at persist
+ *   <li>{@link BalStateRootCommitter} — BAL background root ({@link PatriciaBalEngine} or {@link
+ *       BinaryBalEngine})
+ *   <li>{@link DefaultPatriciaStateRootCommitter} — Patricia accumulator at persist
+ *   <li>{@link DefaultBinaryStateRootCommitter} — Binary accumulator at persist
  * </ul>
  */
 public final class StateRootCommitterFactory {
@@ -41,7 +47,7 @@ public final class StateRootCommitterFactory {
   private enum Mode {
     BAL,
     BINARY,
-    DEFAULT,
+    PATRICIA,
     FOREST
   }
 
@@ -62,9 +68,10 @@ public final class StateRootCommitterFactory {
               protocolContext,
               blockHeader,
               BlockAccessListAccountLookup.of(maybeBal.get()),
-              storageFrozen);
-      case BINARY -> new BinaryStateRootCommitter();
-      case DEFAULT -> new DefaultStateRootCommitter();
+              storageFrozen,
+              balEngine(protocolContext));
+      case BINARY -> new DefaultBinaryStateRootCommitter();
+      case PATRICIA -> new DefaultPatriciaStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
     };
   }
@@ -74,15 +81,19 @@ public final class StateRootCommitterFactory {
     if (protocolContext.getWorldStateArchive() instanceof ForestWorldStateArchive) {
       return Mode.FOREST;
     }
-    if (isBinaryTrie(protocolContext)) {
-      return Mode.BINARY;
-    }
     if (maybeBal.isPresent()
         && balConfiguration.isBalStateRootEnabled()
         && !isTrieDisabled(protocolContext)) {
       return Mode.BAL;
     }
-    return Mode.DEFAULT;
+    if (isBinaryTrie(protocolContext)) {
+      return Mode.BINARY;
+    }
+    return Mode.PATRICIA;
+  }
+
+  private static BalStateRootCommitter.Engine balEngine(final ProtocolContext protocolContext) {
+    return isBinaryTrie(protocolContext) ? BinaryBalEngine.INSTANCE : PatriciaBalEngine.INSTANCE;
   }
 
   private static boolean isTrieDisabled(final ProtocolContext protocolContext) {

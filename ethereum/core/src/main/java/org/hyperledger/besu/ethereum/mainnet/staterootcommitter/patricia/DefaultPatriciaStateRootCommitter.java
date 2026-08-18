@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
+package org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia;
 
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView.encodeTrieValue;
 
@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
@@ -51,16 +52,19 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
 
-/** Bonsai path-based root from accumulated block updates (no BAL background). */
-public class DefaultStateRootCommitter implements StateRootCommitter {
+/**
+ * Path-based state-root committer that materializes accumulator updates into the Patricia trie
+ * (no BAL background).
+ */
+public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
 
   private final BiFunction<BonsaiWorldState, Address, Hash> addressHasher;
 
-  public DefaultStateRootCommitter() {
+  public DefaultPatriciaStateRootCommitter() {
     this((bonsai, address) -> address.addressHash());
   }
 
-  public DefaultStateRootCommitter(
+  public DefaultPatriciaStateRootCommitter(
       final BiFunction<BonsaiWorldState, Address, Hash> addressHasher) {
     this.addressHasher = addressHasher;
   }
@@ -120,7 +124,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         collectCodeWrites();
       }
 
-      final MerkleTrie<Bytes, Bytes> accountTrie = MptTrieFactory.createAccountStateTrie(bonsai);
+      final MerkleTrie<Bytes, Bytes> accountTrie = PatriciaTrieFactory.createAccountStateTrie(bonsai);
 
       // Step 1: launch storage trie updates concurrently for every touched account.
       for (final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
@@ -179,25 +183,25 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
       final Hash storageRootForLeaf;
       if (storageFuture != null) {
         storageRootForLeaf = storageFuture.join();
-        // Patch the MPT account's held root so the MPT flat-DB encoding includes it. Binary
-        // accounts carry no storage root (their strategy rejects setStorageRoot); their MPT trie
-        // leaf still uses the computed storage root for the genesis Merkle root.
+        // Patch the Patricia account's held root so the Patricia flat-DB encoding includes it.
+        // Binary accounts carry no storage root (their strategy rejects setStorageRoot); their
+        // Patricia trie leaf still uses the computed storage root for the genesis Merkle root.
         if (!bonsai.isTrieDisabled() && updatedAccount.hasStorageRoot()) {
           updatedAccount.setStorageRoot(storageRootForLeaf);
         }
       } else {
-        // No storage updates for this account: reuse the account's existing root (MPT) or, for
-        // binary accounts (no storage root), the empty-trie hash for the MPT trie leaf.
+        // No storage updates for this account: reuse the account's existing root (Patricia) or,
+        // for binary accounts (no storage root), the empty-trie hash for the Patricia trie leaf.
         storageRootForLeaf =
             updatedAccount.hasStorageRoot()
                 ? updatedAccount.getStorageRoot()
                 : Hash.EMPTY_TRIE_HASH;
       }
 
-      // The MPT account trie leaf uses the 4-field MPT RLP, built from a PmtStateTrieAccountValue
-      // rather than BonsaiAccount.serializeAccount() so binary accounts (no storage root) are
-      // handled without throwing. The binary flat-DB cache below uses the format-aware codec and
-      // stays storage-root-free.
+      // The Patricia account trie leaf uses the 4-field Patricia RLP, built from a
+      // PmtStateTrieAccountValue rather than BonsaiAccount.serializeAccount() so binary accounts
+      // (no storage root) are handled without throwing. The binary flat-DB cache below uses the
+      // format-aware codec and stays storage-root-free.
       final BytesValueRLPOutput leafOut = new BytesValueRLPOutput();
       new PmtStateTrieAccountValue(
               updatedAccount.getNonce(),
@@ -232,7 +236,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
               ? Hash.EMPTY_TRIE_HASH
               : accountOriginal.getStorageRoot();
       final MerkleTrie<Bytes, Bytes> storageTrie =
-          MptTrieFactory.createStorageTrie(bonsai, updatedAddressHash, storageRoot);
+          PatriciaTrieFactory.createStorageTrie(bonsai, updatedAddressHash, storageRoot);
 
       for (final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> storageUpdate :
           storageUpdates.entrySet()) {
@@ -296,7 +300,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
         }
         final Hash addressHash = addressHasher.apply(bonsai, address);
         final MerkleTrie<Bytes, Bytes> storageTrie =
-            MptTrieFactory.createStorageTrie(bonsai, addressHash, oldAccount.getStorageRoot());
+            PatriciaTrieFactory.createStorageTrie(bonsai, addressHash, oldAccount.getStorageRoot());
         try {
           StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> storageToDelete = null;
           Bytes32 nextKeyHash = Bytes32.ZERO;

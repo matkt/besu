@@ -45,6 +45,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.N
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
@@ -280,7 +281,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = nonFrozenHarness.newWritableWorldState()) {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
         nonFrozenRoot = worldState.rootHash();
       }
 
@@ -293,7 +294,7 @@ class StateRootCommitterIntegrationTest {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
         worldState.freezeStorage();
-        worldState.persist(frozenHeader, new DefaultStateRootCommitter());
+        worldState.persist(frozenHeader, new DefaultPatriciaStateRootCommitter());
         frozenRoot = worldState.rootHash();
       }
 
@@ -309,7 +310,7 @@ class StateRootCommitterIntegrationTest {
       final StateRootCommitterFactory factory = new StateRootCommitterFactory(balConfiguration());
 
       assertThat(factory.forBlock(harness.protocolContext(), blockHeader, Optional.empty(), false))
-          .isInstanceOf(DefaultStateRootCommitter.class);
+          .isInstanceOf(DefaultPatriciaStateRootCommitter.class);
       assertThat(
               factory.forBlock(
                   harness.protocolContext(), blockHeader, Optional.of(blockChange.toBal()), false))
@@ -336,7 +337,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
       }
 
       assertThat(harness.trieLogExists(blockHeader)).isTrue();
@@ -364,7 +365,7 @@ class StateRootCommitterIntegrationTest {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
         worldState.freezeStorage();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
       }
 
       assertThat(harness.trieLogExists(blockHeader)).isTrue();
@@ -393,7 +394,7 @@ class StateRootCommitterIntegrationTest {
                   .orElseThrow()) {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
       }
 
       assertThat(harness.trieLogExists(blockHeader)).isTrue();
@@ -425,7 +426,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
         referenceSnapshot = harness.captureFlatDbSnapshot();
       }
 
@@ -437,7 +438,7 @@ class StateRootCommitterIntegrationTest {
         blockChange.apply(frozenWorldState.updater());
         frozenWorldState.updater().commit();
         frozenWorldState.freezeStorage();
-        frozenWorldState.persist(frozenBlockHeader, new DefaultStateRootCommitter());
+        frozenWorldState.persist(frozenBlockHeader, new DefaultPatriciaStateRootCommitter());
       }
 
       assertThat(frozenHarness.trieLogExists(frozenBlockHeader)).isTrue();
@@ -491,7 +492,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
-        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+        worldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
         defaultSnapshot = harness.captureFlatDbSnapshot();
       }
 
@@ -651,11 +652,11 @@ class StateRootCommitterIntegrationTest {
       blockChange.apply(bonsaiWorldState.updater());
       bonsaiWorldState.updater().commit();
       final Hash root =
-          new DefaultStateRootCommitter()
+          new DefaultPatriciaStateRootCommitter()
               .compute(bonsaiWorldState, null, bonsaiWorldState.updater())
               .root();
       final BlockHeader blockHeader = childHeader(root);
-      bonsaiWorldState.persist(blockHeader, new DefaultStateRootCommitter());
+      bonsaiWorldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
       appendBlock(blockHeader);
       return bonsaiWorldState.rootHash();
     }
@@ -664,7 +665,7 @@ class StateRootCommitterIntegrationTest {
       blockChange.apply(bonsaiWorldState.updater());
       bonsaiWorldState.updater().commit();
       final Hash root =
-          new DefaultStateRootCommitter()
+          new DefaultPatriciaStateRootCommitter()
               .compute(bonsaiWorldState, null, bonsaiWorldState.updater())
               .root();
       final BlockHeader blockHeader = childHeader(root);
@@ -695,14 +696,14 @@ class StateRootCommitterIntegrationTest {
     Hash computeRootWithoutPersist(final BlockChange blockChange) {
       blockChange.apply(bonsaiWorldState.updater());
       bonsaiWorldState.updater().commit();
-      return new DefaultStateRootCommitter()
+      return new DefaultPatriciaStateRootCommitter()
           .compute(bonsaiWorldState, null, bonsaiWorldState.updater())
           .root();
     }
 
     Hash persistBonsaiWithPrecomputedRoot(final Hash expectedRoot) {
       final BlockHeader blockHeader = childHeader(expectedRoot);
-      bonsaiWorldState.persist(blockHeader, new DefaultStateRootCommitter());
+      bonsaiWorldState.persist(blockHeader, new DefaultPatriciaStateRootCommitter());
       appendBlock(blockHeader);
       return bonsaiWorldState.rootHash();
     }
@@ -922,7 +923,7 @@ class StateRootCommitterIntegrationTest {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
         final Hash root =
-            new DefaultStateRootCommitter().compute(worldState, null, worldState.updater()).root();
+            new DefaultPatriciaStateRootCommitter().compute(worldState, null, worldState.updater()).root();
         (worldState.updater()).reset();
         return new BlockHeaderTestFixture()
             .parentHash(parent.getHash())

@@ -12,11 +12,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
+package org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NoOpMerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
@@ -34,16 +35,16 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * Builds Merkle Patricia Tries (MPT) rooted at a Bonsai world state.
+ * Builds Patricia tries rooted at a Bonsai world state.
  *
- * <p>MPT construction is format-specific and does not belong on the format-agnostic {@link
- * BonsaiWorldState}. Both MPT state-root committers ({@link DefaultStateRootCommitter} and {@link
- * BalStateRootCommitter}) and the MPT storage enumeration used for account deletion share this
- * factory, keeping {@code BonsaiWorldState} free of MPT-trie-construction details.
+ * <p>Patricia construction is format-specific and does not belong on the format-agnostic {@link
+ * BonsaiWorldState}. Both Patricia state-root committers ({@link DefaultPatriciaStateRootCommitter}
+ * and {@link BalStateRootCommitter}) and the Patricia storage enumeration used for account deletion
+ * share this factory, keeping {@code BonsaiWorldState} free of Patricia-trie-construction details.
  */
-public final class MptTrieFactory {
+public final class PatriciaTrieFactory {
 
-  private MptTrieFactory() {}
+  private PatriciaTrieFactory() {}
 
   /** Account state trie rooted at the world state's current root, using the shared node cache. */
   public static MerkleTrie<Bytes, Bytes> createAccountStateTrie(final BonsaiWorldState worldState) {
@@ -75,9 +76,10 @@ public final class MptTrieFactory {
   }
 
   /**
-   * Builds an MPT from an arbitrary {@link NodeLoader} and root hash. Used for MPT storage
-   * enumeration during account deletion (see {@link #getAllAccountStorage}). Defaults to the
-   * account-trie fork join pool, matching the prior {@code BonsaiWorldState.createTrie} behaviour.
+   * Builds a Patricia trie from an arbitrary {@link NodeLoader} and root hash. Used for Patricia
+   * storage enumeration during account deletion (see {@link #getAllAccountStorage}). Defaults to
+   * the account-trie fork join pool, matching the prior {@code BonsaiWorldState.createTrie}
+   * behaviour.
    */
   public static MerkleTrie<Bytes, Bytes> createTrie(
       final NodeLoader nodeLoader,
@@ -88,16 +90,17 @@ public final class MptTrieFactory {
   }
 
   /**
-   * Enumerates every storage slot of an account by walking its MPT storage trie. Used during
+   * Enumerates every storage slot of an account by walking its Patricia storage trie. Used during
    * account deletion to clear storage slots that were not touched in the current transaction.
    *
-   * <p>This is MPT-specific: it builds a storage trie rooted at {@code rootHash} over the world
-   * state's trie nodes and returns the trie entries keyed by hashed slot. Binary accounts carry no
-   * storage root and must not reach this path (callers guard with {@code hasStorageRoot()}).
+   * <p>This is Patricia-specific: it builds a storage trie rooted at {@code rootHash} over the
+   * world state's trie nodes and returns the trie entries keyed by hashed slot. Binary accounts
+   * carry no storage root and must not reach this path (callers guard with {@code
+   * hasStorageRoot()}).
    *
    * @param worldState the world state providing the trie node storage and config.
    * @param address the account whose storage is enumerated.
-   * @param rootHash the root of the account's MPT storage trie.
+   * @param rootHash the root of the account's Patricia storage trie.
    * @return a map of hashed-slot-key → RLP-encoded storage value, as returned by {@link
    *     MerkleTrie#entriesFrom}.
    */

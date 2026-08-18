@@ -24,7 +24,7 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
@@ -280,7 +280,7 @@ class BinaryTrieVectorsTest {
         final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
         applyVectorAccounts(accumulator, accountsNode);
         accumulator.commit();
-        actual = new BinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        actual = new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
       }
       assertThat(actual).as(name).isEqualTo(Hash.fromHexString(expectedHex));
     }
@@ -325,7 +325,7 @@ class BinaryTrieVectorsTest {
       protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
 
       final Hash expected = Hash.fromHexString(expectedHex);
-      final BinaryStateRootCommitter binaryCommitter = new BinaryStateRootCommitter();
+      final DefaultBinaryStateRootCommitter binaryCommitter = new DefaultBinaryStateRootCommitter();
 
       // Obtain the non-frozen head world state (withBlockHeaderAndUpdateNodeHead) so persist()
       // writes the flat-db account info; a frozen world state (withBlockHeaderAndNoUpdateNodeHead)

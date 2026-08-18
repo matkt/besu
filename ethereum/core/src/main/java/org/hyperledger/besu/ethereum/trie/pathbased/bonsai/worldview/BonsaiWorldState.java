@@ -23,8 +23,8 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.StorageRootStrategy;
@@ -68,8 +68,8 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
 
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiWorldState.class);
 
-  protected static final DefaultStateRootCommitter DEFAULT_STATE_ROOT_COMMITTER =
-      new DefaultStateRootCommitter();
+  protected static final DefaultPatriciaStateRootCommitter DEFAULT_STATE_ROOT_COMMITTER =
+      new DefaultPatriciaStateRootCommitter();
 
   protected BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
   protected final BonsaiWorldStateCacheManager worldStateCacheManager;
@@ -528,15 +528,15 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   /**
    * Returns the state-root committer matching this world state's {@link DataStorageFormat}.
    *
-   * <p>BINARY uses {@link BinaryStateRootCommitter} (partitioned binary trie root); BONSAI/FOREST
-   * use the MPT/Keccak {@link DefaultStateRootCommitter}. This mirrors the routing done by {@link
+   * <p>BINARY uses {@link DefaultBinaryStateRootCommitter} (partitioned binary trie root); BONSAI/FOREST
+   * use the MPT/Keccak {@link DefaultPatriciaStateRootCommitter}. This mirrors the routing done by {@link
    * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory} for block
    * commit, so the no-committer {@link #persist(BlockHeader)} and the frozen-recompute paths in
    * {@link #rootHash()} / {@link #frontierRootHash()} produce the correct root for BINARY too.
    */
   protected StateRootCommitter formatAwareCommitter() {
     return worldStateKeyValueStorage.getDataStorageFormat() == DataStorageFormat.BINARY
-        ? new BinaryStateRootCommitter()
+        ? new DefaultBinaryStateRootCommitter()
         : DEFAULT_STATE_ROOT_COMMITTER;
   }
 
