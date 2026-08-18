@@ -328,11 +328,13 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
           throw re;
         } catch (final Exception e) {
           pathBasedUpdater.reset();
-          LOG.atDebug()
+          // The exception was a third addArgument on a two-placeholder message, so it
+          // never rendered. This path makes forkchoiceUpdated return INVALID.
+          LOG.atWarn()
               .setMessage("State rolling failed on {} for block hash {}")
               .addArgument(mutableState.getWorldStateStorage().getClass().getSimpleName())
               .addArgument(blockHash)
-              .addArgument(e)
+              .setCause(e)
               .log();
           return Optional.empty();
         }
