@@ -127,7 +127,16 @@ public class BinaryStateRootCommitter implements StateRootCommitter {
       if (!storageFrozen) {
         stateTrie.commit(
             (location, hash, value) ->
-                writes.add(updater -> updater.putTrieNode(location, hash, value)));
+                writes.add(
+                    updater -> {
+                      // CommitVisitor signals a deleted node as store(location, null, null);
+                      // putTrieNode dereferences the hash, so route those to removeTrieNode.
+                      if (hash == null || value == null) {
+                        updater.removeTrieNode(location);
+                      } else {
+                        updater.putTrieNode(location, hash, value);
+                      }
+                    }));
       }
       writeSink.addAll(writes);
       System.out.println(
