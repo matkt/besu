@@ -20,7 +20,7 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.TrieNodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -53,7 +53,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
    */
   public abstract Optional<Bytes> getFlatAccount(
       Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      NodeLoader nodeLoader,
+      TrieNodeLoader trieNodeLoader,
       Hash accountHash,
       SegmentedKeyValueStorage storage);
 
@@ -66,7 +66,7 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
   public abstract Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       Supplier<Optional<Bytes>> worldStateRootHashSupplier,
       Supplier<Optional<Bytes>> accountSupplier,
-      NodeLoader nodeLoader,
+      TrieNodeLoader trieNodeLoader,
       Hash accountHash,
       StorageSlotKey storageSlotKey,
       SegmentedKeyValueStorage storageStorage);

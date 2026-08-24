@@ -40,8 +40,10 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   CODE_STORAGE(new byte[] {7}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINARY)),
   ACCOUNT_STORAGE_STORAGE(
       new byte[] {8}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINARY), false, true, false),
-  TRIE_BRANCH_STORAGE(
+  PATRICIA_TRIE_BRANCH_STORAGE(
       new byte[] {9}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINARY), false, true, false),
+  BINARY_TRIE_BRANCH_STORAGE(
+      new byte[] {19}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINARY), false, true, false),
   TRIE_LOG_STORAGE(
       new byte[] {10}, EnumSet.of(BONSAI, X_BONSAI_ARCHIVE, BINARY), true, false, true),
   ACCOUNT_INFO_STATE_ARCHIVE(

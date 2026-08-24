@@ -923,7 +923,9 @@ class StateRootCommitterIntegrationTest {
         blockChange.apply(worldState.updater());
         worldState.updater().commit();
         final Hash root =
-            new DefaultPatriciaStateRootCommitter().compute(worldState, null, worldState.updater()).root();
+            new DefaultPatriciaStateRootCommitter()
+                .compute(worldState, null, worldState.updater())
+                .root();
         (worldState.updater()).reset();
         return new BlockHeaderTestFixture()
             .parentHash(parent.getHash())

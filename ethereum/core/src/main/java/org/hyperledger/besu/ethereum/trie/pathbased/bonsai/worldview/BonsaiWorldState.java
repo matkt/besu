@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
@@ -39,13 +38,13 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.bal.BonsaiBalWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.TrieBranchSegments;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
@@ -53,6 +52,7 @@ import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -87,6 +87,8 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
   private final BonsaiCodeCache codeCache;
   private final EvmConfiguration evmConfiguration;
+  protected TrieBranchType trieBranchType;
+  private final BonsaiWorldStateProvider archive;
 
   public BonsaiWorldState(
       final BonsaiWorldStateProvider archive,
@@ -95,13 +97,31 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache) {
     this(
+        archive,
+        worldStateKeyValueStorage,
+        evmConfiguration,
+        worldStateConfig,
+        codeCache,
+        archive.getBlockchain().getChainHeadHeader());
+  }
+
+  public BonsaiWorldState(
+      final BonsaiWorldStateProvider archive,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final EvmConfiguration evmConfiguration,
+      final WorldStateConfig worldStateConfig,
+      final BonsaiCodeCache codeCache,
+      final BlockHeader blockHeader) {
+    this(
+        archive,
         worldStateKeyValueStorage,
         archive.getCachedMerkleTrieLoader(),
         archive.getWorldStateCacheManager(),
         archive.getTrieLogManager(),
         evmConfiguration,
         worldStateConfig,
-        codeCache);
+        codeCache,
+        archive.resolveTrieBranchType(blockHeader));
   }
 
   public BonsaiWorldState(
@@ -112,14 +132,60 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
       final EvmConfiguration evmConfiguration,
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache) {
+    this(
+        null,
+        worldStateKeyValueStorage,
+        bonsaiCachedMerkleTrieLoader,
+        worldStateCacheManager,
+        trieLogManager,
+        evmConfiguration,
+        worldStateConfig,
+        codeCache,
+        TrieBranchType.PATRICIA);
+  }
+
+  public BonsaiWorldState(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
+      final BonsaiWorldStateCacheManager worldStateCacheManager,
+      final TrieLogManager trieLogManager,
+      final EvmConfiguration evmConfiguration,
+      final WorldStateConfig worldStateConfig,
+      final BonsaiCodeCache codeCache,
+      final TrieBranchType trieBranchType) {
+    this(
+        null,
+        worldStateKeyValueStorage,
+        bonsaiCachedMerkleTrieLoader,
+        worldStateCacheManager,
+        trieLogManager,
+        evmConfiguration,
+        worldStateConfig,
+        codeCache,
+        trieBranchType);
+  }
+
+  private BonsaiWorldState(
+      final BonsaiWorldStateProvider archive,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
+      final BonsaiWorldStateCacheManager worldStateCacheManager,
+      final TrieLogManager trieLogManager,
+      final EvmConfiguration evmConfiguration,
+      final WorldStateConfig worldStateConfig,
+      final BonsaiCodeCache codeCache,
+      final TrieBranchType trieBranchType) {
+    this.archive = archive;
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
+    this.trieBranchType = trieBranchType;
     this.worldStateRootHash =
         Hash.wrap(
             Bytes32.wrap(
                 worldStateKeyValueStorage
-                    .getWorldStateRootHash()
-                    .orElse(getEmptyTrieHash().getBytes())));
-    this.worldStateBlockHash = worldStateKeyValueStorage.getWorldStateBlockHash().orElse(Hash.ZERO);
+                    .getWorldStateRootHash(trieBranchType)
+                    .orElse(emptyTrieHashFor(trieBranchType).getBytes())));
+    this.worldStateBlockHash =
+        worldStateKeyValueStorage.getWorldStateBlockHash(trieBranchType).orElse(Hash.ZERO);
     this.worldStateCacheManager = worldStateCacheManager;
     this.trieLogManager = trieLogManager;
     this.worldStateConfig = worldStateConfig;
@@ -169,6 +235,11 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
     return worldStateRootHash;
   }
 
+  /** Trie branch type used for world metadata and default state-root computation. */
+  public TrieBranchType getTrieBranchType() {
+    return trieBranchType;
+  }
+
   /**
    * Determines whether the current world state is directly modifying the "head" state of the
    * blockchain. A world state modifying the head directly updates the latest state of the node,
@@ -200,6 +271,9 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   public void resetWorldStateTo(final BlockHeader blockHeader) {
     worldStateBlockHash = blockHeader.getBlockHash();
     worldStateRootHash = blockHeader.getStateRoot();
+    if (archive != null) {
+      trieBranchType = archive.resolveTrieBranchType(blockHeader);
+    }
   }
 
   @Override
@@ -241,7 +315,10 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
     Runnable cacheWorldState = () -> {};
 
     try {
+
       final StateRootComputation computation = committer.compute(this, blockHeader, accumulator);
+      final SegmentIdentifier trieBranchSegment =
+          TrieBranchSegments.segmentFor(committer.getTrieBranchType());
       if (!isStorageFrozen()) {
         computation.applyTo(stateUpdater);
       }
@@ -258,26 +335,26 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
         stateUpdater
             .getWorldStateTransaction()
             .put(
-                TRIE_BRANCH_STORAGE,
+                trieBranchSegment,
                 WORLD_BLOCK_HASH_KEY,
                 blockHeader.getBlockHash().getBytes().toArrayUnsafe());
         worldStateBlockHash = blockHeader.getBlockHash();
       } else {
-        stateUpdater.getWorldStateTransaction().remove(TRIE_BRANCH_STORAGE, WORLD_BLOCK_HASH_KEY);
+        stateUpdater.getWorldStateTransaction().remove(trieBranchSegment, WORLD_BLOCK_HASH_KEY);
         worldStateBlockHash = null;
       }
 
       stateUpdater
           .getWorldStateTransaction()
           .put(
-              TRIE_BRANCH_STORAGE,
+              trieBranchSegment,
               WORLD_ROOT_HASH_KEY,
               calculatedRootHash.getBytes().toArrayUnsafe());
 
       stateUpdater
           .getWorldStateTransaction()
           .put(
-              TRIE_BRANCH_STORAGE,
+              trieBranchSegment,
               WORLD_BLOCK_NUMBER_KEY,
               Bytes.ofUnsignedLong(blockHeader == null ? 0L : blockHeader.getNumber())
                   .toArrayUnsafe());
@@ -515,27 +592,29 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   }
 
   protected Hash getEmptyTrieHash() {
+    return emptyTrieHashFor(trieBranchType);
+  }
+
+  private static Hash emptyTrieHashFor(final TrieBranchType trieBranchType) {
     // The partitioned binary trie's empty root is Bytes32.ZERO, not the MPT/Keccak empty root.
     // Returning the MPT empty root for a fresh BINARY world state would make the
     // BinaryStateRootCommitter try to load a non-existent node (the MPT empty node 0x80) and
     // fail to decode it as a binary trie node. Use ZERO so the binary trie starts from an empty
     // root instead.
-    return worldStateKeyValueStorage.getDataStorageFormat() == DataStorageFormat.BINARY
-        ? Hash.ZERO
-        : Hash.EMPTY_TRIE_HASH;
+    return trieBranchType == TrieBranchType.BINARY ? Hash.ZERO : Hash.EMPTY_TRIE_HASH;
   }
 
   /**
-   * Returns the state-root committer matching this world state's {@link DataStorageFormat}.
+   * Returns the state-root committer matching this world state's active {@link TrieBranchType}.
    *
-   * <p>BINARY uses {@link DefaultBinaryStateRootCommitter} (partitioned binary trie root); BONSAI/FOREST
-   * use the MPT/Keccak {@link DefaultPatriciaStateRootCommitter}. This mirrors the routing done by {@link
-   * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory} for block
-   * commit, so the no-committer {@link #persist(BlockHeader)} and the frozen-recompute paths in
-   * {@link #rootHash()} / {@link #frontierRootHash()} produce the correct root for BINARY too.
+   * <p>BINARY uses {@link DefaultBinaryStateRootCommitter}; Patricia uses {@link
+   * DefaultPatriciaStateRootCommitter}. This mirrors {@link
+   * org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory} routing for
+   * the no-committer {@link #persist(BlockHeader)} and frozen-recompute paths in {@link
+   * #rootHash()} / {@link #frontierRootHash()}.
    */
   protected StateRootCommitter formatAwareCommitter() {
-    return worldStateKeyValueStorage.getDataStorageFormat() == DataStorageFormat.BINARY
+    return trieBranchType == TrieBranchType.BINARY
         ? new DefaultBinaryStateRootCommitter()
         : DEFAULT_STATE_ROOT_COMMITTER;
   }

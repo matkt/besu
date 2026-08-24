@@ -36,6 +36,7 @@ import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,8 +54,8 @@ import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Path-based state-root committer that materializes accumulator updates into the Patricia trie
- * (no BAL background).
+ * Path-based state-root committer that materializes accumulator updates into the Patricia trie (no
+ * BAL background).
  */
 public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
 
@@ -62,6 +63,11 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
 
   public DefaultPatriciaStateRootCommitter() {
     this((bonsai, address) -> address.addressHash());
+  }
+
+  @Override
+  public TrieBranchType getTrieBranchType() {
+    return TrieBranchType.PATRICIA;
   }
 
   public DefaultPatriciaStateRootCommitter(
@@ -124,7 +130,8 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
         collectCodeWrites();
       }
 
-      final MerkleTrie<Bytes, Bytes> accountTrie = PatriciaTrieFactory.createAccountStateTrie(bonsai);
+      final MerkleTrie<Bytes, Bytes> accountTrie =
+          PatriciaTrieFactory.createAccountStateTrie(bonsai);
 
       // Step 1: launch storage trie updates concurrently for every touched account.
       for (final Map.Entry<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
@@ -168,7 +175,8 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
 
       if (!storageFrozen) {
         accountTrie.commit(
-            (location, hash, value) -> writes.add(u -> u.putTrieNode(location, hash, value)));
+            (location, hash, value) ->
+                writes.add(u -> u.putTrieNode(TrieBranchType.PATRICIA, location, hash, value)));
       }
       writeSink.addAll(writes);
       return Hash.wrap(accountTrie.getRootHash());
@@ -272,6 +280,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
                 writes.add(
                     u ->
                         u.putTrieNode(
+                            TrieBranchType.PATRICIA,
                             Bytes.concatenate(updatedAddressHash.getBytes(), location),
                             nodeHash,
                             value)));

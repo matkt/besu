@@ -20,6 +20,7 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.TrieNodeLoader;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -28,6 +29,7 @@ import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 import java.util.function.Function;
@@ -84,7 +86,7 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
   @Override
   public Optional<Bytes> getFlatAccount(
       final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
-      final NodeLoader nodeLoader,
+      final TrieNodeLoader trieNodeLoader,
       final Hash accountHash,
       final SegmentedKeyValueStorage storage) {
     getAccountCounter.inc();
@@ -96,7 +98,10 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
       if (worldStateRootHash.isPresent()) {
         response =
             new StoredMerklePatriciaTrie<>(
-                    new StoredNodeFactory<>(nodeLoader, Function.identity(), Function.identity()),
+                    new StoredNodeFactory<>(
+                        patriciaNodeLoader(trieNodeLoader),
+                        Function.identity(),
+                        Function.identity()),
                     Bytes32.wrap(worldStateRootHash.get()))
                 .get(accountHash.getBytes());
         if (response.isEmpty()) {
@@ -116,7 +121,7 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
   public Optional<Bytes> getFlatStorageValueByStorageSlotKey(
       final Supplier<Optional<Bytes>> worldStateRootHashSupplier,
       final Supplier<Optional<Bytes>> accountSupplier,
-      final NodeLoader nodeLoader,
+      final TrieNodeLoader trieNodeLoader,
       final Hash accountHash,
       final StorageSlotKey storageSlotKey,
       final SegmentedKeyValueStorage storage) {
@@ -144,7 +149,10 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
       if (storageRoot.isPresent() && worldStateRootHash.isPresent()) {
         final NodeLoader prefixedLoader =
             (location, hash) ->
-                nodeLoader.getNode(Bytes.concatenate(accountHash.getBytes(), location), hash);
+                trieNodeLoader.getTrieNode(
+                    TrieBranchType.PATRICIA,
+                    Bytes.concatenate(accountHash.getBytes(), location),
+                    hash);
         response =
             new StoredMerklePatriciaTrie<>(
                     new StoredNodeFactory<>(
@@ -159,5 +167,9 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
       getStorageValueFlatDatabaseCounter.inc();
     }
     return response;
+  }
+
+  private static NodeLoader patriciaNodeLoader(final TrieNodeLoader trieNodeLoader) {
+    return (location, hash) -> trieNodeLoader.getTrieNode(TrieBranchType.PATRICIA, location, hash);
   }
 }

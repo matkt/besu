@@ -54,7 +54,8 @@ class BonsaiWorldStateTest {
   private static final Hash ACCOUNT_HASH = Address.ZERO.addressHash();
   private static final Address ACCOUNT = Address.ZERO;
 
-  private final DefaultPatriciaStateRootCommitter committer = new DefaultPatriciaStateRootCommitter();
+  private final DefaultPatriciaStateRootCommitter committer =
+      new DefaultPatriciaStateRootCommitter();
 
   private void applyCodeUpdate(final BonsaiWorldStateUpdateAccumulator accumulator) {
     when(accumulator.getAccountsToUpdate()).thenReturn(Map.of());

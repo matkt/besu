@@ -16,8 +16,9 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -27,6 +28,7 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.TrieBranchSegments;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.FlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.VersionedFlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
@@ -41,6 +43,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.nio.charset.StandardCharsets;
@@ -98,7 +101,11 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     this.composedWorldStateStorage =
         provider.getStorageBySegmentIdentifiers(
             List.of(
-                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE));
+                ACCOUNT_INFO_STATE,
+                CODE_STORAGE,
+                ACCOUNT_STORAGE_STORAGE,
+                PATRICIA_TRIE_BRANCH_STORAGE,
+                BINARY_TRIE_BRANCH_STORAGE));
     this.trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
     this.flatDbStrategyProvider =
@@ -178,7 +185,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatAccount(
-                    this::getWorldStateRootHash,
+                    this::getActiveWorldStateRootHash,
                     this::getTrieNode,
                     accountHash,
                     composedWorldStateStorage));
@@ -195,7 +202,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatStorageValueByStorageSlotKey(
-                    this::getWorldStateRootHash,
+                    this::getActiveWorldStateRootHash,
                     () -> getAccount(accountHash),
                     this::getTrieNode,
                     accountHash,
@@ -210,17 +217,28 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     return getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage);
   }
 
-  public Optional<Bytes> getTrieNode(final Bytes location, final Bytes32 nodeHash) {
+  public Optional<Bytes> getTrieNode(
+      final TrieBranchType trieBranchType, final Bytes location, final Bytes32 nodeHash) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
     return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
+        .get(TrieBranchSegments.segmentFor(trieBranchType), location.toArrayUnsafe())
+        .map(Bytes::wrap);
+  }
+
+  public Optional<Bytes> getTrieNode(final Bytes location, final Bytes32 nodeHash) {
+    return getTrieNode(TrieBranchType.PATRICIA, location, nodeHash);
+  }
+
+  public Optional<Bytes> getTrieNode(final TrieBranchType trieBranchType, final Bytes key) {
+    return composedWorldStateStorage
+        .get(TrieBranchSegments.segmentFor(trieBranchType), key.toArrayUnsafe())
         .map(Bytes::wrap);
   }
 
   public Optional<Bytes> getTrieNode(final Bytes key) {
-    return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
+    return getTrieNode(TrieBranchType.PATRICIA, key);
   }
 
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(
@@ -259,7 +277,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void clear() {
     subscribers.forEach(StorageSubscriber::onClearStorage);
     getFlatDbStrategy().clearAll(composedWorldStateStorage);
-    composedWorldStateStorage.clear(TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(PATRICIA_TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
     trieLogStorage.clear();
     cacheManager.clear(ACCOUNT_INFO_STATE);
     cacheManager.clear(ACCOUNT_STORAGE_STORAGE);
@@ -324,26 +343,54 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     return trieLogStorage.streamKeys().limit(limit);
   }
 
-  public Optional<Bytes> getStateTrieNode(final Bytes location) {
+  public Optional<Bytes> getWorldStateRootHash() {
+    return getWorldStateRootHash(TrieBranchType.PATRICIA);
+  }
+
+  public Optional<Bytes> getWorldStateRootHash(final TrieBranchType trieBranchType) {
     return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
+        .get(TrieBranchSegments.segmentFor(trieBranchType), WORLD_ROOT_HASH_KEY)
         .map(Bytes::wrap);
   }
 
-  public Optional<Bytes> getWorldStateRootHash() {
-    return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY).map(Bytes::wrap);
+  /** Root hash from whichever trie branch column currently holds world metadata. */
+  public Optional<Bytes> getActiveWorldStateRootHash() {
+    return getWorldStateRootHash(resolveActiveTrieBranchType());
+  }
+
+  /** Returns which trie branch column holds the persisted world root hash. */
+  public TrieBranchType resolveActiveTrieBranchType() {
+    if (composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY)
+        .isPresent()) {
+      return TrieBranchType.BINARY;
+    }
+    if (composedWorldStateStorage
+        .get(PATRICIA_TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY)
+        .isPresent()) {
+      return TrieBranchType.PATRICIA;
+    }
+    return TrieBranchType.PATRICIA;
   }
 
   public Optional<Hash> getWorldStateBlockHash() {
+    return getWorldStateBlockHash(TrieBranchType.PATRICIA);
+  }
+
+  public Optional<Hash> getWorldStateBlockHash(final TrieBranchType trieBranchType) {
     return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, WORLD_BLOCK_HASH_KEY)
+        .get(TrieBranchSegments.segmentFor(trieBranchType), WORLD_BLOCK_HASH_KEY)
         .map(Bytes32::wrap)
         .map(Hash::wrap);
   }
 
   public Optional<Long> getWorldStateBlockNumber() {
+    return getWorldStateBlockNumber(TrieBranchType.PATRICIA);
+  }
+
+  public Optional<Long> getWorldStateBlockNumber(final TrieBranchType trieBranchType) {
     return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, WORLD_BLOCK_NUMBER_KEY)
+        .get(TrieBranchSegments.segmentFor(trieBranchType), WORLD_BLOCK_NUMBER_KEY)
         .map(bytes -> Bytes.wrap(bytes).toLong());
   }
 
@@ -375,8 +422,14 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   public boolean isWorldStateAvailable(final Bytes32 rootHash, final Hash blockHash) {
+    return isWorldStateAvailable(TrieBranchType.PATRICIA, rootHash, blockHash)
+        || isWorldStateAvailable(TrieBranchType.BINARY, rootHash, blockHash);
+  }
+
+  public boolean isWorldStateAvailable(
+      final TrieBranchType trieBranchType, final Bytes32 rootHash, final Hash blockHash) {
     return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY)
+        .get(TrieBranchSegments.segmentFor(trieBranchType), WORLD_ROOT_HASH_KEY)
         .map(Bytes32::wrap)
         .map(
             hash ->
@@ -392,7 +445,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   public void clearTrie() {
     subscribers.forEach(StorageSubscriber::onClearTrie);
-    composedWorldStateStorage.clear(TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(PATRICIA_TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
   }
 
   public boolean pruneTrieLog(final Hash blockHash) {
@@ -505,36 +559,60 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     }
 
     public Updater saveWorldState(final Bytes blockHash, final Bytes32 nodeHash, final Bytes node) {
+      return saveWorldState(TrieBranchType.PATRICIA, blockHash, nodeHash, node);
+    }
+
+    public Updater saveWorldState(
+        final TrieBranchType trieBranchType,
+        final Bytes blockHash,
+        final Bytes32 nodeHash,
+        final Bytes node) {
+      final SegmentIdentifier trieBranchSegment = TrieBranchSegments.segmentFor(trieBranchType);
       composedWorldStateTransaction.put(
-          TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe(), node.toArrayUnsafe());
+          trieBranchSegment, Bytes.EMPTY.toArrayUnsafe(), node.toArrayUnsafe());
       composedWorldStateTransaction.put(
-          TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY, nodeHash.toArrayUnsafe());
+          trieBranchSegment, WORLD_ROOT_HASH_KEY, nodeHash.toArrayUnsafe());
       composedWorldStateTransaction.put(
-          TRIE_BRANCH_STORAGE, WORLD_BLOCK_HASH_KEY, blockHash.toArrayUnsafe());
+          trieBranchSegment, WORLD_BLOCK_HASH_KEY, blockHash.toArrayUnsafe());
       return this;
     }
 
     /**
-     * Writes a trie (branch) node to the {@code TRIE_BRANCH_STORAGE} segment, keyed by {@code
+     * Writes a trie (branch) node to the segment for {@code trieBranchType}, keyed by {@code
      * location}. Callers are responsible for any key prefixing (see {@link #getTrieNode}).
      */
     public synchronized Updater putTrieNode(
-        final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+        final TrieBranchType trieBranchType,
+        final Bytes location,
+        final Bytes32 nodeHash,
+        final Bytes node) {
       if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         return this;
       }
       composedWorldStateTransaction.put(
-          TRIE_BRANCH_STORAGE, location.toArrayUnsafe(), node.toArrayUnsafe());
+          TrieBranchSegments.segmentFor(trieBranchType),
+          location.toArrayUnsafe(),
+          node.toArrayUnsafe());
       return this;
     }
 
+    public synchronized Updater putTrieNode(
+        final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+      return putTrieNode(TrieBranchType.PATRICIA, location, nodeHash, node);
+    }
+
     /**
-     * Removes a trie (branch) node from the {@code TRIE_BRANCH_STORAGE} segment, keyed by {@code
+     * Removes a trie (branch) node from the segment for {@code trieBranchType}, keyed by {@code
      * location}. Callers are responsible for any key prefixing (see {@link #getTrieNode}).
      */
-    public Updater removeTrieNode(final Bytes location) {
-      composedWorldStateTransaction.remove(TRIE_BRANCH_STORAGE, location.toArrayUnsafe());
+    public Updater removeTrieNode(final TrieBranchType trieBranchType, final Bytes location) {
+      composedWorldStateTransaction.remove(
+          TrieBranchSegments.segmentFor(trieBranchType), location.toArrayUnsafe());
       return this;
+    }
+
+    public Updater removeTrieNode(final Bytes location) {
+      return removeTrieNode(TrieBranchType.PATRICIA, location);
     }
 
     public synchronized Updater putStorageValueBySlotHash(

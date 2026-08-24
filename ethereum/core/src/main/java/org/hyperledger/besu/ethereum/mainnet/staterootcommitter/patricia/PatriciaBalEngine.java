@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.Map;
@@ -41,8 +42,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Patricia BAL root: replays BAL changes onto the account trie and per-account storage tries,
- * then returns storage roots to patch into the EVM accumulator.
+ * Patricia BAL root: replays BAL changes onto the account trie and per-account storage tries, then
+ * returns storage roots to patch into the EVM accumulator.
  */
 public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
 
@@ -119,7 +120,8 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
 
       if (!storageFrozen) {
         accountTrie.commit(
-            (location, hash, value) -> writes.add(u -> u.putTrieNode(location, hash, value)));
+            (location, hash, value) ->
+                writes.add(u -> u.putTrieNode(TrieBranchType.PATRICIA, location, hash, value)));
       }
       return new BalStateRootCommitter.Result(
           StateRootComputations.pathBased(
@@ -227,7 +229,10 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
                 writes.add(
                     u ->
                         u.putTrieNode(
-                            Bytes.concatenate(accountHash.getBytes(), location), nodeHash, value)));
+                            TrieBranchType.PATRICIA,
+                            Bytes.concatenate(accountHash.getBytes(), location),
+                            nodeHash,
+                            value)));
       }
       return Hash.wrap(storageTrie.getRootHash());
     }

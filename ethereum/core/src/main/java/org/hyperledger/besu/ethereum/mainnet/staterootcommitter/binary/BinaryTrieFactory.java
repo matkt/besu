@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitione
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.concurrent.ForkJoinPool;
 
@@ -41,7 +42,8 @@ public final class BinaryTrieFactory {
   /** State trie rooted at the world state's current root. */
   public static StoredPartitionedBinaryTrie createStateTrie(final BonsaiWorldState worldState) {
     return createTrie(
-        (location, hash) -> worldState.getWorldStateStorage().getTrieNode(location, hash),
+        (location, hash) ->
+            worldState.getWorldStateStorage().getTrieNode(TrieBranchType.BINARY, location, hash),
         Bytes32.wrap(worldState.getWorldStateRootHash().getBytes()),
         worldState.getWorldStateConfig(),
         BlockProcessingExecutors.accountTrieForkJoinPool());

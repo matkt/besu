@@ -34,10 +34,8 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.C
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
@@ -59,6 +57,10 @@ import org.junit.jupiter.api.Test;
 
 class BinaryBalStateRootCommitterTest {
 
+  private static final GenesisConfig EMPTY_BINARY_GENESIS =
+      GenesisConfig.fromResource(
+          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
+
   private ExecutionContextTestFixture contextTestFixture;
   private ProtocolContext protocolContext;
   private BlockHeader chainHeadHeader;
@@ -67,36 +69,12 @@ class BinaryBalStateRootCommitterTest {
   @BeforeEach
   void setUp() {
     contextTestFixture =
-        ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
-            .dataStorageFormat(DataStorageFormat.BINARY)
+        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
+            .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
     protocolContext = contextTestFixture.getProtocolContext();
     chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
     factory = new StateRootCommitterFactory(ImmutableBalConfiguration.builder().build());
-    initializeEmptyBinaryTrieRoot();
-  }
-
-  private void initializeEmptyBinaryTrieRoot() {
-    try (BonsaiWorldState worldState = getWorldState(true)) {
-      final var updater = worldState.getWorldStateStorage().updater();
-      updater
-          .getWorldStateTransaction()
-          .put(
-              KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
-              BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
-              new byte[32]);
-      updater
-          .getWorldStateTransaction()
-          .remove(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe());
-      updater.commit();
-    }
-    final BlockHeader emptyBinaryHead =
-        new BlockHeaderTestFixture()
-            .parentHash(chainHeadHeader.getHash())
-            .number(chainHeadHeader.getNumber())
-            .stateRoot(Hash.ZERO)
-            .buildHeader();
-    protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
   }
 
   @AfterEach
@@ -216,8 +194,7 @@ class BinaryBalStateRootCommitterTest {
     final Wei newBalance = Wei.of(9_999_999L);
     final BlockAccessList bal = balanceAndNonceBal(address, newBalance, 0L);
     final Hash expectedRoot =
-        computeBinaryRoot(
-            accumulator -> accumulator.getOrCreate(address).setBalance(newBalance));
+        computeBinaryRoot(accumulator -> accumulator.getOrCreate(address).setBalance(newBalance));
     final BlockHeader blockHeader = childHeader(expectedRoot);
 
     try (BonsaiWorldState worldState = getWorldState(false)) {
@@ -281,7 +258,8 @@ class BinaryBalStateRootCommitterTest {
                     List.of(new CodeChange(0, delegationCode)))));
 
     final Hash expectedRoot =
-        computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority).setCode(delegationCode));
+        computeBinaryRoot(
+            accumulator -> accumulator.getOrCreate(authority).setCode(delegationCode));
     final BlockHeader blockHeader = childHeader(expectedRoot);
 
     try (BonsaiWorldState worldState = getWorldState(false)) {

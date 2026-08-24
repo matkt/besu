@@ -46,8 +46,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * world-state storage, not the protocol schedule, so {@code executeBlock} produces receipts that
  * don't match the block transactions and {@code appendBlock} rejects them. Making this suite
  * binary-correct requires a protocol-schedule / genesis-config hook in {@link
- * AbstractIsolationTests} (binary-trie fork + {@link
- * DefaultBinaryStateRootCommitter}); that
+ * AbstractIsolationTests} (binary-trie fork + {@link DefaultBinaryStateRootCommitter}); that
  * test-infra change is deferred. The rolling semantics this would cover are already exercised
  * end-to-end by {@code PbtLogRollingTests}.
  */
@@ -59,7 +58,7 @@ public class PbtSnapshotIsolationTests extends AbstractIsolationTests {
 
   @Override
   protected DataStorageFormat getDataStorageFormat() {
-    return DataStorageFormat.BINARY;
+    return DataStorageFormat.BONSAI;
   }
 
   @Override

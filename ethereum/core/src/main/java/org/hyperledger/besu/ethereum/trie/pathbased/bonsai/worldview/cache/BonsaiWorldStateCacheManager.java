@@ -134,10 +134,9 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
       return Optional.ofNullable(cachedWorldStatesByHash.get(blockHash))
           .map(
               cached ->
-                  createWorldState(
-                      archive,
+                  worldStateForBlock(
                       createLayeredKeyValueStorage(cached.getWorldStateStorage()),
-                      evmConfiguration));
+                      cached.getBlockHeader()));
     }
     LOG.atDebug()
         .setMessage("did not find worldstate in cache for {}")
@@ -173,10 +172,7 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
                   .map(BonsaiCachedWorldStateView::getWorldStateStorage)
                   .findFirst();
             })
-        .map(
-            storage ->
-                createWorldState( // wrap the state in a layered worldstate
-                    archive, createLayeredKeyValueStorage(storage), evmConfiguration));
+        .map(storage -> worldStateForBlock(createLayeredKeyValueStorage(storage), blockHeader));
   }
 
   public Optional<BonsaiWorldState> getHeadWorldState(
@@ -185,7 +181,8 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
     LOG.atDebug().setMessage("getting head worldstate").log();
 
     return rootWorldStateStorage
-        .getWorldStateBlockHash()
+        .getWorldStateBlockHash(
+            archive.resolveTrieBranchType(archive.getBlockchain().getChainHeadHeader()))
         .flatMap(hashBlockHeaderFunction)
         .flatMap(
             blockHeader -> {
@@ -193,7 +190,7 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
               addCachedLayer(
                   blockHeader,
                   blockHeader.getStateRoot(),
-                  createWorldState(archive, rootWorldStateStorage, evmConfiguration));
+                  worldStateForBlock(rootWorldStateStorage, blockHeader));
               return getWorldState(blockHeader.getBlockHash());
             });
   }
@@ -285,6 +282,18 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
         evmConfiguration,
         WorldStateConfig.newBuilder(worldStateConfig).build(),
         codeCache);
+  }
+
+  private BonsaiWorldState worldStateForBlock(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BlockHeader blockHeader) {
+    return new BonsaiWorldState(
+        archive,
+        worldStateKeyValueStorage,
+        evmConfiguration,
+        WorldStateConfig.newBuilder(worldStateConfig).build(),
+        codeCache,
+        blockHeader);
   }
 
   public BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(

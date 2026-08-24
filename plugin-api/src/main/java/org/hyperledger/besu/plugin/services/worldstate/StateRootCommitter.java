@@ -26,6 +26,11 @@ import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
  */
 public interface StateRootCommitter {
 
+  /** Which trie branch column family this committer reads and writes. Defaults to Patricia. */
+  default TrieBranchType getTrieBranchType() {
+    return TrieBranchType.PATRICIA;
+  }
+
   /**
    * Compute the state root and any deferred storage writes for the current world state.
    *
@@ -48,9 +53,25 @@ public interface StateRootCommitter {
    */
   default StateRootCommitter timed(final OperationTimer timer) {
     final StateRootCommitter delegate = this;
-    return (worldState, blockHeader, accumulator) -> {
-      try (var ignored = timer.startTimer()) {
-        return delegate.compute(worldState, blockHeader, accumulator);
+    return new StateRootCommitter() {
+      @Override
+      public StateRootComputation compute(
+          final MutableWorldState worldState,
+          final BlockHeader blockHeader,
+          final WorldUpdater worldUpdater) {
+        try (var ignored = timer.startTimer()) {
+          return delegate.compute(worldState, blockHeader, worldUpdater);
+        }
+      }
+
+      @Override
+      public void cancel() {
+        delegate.cancel();
+      }
+
+      @Override
+      public TrieBranchType getTrieBranchType() {
+        return delegate.getTrieBranchType();
       }
     };
   }

@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -106,7 +107,8 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
     final long storageSubscriberId = worldStateKeyValueStorage.subscribe(this);
     try {
       worldStateKeyValueStorage
-          .getStateTrieNode(Bytes.concatenate(accountHash.getBytes(), Bytes.EMPTY))
+          .getTrieNode(
+              TrieBranchType.PATRICIA, Bytes.concatenate(accountHash.getBytes(), Bytes.EMPTY))
           .ifPresent(
               storageRoot -> {
                 try {

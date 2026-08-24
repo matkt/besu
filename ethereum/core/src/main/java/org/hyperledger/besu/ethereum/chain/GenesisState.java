@@ -37,8 +37,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.net.URL;
 import java.util.List;
@@ -169,13 +169,14 @@ public final class GenesisState {
    * @param target WorldView to write genesis state to
    */
   public void writeStateTo(final MutableWorldState target) {
-    writeAccountsTo(target, genesisConfig.streamAllocations(), block.getHeader());
+    writeAccountsTo(target, genesisConfig.streamAllocations(), block.getHeader(), genesisConfig);
   }
 
   private static void writeAccountsTo(
       final MutableWorldState target,
       final Stream<GenesisAccount> genesisAccounts,
-      final BlockHeader rootHeader) {
+      final BlockHeader rootHeader,
+      final GenesisConfig genesisConfig) {
     final WorldUpdater updater = target.updater();
     genesisAccounts.forEach(
         genesisAccount -> {
@@ -186,28 +187,29 @@ public final class GenesisState {
           genesisAccount.storage().forEach(account::setStorageValue);
         });
     updater.commit();
-    // Genesis state root must match the storage format's committer so the genesis block is
-    // PBT-rooted from block 0 when --data-storage-format=BINARY. The default persist() path uses
-    // the MPT/Keccak committer; BINARY needs the partitioned-binary-trie committer.
-    if (isBinaryWorldState(target)) {
+    // When Amsterdam is active at genesis, the partitioned-binary-trie committer must persist
+    // block-0 state so world metadata lives in the BINARY trie-branch column from the start.
+    if (usesBinaryTrieCommitterAtGenesis(target, genesisConfig)) {
       target.persist(rootHeader, new DefaultBinaryStateRootCommitter());
     } else {
       target.persist(rootHeader);
     }
   }
 
-  private static boolean isBinaryWorldState(final MutableWorldState target) {
-    return target instanceof BonsaiWorldState bonsaiWorldState
-        && bonsaiWorldState.getWorldStateStorage().getDataStorageFormat()
-            == DataStorageFormat.BINARY;
+  private static boolean usesBinaryTrieCommitterAtGenesis(
+      final MutableWorldState target, final GenesisConfig genesisConfig) {
+    return target instanceof BonsaiWorldState && isAmsterdamAtGenesis(genesisConfig);
   }
 
   private static Hash calculateGenesisStateRoot(
       final DataStorageConfiguration dataStorageConfiguration,
       final GenesisConfig genesisConfig,
       final BonsaiCodeCache codeCache) {
-    try (var worldState = createGenesisWorldState(dataStorageConfiguration, codeCache)) {
-      writeAccountsTo(worldState, genesisConfig.streamAllocations(), null);
+    final TrieBranchType trieBranchType =
+        isAmsterdamAtGenesis(genesisConfig) ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+    try (var worldState =
+        createGenesisWorldState(dataStorageConfiguration, codeCache, trieBranchType)) {
+      writeAccountsTo(worldState, genesisConfig.streamAllocations(), null, genesisConfig);
       return worldState.rootHash();
     } catch (Exception e) {
       throw new RuntimeException(e);

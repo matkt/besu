@@ -42,6 +42,8 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
+import java.util.Optional;
+
 public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
 
   public InMemoryKeyValueStorageProvider() {
@@ -118,6 +120,16 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
       final EvmConfiguration evmConfiguration,
       final ServiceManager serviceManager,
       final DataStorageFormat dataStorageFormat) {
+    return createBonsaiInMemoryWorldStateArchive(
+        blockchain, evmConfiguration, serviceManager, dataStorageFormat, Optional.empty());
+  }
+
+  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
+      final Blockchain blockchain,
+      final EvmConfiguration evmConfiguration,
+      final ServiceManager serviceManager,
+      final DataStorageFormat dataStorageFormat,
+      final Optional<Long> amsterdamMilestone) {
     final DataStorageConfiguration storageConfiguration =
         switch (dataStorageFormat) {
           case BINARY -> DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
@@ -138,7 +150,8 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         serviceManager,
         evmConfiguration,
         throwingWorldStateHealerSupplier(),
-        new BonsaiCodeCache());
+        new BonsaiCodeCache(),
+        amsterdamMilestone);
   }
 
   public static MutableWorldState createInMemoryWorldState() {

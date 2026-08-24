@@ -33,6 +33,7 @@ import org.hyperledger.besu.plugin.data.BlockBody;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.data.SyncStatus;
 import org.hyperledger.besu.plugin.services.sync.SynchronizationService;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 
@@ -149,13 +150,17 @@ public class SynchronizationServiceImpl implements SynchronizationService {
           archive.getWorldStateSharedSpec().setTrieDisabled(true);
           final BonsaiWorldStateKeyValueStorage worldStateStorage =
               archive.getWorldStateKeyValueStorage();
-          final Optional<Hash> worldStateBlockHash = worldStateStorage.getWorldStateBlockHash();
-          final Optional<Bytes> worldStateRootHash = worldStateStorage.getWorldStateRootHash();
+          final TrieBranchType trieBranchType = worldStateStorage.resolveActiveTrieBranchType();
+          final Optional<Hash> worldStateBlockHash =
+              worldStateStorage.getWorldStateBlockHash(trieBranchType);
+          final Optional<Bytes> worldStateRootHash =
+              worldStateStorage.getWorldStateRootHash(trieBranchType);
           if (worldStateRootHash.isPresent() && worldStateBlockHash.isPresent()) {
             worldStateStorage.clearTrie();
             // keep root and block hash in the trie branch
             final BonsaiWorldStateKeyValueStorage.Updater updater = worldStateStorage.updater();
             updater.saveWorldState(
+                trieBranchType,
                 worldStateBlockHash.get().getBytes(),
                 Bytes32.wrap(worldStateRootHash.get()),
                 Bytes.EMPTY);

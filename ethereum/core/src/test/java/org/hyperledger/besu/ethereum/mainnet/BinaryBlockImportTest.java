@@ -37,16 +37,14 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
-import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
@@ -65,15 +63,14 @@ import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint256;
 
 /**
- * Block import and processing integration tests for {@link DataStorageFormat#BINARY}.
+ * Block import and processing integration tests for Amsterdam chains using the binary trie.
  *
- * <p>Genesis mainnet state is written with a Merkle root; tests reset the trie root to {@link
- * Hash#ZERO} before exercising the binary state-root committer (same pattern as {@link
- * org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter.DefaultBinaryStateRootCommitterTest}).
+ * <p>Genesis state is written via {@link org.hyperledger.besu.ethereum.chain.GenesisState} with
+ * {@link DefaultBinaryStateRootCommitter} when Amsterdam is active at genesis.
  *
  * <p>Expected post-block state roots are computed by executing the block body (without persisting)
- * and running {@link DefaultBinaryStateRootCommitter}; the resulting root is set on the block header
- * before {@link BlockProcessor#processBlock} is called.
+ * and running {@link DefaultBinaryStateRootCommitter}; the resulting root is set on the block
+ * header before {@link BlockProcessor#processBlock} is called.
  */
 @SuppressWarnings("rawtypes")
 class BinaryBlockImportTest {
@@ -96,6 +93,7 @@ class BinaryBlockImportTest {
       Hash.fromHexString("0x5f7606bf4b9eb2a8414aaa53f4c84062ec8789d24c604453563dc26e4ae65837");
 
   private ExecutionContextTestFixture fixture;
+  private BonsaiWorldStateProvider stateArchive;
   private ProtocolContext protocolContext;
   private MutableBlockchain blockchain;
   private BlockHeader chainHeadHeader;
@@ -105,20 +103,20 @@ class BinaryBlockImportTest {
   void setUp() {
     fixture =
         ExecutionContextTestFixture.builder(GenesisConfig.fromResource(GENESIS_RESOURCE))
-            .dataStorageFormat(DataStorageFormat.BINARY)
+            .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
+    stateArchive = (BonsaiWorldStateProvider) fixture.getStateArchive();
     protocolContext = fixture.getProtocolContext();
     blockchain = fixture.getBlockchain();
     chainHeadHeader = blockchain.getChainHeadHeader();
-    initializeEmptyBinaryTrieRoot();
-    chainHeadHeader = blockchain.getChainHeadHeader();
-    initialStateRoot = ((BonsaiWorldState) fixture.getStateArchive().getWorldState()).rootHash();
-    assertThat(initialStateRoot).isEqualTo(Hash.ZERO);
+    initialStateRoot = chainHeadHeader.getStateRoot();
   }
 
   @AfterEach
   void tearDown() throws Exception {
-    fixture.getStateArchive().close();
+    if (stateArchive != null) {
+      stateArchive.close();
+    }
   }
 
   @Test
@@ -198,8 +196,7 @@ class BinaryBlockImportTest {
 
     try (BonsaiWorldState ignoredHeadLoad =
         (BonsaiWorldState)
-            fixture
-                .getStateArchive()
+            stateArchive
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
                         .withBlockHeader(block.getHeader())
@@ -215,8 +212,7 @@ class BinaryBlockImportTest {
 
     try (BonsaiWorldState headWorldState =
         (BonsaiWorldState)
-            fixture
-                .getStateArchive()
+            stateArchive
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
                         .withBlockHeader(block.getHeader())
@@ -271,47 +267,6 @@ class BinaryBlockImportTest {
     assertThat(contractAccount.getCode().size()).isGreaterThan(0);
   }
 
-  /** Genesis is written with a Merkle root; BINARY committer expects an empty binary trie root. */
-  private void initializeEmptyBinaryTrieRoot() {
-    try (BonsaiWorldState worldState =
-        (BonsaiWorldState)
-            fixture
-                .getStateArchive()
-                .getWorldState(
-                    WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(chainHeadHeader)
-                        .withShouldWorldStateUpdateHead(true)
-                        .build())
-                .orElseThrow()) {
-      final var updater = worldState.getWorldStateStorage().updater();
-      updater
-          .getWorldStateTransaction()
-          .put(
-              KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
-              BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
-              new byte[32]);
-      updater
-          .getWorldStateTransaction()
-          .remove(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe());
-      updater.commit();
-      setWorldStateRootHash(worldState, Hash.ZERO);
-    }
-    final BonsaiWorldState head = (BonsaiWorldState) fixture.getStateArchive().getWorldState();
-    assertThat(head.blockHash()).isEqualTo(chainHeadHeader.getBlockHash());
-    assertThat(head.rootHash()).isEqualTo(Hash.ZERO);
-  }
-
-  private static void setWorldStateRootHash(
-      final BonsaiWorldState worldState, final Hash stateRoot) {
-    try {
-      final Field rootField = BonsaiWorldState.class.getDeclaredField("worldStateRootHash");
-      rootField.setAccessible(true);
-      rootField.set(worldState, stateRoot);
-    } catch (ReflectiveOperationException e) {
-      throw new LinkageError("Failed to set world state root hash for BINARY test setup", e);
-    }
-  }
-
   private AbstractBlockProcessor createBlockProcessor() {
     final ProtocolSpec protocolSpec =
         fixture
@@ -328,8 +283,7 @@ class BinaryBlockImportTest {
   }
 
   private MutableWorldState worldStateAtParent(final BlockHeader parentHeader) {
-    return fixture
-        .getStateArchive()
+    return stateArchive
         .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(parentHeader))
         .orElseThrow();
   }
@@ -338,12 +292,10 @@ class BinaryBlockImportTest {
       final BlockHeader parentHeader, final Wei baseFee, final Transaction... transactions) {
     try (BonsaiWorldState worldState =
         (BonsaiWorldState)
-            fixture
-                .getStateArchive()
+            stateArchive
                 .getWorldState(
                     WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(parentHeader))
                 .orElseThrow()) {
-      setWorldStateRootHash(worldState, initialStateRoot);
       final Block draftBlock = createBlock(parentHeader, initialStateRoot, baseFee, transactions);
       final BlockProcessingResult bodyResult =
           createBlockProcessor()

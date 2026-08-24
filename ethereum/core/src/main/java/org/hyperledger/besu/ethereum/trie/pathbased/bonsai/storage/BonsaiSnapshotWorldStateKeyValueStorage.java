@@ -21,6 +21,7 @@ import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 
@@ -97,8 +98,19 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   }
 
   @Override
+  public Optional<Bytes> getTrieNode(
+      final TrieBranchType trieBranchType, final Bytes location, final Bytes32 nodeHash) {
+    return isClosedGet() ? Optional.empty() : super.getTrieNode(trieBranchType, location, nodeHash);
+  }
+
+  @Override
   public Optional<Bytes> getTrieNode(final Bytes key) {
     return isClosedGet() ? Optional.empty() : super.getTrieNode(key);
+  }
+
+  @Override
+  public Optional<Bytes> getTrieNode(final TrieBranchType trieBranchType, final Bytes key) {
+    return isClosedGet() ? Optional.empty() : super.getTrieNode(trieBranchType, key);
   }
 
   @Override
@@ -107,13 +119,13 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   }
 
   @Override
-  public Optional<Bytes> getStateTrieNode(final Bytes location) {
-    return isClosedGet() ? Optional.empty() : super.getStateTrieNode(location);
+  public Optional<Bytes> getWorldStateRootHash() {
+    return isClosedGet() ? Optional.empty() : super.getWorldStateRootHash();
   }
 
   @Override
-  public Optional<Bytes> getWorldStateRootHash() {
-    return isClosedGet() ? Optional.empty() : super.getWorldStateRootHash();
+  public Optional<Bytes> getWorldStateRootHash(final TrieBranchType trieBranchType) {
+    return isClosedGet() ? Optional.empty() : super.getWorldStateRootHash(trieBranchType);
   }
 
   @Override
@@ -122,8 +134,18 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   }
 
   @Override
+  public Optional<Hash> getWorldStateBlockHash(final TrieBranchType trieBranchType) {
+    return isClosedGet() ? Optional.empty() : super.getWorldStateBlockHash(trieBranchType);
+  }
+
+  @Override
   public Optional<Long> getWorldStateBlockNumber() {
     return isClosedGet() ? Optional.empty() : super.getWorldStateBlockNumber();
+  }
+
+  @Override
+  public Optional<Long> getWorldStateBlockNumber(final TrieBranchType trieBranchType) {
+    return isClosedGet() ? Optional.empty() : super.getWorldStateBlockNumber(trieBranchType);
   }
 
   @Override
@@ -137,6 +159,12 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   @Override
   public boolean isWorldStateAvailable(final Bytes32 rootHash, final Hash blockHash) {
     return !isClosedGet() && super.isWorldStateAvailable(rootHash, blockHash);
+  }
+
+  @Override
+  public boolean isWorldStateAvailable(
+      final TrieBranchType trieBranchType, final Bytes32 rootHash, final Hash blockHash) {
+    return !isClosedGet() && super.isWorldStateAvailable(trieBranchType, rootHash, blockHash);
   }
 
   @Override

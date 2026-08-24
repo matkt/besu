@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.pbt.rolling;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.config.GenesisConfig;
 import org.hyperledger.besu.datatypes.Address;
@@ -30,7 +31,6 @@ import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTestSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -47,6 +47,7 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -59,19 +60,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * Binary-trie mirror of {@code LogRollingTests}. Exercises trie-log roll-forward / roll-back
  * against a {@link DataStorageFormat#BINARY} world state and asserts the binary state root,
- * recomputed via {@link DefaultBinaryStateRootCommitter}, matches the live-execution root after each roll.
+ * recomputed via {@link DefaultBinaryStateRootCommitter}, matches the live-execution root after
+ * each roll.
  *
  * <p>This only works because the {@link PbtTrieLogFactory} carries the storage slot key preimage;
  * the legacy MPT factory serializes only the slot hash, which would leave {@code
  * StorageSlotKey.getSlotKey()} empty and make {@code BinaryStateRootCommitter.applyStorage} throw
  * after a roll.
  *
- * <p>The scenario tests below drive the REAL {@link DefaultBinaryStateRootCommitter} against a real BINARY
- * {@link BonsaiWorldState} for every root. Each scenario applies changes → persists (capturing a
- * PBT trie-log layer) → verifies the root → rolls back to the empty state (root {@link Hash#ZERO})
- * → rolls forward → verifies the root again. Multi-block scenarios chain several layers and roll
- * them back/forward in order. The rollback-to-ZERO assertion proves the binary trie fully reverts,
- * including reference-aware removal of shared CODE_ZONE chunks (EIP-8297).
+ * <p>The scenario tests below drive the REAL {@link DefaultBinaryStateRootCommitter} against a real
+ * BINARY {@link BonsaiWorldState} for every root. Each scenario applies changes → persists
+ * (capturing a PBT trie-log layer) → verifies the root → rolls back to the empty state (root {@link
+ * Hash#ZERO}) → rolls forward → verifies the root again. Multi-block scenarios chain several layers
+ * and roll them back/forward in order. The rollback-to-ZERO assertion proves the binary trie fully
+ * reverts, including reference-aware removal of shared CODE_ZONE chunks (EIP-8297).
  */
 @ExtendWith(MockitoExtension.class)
 class PbtLogRollingTests {
@@ -95,34 +97,45 @@ class PbtLogRollingTests {
   private InMemoryKeyValueStorageProvider secondProvider;
 
   private final Blockchain blockchain = mock(Blockchain.class);
-  private final DefaultBinaryStateRootCommitter binaryCommitter = new DefaultBinaryStateRootCommitter();
+  private final DefaultBinaryStateRootCommitter binaryCommitter =
+      new DefaultBinaryStateRootCommitter();
 
   @BeforeEach
   void createStorage() {
+    when(blockchain.getChainHeadHeader())
+        .thenReturn(
+            new BlockHeaderTestFixture().number(0).timestamp(0).stateRoot(Hash.ZERO).buildHeader());
     provider = new InMemoryKeyValueStorageProvider();
     archive =
         InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(
-            blockchain, DataStorageFormat.BINARY);
+            blockchain, EvmConfiguration.DEFAULT, null, DataStorageFormat.BINARY, Optional.of(0L));
     trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
 
     secondProvider = new InMemoryKeyValueStorageProvider();
     secondArchive =
         InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(
-            blockchain, DataStorageFormat.BINARY);
+            blockchain, EvmConfiguration.DEFAULT, null, DataStorageFormat.BINARY, Optional.of(0L));
   }
+
+  private static final GenesisConfig EMPTY_BINARY_GENESIS =
+      GenesisConfig.fromResource(
+          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
 
   private BonsaiWorldState newWorldState(
       final BonsaiWorldStateProvider archiveProvider,
       final InMemoryKeyValueStorageProvider storageProvider) {
+    final BlockHeader emptyGenesisHeader =
+        new BlockHeaderTestFixture().number(0).timestamp(0).stateRoot(Hash.ZERO).buildHeader();
     final BonsaiWorldState worldState =
         new BonsaiWorldState(
             archiveProvider,
             new BonsaiWorldStateKeyValueStorage(storageProvider, new NoOpMetricsSystem(), CONFIG),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
-            new BonsaiCodeCache());
-    BinaryTestSupport.initializeEmptyBinaryTrieRoot(worldState);
+            new BonsaiCodeCache(),
+            emptyGenesisHeader);
+    worldState.persist(emptyGenesisHeader, binaryCommitter);
     return worldState;
   }
 
@@ -672,8 +685,8 @@ class PbtLogRollingTests {
   }
 
   // --------------------------------------------------------------------------------------------
-  // Fixture: a fresh BINARY BonsaiWorldState backed by ExecutionContextTestFixture, reset to the
-  // empty binary trie root (Hash.ZERO). Mirrors the setup of BinaryTrieVectorsTest.
+  // Fixture: a fresh BINARY BonsaiWorldState backed by ExecutionContextTestFixture with an empty
+  // Amsterdam genesis (binary trie root Hash.ZERO). Mirrors BinaryTrieVectorsTest setup.
   // --------------------------------------------------------------------------------------------
 
   private static final class BinaryFixture implements AutoCloseable {
@@ -685,39 +698,19 @@ class PbtLogRollingTests {
 
     BinaryFixture() {
       contextFixture =
-          ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
+          ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
               .dataStorageFormat(DataStorageFormat.BINARY)
               .build();
       final BlockHeader chainHead = contextFixture.getBlockchain().getChainHeadHeader();
-      try (BonsaiWorldState reset =
-          (BonsaiWorldState)
-              contextFixture
-                  .getProtocolContext()
-                  .getWorldStateArchive()
-                  .getWorldState(
-                      WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(chainHead)
-                          .withShouldWorldStateUpdateHead(true)
-                          .build())
-                  .orElseThrow()) {
-        BinaryTestSupport.initializeEmptyBinaryTrieRoot(reset);
-      }
-      final BlockHeader emptyHead =
-          new BlockHeaderTestFixture()
-              .parentHash(chainHead.getHash())
-              .number(chainHead.getNumber())
-              .stateRoot(Hash.ZERO)
-              .buildHeader();
-      contextFixture.getProtocolContext().getWorldStateArchive().resetArchiveStateTo(emptyHead);
       worldState =
           (BonsaiWorldState)
               contextFixture
                   .getProtocolContext()
                   .getWorldStateArchive()
-                  .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(emptyHead))
+                  .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(chainHead))
                   .orElseThrow();
-      previousHeader = emptyHead;
-      blockNumber = emptyHead.getNumber();
+      previousHeader = chainHead;
+      blockNumber = chainHead.getNumber();
     }
 
     /** Apply {@code mutator} to a fresh updater, persist with a header, and capture the layer. */

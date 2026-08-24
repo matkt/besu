@@ -32,7 +32,6 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitione
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTestSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
@@ -67,6 +66,10 @@ import org.junit.jupiter.params.provider.MethodSource;
  * chunkify_code}, {@code encode_basic_data}, and {@code pbt_state}.
  */
 class BinaryTrieVectorsTest {
+
+  private static final GenesisConfig EMPTY_BINARY_GENESIS =
+      GenesisConfig.fromResource(
+          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
 
   private static final String VECTORS_RESOURCE = "binary_trie_vectors.json";
   private static final NodeLoader EMPTY_LOADER = (location, hash) -> Optional.empty();
@@ -240,34 +243,12 @@ class BinaryTrieVectorsTest {
     // conformance vectors exercise the production code path (not a spec reimplementation
     // via StoredPartitionedBinaryTrie). Each vector starts from a fresh empty binary trie.
     final ExecutionContextTestFixture contextTestFixture =
-        ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
-            .dataStorageFormat(DataStorageFormat.BINARY)
+        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
+            .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
     try (final var ignored = contextTestFixture.getStateArchive()) {
       final ProtocolContext protocolContext = contextTestFixture.getProtocolContext();
       final BlockHeader chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
-
-      // Genesis is written with a Merkle root; reset the stored root to the empty binary trie
-      // root (Hash.ZERO) and clear the stale Merkle root, mirroring BinaryStateRootCommitterTest.
-      try (BonsaiWorldState resetWorldState =
-          (BonsaiWorldState)
-              protocolContext
-                  .getWorldStateArchive()
-                  .getWorldState(
-                      WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(chainHeadHeader)
-                          .withShouldWorldStateUpdateHead(true)
-                          .build())
-                  .orElseThrow()) {
-        BinaryTestSupport.initializeEmptyBinaryTrieRoot(resetWorldState);
-      }
-      final BlockHeader emptyBinaryHead =
-          new BlockHeaderTestFixture()
-              .parentHash(chainHeadHeader.getHash())
-              .number(chainHeadHeader.getNumber())
-              .stateRoot(Hash.ZERO)
-              .buildHeader();
-      protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
 
       final Hash actual;
       try (BonsaiWorldState worldState =
@@ -280,7 +261,8 @@ class BinaryTrieVectorsTest {
         final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
         applyVectorAccounts(accumulator, accountsNode);
         accumulator.commit();
-        actual = new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        actual =
+            new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
       }
       assertThat(actual).as(name).isEqualTo(Hash.fromHexString(expectedHex));
     }
@@ -295,34 +277,12 @@ class BinaryTrieVectorsTest {
     // preimage via PbtTrieLogFactory) round-trips the binary state: apply -> expected root,
     // rollback -> empty root, rollforward -> expected root again.
     final ExecutionContextTestFixture contextTestFixture =
-        ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
+        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
             .dataStorageFormat(DataStorageFormat.BINARY)
             .build();
     try (final var ignored = contextTestFixture.getStateArchive()) {
       final ProtocolContext protocolContext = contextTestFixture.getProtocolContext();
       final BlockHeader chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
-
-      // Reset the stored root to the empty binary trie root (Hash.ZERO), mirroring
-      // pbtStateMatchesVector / BinaryStateRootCommitterTest.
-      try (BonsaiWorldState resetWorldState =
-          (BonsaiWorldState)
-              protocolContext
-                  .getWorldStateArchive()
-                  .getWorldState(
-                      WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(chainHeadHeader)
-                          .withShouldWorldStateUpdateHead(true)
-                          .build())
-                  .orElseThrow()) {
-        BinaryTestSupport.initializeEmptyBinaryTrieRoot(resetWorldState);
-      }
-      final BlockHeader emptyBinaryHead =
-          new BlockHeaderTestFixture()
-              .parentHash(chainHeadHeader.getHash())
-              .number(chainHeadHeader.getNumber())
-              .stateRoot(Hash.ZERO)
-              .buildHeader();
-      protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
 
       final Hash expected = Hash.fromHexString(expectedHex);
       final DefaultBinaryStateRootCommitter binaryCommitter = new DefaultBinaryStateRootCommitter();
@@ -335,7 +295,7 @@ class BinaryTrieVectorsTest {
               protocolContext
                   .getWorldStateArchive()
                   .getWorldState(
-                      WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(emptyBinaryHead))
+                      WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(chainHeadHeader))
                   .orElseThrow()) {
         final BonsaiWorldStateUpdateAccumulator accumulator = worldState.updater();
 
@@ -353,8 +313,8 @@ class BinaryTrieVectorsTest {
         // is captured (keyed by the header's block hash).
         final BlockHeader persistHeader =
             new BlockHeaderTestFixture()
-                .parentHash(emptyBinaryHead.getHash())
-                .number(emptyBinaryHead.getNumber() + 1)
+                .parentHash(chainHeadHeader.getHash())
+                .number(chainHeadHeader.getNumber() + 1)
                 .stateRoot(rootAfterApply)
                 .buildHeader();
         worldState.persist(persistHeader, binaryCommitter);

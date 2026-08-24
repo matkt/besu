@@ -30,6 +30,7 @@ import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.List;
 import java.util.Map;
@@ -53,24 +54,22 @@ public final class BalStateRootCommitter implements StateRootCommitter {
    */
   public interface Engine {
     /**
-     * When true, the parent world state is opened with a BAL overlay. Patricia uses this so
-     * account loads see BAL-merged state; Binary reads prior state from the parent flat DB and
-     * applies the BAL onto the binary trie directly.
+     * When true, the parent world state is opened with a BAL overlay. Patricia uses this so account
+     * loads see BAL-merged state; Binary reads prior state from the parent flat DB and applies the
+     * BAL onto the binary trie directly.
      */
     boolean useBalOverlay();
 
     Result compute(
-        BonsaiWorldState parent,
-        BlockAccessListAccountLookup accountLookup,
-        boolean storageFrozen);
+        BonsaiWorldState parent, BlockAccessListAccountLookup accountLookup, boolean storageFrozen);
   }
 
   /**
    * Outcome of a BAL background root computation.
    *
    * @param computation root and deferred KV writes
-   * @param storageRoots Patricia per-account storage roots to patch into the EVM accumulator
-   *     (empty for Binary)
+   * @param storageRoots Patricia per-account storage roots to patch into the EVM accumulator (empty
+   *     for Binary)
    * @param introducedCodeHashes Binary code hashes newly introduced by this block (empty for
    *     Patricia)
    */
@@ -86,6 +85,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
 
   private final CompletableFuture<Result> backgroundComputation;
   private final AtomicBoolean cancelled = new AtomicBoolean(false);
+  private final Engine engine;
 
   /** Patricia BAL background committer (existing public constructor). */
   public BalStateRootCommitter(
@@ -102,6 +102,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       final BlockAccessListAccountLookup accountLookup,
       final boolean storageFrozen,
       final Engine engine) {
+    this.engine = engine;
     this.backgroundComputation =
         CompletableFuture.supplyAsync(
             () -> {
@@ -117,6 +118,11 @@ public final class BalStateRootCommitter implements StateRootCommitter {
   public void cancel() {
     cancelled.set(true);
     backgroundComputation.cancel(true);
+  }
+
+  @Override
+  public TrieBranchType getTrieBranchType() {
+    return engine == BinaryBalEngine.INSTANCE ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
   }
 
   /**

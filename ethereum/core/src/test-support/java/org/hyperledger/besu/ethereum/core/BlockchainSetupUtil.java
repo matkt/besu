@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.core;
 
 import static org.assertj.core.util.Preconditions.checkArgument;
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
@@ -205,7 +206,11 @@ public class BlockchainSetupUtil {
           storageFormat == DataStorageFormat.FOREST
               ? createInMemoryWorldStateArchive()
               : createBonsaiInMemoryWorldStateArchive(
-                  blockchain, EvmConfiguration.DEFAULT, serviceManager, storageFormat);
+                  blockchain,
+                  EvmConfiguration.DEFAULT,
+                  serviceManager,
+                  storageFormat,
+                  protocolSchedule.milestoneFor(AMSTERDAM));
       final TransactionPool transactionPool = mock(TransactionPool.class);
 
       genesisState.writeStateTo(worldArchive.getWorldState());

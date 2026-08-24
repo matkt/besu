@@ -28,6 +28,7 @@ import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -50,6 +51,11 @@ import org.apache.tuweni.units.bigints.UInt256;
  * storage accumulator when in scope).
  */
 public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
+
+  @Override
+  public TrieBranchType getTrieBranchType() {
+    return TrieBranchType.BINARY;
+  }
 
   @Override
   public StateRootComputation compute(

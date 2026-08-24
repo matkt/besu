@@ -31,11 +31,9 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.A
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
@@ -58,49 +56,25 @@ import org.junit.jupiter.api.Test;
 
 class DefaultBinaryStateRootCommitterTest {
 
+  private static final GenesisConfig EMPTY_BINARY_GENESIS =
+      GenesisConfig.fromResource(
+          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
+
   private ExecutionContextTestFixture contextTestFixture;
   private ProtocolContext protocolContext;
   private BlockHeader chainHeadHeader;
-
-  /** Archive head after BINARY empty-root init; used for non-frozen persist tests. */
-  private BlockHeader emptyBinaryHead;
 
   private StateRootCommitterFactory factory;
 
   @BeforeEach
   void setUp() {
     contextTestFixture =
-        ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
-            .dataStorageFormat(DataStorageFormat.BINARY)
+        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
+            .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
     protocolContext = contextTestFixture.getProtocolContext();
     chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
     factory = new StateRootCommitterFactory(ImmutableBalConfiguration.builder().build());
-    initializeEmptyBinaryTrieRoot();
-  }
-
-  /** Genesis is written with a Merkle root; BINARY committer expects an empty binary trie root. */
-  private void initializeEmptyBinaryTrieRoot() {
-    try (BonsaiWorldState worldState = getWorldState(true)) {
-      final var updater = worldState.getWorldStateStorage().updater();
-      updater
-          .getWorldStateTransaction()
-          .put(
-              KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
-              BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY,
-              new byte[32]);
-      updater
-          .getWorldStateTransaction()
-          .remove(KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE, Bytes.EMPTY.toArrayUnsafe());
-      updater.commit();
-    }
-    emptyBinaryHead =
-        new BlockHeaderTestFixture()
-            .parentHash(chainHeadHeader.getHash())
-            .number(chainHeadHeader.getNumber())
-            .stateRoot(Hash.ZERO)
-            .buildHeader();
-    protocolContext.getWorldStateArchive().resetArchiveStateTo(emptyBinaryHead);
   }
 
   @AfterEach
@@ -455,7 +429,7 @@ class DefaultBinaryStateRootCommitterTest {
                   .getWorldStateArchive()
                   .getWorldState(
                       WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(emptyBinaryHead)
+                          .withBlockHeader(chainHeadHeader)
                           .withShouldWorldStateUpdateHead(true)
                           .build())
                   .orElseThrow()) {
@@ -590,7 +564,7 @@ class DefaultBinaryStateRootCommitterTest {
                   .getWorldStateArchive()
                   .getWorldState(
                       WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(emptyBinaryHead)
+                          .withBlockHeader(chainHeadHeader)
                           .withShouldWorldStateUpdateHead(true)
                           .build())
                   .orElseThrow()) {

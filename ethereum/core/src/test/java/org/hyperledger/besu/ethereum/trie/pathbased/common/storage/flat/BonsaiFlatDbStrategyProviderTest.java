@@ -54,7 +54,7 @@ class FlatDbStrategyProviderTest {
   private final SegmentedKeyValueStorage composedWorldStateStorage =
       new SegmentedInMemoryKeyValueStorage(
           List.of(
-              KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
+              KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE,
               KeyValueSegmentIdentifier.CODE_STORAGE));
 
   @ParameterizedTest
@@ -321,7 +321,7 @@ class FlatDbStrategyProviderTest {
     final SegmentedKeyValueStorageTransaction transaction =
         composedWorldStateStorage.startTransaction();
     transaction.put(
-        KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE,
+        KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE,
         FlatDbStrategyProvider.FLAT_DB_MODE,
         flatDbMode.getVersion().toArrayUnsafe());
     transaction.commit();

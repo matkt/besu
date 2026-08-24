@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
 
@@ -88,7 +89,12 @@ public class ExecutionContextTestFixture {
             0);
     if (dataStorageFormat.isPresent() && dataStorageFormat.get().isBonsaiFormat()) {
       this.stateArchive =
-          createBonsaiInMemoryWorldStateArchive(blockchain, dataStorageFormat.get());
+          createBonsaiInMemoryWorldStateArchive(
+              blockchain,
+              EvmConfiguration.DEFAULT,
+              null,
+              dataStorageFormat.get(),
+              protocolSchedule.milestoneFor(AMSTERDAM));
     } else this.stateArchive = createInMemoryWorldStateArchive();
     this.protocolSchedule = protocolSchedule;
     this.protocolContext =

@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParam
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitionedBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -73,13 +74,15 @@ public final class BinaryTrieWriter {
   public Hash commit() {
     if (!storageFrozen) {
       stateTrie.commit(
-          (location, hash, value) -> writes.add(u -> {
-            if(value==null){
-              u.removeTrieNode(location);
-            } else {
-              u.putTrieNode(location, hash, value);
-            }
-          }));
+          (location, hash, value) ->
+              writes.add(
+                  u -> {
+                    if (value == null) {
+                      u.removeTrieNode(TrieBranchType.BINARY, location);
+                    } else {
+                      u.putTrieNode(TrieBranchType.BINARY, location, hash, value);
+                    }
+                  }));
     }
     return Hash.wrap(stateTrie.getRootHash());
   }

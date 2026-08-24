@@ -26,8 +26,8 @@ import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.plugin.data.BlockHeader;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 
@@ -38,16 +38,15 @@ import java.util.Optional;
  *   <li>{@link ForestStateRootCommitter} — Forest archive
  *   <li>{@link BalStateRootCommitter} — BAL background root ({@link PatriciaBalEngine} or {@link
  *       BinaryBalEngine})
- *   <li>{@link DefaultPatriciaStateRootCommitter} — Patricia accumulator at persist
- *   <li>{@link DefaultBinaryStateRootCommitter} — Binary accumulator at persist
+ *   <li>{@link DefaultPatriciaStateRootCommitter} or {@link DefaultBinaryStateRootCommitter} —
+ *       direct accumulator at persist (trie branch resolved from world state)
  * </ul>
  */
 public final class StateRootCommitterFactory {
 
-  private enum Mode {
+  private enum CommitterStrategy {
     BAL,
-    BINARY,
-    PATRICIA,
+    DIRECT,
     FOREST
   }
 
@@ -62,38 +61,47 @@ public final class StateRootCommitterFactory {
       final BlockHeader blockHeader,
       final Optional<BlockAccessList> maybeBal,
       final boolean storageFrozen) {
-    return switch (resolveMode(protocolContext, maybeBal)) {
+    final TrieBranchType trieBranchType = resolveTrieBranchType(protocolContext);
+    return switch (resolveStrategy(protocolContext, maybeBal)) {
       case BAL ->
           new BalStateRootCommitter(
               protocolContext,
               blockHeader,
               BlockAccessListAccountLookup.of(maybeBal.get()),
               storageFrozen,
-              balEngine(protocolContext));
-      case BINARY -> new DefaultBinaryStateRootCommitter();
-      case PATRICIA -> new DefaultPatriciaStateRootCommitter();
+              balEngine(trieBranchType));
+      case DIRECT ->
+          trieBranchType == TrieBranchType.BINARY
+              ? new DefaultBinaryStateRootCommitter()
+              : new DefaultPatriciaStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
     };
   }
 
-  private Mode resolveMode(
+  private CommitterStrategy resolveStrategy(
       final ProtocolContext protocolContext, final Optional<BlockAccessList> maybeBal) {
     if (protocolContext.getWorldStateArchive() instanceof ForestWorldStateArchive) {
-      return Mode.FOREST;
+      return CommitterStrategy.FOREST;
     }
     if (maybeBal.isPresent()
         && balConfiguration.isBalStateRootEnabled()
         && !isTrieDisabled(protocolContext)) {
-      return Mode.BAL;
+      return CommitterStrategy.BAL;
     }
-    if (isBinaryTrie(protocolContext)) {
-      return Mode.BINARY;
-    }
-    return Mode.PATRICIA;
+    return CommitterStrategy.DIRECT;
   }
 
-  private static BalStateRootCommitter.Engine balEngine(final ProtocolContext protocolContext) {
-    return isBinaryTrie(protocolContext) ? BinaryBalEngine.INSTANCE : PatriciaBalEngine.INSTANCE;
+  private static BalStateRootCommitter.Engine balEngine(final TrieBranchType trieBranchType) {
+    return trieBranchType == TrieBranchType.BINARY
+        ? BinaryBalEngine.INSTANCE
+        : PatriciaBalEngine.INSTANCE;
+  }
+
+  private static TrieBranchType resolveTrieBranchType(final ProtocolContext protocolContext) {
+    if (isBinaryTrie(protocolContext)) {
+      return TrieBranchType.BINARY;
+    }
+    return TrieBranchType.PATRICIA;
   }
 
   private static boolean isTrieDisabled(final ProtocolContext protocolContext) {
@@ -104,7 +112,7 @@ public final class StateRootCommitterFactory {
   private static boolean isBinaryTrie(final ProtocolContext protocolContext) {
     if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider
         && provider.getWorldState() instanceof BonsaiWorldState worldState) {
-      return worldState.getWorldStateStorage().getDataStorageFormat() == DataStorageFormat.BINARY;
+      return worldState.getTrieBranchType() == TrieBranchType.BINARY;
     }
     return false;
   }

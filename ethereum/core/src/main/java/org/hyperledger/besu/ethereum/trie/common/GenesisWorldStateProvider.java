@@ -31,6 +31,7 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
@@ -46,19 +47,26 @@ public class GenesisWorldStateProvider {
    */
   public static MutableWorldState createGenesisWorldState(
       final DataStorageConfiguration dataStorageConfiguration, final BonsaiCodeCache codeCache) {
+    return createGenesisWorldState(dataStorageConfiguration, codeCache, null);
+  }
+
+  public static MutableWorldState createGenesisWorldState(
+      final DataStorageConfiguration dataStorageConfiguration,
+      final BonsaiCodeCache codeCache,
+      final TrieBranchType trieBranchType) {
 
     if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.BONSAI) {
       return createGenesisBonsaiWorldState(
-          DataStorageConfiguration.DEFAULT_BONSAI_CONFIG, codeCache);
+          DataStorageConfiguration.DEFAULT_BONSAI_CONFIG, codeCache, trieBranchType);
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.BINARY) {
       return createGenesisBonsaiWorldState(
-          DataStorageConfiguration.DEFAULT_BINARY_CONFIG, codeCache);
+          DataStorageConfiguration.DEFAULT_BINARY_CONFIG, codeCache, trieBranchType);
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.X_BONSAI_ARCHIVE) {
       return createGenesisBonsaiWorldState(
-          DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache);
+          DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache, trieBranchType);
     } else {
       return createGenesisForestWorldState();
     }
@@ -70,7 +78,9 @@ public class GenesisWorldStateProvider {
    * @return a mutable world state for the Genesis block
    */
   private static MutableWorldState createGenesisBonsaiWorldState(
-      final DataStorageConfiguration storageConfiguration, final BonsaiCodeCache codeCache) {
+      final DataStorageConfiguration storageConfiguration,
+      final BonsaiCodeCache codeCache,
+      final TrieBranchType trieBranchType) {
     final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader =
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem());
     final BonsaiWorldStateKeyValueStorage bonsaiWorldStateKeyValueStorage =
@@ -89,7 +99,8 @@ public class GenesisWorldStateProvider {
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
         createStatefulConfigWithTrie(),
-        codeCache);
+        codeCache,
+        trieBranchType);
   }
 
   /**

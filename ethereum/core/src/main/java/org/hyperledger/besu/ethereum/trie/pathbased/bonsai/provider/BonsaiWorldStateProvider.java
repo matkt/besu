@@ -44,6 +44,7 @@ import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -131,7 +132,12 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
             this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
     initializeHeadWorldState(
         new BonsaiWorldState(
-            this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
+            this,
+            worldStateKeyValueStorage,
+            evmConfiguration,
+            worldStateConfig,
+            codeCache,
+            blockchain.getChainHeadHeader()));
   }
 
   @VisibleForTesting
@@ -160,11 +166,20 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     provideWorldStateCacheManager(bonsaiWorldStateCacheManager);
     initializeHeadWorldState(
         new BonsaiWorldState(
-            this, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache));
+            this,
+            worldStateKeyValueStorage,
+            evmConfiguration,
+            worldStateConfig,
+            codeCache,
+            blockchain.getChainHeadHeader()));
   }
 
   public BonsaiCachedMerkleTrieLoader getCachedMerkleTrieLoader() {
     return bonsaiCachedMerkleTrieLoader;
+  }
+
+  public Blockchain getBlockchain() {
+    return blockchain;
   }
 
   protected void provideWorldStateCacheManager(
@@ -189,10 +204,11 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
 
   @Override
   public boolean isWorldStateAvailable(final Hash rootHash, final Hash blockHash) {
+    final TrieBranchType trieBranchType = headWorldState.getTrieBranchType();
     return worldStateCacheManager.contains(blockHash)
         || headWorldState.blockHash().equals(blockHash)
         || worldStateKeyValueStorage.isWorldStateAvailable(
-            Bytes32.wrap(rootHash.getBytes()), blockHash);
+            trieBranchType, Bytes32.wrap(rootHash.getBytes()), blockHash);
   }
 
   @Override
@@ -434,6 +450,11 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     return amsterdamMilestone
         .map(milestone -> Long.compareUnsigned(blockHeader.getTimestamp(), milestone) >= 0)
         .orElse(false);
+  }
+
+  /** Amsterdam active at {@code blockHeader} → binary trie, otherwise MPT. */
+  public TrieBranchType resolveTrieBranchType(final BlockHeader blockHeader) {
+    return isAmsterdamActive(blockHeader) ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
   }
 
   private BonsaiWorldStateKeyValueStorage getBonsaiWorldStateKeyValueStorage() {
