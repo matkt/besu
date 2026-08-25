@@ -59,9 +59,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * Binary-trie mirror of {@code LogRollingTests}. Exercises trie-log roll-forward / roll-back
- * against a {@link DataStorageFormat#BINARY} world state and asserts the binary state root,
- * recomputed via {@link DefaultBinaryStateRootCommitter}, matches the live-execution root after
- * each roll.
+ * against a BONSAI world state with the Amsterdam binary trie branch and asserts the binary state
+ * recomputed via {@link DefaultBinaryStateRootCommitter} matches the live-execution root after each
+ * roll.
  *
  * <p>This only works because the {@link PbtTrieLogFactory} carries the storage slot key preimage;
  * the legacy MPT factory serializes only the slot hash, which would leave {@code
@@ -69,7 +69,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * after a roll.
  *
  * <p>The scenario tests below drive the REAL {@link DefaultBinaryStateRootCommitter} against a real
- * BINARY {@link BonsaiWorldState} for every root. Each scenario applies changes → persists
+ * binary-trie {@link BonsaiWorldState} for every root. Each scenario applies changes → persists
  * (capturing a PBT trie-log layer) → verifies the root → rolls back to the empty state (root {@link
  * Hash#ZERO}) → rolls forward → verifies the root again. Multi-block scenarios chain several layers
  * and roll them back/forward in order. The rollback-to-ZERO assertion proves the binary trie fully
@@ -79,7 +79,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class PbtLogRollingTests {
 
   private static final DataStorageConfiguration CONFIG =
-      DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
+      DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
   private static final Address ADDRESS_ONE =
       Address.fromHexString("0x1111111111111111111111111111111111111111");
   private static final Address ADDRESS_TWO =
@@ -108,14 +108,24 @@ class PbtLogRollingTests {
     provider = new InMemoryKeyValueStorageProvider();
     archive =
         InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(
-            blockchain, EvmConfiguration.DEFAULT, null, DataStorageFormat.BINARY, Optional.of(0L));
+            blockchain,
+            EvmConfiguration.DEFAULT,
+            null,
+            DataStorageFormat.BONSAI,
+            Optional.of(0L),
+            Optional.of(0L));
     trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
 
     secondProvider = new InMemoryKeyValueStorageProvider();
     secondArchive =
         InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(
-            blockchain, EvmConfiguration.DEFAULT, null, DataStorageFormat.BINARY, Optional.of(0L));
+            blockchain,
+            EvmConfiguration.DEFAULT,
+            null,
+            DataStorageFormat.BONSAI,
+            Optional.of(0L),
+            Optional.of(0L));
   }
 
   private static final GenesisConfig EMPTY_BINARY_GENESIS =
@@ -685,7 +695,8 @@ class PbtLogRollingTests {
   }
 
   // --------------------------------------------------------------------------------------------
-  // Fixture: a fresh BINARY BonsaiWorldState backed by ExecutionContextTestFixture with an empty
+  // Fixture: a fresh binary-trie BonsaiWorldState backed by ExecutionContextTestFixture with an
+  // empty
   // Amsterdam genesis (binary trie root Hash.ZERO). Mirrors BinaryTrieVectorsTest setup.
   // --------------------------------------------------------------------------------------------
 
@@ -699,7 +710,7 @@ class PbtLogRollingTests {
     BinaryFixture() {
       contextFixture =
           ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
-              .dataStorageFormat(DataStorageFormat.BINARY)
+              .dataStorageFormat(DataStorageFormat.BONSAI)
               .build();
       final BlockHeader chainHead = contextFixture.getBlockchain().getChainHeadHeader();
       worldState =

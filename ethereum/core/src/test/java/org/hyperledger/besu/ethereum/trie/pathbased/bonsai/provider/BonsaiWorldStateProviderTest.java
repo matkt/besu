@@ -85,6 +85,7 @@ class BonsaiWorldStateProviderTest {
         .thenReturn(segmentedKeyValueStorageTransaction);
     when(storageProvider.getStorageBySegmentIdentifier(any())).thenReturn(trieLogStorage);
     when(trieLogStorage.startTransaction()).thenReturn(mock(KeyValueStorageTransaction.class));
+    when(blockchain.getChainHeadHeader()).thenReturn(blockBuilder.number(0).buildHeader());
   }
 
   @Test

@@ -60,10 +60,6 @@ public class GenesisWorldStateProvider {
       return createGenesisBonsaiWorldState(
           DataStorageConfiguration.DEFAULT_BONSAI_CONFIG, codeCache, trieBranchType);
     } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
-        == DataStorageFormat.BINARY) {
-      return createGenesisBonsaiWorldState(
-          DataStorageConfiguration.DEFAULT_BINARY_CONFIG, codeCache, trieBranchType);
-    } else if (Objects.requireNonNull(dataStorageConfiguration).getDataStorageFormat()
         == DataStorageFormat.X_BONSAI_ARCHIVE) {
       return createGenesisBonsaiWorldState(
           DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG, codeCache, trieBranchType);
@@ -96,7 +92,7 @@ public class GenesisWorldStateProvider {
         bonsaiCachedMerkleTrieLoader,
         new NoOpBonsaiWorldStateCacheManager(
             bonsaiWorldStateKeyValueStorage, EvmConfiguration.DEFAULT, codeCache),
-        new NoOpTrieLogManager(),
+        new NoOpTrieLogManager(bonsaiWorldStateKeyValueStorage),
         EvmConfiguration.DEFAULT,
         createStatefulConfigWithTrie(),
         codeCache,

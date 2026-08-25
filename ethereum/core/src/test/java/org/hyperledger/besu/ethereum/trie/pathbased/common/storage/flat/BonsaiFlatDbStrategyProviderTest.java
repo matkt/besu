@@ -317,6 +317,68 @@ class FlatDbStrategyProviderTest {
         .isInstanceOf(BonsaiPartialFlatDbStrategy.class);
   }
 
+  @Test
+  void codeHashStrategyRemovesByHashOnly() {
+    final SegmentedKeyValueStorage storage =
+        new SegmentedInMemoryKeyValueStorage(
+            List.of(
+                KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE,
+                KeyValueSegmentIdentifier.CODE_STORAGE));
+    final Hash codeHash = Hash.hash(Bytes.of(1));
+    final Hash accountHash = Hash.hash(Bytes.of(2));
+    final CodeHashCodeStorageStrategy strategy = new CodeHashCodeStorageStrategy();
+    final SegmentedKeyValueStorageTransaction putTx = storage.startTransaction();
+    strategy.putFlatCode(storage, putTx, accountHash, codeHash, Bytes.of(1));
+    putTx.commit();
+
+    final SegmentedKeyValueStorageTransaction removeByAddressTx = storage.startTransaction();
+    strategy.removeFlatCodeByAddress(storage, removeByAddressTx, accountHash);
+    removeByAddressTx.commit();
+    assertThat(
+            storage.get(
+                KeyValueSegmentIdentifier.CODE_STORAGE, codeHash.getBytes().toArrayUnsafe()))
+        .isPresent();
+
+    final SegmentedKeyValueStorageTransaction removeByHashTx = storage.startTransaction();
+    strategy.removeFlatCodeByHash(storage, removeByHashTx, codeHash);
+    removeByHashTx.commit();
+    assertThat(
+            storage.get(
+                KeyValueSegmentIdentifier.CODE_STORAGE, codeHash.getBytes().toArrayUnsafe()))
+        .isEmpty();
+  }
+
+  @Test
+  void accountHashStrategyRemovesByAddressOnly() {
+    final SegmentedKeyValueStorage storage =
+        new SegmentedInMemoryKeyValueStorage(
+            List.of(
+                KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE,
+                KeyValueSegmentIdentifier.CODE_STORAGE));
+    final Hash codeHash = Hash.hash(Bytes.of(1));
+    final Hash accountHash = Hash.hash(Bytes.of(2));
+    final AccountHashCodeStorageStrategy strategy = new AccountHashCodeStorageStrategy();
+    final SegmentedKeyValueStorageTransaction putTx = storage.startTransaction();
+    strategy.putFlatCode(storage, putTx, accountHash, codeHash, Bytes.of(1));
+    putTx.commit();
+
+    final SegmentedKeyValueStorageTransaction removeByHashTx = storage.startTransaction();
+    strategy.removeFlatCodeByHash(storage, removeByHashTx, codeHash);
+    removeByHashTx.commit();
+    assertThat(
+            storage.get(
+                KeyValueSegmentIdentifier.CODE_STORAGE, accountHash.getBytes().toArrayUnsafe()))
+        .isPresent();
+
+    final SegmentedKeyValueStorageTransaction removeByAddressTx = storage.startTransaction();
+    strategy.removeFlatCodeByAddress(storage, removeByAddressTx, accountHash);
+    removeByAddressTx.commit();
+    assertThat(
+            storage.get(
+                KeyValueSegmentIdentifier.CODE_STORAGE, accountHash.getBytes().toArrayUnsafe()))
+        .isEmpty();
+  }
+
   private void updateFlatDbMode(final FlatDbMode flatDbMode) {
     final SegmentedKeyValueStorageTransaction transaction =
         composedWorldStateStorage.startTransaction();

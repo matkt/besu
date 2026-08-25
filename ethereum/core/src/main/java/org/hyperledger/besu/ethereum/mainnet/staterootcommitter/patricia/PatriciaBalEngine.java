@@ -162,8 +162,7 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
         if (!storageFrozen) {
           if (codeChange.newCode().isEmpty()) {
             if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
-              final Hash priorCodeHash = priorAccount.getCodeHash();
-              writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+              writes.add(updater -> updater.removeCodeByAddress(accountHash));
             }
           } else {
             writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));

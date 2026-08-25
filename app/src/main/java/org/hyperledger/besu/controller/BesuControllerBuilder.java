@@ -16,6 +16,7 @@ package org.hyperledger.besu.controller;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BINARY_TRIE;
 
 import org.hyperledger.besu.chainimport.BlockHeadersCachePreload;
 import org.hyperledger.besu.components.BesuComponent;
@@ -1369,8 +1370,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final Supplier<WorldStateHealer> worldStateHealerSupplier,
       final ProtocolSchedule protocolSchedule) {
     final Optional<Long> amsterdamMilestone = protocolSchedule.milestoneFor(AMSTERDAM);
+    final Optional<Long> binaryTrieMilestone = protocolSchedule.milestoneFor(BINARY_TRIE);
     return switch (dataStorageConfiguration.getDataStorageFormat()) {
-      case BONSAI, BINARY -> {
+      case BONSAI -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
             worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
 
@@ -1383,7 +1385,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             evmConfiguration,
             worldStateHealerSupplier,
             codeCache,
-            amsterdamMilestone);
+            amsterdamMilestone,
+            binaryTrieMilestone);
       }
       case X_BONSAI_ARCHIVE -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
@@ -1399,7 +1402,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             worldStateHealerSupplier,
             codeCache,
             metricsSystem,
-            amsterdamMilestone);
+            amsterdamMilestone,
+            binaryTrieMilestone);
       }
       case FOREST -> {
         final WorldStatePreimageStorage preimageStorage =

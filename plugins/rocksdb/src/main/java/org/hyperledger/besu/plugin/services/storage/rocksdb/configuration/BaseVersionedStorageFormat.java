@@ -52,13 +52,7 @@ public enum BaseVersionedStorageFormat implements VersionedStorageFormat {
    * Current Bonsai archive version, with receipts using compaction, in order to make Receipts use
    * less disk space
    */
-  BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION(DataStorageFormat.X_BONSAI_ARCHIVE, 2),
-  /**
-   * Current Binary trie version, sharing the Bonsai column-family layout but recording {@link
-   * DataStorageFormat#BINARY} in metadata so restarts with {@code --data-storage-format=BINARY} do
-   * not hit a format-mismatch against BONSAI.
-   */
-  BINARY_WITH_RECEIPT_COMPACTION(DataStorageFormat.BINARY, 1);
+  BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION(DataStorageFormat.X_BONSAI_ARCHIVE, 2);
 
   private final DataStorageFormat format;
   private final int version;
@@ -80,7 +74,6 @@ public enum BaseVersionedStorageFormat implements VersionedStorageFormat {
       case FOREST -> FOREST_WITH_RECEIPT_COMPACTION;
       case BONSAI -> BONSAI_WITH_RECEIPT_COMPACTION;
       case X_BONSAI_ARCHIVE -> BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
-      case BINARY -> BINARY_WITH_RECEIPT_COMPACTION;
     };
   }
 

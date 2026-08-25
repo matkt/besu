@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.core.Withdrawal;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -187,7 +188,7 @@ public final class GenesisState {
           genesisAccount.storage().forEach(account::setStorageValue);
         });
     updater.commit();
-    // When Amsterdam is active at genesis, the partitioned-binary-trie committer must persist
+    // When binary trie is active at genesis, the partitioned-binary-trie committer must persist
     // block-0 state so world metadata lives in the BINARY trie-branch column from the start.
     if (usesBinaryTrieCommitterAtGenesis(target, genesisConfig)) {
       target.persist(rootHeader, new DefaultBinaryStateRootCommitter());
@@ -198,7 +199,8 @@ public final class GenesisState {
 
   private static boolean usesBinaryTrieCommitterAtGenesis(
       final MutableWorldState target, final GenesisConfig genesisConfig) {
-    return target instanceof BonsaiWorldState && isAmsterdamAtGenesis(genesisConfig);
+    return target instanceof BonsaiWorldState
+        && BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(genesisConfig);
   }
 
   private static Hash calculateGenesisStateRoot(
@@ -206,7 +208,9 @@ public final class GenesisState {
       final GenesisConfig genesisConfig,
       final BonsaiCodeCache codeCache) {
     final TrieBranchType trieBranchType =
-        isAmsterdamAtGenesis(genesisConfig) ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+        BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(genesisConfig)
+            ? TrieBranchType.BINARY
+            : TrieBranchType.PATRICIA;
     try (var worldState =
         createGenesisWorldState(dataStorageConfiguration, codeCache, trieBranchType)) {
       writeAccountsTo(worldState, genesisConfig.streamAllocations(), null, genesisConfig);

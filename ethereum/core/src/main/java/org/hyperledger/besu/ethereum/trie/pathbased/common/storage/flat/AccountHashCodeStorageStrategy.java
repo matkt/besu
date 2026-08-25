@@ -45,11 +45,18 @@ public class AccountHashCodeStorageStrategy implements CodeStorageStrategy {
   }
 
   @Override
-  public void removeFlatCode(
+  public void removeFlatCodeByAddress(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
-      final Hash accountHash,
-      final Hash codeHash) {
+      final Hash accountHash) {
     transaction.remove(CODE_STORAGE, accountHash.getBytes().toArrayUnsafe());
+  }
+
+  @Override
+  public void removeFlatCodeByHash(
+      final SegmentedKeyValueStorage storage,
+      final SegmentedKeyValueStorageTransaction transaction,
+      final Hash codeHash) {
+    // Code-by-hash flat DB is not keyed by account; MPT callers use removeFlatCodeByAddress.
   }
 }

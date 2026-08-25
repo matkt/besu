@@ -17,6 +17,7 @@
     "pragueTime":0,
     "osakaTime":0,
     "amsterdamTime":0,
+    "binaryTrieTime":0,
     "blobSchedule": {
       "cancun": {
         "target": 3,

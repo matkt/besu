@@ -35,20 +35,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * Binary-trie mirror of the Bonsai snapshot-isolation suite. Reuses the format-agnostic {@link
- * AbstractIsolationTests} machinery by selecting {@link DataStorageFormat#BINARY} with {@link
- * DataStorageConfiguration#DEFAULT_BINARY_CONFIG}. The {@code @Test} scenarios mirror {@code
+ * AbstractIsolationTests} machinery by selecting {@link DataStorageFormat#BONSAI} with {@link
+ * DataStorageConfiguration#DEFAULT_BONSAI_PBT_CONFIG}. The {@code @Test} scenarios mirror {@code
  * BonsaiSnapshotIsolationTests}; the format hooks route fixture construction through the binary
  * trie.
  *
  * <p><b>Currently disabled.</b> {@link AbstractIsolationTests} executes real blocks through a
  * hardcoded MPT/mainnet {@code ProtocolSchedule} (built from {@code /dev.json}) and writes genesis
- * state via that same MPT schedule. The storage-format hooks added for BINARY only re-route the
- * world-state storage, not the protocol schedule, so {@code executeBlock} produces receipts that
- * don't match the block transactions and {@code appendBlock} rejects them. Making this suite
- * binary-correct requires a protocol-schedule / genesis-config hook in {@link
- * AbstractIsolationTests} (binary-trie fork + {@link DefaultBinaryStateRootCommitter}); that
- * test-infra change is deferred. The rolling semantics this would cover are already exercised
- * end-to-end by {@code PbtLogRollingTests}.
+ * state via that same MPT schedule. The storage-format hooks only re-route the world-state storage,
+ * not the protocol schedule, so {@code executeBlock} produces receipts that don't match the block
+ * transactions and {@code appendBlock} rejects them. Making this suite binary-correct requires a
+ * protocol-schedule / genesis-config hook in {@link AbstractIsolationTests} (binary-trie fork +
+ * {@link DefaultBinaryStateRootCommitter}); that test-infra change is deferred. The rolling
+ * semantics this would cover are already exercised end-to-end by {@code PbtLogRollingTests}.
  */
 @ExtendWith(MockitoExtension.class)
 @Disabled(
@@ -63,7 +62,7 @@ public class PbtSnapshotIsolationTests extends AbstractIsolationTests {
 
   @Override
   protected DataStorageConfiguration getDataStorageConfiguration() {
-    return DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
+    return DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
   }
 
   @Test

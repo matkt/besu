@@ -29,9 +29,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateC
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -152,27 +150,18 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
         .addArgument(blockHeader::toLogString)
         .log();
 
-    return Optional.ofNullable(
-            cachedWorldStatesByHash.get(blockHeader.getParentHash())) // search parent block
-        .map(BonsaiCachedWorldStateView::getWorldStateStorage)
+    return Optional.ofNullable(cachedWorldStatesByHash.get(blockHeader.getParentHash()))
         .or(
-            () -> {
-              // or else search the nearest state in the cache
-              LOG.atDebug()
-                  .setMessage("searching cache for nearest worldstate for {}")
-                  .addArgument(blockHeader::toLogString)
-                  .log();
-
-              final List<BonsaiCachedWorldStateView> cachedBonsaiWorldViews =
-                  new ArrayList<>(cachedWorldStatesByHash.values());
-              return cachedBonsaiWorldViews.stream()
-                  .sorted(
-                      Comparator.comparingLong(
-                          view -> Math.abs(blockHeader.getNumber() - view.getBlockNumber())))
-                  .map(BonsaiCachedWorldStateView::getWorldStateStorage)
-                  .findFirst();
-            })
-        .map(storage -> worldStateForBlock(createLayeredKeyValueStorage(storage), blockHeader));
+            () ->
+                cachedWorldStatesByHash.values().stream()
+                    .min(
+                        Comparator.comparingLong(
+                            view -> Math.abs(blockHeader.getNumber() - view.getBlockNumber()))))
+        .map(
+            view ->
+                worldStateForBlock(
+                    createLayeredKeyValueStorage(view.getWorldStateStorage()),
+                    view.getBlockHeader()));
   }
 
   public Optional<BonsaiWorldState> getHeadWorldState(

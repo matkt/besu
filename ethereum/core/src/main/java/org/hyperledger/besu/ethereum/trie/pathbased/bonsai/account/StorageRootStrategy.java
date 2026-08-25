@@ -18,7 +18,7 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 
@@ -119,14 +119,14 @@ public interface StorageRootStrategy {
   void assertStorageRootMatches(AccountValue other, String context);
 
   /**
-   * Selects the strategy for the given storage format.
+   * Selects the strategy for the active trie branch type (Amsterdam fork → binary trie).
    *
-   * @param dataStorageFormat the active {@code DataStorageFormat}.
+   * @param trieBranchType the active {@link TrieBranchType}.
    * @return {@link BinaryStorageRootStrategy#INSTANCE} for {@code BINARY}, otherwise a fresh {@link
    *     MptStorageRootStrategy} holding {@link Hash#EMPTY_TRIE_HASH}.
    */
-  static StorageRootStrategy forFormat(final DataStorageFormat dataStorageFormat) {
-    return dataStorageFormat == DataStorageFormat.BINARY
+  static StorageRootStrategy forTrieBranchType(final TrieBranchType trieBranchType) {
+    return trieBranchType == TrieBranchType.BINARY
         ? BinaryStorageRootStrategy.INSTANCE
         : new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
   }

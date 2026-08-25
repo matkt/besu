@@ -534,7 +534,7 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
                     bytes,
                     true,
                     codeCache,
-                    StorageRootStrategy.forFormat(getWorldStateStorage().getDataStorageFormat())))
+                    StorageRootStrategy.forTrieBranchType(getTrieBranchType())))
         .orElse(null);
   }
 

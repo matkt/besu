@@ -40,9 +40,9 @@ import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.AbstractWorldUpdater;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogAccumulator;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -365,16 +365,16 @@ public class BonsaiWorldStateUpdateAccumulator
   }
 
   /**
-   * Returns the {@link StorageRootStrategy} for the active storage format, used when constructing
-   * new {@link BonsaiAccount} instances. MPT → a fresh {@link MptStorageRootStrategy} holding
-   * {@link Hash#EMPTY_TRIE_HASH} (the initial root for a new account); BINARY → the stateless
-   * {@link BinaryStorageRootStrategy} singleton. This is the single place that maps the world
-   * state's {@link DataStorageFormat} onto a strategy — {@code BonsaiAccount} itself is
-   * format-agnostic.
+   * Returns the {@link StorageRootStrategy} for the active trie branch type, used when constructing
+   * new {@link BonsaiAccount} instances. Patricia → a fresh {@link MptStorageRootStrategy} holding
+   * {@link Hash#EMPTY_TRIE_HASH} (the initial root for a new account); binary trie → the stateless
+   * {@link BinaryStorageRootStrategy} singleton. This is the single place that maps the world world
+   * state's {@link TrieBranchType} onto a strategy — {@code BonsaiAccount} itself is
+   * branch-agnostic.
    */
   protected StorageRootStrategy storageRootStrategy() {
-    return StorageRootStrategy.forFormat(
-        wrappedWorldView().getWorldStateStorage().getDataStorageFormat());
+    return StorageRootStrategy.forTrieBranchType(
+        ((BonsaiWorldState) wrappedWorldView()).getTrieBranchType());
   }
 
   @Override

@@ -80,7 +80,6 @@ public class RocksDBKeyValueStorageFactoryTest {
             case BONSAI -> BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION;
             case X_BONSAI_ARCHIVE ->
                 BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
-            case BINARY -> BaseVersionedStorageFormat.BINARY_WITH_RECEIPT_COMPACTION;
             case FOREST -> BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION;
           };
       assertThat(DatabaseMetadata.lookUpFrom(tempDataDir).getVersionedStorageFormat())
@@ -107,7 +106,6 @@ public class RocksDBKeyValueStorageFactoryTest {
             case BONSAI -> BaseVersionedStorageFormat.BONSAI_WITH_RECEIPT_COMPACTION;
             case X_BONSAI_ARCHIVE ->
                 BaseVersionedStorageFormat.BONSAI_ARCHIVE_WITH_RECEIPT_COMPACTION;
-            case BINARY -> BaseVersionedStorageFormat.BINARY_WITH_RECEIPT_COMPACTION;
             case FOREST -> BaseVersionedStorageFormat.FOREST_WITH_RECEIPT_COMPACTION;
           };
       assertThat(DatabaseMetadata.lookUpFrom(tempDataDir).getVersionedStorageFormat())

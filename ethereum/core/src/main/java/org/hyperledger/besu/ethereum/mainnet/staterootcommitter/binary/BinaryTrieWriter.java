@@ -191,7 +191,7 @@ public final class BinaryTrieWriter {
         removeCodeLeaves(Bytes32.wrap(priorCodeHash.getBytes()), priorCode);
       }
       if (!storageFrozen) {
-        writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+        writes.add(updater -> updater.removeCodeByHash(priorCodeHash));
       }
     }
   }

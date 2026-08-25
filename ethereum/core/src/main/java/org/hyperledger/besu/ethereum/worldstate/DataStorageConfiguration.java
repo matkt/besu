@@ -55,14 +55,13 @@ public interface DataStorageConfiguration {
           .pathBasedExtraStorageConfiguration(PathBasedExtraStorageConfiguration.DISABLED)
           .build();
 
-  DataStorageConfiguration DEFAULT_BINARY_CONFIG =
+  DataStorageConfiguration DEFAULT_BONSAI_PBT_CONFIG =
       ImmutableDataStorageConfiguration.builder()
-          .dataStorageFormat(DataStorageFormat.BINARY)
+          .dataStorageFormat(DataStorageFormat.BONSAI)
           .pathBasedExtraStorageConfiguration(
               ImmutablePathBasedExtraStorageConfiguration.builder()
                   // The partitioned binary trie stores code content-addressed by code hash, so the
-                  // flat DB must mirror that layout (enforced; see
-                  // PathBasedExtraStorageOptions.validate).
+                  // flat DB must mirror that layout when the binary trie fork is active.
                   .unstable(
                       ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
                           .codeStoredByCodeHashEnabled(true)

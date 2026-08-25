@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
@@ -26,25 +25,6 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 
 public class CodeHashCodeStorageStrategy implements CodeStorageStrategy {
-
-  /**
-   * Whether {@link #removeFlatCode} actually deletes the codeHash-keyed entry. Code is
-   * content-addressed (EIP-8297) and may be shared across accounts, so for the MPT (BONSAI) it is
-   * never removed from the flat DB on a per-account delete (sharing would be broken). For the
-   * partitioned binary trie the committer only signals removal for a code hash newly introduced by
-   * the rolled-back block (no remaining account references it), so the flat-DB entry is dropped to
-   * stay consistent with the trie (whose CODE_ZONE chunks were removed).
-   */
-  private final boolean removeOnDelete;
-
-  /** MPT (BONSAI) default: never remove content-addressed code from the flat DB. */
-  public CodeHashCodeStorageStrategy() {
-    this(DataStorageFormat.BONSAI);
-  }
-
-  public CodeHashCodeStorageStrategy(final DataStorageFormat dataStorageFormat) {
-    this.removeOnDelete = dataStorageFormat == DataStorageFormat.BINARY;
-  }
 
   @Override
   public Optional<Bytes> getFlatCode(
@@ -63,14 +43,19 @@ public class CodeHashCodeStorageStrategy implements CodeStorageStrategy {
   }
 
   @Override
-  public void removeFlatCode(
+  public void removeFlatCodeByAddress(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
-      final Hash accountHash,
+      final Hash accountHash) {
+    // Content-addressed code is keyed by hash; PBT callers use removeFlatCodeByHash.
+  }
+
+  @Override
+  public void removeFlatCodeByHash(
+      final SegmentedKeyValueStorage storage,
+      final SegmentedKeyValueStorageTransaction transaction,
       final Hash codeHash) {
-    if (removeOnDelete) {
-      transaction.remove(CODE_STORAGE, codeHash.getBytes().toArrayUnsafe());
-    }
+    transaction.remove(CODE_STORAGE, codeHash.getBytes().toArrayUnsafe());
   }
 
   public static boolean isCodeHashValue(final byte[] key, final byte[] value) {

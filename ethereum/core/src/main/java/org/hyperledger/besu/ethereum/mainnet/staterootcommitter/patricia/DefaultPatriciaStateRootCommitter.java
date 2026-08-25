@@ -377,8 +377,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
         }
 
         if (codeIsEmpty(updatedCode)) {
-          final Hash priorCodeHash = Hash.hash(priorCode);
-          writes.add(updater -> updater.removeCode(accountHash, priorCodeHash));
+          writes.add(updater -> updater.removeCodeByAddress(accountHash));
         } else {
           final Hash codeHash = Hash.hash(updatedCode);
           writes.add(updater -> updater.putCode(accountHash, codeHash, updatedCode));

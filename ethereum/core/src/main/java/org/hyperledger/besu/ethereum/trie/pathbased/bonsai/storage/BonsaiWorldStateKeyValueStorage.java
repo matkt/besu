@@ -524,9 +524,14 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       this.worldStorage = worldStorage;
     }
 
-    public Updater removeCode(final Hash accountHash, final Hash codeHash) {
-      flatDbStrategy.removeFlatCode(
-          worldStorage, composedWorldStateTransaction, accountHash, codeHash);
+    public Updater removeCodeByAddress(final Hash accountHash) {
+      flatDbStrategy.removeFlatCodeByAddress(
+          worldStorage, composedWorldStateTransaction, accountHash);
+      return this;
+    }
+
+    public Updater removeCodeByHash(final Hash codeHash) {
+      flatDbStrategy.removeFlatCodeByHash(worldStorage, composedWorldStateTransaction, codeHash);
       return this;
     }
 

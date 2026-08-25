@@ -60,7 +60,7 @@ import org.mockito.quality.Strictness;
 /**
  * Binary-trie mirror of {@link BonsaiWorldStateProviderTest}'s rollback / reorg scenarios,
  * exercising the format-agnostic provider logic against {@link
- * DataStorageConfiguration#DEFAULT_BINARY_CONFIG}.
+ * DataStorageConfiguration#DEFAULT_BONSAI_PBT_CONFIG}.
  *
  * <p>Lives in this package (rather than a {@code pbt.provider} subpackage) because it must access
  * the package-private {@code @VisibleForTesting} constructor of {@link BonsaiWorldStateProvider}
@@ -71,7 +71,7 @@ import org.mockito.quality.Strictness;
 class PbtWorldStateProviderReorgTest {
 
   private static final DataStorageConfiguration DEFAULT_CONFIG =
-      DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
+      DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
 
   private final BlockHeaderTestFixture blockBuilder = new BlockHeaderTestFixture();
 
@@ -93,6 +93,7 @@ class PbtWorldStateProviderReorgTest {
         .thenReturn(segmentedKeyValueStorageTransaction);
     when(storageProvider.getStorageBySegmentIdentifier(any())).thenReturn(trieLogStorage);
     when(trieLogStorage.startTransaction()).thenReturn(mock(KeyValueStorageTransaction.class));
+    when(blockchain.getChainHeadHeader()).thenReturn(blockBuilder.number(0).buildHeader());
   }
 
   @Test

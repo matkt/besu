@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -77,7 +78,15 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
 
   private final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
   private final Supplier<WorldStateHealer> worldStateHealerSupplier;
+
+  /** Amsterdam fork milestone: BAL execution rules and {@link #prepareWorldStateForBlock} only. */
   private final Optional<Long> amsterdamMilestone;
+
+  /**
+   * Binary-trie fork milestone: trie branch selection and trie-log encoding (independent of
+   * Amsterdam).
+   */
+  private final Optional<Long> binaryTrieMilestone;
 
   public BonsaiWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
@@ -110,6 +119,30 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
       final Supplier<WorldStateHealer> worldStateHealerSupplier,
       final BonsaiCodeCache codeCache,
       final Optional<Long> amsterdamMilestone) {
+    this(
+        worldStateKeyValueStorage,
+        blockchain,
+        pathBasedExtraStorageConfiguration,
+        bonsaiCachedMerkleTrieLoader,
+        pluginContext,
+        evmConfiguration,
+        worldStateHealerSupplier,
+        codeCache,
+        amsterdamMilestone,
+        Optional.empty());
+  }
+
+  public BonsaiWorldStateProvider(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Blockchain blockchain,
+      final PathBasedExtraStorageConfiguration pathBasedExtraStorageConfiguration,
+      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
+      final ServiceManager pluginContext,
+      final EvmConfiguration evmConfiguration,
+      final Supplier<WorldStateHealer> worldStateHealerSupplier,
+      final BonsaiCodeCache codeCache,
+      final Optional<Long> amsterdamMilestone,
+      final Optional<Long> binaryTrieMilestone) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.trieLogManager =
         new TrieLogManager(
@@ -126,6 +159,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateHealerSupplier = worldStateHealerSupplier;
     this.amsterdamMilestone = amsterdamMilestone;
+    this.binaryTrieMilestone = binaryTrieMilestone;
     this.evmConfiguration = evmConfiguration;
     provideWorldStateCacheManager(
         new BonsaiWorldStateCacheManager(
@@ -162,6 +196,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateHealerSupplier = worldStateHealerSupplier;
     this.amsterdamMilestone = Optional.empty();
+    this.binaryTrieMilestone = Optional.empty();
     this.evmConfiguration = evmConfiguration;
     provideWorldStateCacheManager(bonsaiWorldStateCacheManager);
     initializeHeadWorldState(
@@ -452,9 +487,11 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
         .orElse(false);
   }
 
-  /** Amsterdam active at {@code blockHeader} → binary trie, otherwise MPT. */
+  /** Binary-trie fork active at {@code blockHeader} → PBT, otherwise MPT. */
   public TrieBranchType resolveTrieBranchType(final BlockHeader blockHeader) {
-    return isAmsterdamActive(blockHeader) ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+    return BinaryTrieForkSupport.isBinaryTrieActive(blockHeader.getTimestamp(), binaryTrieMilestone)
+        ? TrieBranchType.BINARY
+        : TrieBranchType.PATRICIA;
   }
 
   private BonsaiWorldStateKeyValueStorage getBonsaiWorldStateKeyValueStorage() {

@@ -94,15 +94,18 @@ public abstract class FlatDbStrategy {
     }
   }
 
-  /*
-   * Removes code for the given account hash.
-   */
-  public void removeFlatCode(
+  public void removeFlatCodeByAddress(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
-      final Hash accountHash,
+      final Hash accountHash) {
+    codeStorageStrategy.removeFlatCodeByAddress(storage, transaction, accountHash);
+  }
+
+  public void removeFlatCodeByHash(
+      final SegmentedKeyValueStorage storage,
+      final SegmentedKeyValueStorageTransaction transaction,
       final Hash codeHash) {
-    codeStorageStrategy.removeFlatCode(storage, transaction, accountHash, codeHash);
+    codeStorageStrategy.removeFlatCodeByHash(storage, transaction, codeHash);
   }
 
   /*

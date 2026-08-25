@@ -51,12 +51,12 @@ public abstract class FlatDbStrategyProvider {
     // derive our flatdb strategy from db or default:
     var newFlatDbMode = deriveFlatDbStrategy(composedWorldStateStorage);
 
-    // if  flatDbMode is not loaded or has changed, reload flatDbStrategy
+    // if flatDbMode is not loaded or has changed, reload
     if (this.flatDbMode == null || !this.flatDbMode.equals(newFlatDbMode)) {
       this.flatDbMode = newFlatDbMode;
       final CodeStorageStrategy codeStorageStrategy =
           deriveUseCodeStorageByHash(composedWorldStateStorage)
-              ? new CodeHashCodeStorageStrategy(dataStorageConfiguration.getDataStorageFormat())
+              ? new CodeHashCodeStorageStrategy()
               : new AccountHashCodeStorageStrategy();
       this.flatDbStrategy = createFlatDbStrategy(flatDbMode, metricsSystem, codeStorageStrategy);
     }

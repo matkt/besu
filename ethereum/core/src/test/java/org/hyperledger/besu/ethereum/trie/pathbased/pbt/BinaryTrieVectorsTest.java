@@ -278,7 +278,7 @@ class BinaryTrieVectorsTest {
     // rollback -> empty root, rollforward -> expected root again.
     final ExecutionContextTestFixture contextTestFixture =
         ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
-            .dataStorageFormat(DataStorageFormat.BINARY)
+            .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
     try (final var ignored = contextTestFixture.getStateArchive()) {
       final ProtocolContext protocolContext = contextTestFixture.getProtocolContext();

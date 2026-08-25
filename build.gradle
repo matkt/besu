@@ -1097,8 +1097,27 @@ tasks.register("dockerDistUntar") {
   }
 }
 
+task downloadPyroscopeJar {
+  def dockerBuildDir = "build/docker-besu/"
+  def outputJar = file("${dockerBuildDir}/pyroscope.jar")
+  outputs.file(outputJar)
+
+  doLast {
+    outputJar.parentFile.mkdirs()
+    if (outputJar.exists() && outputJar.length() > 0) {
+      return
+    }
+    def url =
+        new URL(
+            "https://github.com/grafana/pyroscope-java/releases/download/v2.6.0/pyroscope.jar")
+    url.withInputStream { input ->
+      outputJar.withOutputStream { output -> output << input }
+    }
+  }
+}
+
 task distDockerCopy {
-  dependsOn dockerDistUntar
+  dependsOn dockerDistUntar, downloadPyroscopeJar
   inputs.dir("build/docker-besu/")
   def dockerBuildDir = "build/docker-besu/"
 

@@ -281,7 +281,7 @@ public abstract class AbstractIsolationTests {
   /**
    * Format hook: the {@link DataStorageFormat} used to configure the world state storage and the
    * storage provider. Subclasses override this to run the isolation suite against a different
-   * path-based format (e.g. {@link DataStorageFormat#BINARY}).
+   * path-based format (e.g. {@link DataStorageFormat#BONSAI} with Amsterdam binary trie).
    */
   protected DataStorageFormat getDataStorageFormat() {
     return DataStorageFormat.BONSAI;
@@ -290,7 +290,7 @@ public abstract class AbstractIsolationTests {
   /**
    * Format hook: the {@link DataStorageConfiguration} used to build the world state storage.
    * Subclasses override this to run the isolation suite against a different configuration (e.g.
-   * {@link DataStorageConfiguration#DEFAULT_BINARY_CONFIG}).
+   * {@link DataStorageConfiguration#DEFAULT_BONSAI_PBT_CONFIG}).
    */
   protected DataStorageConfiguration getDataStorageConfiguration() {
     return DataStorageConfiguration.DEFAULT_BONSAI_PARTIAL_DB_CONFIG;

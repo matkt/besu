@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.core;
 
 import static org.assertj.core.util.Preconditions.checkArgument;
 import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
+import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BINARY_TRIE;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
@@ -200,7 +201,7 @@ public class BlockchainSetupUtil {
       final GenesisState genesisState =
           GenesisState.fromConfig(genesisConfig, protocolSchedule, new BonsaiCodeCache());
       final MutableBlockchain blockchain = createInMemoryBlockchain(genesisState.getBlock());
-      // BONSAI, BINARY, and X_BONSAI_ARCHIVE are all path-based and must route to the Bonsai
+      // BONSAI and X_BONSAI_ARCHIVE are all path-based and must route to the Bonsai
       // archive; only FOREST uses the in-memory Forest archive.
       final WorldStateArchive worldArchive =
           storageFormat == DataStorageFormat.FOREST
@@ -210,7 +211,8 @@ public class BlockchainSetupUtil {
                   EvmConfiguration.DEFAULT,
                   serviceManager,
                   storageFormat,
-                  protocolSchedule.milestoneFor(AMSTERDAM));
+                  protocolSchedule.milestoneFor(AMSTERDAM),
+                  protocolSchedule.milestoneFor(BINARY_TRIE));
       final TransactionPool transactionPool = mock(TransactionPool.class);
 
       genesisState.writeStateTo(worldArchive.getWorldState());

@@ -130,9 +130,24 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
       final ServiceManager serviceManager,
       final DataStorageFormat dataStorageFormat,
       final Optional<Long> amsterdamMilestone) {
+    return createBonsaiInMemoryWorldStateArchive(
+        blockchain,
+        evmConfiguration,
+        serviceManager,
+        dataStorageFormat,
+        amsterdamMilestone,
+        Optional.empty());
+  }
+
+  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
+      final Blockchain blockchain,
+      final EvmConfiguration evmConfiguration,
+      final ServiceManager serviceManager,
+      final DataStorageFormat dataStorageFormat,
+      final Optional<Long> amsterdamMilestone,
+      final Optional<Long> binaryTrieMilestone) {
     final DataStorageConfiguration storageConfiguration =
         switch (dataStorageFormat) {
-          case BINARY -> DataStorageConfiguration.DEFAULT_BINARY_CONFIG;
           case X_BONSAI_ARCHIVE -> DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG;
           case BONSAI -> DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
           case FOREST -> DataStorageConfiguration.DEFAULT_FOREST_CONFIG;
@@ -141,9 +156,11 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         new InMemoryKeyValueStorageProvider();
     final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader =
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem());
-    return new BonsaiWorldStateProvider(
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
         (BonsaiWorldStateKeyValueStorage)
-            inMemoryKeyValueStorageProvider.createWorldStateStorage(storageConfiguration),
+            inMemoryKeyValueStorageProvider.createWorldStateStorage(storageConfiguration);
+    return new BonsaiWorldStateProvider(
+        worldStateKeyValueStorage,
         blockchain,
         storageConfiguration.getPathBasedExtraStorageConfiguration(),
         bonsaiCachedMerkleTrieLoader,
@@ -151,7 +168,8 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         evmConfiguration,
         throwingWorldStateHealerSupplier(),
         new BonsaiCodeCache(),
-        amsterdamMilestone);
+        amsterdamMilestone,
+        binaryTrieMilestone);
   }
 
   public static MutableWorldState createInMemoryWorldState() {

@@ -130,7 +130,7 @@ class BalTransactionProcessorUnitTest {
             new NoOpBonsaiCachedMerkleTrieLoader(),
             new NoOpBonsaiWorldStateCacheManager(
                 storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
-            new NoOpTrieLogManager(),
+            new NoOpTrieLogManager(storage),
             EvmConfiguration.DEFAULT,
             createStatefulConfigWithTrie(),
             new BonsaiCodeCache());

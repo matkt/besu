@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.common.trielog;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -24,8 +25,8 @@ import java.util.Optional;
 
 public class NoOpTrieLogManager extends TrieLogManager {
 
-  public NoOpTrieLogManager() {
-    super(null, null, 0, null);
+  public NoOpTrieLogManager(final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    super(null, worldStateKeyValueStorage, 0, null);
   }
 
   @Override
@@ -35,7 +36,7 @@ public class NoOpTrieLogManager extends TrieLogManager {
       final BlockHeader forBlockHeader,
       final BonsaiWorldState forWorldState) {
     // notify trie log added observers, synchronously
-    TrieLog trieLog = trieLogFactory.create(localUpdater, forBlockHeader);
+    TrieLog trieLog = getTrieLogFactory().create(localUpdater, forBlockHeader);
     trieLogObservers.forEach(o -> o.onTrieLogAdded(new TrieLogAddedEvent(trieLog)));
   }
 

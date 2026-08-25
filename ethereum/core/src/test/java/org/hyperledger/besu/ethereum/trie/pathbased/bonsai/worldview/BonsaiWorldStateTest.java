@@ -105,7 +105,7 @@ class BonsaiWorldStateTest {
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
-    verify(bonsaiUpdater).removeCode(ACCOUNT_HASH, CODE_HASH);
+    verify(bonsaiUpdater).removeCodeByAddress(ACCOUNT_HASH);
   }
 
   @ParameterizedTest
@@ -131,7 +131,7 @@ class BonsaiWorldStateTest {
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
     verify(bonsaiUpdater).putCode(Address.fromHexString("0x1").addressHash(), CODE_HASH, CODE);
-    verify(bonsaiUpdater).removeCode(Address.fromHexString("0x2").addressHash(), CODE_HASH);
+    verify(bonsaiUpdater).removeCodeByAddress(Address.fromHexString("0x2").addressHash());
     verify(bonsaiUpdater).putCode(Address.fromHexString("0x3").addressHash(), CODE_HASH, CODE);
   }
 

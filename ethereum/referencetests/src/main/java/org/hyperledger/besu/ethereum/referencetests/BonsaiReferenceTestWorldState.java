@@ -231,7 +231,6 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
 
     final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader =
         new BonsaiCachedMerkleTrieLoader(metricsSystem);
-    final TrieLogManager trieLogManager = new ReferenceTestsInMemoryTrieLogManager();
 
     final BonsaiPreImageProxy preImageProxy =
         new BonsaiPreImageProxy.BonsaiReferenceTestPreImageProxy();
@@ -241,6 +240,9 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
             new InMemoryKeyValueStorageProvider(),
             metricsSystem,
             DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+
+    final TrieLogManager trieLogManager =
+        new ReferenceTestsInMemoryTrieLogManager(bonsaiWorldStateKeyValueStorage);
 
     final BonsaiReferenceTestWorldStateStorage worldStateKeyValueStorage =
         new BonsaiReferenceTestWorldStateStorage(bonsaiWorldStateKeyValueStorage, preImageProxy);
@@ -277,8 +279,9 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
     private final Cache<Hash, byte[]> trieLogCache =
         CacheBuilder.newBuilder().maximumSize(5).build();
 
-    public ReferenceTestsInMemoryTrieLogManager() {
-      super(null, null, 0, null);
+    public ReferenceTestsInMemoryTrieLogManager(
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
+      super(null, worldStateKeyValueStorage, 0, null);
     }
 
     @Override
@@ -288,8 +291,8 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
         final BlockHeader forBlockHeader,
         final BonsaiWorldState forWorldState) {
       // notify trie log added observers, synchronously
-      TrieLog trieLog = trieLogFactory.create(localUpdater, forBlockHeader);
-      trieLogCache.put(forBlockHeader.getBlockHash(), trieLogFactory.serialize(trieLog));
+      TrieLog trieLog = getTrieLogFactory().create(localUpdater, forBlockHeader);
+      trieLogCache.put(forBlockHeader.getBlockHash(), getTrieLogFactory().serialize(trieLog));
       trieLogObservers.forEach(o -> o.onTrieLogAdded(new TrieLogAddedEvent(trieLog)));
     }
 
@@ -302,7 +305,7 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
     public Optional<TrieLog> getTrieLogLayer(final Hash blockHash) {
       final byte[] trielog = trieLogCache.getIfPresent(blockHash);
       trieLogCache.invalidate(blockHash); // remove trielog from the cache
-      return Optional.ofNullable(trieLogFactory.deserialize(trielog));
+      return Optional.ofNullable(getTrieLogFactory().deserialize(trielog));
     }
   }
 

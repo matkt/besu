@@ -41,7 +41,8 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Trie-log factory for the partitioned binary trie ({@code DataStorageFormat#BINARY}).
+ * Trie-log factory for the partitioned binary trie (Amsterdam {@link
+ * org.hyperledger.besu.plugin.services.worldstate.TrieBranchType#BINARY} branch).
  *
  * <p>It mirrors {@link PmtTrieLogFactory} but additionally serializes the storage slot <b>key
  * preimage</b> for each storage change, so that a binary state-root can be recomputed after a

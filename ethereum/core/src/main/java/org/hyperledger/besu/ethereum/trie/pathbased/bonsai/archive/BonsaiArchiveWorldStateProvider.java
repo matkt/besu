@@ -81,6 +81,32 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
       final BonsaiCodeCache codeCache,
       final MetricsSystem metricsSystem,
       final Optional<Long> amsterdamMilestone) {
+    this(
+        worldStateKeyValueStorage,
+        blockchain,
+        dataStorageConfiguration,
+        bonsaiCachedMerkleTrieLoader,
+        pluginContext,
+        evmConfiguration,
+        worldStateHealerSupplier,
+        codeCache,
+        metricsSystem,
+        amsterdamMilestone,
+        Optional.empty());
+  }
+
+  public BonsaiArchiveWorldStateProvider(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Blockchain blockchain,
+      final DataStorageConfiguration dataStorageConfiguration,
+      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
+      final ServiceManager pluginContext,
+      final EvmConfiguration evmConfiguration,
+      final Supplier<WorldStateHealer> worldStateHealerSupplier,
+      final BonsaiCodeCache codeCache,
+      final MetricsSystem metricsSystem,
+      final Optional<Long> amsterdamMilestone,
+      final Optional<Long> binaryTrieMilestone) {
     super(
         worldStateKeyValueStorage,
         blockchain,
@@ -90,7 +116,8 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
         evmConfiguration,
         worldStateHealerSupplier,
         codeCache,
-        amsterdamMilestone);
+        amsterdamMilestone,
+        binaryTrieMilestone);
     this.codeCache = codeCache;
     this.archiveWorldStateConfig =
         WorldStateConfig.newBuilder(worldStateConfig).trieDisabled(true).build();

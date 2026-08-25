@@ -51,7 +51,7 @@ public class Utils {
   private static int dataStorageFormatToV1(final DataStorageFormat dataStorageFormat) {
     return switch (dataStorageFormat) {
       case FOREST -> 1;
-      case BONSAI, BINARY -> 2;
+      case BONSAI -> 2;
       case X_BONSAI_ARCHIVE -> 3;
     };
   }
