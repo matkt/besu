@@ -67,6 +67,9 @@ public class TrieLogLayer implements TrieLog {
   protected final Map<Address, Map<StorageSlotKey, BonsaiValue<UInt256>>> storage;
   protected final Set<Hash> introducedCodeHashes = new HashSet<>();
 
+  /** On-disk trie-log wire format version ({@code 0} = legacy slot hash, {@code 1} = slot key). */
+  protected int wireVersion = 0;
+
   protected boolean frozen = false;
 
   public TrieLogLayer() {
@@ -101,6 +104,16 @@ public class TrieLogLayer implements TrieLog {
   public TrieLogLayer setBlockNumber(final long blockNumber) {
     checkState(!frozen, "Layer is Frozen");
     this.blockNumber = Optional.of(blockNumber);
+    return this;
+  }
+
+  public int getWireVersion() {
+    return wireVersion;
+  }
+
+  public TrieLogLayer setWireVersion(final int wireVersion) {
+    checkState(!frozen, "Layer is Frozen");
+    this.wireVersion = wireVersion;
     return this;
   }
 
@@ -266,6 +279,7 @@ public class TrieLogLayer implements TrieLog {
         .append(code, that.code)
         .append(storage, that.storage)
         .append(introducedCodeHashes, that.introducedCodeHashes)
+        .append(wireVersion, that.wireVersion)
         .isEquals();
   }
 
@@ -278,6 +292,7 @@ public class TrieLogLayer implements TrieLog {
         .append(code)
         .append(storage)
         .append(introducedCodeHashes)
+        .append(wireVersion)
         .toHashCode();
   }
 }

@@ -22,8 +22,8 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAc
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory.BinaryAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.evm.account.Account;
 
@@ -134,7 +134,7 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
           newBalance,
           updatedCode,
           newCodeHash,
-          RLP.encode(new BinaryAccountValue(newNonce, newBalance, newCodeHash)::writeTo));
+          RLP.encode(new BinaryTrieAccountValue(newNonce, newBalance, newCodeHash)::writeTo));
     }
 
     private void applyCode(final BlockAccessList.AccountChanges changes, final Bytes priorCode) {

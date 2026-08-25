@@ -31,7 +31,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
@@ -209,7 +209,7 @@ public class SnapV2BlockAccessListApplier {
     for (final Map.Entry<Hash, Bytes32> entry : correctRoots.entrySet()) {
       final Hash accountHash = entry.getKey();
       final Hash correctRoot = Hash.wrap(entry.getValue());
-      final PmtStateTrieAccountValue existingAccount = readExistingAccount(accountHash);
+      final PatriciaTrieAccountValue existingAccount = readExistingAccount(accountHash);
       if (existingAccount == null) {
         LOG.warn(
             "snap/2 skipping storage root patch for account {}: not found locally", accountHash);
@@ -218,8 +218,8 @@ public class SnapV2BlockAccessListApplier {
       if (existingAccount.getStorageRoot().equals(correctRoot)) {
         continue;
       }
-      final PmtStateTrieAccountValue correctedAccount =
-          new PmtStateTrieAccountValue(
+      final PatriciaTrieAccountValue correctedAccount =
+          new PatriciaTrieAccountValue(
               existingAccount.getNonce(),
               existingAccount.getBalance(),
               correctRoot,
@@ -273,7 +273,7 @@ public class SnapV2BlockAccessListApplier {
       final Hash accountHash = entry.getKey();
       final PerAccountChanges perAccount = entry.getValue();
 
-      final PmtStateTrieAccountValue existingAccount = readExistingAccount(accountHash);
+      final PatriciaTrieAccountValue existingAccount = readExistingAccount(accountHash);
 
       final long newNonce = computeNewNonce(perAccount, existingAccount);
       final Wei newBalance = computeNewBalance(perAccount, existingAccount);
@@ -291,8 +291,8 @@ public class SnapV2BlockAccessListApplier {
               storageRangeTracker,
               isAccountCompleted);
 
-      final PmtStateTrieAccountValue updatedAccount =
-          new PmtStateTrieAccountValue(newNonce, newBalance, storageResult.root, newCodeHash);
+      final PatriciaTrieAccountValue updatedAccount =
+          new PatriciaTrieAccountValue(newNonce, newBalance, storageResult.root, newCodeHash);
       final Bytes encodedAccount = RLP.encode(updatedAccount::writeTo);
 
       applyForStrategy(
@@ -328,16 +328,16 @@ public class SnapV2BlockAccessListApplier {
     accountTrie.commit(nodeUpdater);
   }
 
-  private PmtStateTrieAccountValue readExistingAccount(final Hash accountHash) {
+  private PatriciaTrieAccountValue readExistingAccount(final Hash accountHash) {
     return worldStateStorageCoordinator
         .applyForStrategy(
             bonsai -> bonsai.getAccount(accountHash), forest -> Optional.<Bytes>empty())
-        .map(b -> PmtStateTrieAccountValue.readFrom(RLP.input(b)))
+        .map(b -> PatriciaTrieAccountValue.readFrom(RLP.input(b)))
         .orElse(null);
   }
 
   private static long computeNewNonce(
-      final PerAccountChanges perAccount, final PmtStateTrieAccountValue existing) {
+      final PerAccountChanges perAccount, final PatriciaTrieAccountValue existing) {
     if (perAccount.latestNonce != null) {
       return perAccount.latestNonce;
     }
@@ -345,7 +345,7 @@ public class SnapV2BlockAccessListApplier {
   }
 
   private static Wei computeNewBalance(
-      final PerAccountChanges perAccount, final PmtStateTrieAccountValue existing) {
+      final PerAccountChanges perAccount, final PatriciaTrieAccountValue existing) {
     if (perAccount.latestBalance != null) {
       return perAccount.latestBalance;
     }
@@ -354,7 +354,7 @@ public class SnapV2BlockAccessListApplier {
 
   private Hash maybeStoreCode(
       final PerAccountChanges perAccount,
-      final PmtStateTrieAccountValue existing,
+      final PatriciaTrieAccountValue existing,
       final Hash accountHash,
       final WorldStateKeyValueStorage.Updater updater) {
 
@@ -440,19 +440,19 @@ public class SnapV2BlockAccessListApplier {
     return new StorageRootResult(Hash.wrap(storageTrie.getRootHash()), downloadedSlots);
   }
 
-  private static Hash storageRootOf(final PmtStateTrieAccountValue account) {
+  private static Hash storageRootOf(final PatriciaTrieAccountValue account) {
     return account != null ? account.getStorageRoot() : Hash.EMPTY_TRIE_HASH;
   }
 
-  private static long nonceOf(final PmtStateTrieAccountValue account) {
+  private static long nonceOf(final PatriciaTrieAccountValue account) {
     return account != null ? account.getNonce() : 0L;
   }
 
-  private static Wei balanceOf(final PmtStateTrieAccountValue account) {
+  private static Wei balanceOf(final PatriciaTrieAccountValue account) {
     return account != null ? account.getBalance() : Wei.ZERO;
   }
 
-  private static Hash codeHashOf(final PmtStateTrieAccountValue account) {
+  private static Hash codeHashOf(final PatriciaTrieAccountValue account) {
     return account != null ? account.getCodeHash() : Hash.EMPTY;
   }
 

@@ -16,11 +16,13 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
@@ -70,6 +72,9 @@ class BonsaiClearStorageTest {
   void frontierRootHashCompletesAfterClearingStorage(
       final int slotCount, @SuppressWarnings("unused") final String label) throws Exception {
     final Blockchain blockchain = mock(Blockchain.class);
+    when(blockchain.getChainHeadHeader())
+        .thenReturn(
+            new BlockHeaderTestFixture().number(0).timestamp(0).stateRoot(Hash.ZERO).buildHeader());
     final BonsaiWorldStateProvider archive =
         InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(blockchain);
     populateStorage(archive, slotCount);

@@ -21,7 +21,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
@@ -82,8 +82,8 @@ public class WorldStateProofProviderTest {
 
     // Define account value
     final Hash codeHash = Hash.hash(Bytes.fromHexString("0x1122"));
-    final PmtStateTrieAccountValue accountValue =
-        new PmtStateTrieAccountValue(
+    final PatriciaTrieAccountValue accountValue =
+        new PatriciaTrieAccountValue(
             1L, Wei.of(2L), Hash.wrap(storageTrie.getRootHash()), codeHash);
     // Save to storage
     worldStateTrie.put(Bytes32.wrap(addressHash.getBytes()), RLP.encode(accountValue::writeTo));
@@ -127,8 +127,8 @@ public class WorldStateProofProviderTest {
 
     // Define account value
     final Hash codeHash = Hash.hash(Bytes.fromHexString("0x1122"));
-    final PmtStateTrieAccountValue accountValue =
-        new PmtStateTrieAccountValue(
+    final PatriciaTrieAccountValue accountValue =
+        new PatriciaTrieAccountValue(
             1L, Wei.of(2L), Hash.wrap(storageTrie.getRootHash()), codeHash);
     // Save to storage
     worldStateTrie.put(Bytes32.wrap(addressHash.getBytes()), RLP.encode(accountValue::writeTo));

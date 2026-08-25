@@ -24,7 +24,7 @@ import org.hyperledger.besu.ethereum.proof.WorldStateProof;
 import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -149,7 +149,8 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
             blockchain,
             worldStateKeyValueStorage,
             pathBasedExtraStorageConfiguration.getMaxLayersToLoad(),
-            pluginContext);
+            pluginContext,
+            binaryTrieMilestone);
     this.blockchain = blockchain;
     this.worldStateConfig =
         WorldStateConfig.newBuilder()
@@ -525,7 +526,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
       accountTrie
           .get(accountHash.getBytes())
           .map(RLP::input)
-          .map(PmtStateTrieAccountValue::readFrom)
+          .map(PatriciaTrieAccountValue::readFrom)
           .ifPresent(
               account -> {
                 final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =

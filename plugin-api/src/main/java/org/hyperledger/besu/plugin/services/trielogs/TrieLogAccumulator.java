@@ -16,9 +16,11 @@ package org.hyperledger.besu.plugin.services.trielogs;
 
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -47,4 +49,14 @@ public interface TrieLogAccumulator {
    */
   Map<Address, ? extends Map<StorageSlotKey, ? extends TrieLog.LogTuple<UInt256>>>
       getStorageToUpdate();
+
+  /**
+   * Code hashes newly introduced by the block currently flowing through the accumulator. Used for
+   * reference-aware rollback once the extended trie-log wire format is active.
+   *
+   * @return the live set of newly introduced code hashes; empty by default
+   */
+  default Set<Hash> getIntroducedCodeHashes() {
+    return Set.of();
+  }
 }

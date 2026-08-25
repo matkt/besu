@@ -24,26 +24,19 @@ import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Objects;
 
-import org.apache.tuweni.bytes.Bytes32;
-
-/** Represents the raw values associated with an account in the world state patricia merkle trie. */
-public class PmtStateTrieAccountValue extends AbstractStateTrieAccountValue
+/** Patricia (MPT) account value: {@code [nonce, balance, storageRoot, codeHash]}. */
+public class PatriciaTrieAccountValue extends AbstractStateTrieAccountValue
     implements MptAccountValue {
 
   protected final Hash storageRoot;
 
-  public PmtStateTrieAccountValue(
+  public PatriciaTrieAccountValue(
       final long nonce, final Wei balance, final Hash storageRoot, final Hash codeHash) {
     super(nonce, balance, codeHash);
     checkNotNull(storageRoot, "storageRoot cannot be null");
     this.storageRoot = storageRoot;
   }
 
-  /**
-   * The hash of the root of the storage trie associated with this account.
-   *
-   * @return the hash of the root node of the storage trie.
-   */
   @Override
   public Hash getStorageRoot() {
     return storageRoot;
@@ -52,8 +45,7 @@ public class PmtStateTrieAccountValue extends AbstractStateTrieAccountValue
   @Override
   public boolean equals(final Object o) {
     if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
-    PmtStateTrieAccountValue that = (PmtStateTrieAccountValue) o;
+    if (!(o instanceof PatriciaTrieAccountValue that)) return false;
     return nonce == that.nonce
         && Objects.equals(balance, that.balance)
         && Objects.equals(storageRoot, that.storageRoot)
@@ -68,7 +60,6 @@ public class PmtStateTrieAccountValue extends AbstractStateTrieAccountValue
   @Override
   public void writeTo(final RLPOutput out) {
     out.startList();
-
     out.writeLongScalar(nonce);
     out.writeUInt256Scalar(balance);
     out.writeBytes(storageRoot.getBytes());
@@ -76,28 +67,13 @@ public class PmtStateTrieAccountValue extends AbstractStateTrieAccountValue
     out.endList();
   }
 
-  public static PmtStateTrieAccountValue readFrom(final RLPInput in) {
+  public static PatriciaTrieAccountValue readFrom(final RLPInput in) {
     in.enterList();
-
     final long nonce = in.readLongScalar();
     final Wei balance = Wei.of(in.readUInt256Scalar());
-    Bytes32 storageRoot;
-    Bytes32 codeHash;
-    if (in.nextIsNull()) {
-      storageRoot = Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes());
-      in.skipNext();
-    } else {
-      storageRoot = in.readBytes32();
-    }
-    if (in.nextIsNull()) {
-      codeHash = Bytes32.wrap(Hash.EMPTY.getBytes());
-      in.skipNext();
-    } else {
-      codeHash = in.readBytes32();
-    }
+    final Hash storageRoot = Hash.wrap(in.readBytes32());
+    final Hash codeHash = Hash.wrap(in.readBytes32());
     in.leaveList();
-
-    return new PmtStateTrieAccountValue(
-        nonce, balance, Hash.wrap(storageRoot), Hash.wrap(codeHash));
+    return new PatriciaTrieAccountValue(nonce, balance, storageRoot, codeHash);
   }
 }

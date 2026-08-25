@@ -21,7 +21,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.TrieNodeLoader;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.CodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredNodeFactory;
@@ -142,7 +142,7 @@ public class BonsaiPartialFlatDbStrategy extends BonsaiFlatDbStrategy {
               .get()
               .map(
                   b ->
-                      PmtStateTrieAccountValue.readFrom(
+                      PatriciaTrieAccountValue.readFrom(
                               org.hyperledger.besu.ethereum.rlp.RLP.input(b))
                           .getStorageRoot());
       final Optional<Bytes> worldStateRootHash = worldStateRootHashSupplier.get();

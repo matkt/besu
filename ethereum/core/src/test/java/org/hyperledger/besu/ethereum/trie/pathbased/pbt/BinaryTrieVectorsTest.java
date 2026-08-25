@@ -32,7 +32,7 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitione
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
@@ -274,7 +274,7 @@ class BinaryTrieVectorsTest {
       final String name, final JsonNode accountsNode, final String expectedHex) throws IOException {
     // Drive the REAL BinaryStateRootCommitter through a rollback-then-rollforward cycle against a
     // BINARY BonsaiWorldState. This validates that the PBT trie log (which carries the slot-key
-    // preimage via PbtTrieLogFactory) round-trips the binary state: apply -> expected root,
+    // preimage via BonsaiTrieLogFactory) round-trips the binary state: apply -> expected root,
     // rollback -> empty root, rollforward -> expected root again.
     final ExecutionContextTestFixture contextTestFixture =
         ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
@@ -326,7 +326,7 @@ class BinaryTrieVectorsTest {
                 .getTrieLog(persistHeader.getBlockHash())
                 .map(
                     bytes ->
-                        PbtTrieLogFactory.readFrom(
+                        BonsaiTrieLogFactory.readFrom(
                             new BytesValueRLPInput(Bytes.wrap(bytes), false)))
                 .orElseThrow(
                     () ->

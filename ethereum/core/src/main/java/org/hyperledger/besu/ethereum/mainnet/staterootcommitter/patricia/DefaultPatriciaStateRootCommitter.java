@@ -21,10 +21,8 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
-import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -188,41 +186,16 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
         final BonsaiValue<BonsaiAccount> accountValue) {
       final BonsaiAccount updatedAccount = accountValue.getUpdated();
       final CompletableFuture<Hash> storageFuture = storageFutures.get(address);
-      final Hash storageRootForLeaf;
       if (storageFuture != null) {
-        storageRootForLeaf = storageFuture.join();
-        // Patch the Patricia account's held root so the Patricia flat-DB encoding includes it.
-        // Binary accounts carry no storage root (their strategy rejects setStorageRoot); their
-        // Patricia trie leaf still uses the computed storage root for the genesis Merkle root.
-        if (!bonsai.isTrieDisabled() && updatedAccount.hasStorageRoot()) {
-          updatedAccount.setStorageRoot(storageRootForLeaf);
+        if (!bonsai.isTrieDisabled()) {
+          updatedAccount.setStorageRoot(storageFuture.join());
         }
-      } else {
-        // No storage updates for this account: reuse the account's existing root (Patricia) or,
-        // for binary accounts (no storage root), the empty-trie hash for the Patricia trie leaf.
-        storageRootForLeaf =
-            updatedAccount.hasStorageRoot()
-                ? updatedAccount.getStorageRoot()
-                : Hash.EMPTY_TRIE_HASH;
       }
-
-      // The Patricia account trie leaf uses the 4-field Patricia RLP, built from a
-      // PmtStateTrieAccountValue rather than BonsaiAccount.serializeAccount() so binary accounts
-      // (no storage root) are handled without throwing. The binary flat-DB cache below uses the
-      // format-aware codec and stays storage-root-free.
-      final BytesValueRLPOutput leafOut = new BytesValueRLPOutput();
-      new PmtStateTrieAccountValue(
-              updatedAccount.getNonce(),
-              updatedAccount.getBalance(),
-              storageRootForLeaf,
-              updatedAccount.getCodeHash())
-          .writeTo(leafOut);
-      final Bytes trieLeafBytes = leafOut.encoded();
-      final Bytes flatDbBytes = updatedAccount.serializeAccount();
+      final Bytes accountValueBytes = updatedAccount.serializeAccount();
       if (!storageFrozen) {
-        writes.add(updater -> updater.putAccountInfoState(addressHash, flatDbBytes));
+        writes.add(updater -> updater.putAccountInfoState(addressHash, accountValueBytes));
       }
-      return Optional.of(trieLeafBytes);
+      return Optional.of(accountValueBytes);
     }
 
     private Hash updateStorageTrie(

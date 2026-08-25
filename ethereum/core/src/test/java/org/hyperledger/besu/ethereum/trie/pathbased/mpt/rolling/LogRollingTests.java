@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.mpt.rolling;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -24,6 +25,7 @@ import org.hyperledger.besu.datatypes.LogsBloomFilter;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
@@ -32,7 +34,7 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
@@ -134,6 +136,9 @@ class LogRollingTests {
 
   @BeforeEach
   void createStorage() {
+    when(blockchain.getChainHeadHeader())
+        .thenReturn(
+            new BlockHeaderTestFixture().number(0).timestamp(0).stateRoot(Hash.ZERO).buildHeader());
     provider = new InMemoryKeyValueStorageProvider();
     archive = InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive(blockchain);
     accountStorage =
@@ -199,7 +204,7 @@ class LogRollingTests {
         trieLogStorage.get(headerOne.getHash().getBytes().toArrayUnsafe());
 
     final TrieLogLayer layer =
-        PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
+        BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(value.get()), false));
 
     secondUpdater.rollForward(layer);
     secondUpdater.commit();
@@ -344,7 +349,9 @@ class LogRollingTests {
   private TrieLogLayer getTrieLogLayer(final KeyValueStorage storage, final Hash key) {
     return storage
         .get(key.getBytes().toArrayUnsafe())
-        .map(bytes -> PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
+        .map(
+            bytes ->
+                BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
         .get();
   }
 

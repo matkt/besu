@@ -53,7 +53,7 @@ import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldSta
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
@@ -958,7 +958,7 @@ class StateRootCommitterIntegrationTest {
     TrieLogLayer readTrieLog(final BlockHeader blockHeader) {
       final byte[] serialized =
           trieLogStorage.get(blockHeader.getHash().getBytes().toArrayUnsafe()).orElseThrow();
-      return PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(serialized), false));
+      return BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(serialized), false));
     }
 
     KvSnapshot captureFlatDbSnapshot() {

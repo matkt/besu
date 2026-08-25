@@ -797,11 +797,13 @@ public class BonsaiWorldStateUpdateAccumulator
   /**
    * Returns the mutable set of code hashes newly introduced by the block currently flowing through
    * the accumulator. The binary committer records into this set during the forward commit (flat-DB
-   * presence check) and reads it during rollback to drop CODE_ZONE chunks; {@code
-   * PbtTrieLogFactory.create} copies it into the trie-log layer for persistence.
+   * presence check) and reads it during rollback to drop CODE_ZONE chunks; {@link
+   * org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory#create} copies
+   * it into the trie-log layer for persistence.
    *
    * @return the live, mutable set.
    */
+  @Override
   public Set<Hash> getIntroducedCodeHashes() {
     return introducedCodeHashes;
   }

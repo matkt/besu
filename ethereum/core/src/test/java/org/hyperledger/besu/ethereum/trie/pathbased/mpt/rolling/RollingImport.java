@@ -27,7 +27,7 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
@@ -84,7 +84,7 @@ public class RollingImport {
           continue;
         }
         final TrieLogLayer layer =
-            PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
+            BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
         final BonsaiWorldStateUpdateAccumulator updater = bonsaiState.updater();
         updater.rollForward(layer);
         updater.commit();
@@ -112,7 +112,7 @@ public class RollingImport {
         reader.seek(count);
         final byte[] bytes = reader.readBytes();
         final TrieLogLayer layer =
-            PmtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
+            BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false));
         final BonsaiWorldStateUpdateAccumulator updater = bonsaiState.updater();
         updater.rollBack(layer);
         updater.commit();

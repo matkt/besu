@@ -39,7 +39,7 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.StorageEntriesCollector;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
@@ -398,8 +398,8 @@ public class BonsaiWorldStateKeyValueStorageTest {
                     StorageEntriesCollector.collectEntries(
                         root, Bytes32.wrap(Hash.ZERO.getBytes()), 1));
 
-    final PmtStateTrieAccountValue stateTrieAccountValue =
-        PmtStateTrieAccountValue.readFrom(RLP.input(accounts.firstEntry().getValue()));
+    final PatriciaTrieAccountValue stateTrieAccountValue =
+        PatriciaTrieAccountValue.readFrom(RLP.input(accounts.firstEntry().getValue()));
 
     final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
         new StoredMerklePatriciaTrie<>(

@@ -23,8 +23,8 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.BlockchainSetupUtil;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
@@ -55,7 +55,7 @@ public class TrieLogFactoryTests {
           .addAccountChange(
               accountFixture,
               null,
-              new PmtStateTrieAccountValue(0, Wei.fromEth(1), Hash.EMPTY, Hash.EMPTY))
+              new PatriciaTrieAccountValue(0, Wei.fromEth(1), Hash.EMPTY, Hash.EMPTY))
           .addCodeChange(
               Address.ZERO,
               null,
@@ -66,7 +66,7 @@ public class TrieLogFactoryTests {
   @Test
   public void testSerializeDeserializeAreEqual() {
 
-    TrieLogFactory factory = new PmtTrieLogFactory();
+    TrieLogFactory factory = new BonsaiTrieLogFactory();
     byte[] rlp = factory.serialize(trieLogFixture);
 
     TrieLog layer = factory.deserialize(rlp);

@@ -17,8 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.trielog;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.plugin.ServiceManager;
@@ -28,7 +27,6 @@ import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogEvent;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogFactory;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogProvider;
-import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.util.List;
@@ -49,8 +47,7 @@ public class TrieLogManager {
   protected final long maxLayersToLoad;
   protected final Subscribers<TrieLogEvent.TrieLogObserver> trieLogObservers = Subscribers.create();
 
-  private final TrieLogFactory pbtTrieLogFactory = new PbtTrieLogFactory();
-  private final TrieLogFactory pmtTrieLogFactory = new PmtTrieLogFactory();
+  private final BonsaiTrieLogFactory trieLogFactory;
   private final Optional<TrieLogFactory> pluginTrieLogFactory;
 
   public TrieLogManager(
@@ -58,9 +55,19 @@ public class TrieLogManager {
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final long maxLayersToLoad,
       final ServiceManager pluginContext) {
+    this(blockchain, worldStateKeyValueStorage, maxLayersToLoad, pluginContext, Optional.empty());
+  }
+
+  public TrieLogManager(
+      final Blockchain blockchain,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final long maxLayersToLoad,
+      final ServiceManager pluginContext,
+      final Optional<Long> binaryTrieMilestone) {
     this.blockchain = blockchain;
     this.rootWorldStateStorage = worldStateKeyValueStorage;
     this.maxLayersToLoad = maxLayersToLoad;
+    this.trieLogFactory = new BonsaiTrieLogFactory(binaryTrieMilestone);
     this.pluginTrieLogFactory = setupPluginTrieLogFactory(pluginContext);
   }
 
@@ -77,11 +84,8 @@ public class TrieLogManager {
           forWorldState.getWorldStateStorage().updater();
       boolean success = false;
       try {
-        final BonsaiWorldStateKeyValueStorage worldStateStorage =
-            forWorldState.getWorldStateStorage();
-        final TrieLog trieLog = prepareTrieLog(forBlockHeader, localUpdater, worldStateStorage);
-        persistTrieLog(
-            forBlockHeader, forWorldStateRootHash, trieLog, stateUpdater, worldStateStorage);
+        final TrieLog trieLog = prepareTrieLog(forBlockHeader, localUpdater);
+        persistTrieLog(forBlockHeader, forWorldStateRootHash, trieLog, stateUpdater);
 
         // notify trie log added observers, synchronously
         trieLogObservers.forEach(o -> o.onTrieLogAdded(new TrieLogAddedEvent(trieLog)));
@@ -102,15 +106,12 @@ public class TrieLogManager {
   }
 
   private TrieLog prepareTrieLog(
-      final BlockHeader blockHeader,
-      final BonsaiWorldStateUpdateAccumulator localUpdater,
-      final BonsaiWorldStateKeyValueStorage worldStateStorage) {
+      final BlockHeader blockHeader, final BonsaiWorldStateUpdateAccumulator localUpdater) {
     LOG.atDebug()
         .setMessage("Adding layered world state for {}")
         .addArgument(blockHeader::toLogString)
         .log();
-    final TrieLog trieLog =
-        resolveTrieLogFactory(worldStateStorage).create(localUpdater, blockHeader);
+    final TrieLog trieLog = resolveTrieLogFactory().create(localUpdater, blockHeader);
     trieLog.freeze();
     return trieLog;
   }
@@ -119,8 +120,7 @@ public class TrieLogManager {
       final BlockHeader blockHeader,
       final Hash worldStateRootHash,
       final TrieLog trieLog,
-      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater,
-      final BonsaiWorldStateKeyValueStorage worldStateStorage) {
+      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater) {
     LOG.atDebug()
         .setMessage("Persisting trie log for block hash {} and world state root {}")
         .addArgument(blockHeader::toLogString)
@@ -131,7 +131,7 @@ public class TrieLogManager {
         .getTrieLogStorageTransaction()
         .put(
             blockHeader.getBlockHash().getBytes().toArrayUnsafe(),
-            resolveTrieLogFactory(worldStateStorage).serialize(trieLog));
+            resolveTrieLogFactory().serialize(trieLog));
   }
 
   public long getMaxLayersToLoad() {
@@ -171,26 +171,8 @@ public class TrieLogManager {
     return Optional.empty();
   }
 
-  /**
-   * Resolves the trie-log codec from the active trie branch in storage. This is evaluated on each
-   * use so a fresh genesis write (binary trie at block 0) is picked up even though {@link
-   * TrieLogManager} is constructed before {@link
-   * org.hyperledger.besu.ethereum.chain.GenesisState#writeStateTo}.
-   */
   private TrieLogFactory resolveTrieLogFactory() {
-    return resolveTrieLogFactory(rootWorldStateStorage);
-  }
-
-  private TrieLogFactory resolveTrieLogFactory(
-      final BonsaiWorldStateKeyValueStorage worldStateStorage) {
-    if (pluginTrieLogFactory.isPresent()) {
-      return pluginTrieLogFactory.get();
-    }
-    // The PBT factory carries the storage slot key preimage so the binary state root can be
-    // recomputed after a trie-log roll; the MPT (mainnet) factory serializes only the slot hash.
-    return worldStateStorage.resolveActiveTrieBranchType() == TrieBranchType.BINARY
-        ? pbtTrieLogFactory
-        : pmtTrieLogFactory;
+    return pluginTrieLogFactory.orElse(trieLogFactory);
   }
 
   private TrieLogProvider getTrieLogProvider() {

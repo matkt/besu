@@ -26,7 +26,7 @@ import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootComm
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
@@ -136,8 +136,8 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
         final BlockAccessList.AccountChanges changes,
         final Optional<Bytes> maybeRlp) {
 
-      final PmtStateTrieAccountValue priorAccount =
-          maybeRlp.map(rlp -> PmtStateTrieAccountValue.readFrom(RLP.input(rlp))).orElse(null);
+      final PatriciaTrieAccountValue priorAccount =
+          maybeRlp.map(rlp -> PatriciaTrieAccountValue.readFrom(RLP.input(rlp))).orElse(null);
 
       final long newNonce;
       if (changes.nonceChanges().isEmpty()) {
@@ -179,8 +179,8 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
       }
       storageRoots.put(address, newStorageRoot);
 
-      final PmtStateTrieAccountValue updatedAccount =
-          new PmtStateTrieAccountValue(newNonce, newBalance, newStorageRoot, newCodeHash);
+      final PatriciaTrieAccountValue updatedAccount =
+          new PatriciaTrieAccountValue(newNonce, newBalance, newStorageRoot, newCodeHash);
       if (isAccountEmpty(updatedAccount)) {
         if (!storageFrozen) {
           writes.add(updater -> updater.removeAccountInfoState(accountHash));
@@ -240,11 +240,11 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
       return worldState
           .getWorldStateStorage()
           .getAccount(address.addressHash())
-          .map(rlp -> PmtStateTrieAccountValue.readFrom(RLP.input(rlp)).getStorageRoot())
+          .map(rlp -> PatriciaTrieAccountValue.readFrom(RLP.input(rlp)).getStorageRoot())
           .orElse(Hash.EMPTY_TRIE_HASH);
     }
 
-    private boolean isAccountEmpty(final PmtStateTrieAccountValue account) {
+    private boolean isAccountEmpty(final PatriciaTrieAccountValue account) {
       return account.getNonce() == 0
           && account.getBalance().isZero()
           && Hash.EMPTY_TRIE_HASH.equals(account.getStorageRoot())

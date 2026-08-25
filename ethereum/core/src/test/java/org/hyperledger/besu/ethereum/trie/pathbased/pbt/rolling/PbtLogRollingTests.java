@@ -34,7 +34,7 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
@@ -63,8 +63,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * recomputed via {@link DefaultBinaryStateRootCommitter} matches the live-execution root after each
  * roll.
  *
- * <p>This only works because the {@link PbtTrieLogFactory} carries the storage slot key preimage;
- * the legacy MPT factory serializes only the slot hash, which would leave {@code
+ * <p>This only works because the {@link BonsaiTrieLogFactory} carries the storage slot key
+ * preimage; the legacy MPT factory serializes only the slot hash, which would leave {@code
  * StorageSlotKey.getSlotKey()} empty and make {@code BinaryStateRootCommitter.applyStorage} throw
  * after a roll.
  *
@@ -213,7 +213,9 @@ class PbtLogRollingTests {
   private static TrieLogLayer readPbtTrieLog(final KeyValueStorage storage, final Hash key) {
     return storage
         .get(key.getBytes().toArrayUnsafe())
-        .map(bytes -> PbtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
+        .map(
+            bytes ->
+                BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
         .orElseThrow(() -> new IllegalStateException("Missing trie log for " + key));
   }
 
@@ -770,7 +772,8 @@ class PbtLogRollingTests {
           .getWorldStateStorage()
           .getTrieLog(blockHash)
           .map(
-              bytes -> PbtTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
+              bytes ->
+                  BonsaiTrieLogFactory.readFrom(new BytesValueRLPInput(Bytes.wrap(bytes), false)))
           .orElseThrow(() -> new IllegalStateException("Missing trie log for " + blockHash));
     }
 

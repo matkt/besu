@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.pbt.trielog;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -23,17 +22,19 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PbtTrieLogFactory.BinaryAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
+
+import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
 /**
- * Validates the {@link PbtTrieLogFactory} wire format: the storage slot key preimage must
- * round-trip so the binary state root can be recomputed after a trie-log roll.
+ * Validates the extended {@link BonsaiTrieLogFactory} wire format: the storage slot key preimage
+ * must round-trip so the binary state root can be recomputed after a trie-log roll.
  */
 class PbtTrieLogFactoryTests {
 
@@ -44,11 +45,14 @@ class PbtTrieLogFactoryTests {
   private final BlockHeader headerFixture =
       new BlockHeaderTestFixture().parentHash(Hash.ZERO).coinbase(Address.ZERO).buildHeader();
 
+  private final BonsaiTrieLogFactory extendedFactory = new BonsaiTrieLogFactory(Optional.of(0L));
+
   private TrieLogLayer newFixture(final StorageSlotKey slotKey) {
     return new TrieLogLayer()
         .setBlockHash(headerFixture.getBlockHash())
+        .setWireVersion(BonsaiTrieLogFactory.WIRE_VERSION_EXTENDED)
         .addAccountChange(
-            ACCOUNT_FIXTURE, null, new BinaryAccountValue(0, Wei.fromEth(1), Hash.EMPTY))
+            ACCOUNT_FIXTURE, null, new BinaryTrieAccountValue(0, Wei.fromEth(1), Hash.EMPTY))
         .addCodeChange(
             Address.ZERO, null, Bytes.fromHexString("0xfeeddeadbeef"), headerFixture.getBlockHash())
         .addStorageChange(Address.ZERO, slotKey, null, UInt256.ONE);
@@ -56,11 +60,10 @@ class PbtTrieLogFactoryTests {
 
   @Test
   void serializeDeserializeAreEqual_andSlotKeyPreimageRoundTrips() {
-    final PbtTrieLogFactory factory = new PbtTrieLogFactory();
     final TrieLogLayer fixture = newFixture(new StorageSlotKey(SLOT_KEY));
 
-    final byte[] rlp = factory.serialize(fixture);
-    final TrieLogLayer deserialized = factory.deserialize(rlp);
+    final byte[] rlp = extendedFactory.serialize(fixture);
+    final TrieLogLayer deserialized = extendedFactory.deserialize(rlp);
 
     assertThat(deserialized).isEqualTo(fixture);
     final StorageSlotKey roundTripped =
@@ -70,12 +73,10 @@ class PbtTrieLogFactoryTests {
 
   @Test
   void zeroSlotKeyPreimageRoundTrips() {
-    // UInt256.ZERO must survive distinctly from an absent preimage (slot 0 is a valid key).
-    final PbtTrieLogFactory factory = new PbtTrieLogFactory();
     final TrieLogLayer fixture = newFixture(new StorageSlotKey(SLOT_KEY_ZERO));
 
-    final byte[] rlp = factory.serialize(fixture);
-    final TrieLogLayer deserialized = factory.deserialize(rlp);
+    final byte[] rlp = extendedFactory.serialize(fixture);
+    final TrieLogLayer deserialized = extendedFactory.deserialize(rlp);
 
     final StorageSlotKey roundTripped =
         deserialized.getStorageChanges(Address.ZERO).keySet().iterator().next();
@@ -83,32 +84,35 @@ class PbtTrieLogFactoryTests {
   }
 
   @Test
-  void pbtFactoryReadsLegacyMptLogLeavesSlotKeyEmpty() {
-    // A log serialized by the legacy MPT factory (no slotKey) must still deserialize under the
-    // PBT factory, with an empty slotKey (graceful migration).
+  void extendedFactoryReadsLegacyLogLeavesSlotKeyEmpty() {
     final TrieLogLayer fixture = newFixture(new StorageSlotKey(SLOT_KEY));
-    final byte[] mptRlp =
-        new org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory()
-            .serialize(fixture);
+    final TrieLogLayer legacyFixture =
+        new TrieLogLayer()
+            .setBlockHash(fixture.getBlockHash())
+            .addAccountChange(
+                ACCOUNT_FIXTURE, null, new BinaryTrieAccountValue(0, Wei.fromEth(1), Hash.EMPTY))
+            .addCodeChange(
+                Address.ZERO,
+                null,
+                Bytes.fromHexString("0xfeeddeadbeef"),
+                headerFixture.getBlockHash())
+            .addStorageChange(Address.ZERO, new StorageSlotKey(SLOT_KEY), null, UInt256.ONE);
+    final byte[] legacyRlp = new BonsaiTrieLogFactory().serialize(legacyFixture);
 
-    final TrieLogLayer deserialized = new PbtTrieLogFactory().deserialize(mptRlp);
+    final TrieLogLayer deserialized = extendedFactory.deserialize(legacyRlp);
     final StorageSlotKey roundTripped =
         deserialized.getStorageChanges(Address.ZERO).keySet().iterator().next();
     assertThat(roundTripped.getSlotKey()).isEmpty();
   }
 
   @Test
-  void mptFactoryCannotReadPbtLog() {
-    // The reverse cross-read is intentionally unsupported: the MPT reader's leaveList()
-    // rejects the trailing slotKey element. This never occurs in normal operation since a
-    // chain is either all-MPT or all-binary.
+  void legacyFactoryReadsExtendedLogWithSlotKeyPreimage() {
     final TrieLogLayer fixture = newFixture(new StorageSlotKey(SLOT_KEY));
-    final byte[] pbtRlp = new PbtTrieLogFactory().serialize(fixture);
+    final byte[] extendedRlp = extendedFactory.serialize(fixture);
 
-    assertThatThrownBy(
-            () ->
-                new org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.PmtTrieLogFactory()
-                    .deserialize(pbtRlp))
-        .isInstanceOf(Exception.class);
+    final TrieLogLayer deserialized = new BonsaiTrieLogFactory().deserialize(extendedRlp);
+    final StorageSlotKey roundTripped =
+        deserialized.getStorageChanges(Address.ZERO).keySet().iterator().next();
+    assertThat(roundTripped.getSlotKey()).contains(SLOT_KEY);
   }
 }
