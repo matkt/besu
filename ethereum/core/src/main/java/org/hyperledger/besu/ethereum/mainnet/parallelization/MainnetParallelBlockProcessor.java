@@ -141,6 +141,8 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
       final MutableWorldState worldState,
       final Block block,
       final Optional<BlockAccessList> blockAccessList) {
+    final boolean balPerfectParallelization =
+        balConfiguration.isPerfectParallelizationEnabled() && blockAccessList.isPresent();
     final BlockProcessingResult blockProcessingResult =
         super.processBlock(
             protocolContext,
@@ -149,7 +151,7 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
             block,
             blockAccessList,
             new ParallelTransactionPreprocessing(transactionProcessor, executor, balConfiguration));
-    if (blockProcessingResult.isFailed()) {
+    if (blockProcessingResult.isFailed() && !balPerfectParallelization) {
       // Fallback to non-parallel processing if there is a block processing exception .
       LOG.info(
           "Parallel transaction processing failure. Falling back to non-parallel processing for block #{} ({})",
