@@ -791,8 +791,6 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       trieMediumNodes.incrementAndGet();
     } else if (size <= LARGE_NODE_LIMIT) {
       trieLargeNodes.incrementAndGet();
-    } else if (size <= HUGE_NODE_LIMIT) {
-      trieHugeNodes.incrementAndGet();
     } else {
       trieHugeNodes.incrementAndGet();
     }
