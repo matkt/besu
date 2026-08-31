@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -31,6 +32,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import java.io.Closeable;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -322,9 +324,43 @@ public class BonsaiWorldStateLayerStorageCacheTest {
     }
   }
 
+  @Test
+  void layerLocalTrieNodePutShadowsCachedParent() throws Exception {
+    newHeadWithCrossBlockCache();
+    final Bytes location = Bytes.of(0x0a);
+    final Bytes onHead = Bytes.of(1, 1, 1);
+    commitAccountTrieNodeOnHead(location, onHead);
+
+    try (BonsaiWorldStateLayerStorage layer = new BonsaiWorldStateLayerStorage(head)) {
+      final Bytes onLayer = Bytes.of(2, 2, 2);
+      final var layerUpdater = layer.updater();
+      layerUpdater.putAccountStateTrieNode(
+          location, Bytes32.wrap(Hash.hash(onLayer).getBytes()), onLayer);
+      layerUpdater.commit();
+
+      assertThat(
+              layer.getAccountStateTrieNode(location, Bytes32.wrap(Hash.hash(onLayer).getBytes())))
+          .contains(onLayer);
+      assertThat(head.getAccountStateTrieNode(location, Bytes32.wrap(Hash.hash(onHead).getBytes())))
+          .contains(onHead);
+      assertThat(head.getCachedValue(TRIE_BRANCH_STORAGE, location))
+          .hasValueSatisfying(
+              cv -> {
+                assertThat(cv.getValue()).isEqualTo(onHead);
+                assertThat(cv.getVersion()).isEqualTo(1);
+              });
+    }
+  }
+
   private void commitOnHead(final Hash account, final Bytes accountRlp) {
     final var u = (BonsaiWorldStateKeyValueStorage.CachedUpdater) head.updater();
     u.putAccountInfoState(account, accountRlp);
+    u.commit();
+  }
+
+  private void commitAccountTrieNodeOnHead(final Bytes location, final Bytes node) {
+    final var u = (BonsaiWorldStateKeyValueStorage.CachedUpdater) head.updater();
+    u.putAccountStateTrieNode(location, Bytes32.wrap(Hash.hash(node).getBytes()), node);
     u.commit();
   }
 }

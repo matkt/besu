@@ -16,6 +16,9 @@ package org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT;
 
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -39,11 +42,21 @@ import java.util.function.Supplier;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Weigher;
 import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Versioned cache implementation using Caffeine. */
+/**
+ * Versioned cache implementation using Caffeine.
+ *
+ * <p>Trie nodes follow geth pathdb's clean-node cache: path-keyed (account location, or {@code
+ * accountHash || location} for storage), write-through on commit, populate-on-miss only for the
+ * head epoch, and eviction by RLP byte weight rather than entry count. Account-trie nodes are split
+ * by nibble depth (shallow {@code 0–4} vs deep {@code 5+}). Storage-trie nodes are grouped by
+ * account with a max number of accounts so a scan of cold contracts cannot evict a hot one.
+ * Versioning is the Besu analogue of pathdb's disk-layer-only clean cache plus layered diffs.
+ */
 public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeable {
 
   private static final Logger LOG = LoggerFactory.getLogger(VersionedFlatDbCacheManager.class);
@@ -54,9 +67,21 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Upper bound for Caffeine {@code initialCapacity} (must fit in a positive int). */
   private static final long MAX_INITIAL_CAPACITY = Integer.MAX_VALUE;
 
+  /** Account-hash prefix length on storage-trie keys ({@code accountHash || location}). */
+  private static final int HASHED_ADDRESS_SIZE = 32;
+
+  /** Inclusive max nibble depth for the shallow account-trie bucket (root through depth 4). */
+  private static final int SHALLOW_TRIE_MAX_DEPTH = 4;
+
+  /** Max storage-trie nodes retained per cached account. */
+  private static final long TRIE_NODES_PER_ACCOUNT = 64L;
+
   private final AtomicLong globalVersion = new AtomicLong(0);
   private final Cache<CacheKey, VersionedValue> accountCache;
   private final Cache<CacheKey, VersionedValue> storageCache;
+  private final Cache<CacheKey, VersionedValue> trieNodeShallowCache;
+  private final Cache<CacheKey, VersionedValue> trieNodeDeepCache;
+  private final Cache<CacheKey, Cache<CacheKey, VersionedValue>> trieStorageNodesByAccount;
   private final ThresholdDrainExecutor drainExecutor;
   private final ExecutorService maintenanceWorker;
   private final AtomicBoolean maintenanceScheduled = new AtomicBoolean(false);
@@ -68,7 +93,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private final Counter cacheRemovalCounter;
 
   /**
-   * Creates a new VersionedFlatDbCacheManager with the default drain threshold.
+   * Creates a new VersionedFlatDbCacheManager with the default drain threshold and default trie
+   * node cache weight.
    *
    * @param accountCacheSize maximum number of entries in the account cache
    * @param storageCacheSize maximum number of entries in the storage cache
@@ -76,11 +102,18 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
    */
   public VersionedFlatDbCacheManager(
       final long accountCacheSize, final long storageCacheSize, final MetricsSystem metricsSystem) {
-    this(accountCacheSize, storageCacheSize, metricsSystem, DEFAULT_DRAIN_THRESHOLD);
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS,
+        metricsSystem,
+        DEFAULT_DRAIN_THRESHOLD);
   }
 
   /**
-   * Creates a new VersionedFlatDbCacheManager with a custom drain threshold.
+   * Creates a new VersionedFlatDbCacheManager with a custom drain threshold and default trie node
+   * cache weight.
    *
    * @param accountCacheSize maximum number of entries in the account cache
    * @param storageCacheSize maximum number of entries in the storage cache
@@ -92,9 +125,108 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final long storageCacheSize,
       final MetricsSystem metricsSystem,
       final int drainThreshold) {
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS,
+        metricsSystem,
+        drainThreshold);
+  }
+
+  /**
+   * Creates a new VersionedFlatDbCacheManager including a weight-bounded trie node cache.
+   *
+   * @param accountCacheSize maximum number of entries in the account cache
+   * @param storageCacheSize maximum number of entries in the storage cache
+   * @param trieNodeCacheWeight maximum weight in bytes of cached trie node RLP (geth pathdb {@code
+   *     TrieCleanSize} analogue)
+   * @param metricsSystem the metrics system for instrumentation
+   */
+  public VersionedFlatDbCacheManager(
+      final long accountCacheSize,
+      final long storageCacheSize,
+      final long trieNodeCacheWeight,
+      final MetricsSystem metricsSystem) {
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        trieNodeCacheWeight,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS,
+        metricsSystem,
+        DEFAULT_DRAIN_THRESHOLD);
+  }
+
+  /**
+   * Creates a new VersionedFlatDbCacheManager including trie-node caches.
+   *
+   * @param accountCacheSize maximum number of entries in the account cache
+   * @param storageCacheSize maximum number of entries in the storage cache
+   * @param trieNodeCacheWeight maximum weight in bytes of account-trie node RLP
+   * @param trieNodeMaxAccounts maximum accounts whose storage-trie nodes are retained
+   * @param metricsSystem the metrics system for instrumentation
+   */
+  public VersionedFlatDbCacheManager(
+      final long accountCacheSize,
+      final long storageCacheSize,
+      final long trieNodeCacheWeight,
+      final long trieNodeMaxAccounts,
+      final MetricsSystem metricsSystem) {
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        trieNodeCacheWeight,
+        trieNodeMaxAccounts,
+        metricsSystem,
+        DEFAULT_DRAIN_THRESHOLD);
+  }
+
+  /**
+   * Creates a new VersionedFlatDbCacheManager with a custom drain threshold.
+   *
+   * @param accountCacheSize maximum number of entries in the account cache
+   * @param storageCacheSize maximum number of entries in the storage cache
+   * @param trieNodeCacheWeight maximum weight in bytes of cached trie node RLP
+   * @param metricsSystem the metrics system for instrumentation
+   * @param drainThreshold number of pending maintenance tasks before automatic drain is triggered
+   */
+  public VersionedFlatDbCacheManager(
+      final long accountCacheSize,
+      final long storageCacheSize,
+      final long trieNodeCacheWeight,
+      final MetricsSystem metricsSystem,
+      final int drainThreshold) {
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        trieNodeCacheWeight,
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS,
+        metricsSystem,
+        drainThreshold);
+  }
+
+  /**
+   * Creates a new VersionedFlatDbCacheManager with a custom drain threshold.
+   *
+   * @param accountCacheSize maximum number of entries in the account cache
+   * @param storageCacheSize maximum number of entries in the storage cache
+   * @param trieNodeCacheWeight maximum weight in bytes of account-trie node RLP
+   * @param trieNodeMaxAccounts maximum accounts whose storage-trie nodes are retained
+   * @param metricsSystem the metrics system for instrumentation
+   * @param drainThreshold number of pending maintenance tasks before automatic drain is triggered
+   */
+  public VersionedFlatDbCacheManager(
+      final long accountCacheSize,
+      final long storageCacheSize,
+      final long trieNodeCacheWeight,
+      final long trieNodeMaxAccounts,
+      final MetricsSystem metricsSystem,
+      final int drainThreshold) {
 
     requirePositiveCacheMaxSize("accountCacheSize", accountCacheSize);
     requirePositiveCacheMaxSize("storageCacheSize", storageCacheSize);
+    requirePositiveCacheMaxSize("trieNodeCacheWeight", trieNodeCacheWeight);
+    requirePositiveCacheMaxSize("trieNodeMaxAccounts", trieNodeMaxAccounts);
 
     this.maintenanceWorker =
         Executors.newSingleThreadExecutor(
@@ -108,6 +240,16 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     this.accountCache = createCache(accountCacheSize);
     this.storageCache = createCache(storageCacheSize);
+    final long shallowWeight = Math.max(1L, trieNodeCacheWeight / 4);
+    final long deepWeight = Math.max(1L, trieNodeCacheWeight - shallowWeight);
+    this.trieNodeShallowCache = createWeightedCache(shallowWeight);
+    this.trieNodeDeepCache = createWeightedCache(deepWeight);
+    this.trieStorageNodesByAccount =
+        Caffeine.newBuilder()
+            .initialCapacity(initialCapacityFor(trieNodeMaxAccounts))
+            .maximumSize(trieNodeMaxAccounts)
+            .executor(drainExecutor)
+            .build();
 
     this.cacheRequestCounter =
         metricsSystem.createCounter(
@@ -138,13 +280,42 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
             "Total number of cache removals");
 
     LOG.info(
-        "Cache maintenance will trigger asynchronously after {} pending tasks", drainThreshold);
+        "Cache maintenance will trigger asynchronously after {} pending tasks; trie node cache"
+            + " shallow={} bytes (account depth 0-{}), deep={} bytes, storage by account max={}",
+        drainThreshold,
+        shallowWeight,
+        SHALLOW_TRIE_MAX_DEPTH,
+        deepWeight,
+        trieNodeMaxAccounts);
   }
 
   private Cache<CacheKey, VersionedValue> createCache(final long maxSize) {
     return Caffeine.newBuilder()
         .initialCapacity(initialCapacityFor(maxSize))
         .maximumSize(maxSize)
+        .executor(drainExecutor)
+        .build();
+  }
+
+  /**
+   * Weight-bounded cache for path-keyed trie nodes. Geth pathdb's {@code fastcache} evicts by
+   * serialized bytes; Caffeine {@code maximumWeight} is the on-heap equivalent so a 17-child branch
+   * does not count the same as a one-byte leaf.
+   */
+  private Cache<CacheKey, VersionedValue> createWeightedCache(final long maxWeightBytes) {
+    return Caffeine.newBuilder()
+        .initialCapacity(initialCapacityFor(Math.max(1L, maxWeightBytes / 256)))
+        .maximumWeight(maxWeightBytes)
+        .weigher(
+            (Weigher<CacheKey, VersionedValue>)
+                (key, value) -> {
+                  long weight = key.size();
+                  final Bytes cached = value.getValue();
+                  if (cached != null) {
+                    weight += cached.size();
+                  }
+                  return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, weight));
+                })
         .executor(drainExecutor)
         .build();
   }
@@ -165,14 +336,39 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
   }
 
-  private Cache<CacheKey, VersionedValue> cacheForSegment(final SegmentIdentifier segment) {
+  private Cache<CacheKey, VersionedValue> cacheFor(
+      final SegmentIdentifier segment, final Bytes key) {
     if (segment == ACCOUNT_INFO_STATE) {
       return accountCache;
     }
     if (segment == ACCOUNT_STORAGE_STORAGE) {
       return storageCache;
     }
+    if (segment == TRIE_BRANCH_STORAGE) {
+      if (key.size() >= HASHED_ADDRESS_SIZE) {
+        return storageTrieNodeCacheFor(key);
+      }
+      return isShallowTrieKey(key) ? trieNodeShallowCache : trieNodeDeepCache;
+    }
     return null;
+  }
+
+  private Cache<CacheKey, VersionedValue> storageTrieNodeCacheFor(final Bytes key) {
+    return trieStorageNodesByAccount.get(
+        CacheKey.of(key.slice(0, HASHED_ADDRESS_SIZE)),
+        ignored -> createCache(TRIE_NODES_PER_ACCOUNT));
+  }
+
+  /**
+   * Nibble depth of an account-trie location (one byte per nibble). Storage keys are not measured
+   * here; they are routed per account.
+   */
+  static int trieNibbleDepth(final Bytes key) {
+    return key.size();
+  }
+
+  static boolean isShallowTrieKey(final Bytes key) {
+    return key.size() < HASHED_ADDRESS_SIZE && key.size() <= SHALLOW_TRIE_MAX_DEPTH;
   }
 
   /**
@@ -204,6 +400,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final int drained = drainExecutor.drain();
       accountCache.cleanUp();
       storageCache.cleanUp();
+      trieNodeShallowCache.cleanUp();
+      trieNodeDeepCache.cleanUp();
+      trieStorageNodesByAccount.cleanUp();
       if (drained > 0) {
         LOG.trace("Cache maintenance drained {} tasks", drained);
       }
@@ -243,7 +442,13 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void clear(final SegmentIdentifier segment) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    if (segment == TRIE_BRANCH_STORAGE) {
+      trieNodeShallowCache.invalidateAll();
+      trieNodeDeepCache.invalidateAll();
+      trieStorageNodesByAccount.invalidateAll();
+      return;
+    }
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, Bytes.EMPTY);
     if (cache != null) {
       cache.invalidateAll();
     }
@@ -256,7 +461,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final long version,
       final Supplier<Optional<Bytes>> storageGetter) {
 
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
 
     cacheRequestCounter.inc();
 
@@ -276,7 +481,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     cacheMissCounter.inc();
     final Optional<Bytes> result = storageGetter.get();
 
-    if (version == globalVersion.get()) {
+    if (version == globalVersion.get() && shouldInsertReadMiss(segment, result)) {
       cacheInsertCounter.inc();
       final Bytes valueToCache = result.orElse(null);
       final boolean isRemoval = result.isEmpty();
@@ -303,9 +508,12 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final long version,
       final Function<List<Bytes>, List<Optional<Bytes>>> batchFetcher) {
 
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
-
-    if (cache == null) {
+    if (keys.isEmpty()) {
+      return List.of();
+    }
+    if (segment != ACCOUNT_INFO_STATE
+        && segment != ACCOUNT_STORAGE_STORAGE
+        && segment != TRIE_BRANCH_STORAGE) {
       keys.forEach(k -> cacheMissCounter.inc());
       return batchFetcher.apply(keys);
     }
@@ -318,8 +526,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final Bytes key = keys.get(i);
       cacheRequestCounter.inc();
 
+      final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
       final CacheKey cacheKey = CacheKey.of(key);
-      final VersionedValue versionedValue = cache.getIfPresent(cacheKey);
+      final VersionedValue versionedValue = cache == null ? null : cache.getIfPresent(cacheKey);
 
       if (versionedValue != null && versionedValue.version <= version) {
         cacheHitCounter.inc();
@@ -344,11 +553,12 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
         results.set(resultIndex, fetchedValue);
 
-        if (shouldUpdateCache) {
+        if (shouldUpdateCache && shouldInsertReadMiss(segment, fetchedValue)) {
           cacheInsertCounter.inc();
           final CacheKey cacheKey = CacheKey.of(key);
           final Bytes valueToCache = fetchedValue.orElse(null);
           final boolean isRemoval = fetchedValue.isEmpty();
+          final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
 
           cache
               .asMap()
@@ -370,7 +580,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   @Override
   public void putInCache(
       final SegmentIdentifier segment, final Bytes key, final Bytes value, final long version) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
     if (cache != null) {
       final CacheKey cacheKey = CacheKey.of(key);
       cache
@@ -390,7 +600,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   @Override
   public void removeFromCache(
       final SegmentIdentifier segment, final Bytes key, final long version) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
     if (cache != null) {
       final CacheKey cacheKey = CacheKey.of(key);
       cache
@@ -400,6 +610,11 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
               (k, existingValue) -> {
                 if (existingValue == null || existingValue.version < version) {
                   cacheRemovalCounter.inc();
+                  // Geth pathdb `fastcache.Del`: drop the path instead of storing a tombstone so
+                  // missing trie nodes do not consume the byte-weight budget.
+                  if (segment == TRIE_BRANCH_STORAGE) {
+                    return null;
+                  }
                   return new VersionedValue(null, version, true);
                 }
                 return existingValue;
@@ -407,21 +622,38 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
   }
 
+  /**
+   * Geth pathdb only inserts present trie blobs into the clean node cache ({@code len(blob) > 0}).
+   * Account/storage still cache absences (geth state cache does the same).
+   */
+  private static boolean shouldInsertReadMiss(
+      final SegmentIdentifier segment, final Optional<Bytes> result) {
+    return segment != TRIE_BRANCH_STORAGE || result.filter(b -> !b.isEmpty()).isPresent();
+  }
+
   @Override
   public long getCacheSize(final SegmentIdentifier segment) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    if (segment == TRIE_BRANCH_STORAGE) {
+      long size = trieNodeShallowCache.estimatedSize() + trieNodeDeepCache.estimatedSize();
+      for (final Cache<CacheKey, VersionedValue> perAccount :
+          trieStorageNodesByAccount.asMap().values()) {
+        size += perAccount.estimatedSize();
+      }
+      return size;
+    }
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, Bytes.EMPTY);
     return cache != null ? cache.estimatedSize() : 0;
   }
 
   @Override
   public boolean isCached(final SegmentIdentifier segment, final Bytes key) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
     return cache != null && cache.getIfPresent(CacheKey.of(key)) != null;
   }
 
   @Override
   public Optional<VersionedValue> getCachedValue(final SegmentIdentifier segment, final Bytes key) {
-    final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
+    final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
     return cache != null
         ? Optional.ofNullable(cache.getIfPresent(CacheKey.of(key)))
         : Optional.empty();

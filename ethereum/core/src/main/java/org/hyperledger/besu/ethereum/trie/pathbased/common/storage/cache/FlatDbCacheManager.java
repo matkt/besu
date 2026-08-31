@@ -132,6 +132,10 @@ final class CacheKey {
     this.hashCode = Arrays.hashCode(data);
   }
 
+  int size() {
+    return data.length;
+  }
+
   @Override
   public boolean equals(final Object o) {
     if (this == o) return true;

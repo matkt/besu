@@ -119,6 +119,14 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
               .getPathBasedExtraStorageConfiguration()
               .getUnstable()
               .getBonsaiCrossBlockCacheStorageSize(),
+          dataStorageConfiguration
+              .getPathBasedExtraStorageConfiguration()
+              .getUnstable()
+              .getBonsaiCrossBlockCacheTrieNodeWeight(),
+          dataStorageConfiguration
+              .getPathBasedExtraStorageConfiguration()
+              .getUnstable()
+              .getBonsaiCrossBlockCacheTrieNodeMaxAccounts(),
           metricsSystem);
     } else {
       return FlatDbCacheManager.NO_OP_CACHE;
@@ -195,10 +203,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return composedWorldStateStorage
-        .get(TRIE_BRANCH_STORAGE, location.toArrayUnsafe())
-        .map(Bytes::wrap)
-        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    return getTrieNodeUnsafe(location).filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -206,16 +211,24 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return composedWorldStateStorage
-        .get(
-            TRIE_BRANCH_STORAGE,
-            Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe())
-        .map(Bytes::wrap)
+    return getTrieNodeUnsafe(Bytes.concatenate(accountHash.getBytes(), location))
         .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
   }
 
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
-    return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
+    return cacheManager.getFromCacheOrStorage(
+        TRIE_BRANCH_STORAGE,
+        key,
+        getCurrentVersion(),
+        () ->
+            composedWorldStateStorage
+                .get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe())
+                .map(Bytes::wrap));
+  }
+
+  @Override
+  public Optional<Bytes> getStateTrieNode(final Bytes location) {
+    return getTrieNodeUnsafe(location);
   }
 
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(
@@ -255,7 +268,14 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     super.clear();
     cacheManager.clear(ACCOUNT_INFO_STATE);
     cacheManager.clear(ACCOUNT_STORAGE_STORAGE);
+    cacheManager.clear(TRIE_BRANCH_STORAGE);
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
+  }
+
+  @Override
+  public void clearTrie() {
+    super.clearTrie();
+    cacheManager.clear(TRIE_BRANCH_STORAGE);
   }
 
   @Override
@@ -491,6 +511,38 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       stageRemoval(
           ACCOUNT_STORAGE_STORAGE, Bytes.concatenate(accountHash.getBytes(), slotHash.getBytes()));
       super.removeStorageValueBySlotHash(accountHash, slotHash);
+    }
+
+    @Override
+    public Updater putAccountStateTrieNode(
+        final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+      if (!nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+        stagePut(TRIE_BRANCH_STORAGE, location, node);
+      }
+      return super.putAccountStateTrieNode(location, nodeHash, node);
+    }
+
+    @Override
+    public Updater removeAccountStateTrieNode(final Bytes location) {
+      stageRemoval(TRIE_BRANCH_STORAGE, location);
+      return super.removeAccountStateTrieNode(location);
+    }
+
+    @Override
+    public synchronized Updater putAccountStorageTrieNode(
+        final Hash accountHash, final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+      if (!nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+        stagePut(TRIE_BRANCH_STORAGE, Bytes.concatenate(accountHash.getBytes(), location), node);
+      }
+      return super.putAccountStorageTrieNode(accountHash, location, nodeHash, node);
+    }
+
+    @Override
+    public Updater saveWorldState(final Bytes blockHash, final Bytes32 nodeHash, final Bytes node) {
+      if (!nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+        stagePut(TRIE_BRANCH_STORAGE, Bytes.EMPTY, node);
+      }
+      return super.saveWorldState(blockHash, nodeHash, node);
     }
 
     private void stagePut(final SegmentIdentifier segment, final Bytes key, final Bytes value) {
