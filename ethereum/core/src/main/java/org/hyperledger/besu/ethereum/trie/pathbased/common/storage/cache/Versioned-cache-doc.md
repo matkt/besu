@@ -100,12 +100,20 @@ Because the version counter advances on **every commit** along the actually exec
 
 ## What segments are cached?
 
-`VersionedCacheManager` only caches:
+`VersionedCacheManager` caches:
 
 - `ACCOUNT_INFO_STATE`
 - `ACCOUNT_STORAGE_STORAGE`
+- `TRIE_BRANCH_STORAGE` — path-keyed trie node RLP:
+  - **Account trie shallow** (nibble depth 0–4, 25% of the byte budget): shared top of the state trie.
+  - **Account trie deep** (depth 5+, 75% of the byte budget).
+  - **Storage tries by account** (default 2048 accounts, 64 nodes each): keys `accountHash || location`. Evicting an account drops all its storage nodes, so a hot contract is not displaced by a scan of cold accounts.
 
-Other segments (e.g. code, trie branches) are not covered by this versioned cache.
+Code is not covered by this versioned cache. Metadata keys in `TRIE_BRANCH_STORAGE` (`worldRoot`, `worldBlockHash`, `worldBlockNumber`) are not written through the trie-node cache path.
+
+Trie node lookups still verify `Hash.hash(rlp) == nodeHash` after a cache or storage read. Layered storage consults in-memory overlay writes before the shared cache (geth dirty buffer before clean cache).
+
+Read misses of **absent** trie nodes are not inserted (geth `len(blob) > 0` before `fastcache.Set`). Deletes **drop** the path from the cache (geth `fastcache.Del`) instead of storing a tombstone, so the byte-weight budget stays on live RLP.
 
 ---
 

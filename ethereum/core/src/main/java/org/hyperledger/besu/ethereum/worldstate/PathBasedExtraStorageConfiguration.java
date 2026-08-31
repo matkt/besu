@@ -92,6 +92,12 @@ public interface PathBasedExtraStorageConfiguration {
     long DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE = 500_000L;
     boolean DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED = false;
 
+    /** Default trie-node cache weight, matching geth pathdb {@code TrieCleanSize} (16 MiB). */
+    long DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT = 16L * 1024 * 1024;
+
+    /** Max accounts whose storage-trie nodes are retained in the versioned cache. */
+    long DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS = 2_048L;
+
     @Value.Default
     default boolean getFullFlatDbEnabled() {
       return DEFAULT_FULL_FLAT_DB_ENABLED;
@@ -120,6 +126,15 @@ public interface PathBasedExtraStorageConfiguration {
     @Value.Default
     default boolean getBonsaiArchiveStateProofsEnabled() {
       return DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
+    }
+
+    default long getBonsaiCrossBlockCacheTrieNodeWeight() {
+      return DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT;
+    }
+
+    @Value.Default
+    default long getBonsaiCrossBlockCacheTrieNodeMaxAccounts() {
+      return DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS;
     }
   }
 }

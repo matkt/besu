@@ -24,6 +24,8 @@ import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConf
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_FULL_FLAT_DB_ENABLED;
 
@@ -152,6 +154,24 @@ public class PathBasedExtraStorageOptions
             "Enables eth_getProof for historical blocks backed by the bonsai archive trie-node store. Requires --data-storage-format=X_BONSAI_ARCHIVE and trie-node capture during initial sync. (default: ${DEFAULT-VALUE})")
     private Boolean bonsaiArchiveStateProofsEnabled = DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
 
+    @Option(
+        hidden = true,
+        names = "--Xbonsai-cross-block-cache-trie-node-weight",
+        paramLabel = "<LONG>",
+        description =
+            "Maximum trie-node cache weight in bytes when the cross-block cache is enabled (default: ${DEFAULT-VALUE}).")
+    private Long bonsaiCrossBlockCacheTrieNodeWeight =
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT;
+
+    @Option(
+        hidden = true,
+        names = "--Xbonsai-cross-block-cache-trie-node-max-accounts",
+        paramLabel = "<LONG>",
+        description =
+            "Maximum accounts whose storage-trie nodes are kept in the cross-block cache (default: ${DEFAULT-VALUE}).")
+    private Long bonsaiCrossBlockCacheTrieNodeMaxAccounts =
+        DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_MAX_ACCOUNTS;
+
     /** Default Constructor. */
     Unstable() {}
   }
@@ -227,6 +247,10 @@ public class PathBasedExtraStorageOptions
         domainObject.getUnstable().getBonsaiCrossBlockCacheStorageSize();
     dataStorageOptions.unstableOptions.bonsaiArchiveStateProofsEnabled =
         domainObject.getUnstable().getBonsaiArchiveStateProofsEnabled();
+    dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheTrieNodeWeight =
+        domainObject.getUnstable().getBonsaiCrossBlockCacheTrieNodeWeight();
+    dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheTrieNodeMaxAccounts =
+        domainObject.getUnstable().getBonsaiCrossBlockCacheTrieNodeMaxAccounts();
     dataStorageOptions.isParallelTxProcessingEnabled =
         domainObject.getParallelTxProcessingEnabled();
     dataStorageOptions.isParallelStateRootComputationEnabled =
@@ -251,6 +275,10 @@ public class PathBasedExtraStorageOptions
                 .bonsaiCrossBlockCacheAccountSize(unstableOptions.bonsaiCrossBlockCacheAccountSize)
                 .bonsaiCrossBlockCacheStorageSize(unstableOptions.bonsaiCrossBlockCacheStorageSize)
                 .bonsaiArchiveStateProofsEnabled(unstableOptions.bonsaiArchiveStateProofsEnabled)
+                .bonsaiCrossBlockCacheTrieNodeWeight(
+                    unstableOptions.bonsaiCrossBlockCacheTrieNodeWeight)
+                .bonsaiCrossBlockCacheTrieNodeMaxAccounts(
+                    unstableOptions.bonsaiCrossBlockCacheTrieNodeMaxAccounts)
                 .build())
         .build();
   }

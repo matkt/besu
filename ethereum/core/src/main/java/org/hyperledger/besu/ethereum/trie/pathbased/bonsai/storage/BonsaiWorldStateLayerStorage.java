@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -122,6 +123,25 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
                             accountHash,
                             storageSlotKey,
                             persistentStorage)));
+  }
+
+  @Override
+  public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
+    if (isClosedGet()) {
+      return Optional.empty();
+    }
+    return getWithCache(
+        TRIE_BRANCH_STORAGE,
+        key,
+        persistentStorage ->
+            cacheManager.getFromCacheOrStorage(
+                TRIE_BRANCH_STORAGE,
+                key,
+                getCurrentVersion(),
+                () ->
+                    persistentStorage
+                        .get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe())
+                        .map(Bytes::wrap)));
   }
 
   @Override
