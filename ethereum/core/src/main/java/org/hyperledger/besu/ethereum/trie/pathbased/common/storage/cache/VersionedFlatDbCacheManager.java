@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
  * Versioned cache implementation using Caffeine.
  *
  * Trie node focus:
- * - logs in-process stats directly
+ * - direct log visibility
  * - hit/miss by shallow/deep/account
  * - per-account weighted cache
  * - stricter admission for cold trie nodes
@@ -65,7 +65,11 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private static final long MAX_INITIAL_CAPACITY = Integer.MAX_VALUE;
   private static final int HASHED_ADDRESS_SIZE = 32;
   private static final int SHALLOW_TRIE_MAX_DEPTH = 4;
-  private static final long TRIE_NODES_PER_ACCOUNT_WEIGHT = 64 * 1024L;
+  private static final long PER_ACCOUNT_TRIE_WEIGHT_BYTES = 64 * 1024L;
+  private static final int ADMISSION_MAX_NODE_SIZE_BYTES = 16 * 1024;
+  private static final int SMALL_NODE_LIMIT = 64;
+  private static final int MEDIUM_NODE_LIMIT = 256;
+  private static final int LARGE_NODE_LIMIT = 1024;
 
   private final AtomicLong globalVersion = new AtomicLong(0);
 
@@ -193,6 +197,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     requirePositiveCacheMaxSize("trieNodeCacheWeight", trieNodeCacheWeight);
     requirePositiveCacheMaxSize("trieNodeMaxAccounts", trieNodeMaxAccounts);
 
+    LOG.warn(">>> VersionedFlatDbCacheManager constructor called <<<");
+
     this.maintenanceWorker =
             Executors.newSingleThreadExecutor(
                     r -> {
@@ -252,13 +258,22 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     loggerExecutor.setRemoveOnCancelPolicy(true);
     this.trieStatsLogger = loggerExecutor;
 
-    this.trieStatsLogger.scheduleAtFixedRate(this::logTrieNodeStats, 60, 60, TimeUnit.SECONDS);
+    LOG.warn(">>> creating trie stats logger <<<");
+    logTrieNodeStats();
+    this.trieStatsLogger.scheduleAtFixedRate(
+            () -> {
+              LOG.warn(">>> trie stats logger tick <<<");
+              logTrieNodeStats();
+            },
+            5,
+            5,
+            TimeUnit.SECONDS);
 
     LOG.info(
-            "Trie cache configured: shallow={} bytes, deep={} bytes, per-account={} weight units",
+            "Trie cache configured: shallow={} bytes, deep={} bytes, per-account={} bytes",
             shallowWeight,
             deepWeight,
-            trieNodeMaxAccounts);
+            PER_ACCOUNT_TRIE_WEIGHT_BYTES);
   }
 
   private Cache<CacheKey, VersionedValue> createCache(final long maxSize) {
@@ -320,7 +335,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     trieStorageWeightByAccount.putIfAbsent(accountKey, new AtomicLong(0));
     return Caffeine.newBuilder()
             .initialCapacity(16)
-            .maximumWeight(TRIE_NODES_PER_ACCOUNT_WEIGHT)
+            .maximumWeight(PER_ACCOUNT_TRIE_WEIGHT_BYTES)
             .weigher(
                     (Weigher<CacheKey, VersionedValue>)
                             (key, value) -> {
@@ -329,20 +344,12 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
                               if (cached != null) {
                                 weight += cached.size();
                               }
+                              final AtomicLong accWeight = trieStorageWeightByAccount.get(accountKey);
+                              if (accWeight != null) {
+                                accWeight.set(weight);
+                              }
                               return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, weight));
                             })
-            .removalListener(
-                    (CacheKey k, VersionedValue v, com.github.benmanes.caffeine.cache.RemovalCause cause) -> {
-                      if (v != null && v.getValue() != null) {
-                        final AtomicLong w = trieStorageWeightByAccount.get(accountKey);
-                        if (w != null) {
-                          w.addAndGet(-(k.size() + v.getValue().size()));
-                          if (w.get() < 0) {
-                            w.set(0);
-                          }
-                        }
-                      }
-                    })
             .executor(drainExecutor)
             .build();
   }
@@ -392,10 +399,13 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void close() {
+    LOG.warn(">>> close() called, dumping trie stats <<<");
     logTrieNodeStats();
     LOG.info("Shutting down cache maintenance worker and trie stats logger");
+
     trieStatsLogger.shutdown();
     maintenanceWorker.shutdown();
+
     try {
       if (!trieStatsLogger.awaitTermination(5, TimeUnit.SECONDS)) {
         trieStatsLogger.shutdownNow();
@@ -408,6 +418,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       maintenanceWorker.shutdownNow();
       Thread.currentThread().interrupt();
     }
+
     doMaintenance();
   }
 
@@ -517,6 +528,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final Cache<CacheKey, VersionedValue> cache = cacheFor(segment, key);
       final CacheKey cacheKey = CacheKey.of(key);
       final VersionedValue versionedValue = cache == null ? null : cache.getIfPresent(cacheKey);
+
       if (versionedValue != null && versionedValue.version <= version) {
         cacheHitCounter.inc();
         results.add(versionedValue.isRemoval ? Optional.empty() : Optional.of(versionedValue.getValue()));
@@ -674,15 +686,15 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
 
     final int size = value.size();
-
-    if (size > 16 * 1024) {
+    if (size > ADMISSION_MAX_NODE_SIZE_BYTES) {
       trieRejected.incrementAndGet();
       return false;
     }
 
     if (key.size() >= HASHED_ADDRESS_SIZE) {
       final CacheKey accountKey = CacheKey.of(key.slice(0, HASHED_ADDRESS_SIZE));
-      final AccountTrieStats stats = accountTrieStats.computeIfAbsent(accountKey, k -> new AccountTrieStats());
+      final AccountTrieStats stats =
+              accountTrieStats.computeIfAbsent(accountKey, k -> new AccountTrieStats());
       final boolean accepted = stats.shouldAdmit(size);
       if (accepted) {
         trieAdmitted.incrementAndGet();
@@ -697,11 +709,11 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   }
 
   private void recordNodeSizeBucket(final int size) {
-    if (size <= 64) {
+    if (size <= SMALL_NODE_LIMIT) {
       trieSmallNodes.incrementAndGet();
-    } else if (size <= 256) {
+    } else if (size <= MEDIUM_NODE_LIMIT) {
       trieMediumNodes.incrementAndGet();
-    } else if (size <= 1024) {
+    } else if (size <= LARGE_NODE_LIMIT) {
       trieLargeNodes.incrementAndGet();
     } else {
       trieHugeNodes.incrementAndGet();
@@ -740,9 +752,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
               (deepHits + deepMisses) == 0 ? 0.0 : (100.0 * deepHits / (deepHits + deepMisses));
       final double accountHitRate =
               (accountHits + accountMisses) == 0 ? 0.0 : (100.0 * accountHits / (accountHits + accountMisses));
-      final double avgWeight = insertedEntries == 0 ? 0.0 : (double) insertedBytes / insertedEntries;
+      final double avgNodeBytes = insertedEntries == 0 ? 0.0 : (double) insertedBytes / insertedEntries;
 
-      LOG.info(
+      LOG.warn(
               "[TRIE CACHE STATS] req={} hits={} misses={} hitRate={}%; shallowHits={} shallowMisses={} shallowHitRate={}%; deepHits={} deepMisses={} deepHitRate={}%; accountHits={} accountMisses={} accountHitRate={}%; admitted={} rejected={} avgNodeBytes={} insertedBytes={} entries={}; sizeBuckets: small={} medium={} large={} huge={}",
               requests,
               hits,
@@ -759,7 +771,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
               String.format("%.2f", accountHitRate),
               admitted,
               rejected,
-              String.format("%.2f", avgWeight),
+              String.format("%.2f", avgNodeBytes),
               insertedBytes,
               insertedEntries,
               small,
@@ -778,7 +790,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     boolean shouldAdmit(final int size) {
       final long r = requests.incrementAndGet();
-      if (size > 16 * 1024) {
+      if (size > ADMISSION_MAX_NODE_SIZE_BYTES) {
         return false;
       }
       if (r <= 8) {
