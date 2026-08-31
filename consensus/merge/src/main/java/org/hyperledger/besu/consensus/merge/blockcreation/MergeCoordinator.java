@@ -16,7 +16,6 @@ package org.hyperledger.besu.consensus.merge.blockcreation;
 
 import static java.util.stream.Collectors.joining;
 import static org.hyperledger.besu.consensus.merge.blockcreation.MergeMiningCoordinator.ForkchoiceResult.Status.INVALID;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead;
 
 import org.hyperledger.besu.config.NetworkDefinition;
 import org.hyperledger.besu.consensus.merge.MergeContext;
@@ -48,6 +47,7 @@ import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
@@ -778,7 +778,11 @@ public class MergeCoordinator implements MergeMiningCoordinator, BadChainListene
     Optional<MutableWorldState> newWorldState =
         protocolContext
             .getWorldStateArchive()
-            .getWorldState(withBlockHeaderAndUpdateNodeHead(newHead));
+            .getWorldState(
+                WorldStateQueryParams.newBuilder()
+                    .withParentBlockHeader(newHead)
+                    .withShouldWorldStateUpdateHead(true)
+                    .build());
 
     newWorldState.ifPresentOrElse(
         mutableWorldState ->

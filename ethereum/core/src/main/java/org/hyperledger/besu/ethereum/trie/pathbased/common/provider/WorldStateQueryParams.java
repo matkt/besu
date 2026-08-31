@@ -29,6 +29,7 @@ public class WorldStateQueryParams {
   private final Hash blockHash;
   private final Optional<Hash> stateRoot;
   private final Optional<BlockAccessListOverlay> blockAccessListOverlay;
+  private final Optional<Long> timeStamp;
 
   /**
    * Private constructor to enforce the use of the Builder.
@@ -36,11 +37,12 @@ public class WorldStateQueryParams {
    * @param builder the builder to create an instance of WorldStateQueryParams
    */
   private WorldStateQueryParams(final Builder builder) {
-    this.blockHeader = builder.blockHeader;
+    this.blockHeader = builder.parentBlockHeader;
     this.shouldWorldStateUpdateHead = builder.shouldWorldStateUpdateHead;
     this.blockHash = builder.blockHash;
     this.stateRoot = builder.stateRoot;
     this.blockAccessListOverlay = builder.blockAccessListOverlay;
+    this.timeStamp = builder.timeStamp;
   }
 
   /**
@@ -84,6 +86,10 @@ public class WorldStateQueryParams {
     return blockAccessListOverlay;
   }
 
+  public Optional<Long> getTimeStamp() {
+    return timeStamp;
+  }
+
   /**
    * Creates a new builder for WorldStateQueryParams.
    *
@@ -101,18 +107,34 @@ public class WorldStateQueryParams {
    */
   public static WorldStateQueryParams withBlockHeaderAndUpdateNodeHead(
       final BlockHeader blockHeader) {
-    return newBuilder().withBlockHeader(blockHeader).withShouldWorldStateUpdateHead(true).build();
+    return newBuilder()
+        .withParentBlockHeader(blockHeader)
+        .withShouldWorldStateUpdateHead(true)
+        .build();
   }
 
   /**
    * Creates an instance with a block header and does not update the node head.
    *
    * @param blockHeader the block header
+   * @param timeStamp the next block timestamp
    * @return an instance of WorldStateQueryParams
    */
   public static WorldStateQueryParams withBlockHeaderAndNoUpdateNodeHead(
+      final BlockHeader blockHeader, final long timeStamp) {
+    return newBuilder()
+        .withParentBlockHeader(blockHeader)
+        .withTimeStamp(timeStamp)
+        .withShouldWorldStateUpdateHead(false)
+        .build();
+  }
+
+  public static WorldStateQueryParams withBlockHeaderAndNoUpdateNodeHead(
       final BlockHeader blockHeader) {
-    return newBuilder().withBlockHeader(blockHeader).withShouldWorldStateUpdateHead(false).build();
+    return newBuilder()
+        .withParentBlockHeader(blockHeader)
+        .withShouldWorldStateUpdateHead(false)
+        .build();
   }
 
   /**
@@ -129,32 +151,6 @@ public class WorldStateQueryParams {
         .withStateRoot(stateRoot)
         .withBlockHash(blockHash)
         .withShouldWorldStateUpdateHead(true)
-        .build();
-  }
-
-  /**
-   * Should return a worldstate instance with a state root and should update the node head.
-   *
-   * @param stateRoot the state root
-   * @return an instance of WorldStateQueryParams
-   */
-  public static WorldStateQueryParams withStateRootAndUpdateNodeHead(final Hash stateRoot) {
-    return newBuilder().withStateRoot(stateRoot).withShouldWorldStateUpdateHead(true).build();
-  }
-
-  /**
-   * Creates an instance with a state root, block hash, and does not update the node head.
-   *
-   * @param stateRoot the state root
-   * @param blockHash the block hash
-   * @return an instance of WorldStateQueryParams
-   */
-  public static WorldStateQueryParams withStateRootAndBlockHashAndNoUpdateNodeHead(
-      final Hash stateRoot, final Hash blockHash) {
-    return newBuilder()
-        .withStateRoot(stateRoot)
-        .withBlockHash(blockHash)
-        .withShouldWorldStateUpdateHead(false)
         .build();
   }
 
@@ -176,24 +172,26 @@ public class WorldStateQueryParams {
   }
 
   public static class Builder {
-    private BlockHeader blockHeader;
+    private BlockHeader parentBlockHeader;
     private boolean shouldWorldStateUpdateHead = false;
     private Hash blockHash;
     private Optional<Hash> stateRoot = Optional.empty();
     private Optional<BlockAccessListOverlay> blockAccessListOverlay = Optional.empty();
+    private Optional<Long> timeStamp = Optional.empty();
 
     private Builder() {}
 
     /**
      * Sets the block header.
      *
-     * @param blockHeader the block header
+     * @param parentBlockHeader the block header
      * @return the builder
      */
-    public Builder withBlockHeader(final BlockHeader blockHeader) {
-      this.blockHeader = blockHeader;
-      this.blockHash = blockHeader.getBlockHash();
-      this.stateRoot = Optional.of(blockHeader.getStateRoot());
+    public Builder withParentBlockHeader(final BlockHeader parentBlockHeader) {
+      this.parentBlockHeader = parentBlockHeader;
+      this.timeStamp = Optional.of(parentBlockHeader.getTimestamp());
+      this.blockHash = parentBlockHeader.getBlockHash();
+      this.stateRoot = Optional.of(parentBlockHeader.getStateRoot());
       return this;
     }
 
@@ -242,6 +240,11 @@ public class WorldStateQueryParams {
       return this;
     }
 
+    public Builder withTimeStamp(final long timeStamp) {
+      this.timeStamp = Optional.of(timeStamp);
+      return this;
+    }
+
     /**
      * Builds an instance of WorldStateQueryParams.
      *
@@ -249,7 +252,7 @@ public class WorldStateQueryParams {
      */
     public WorldStateQueryParams build() {
 
-      if (blockHash == null && stateRoot.isEmpty() && blockHeader == null) {
+      if (blockHash == null && stateRoot.isEmpty() && parentBlockHeader == null) {
         throw new IllegalArgumentException(
             "Either blockHash, stateRoot, or blockHeader must be provided");
       }

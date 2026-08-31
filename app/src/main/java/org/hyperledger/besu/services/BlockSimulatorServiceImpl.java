@@ -199,7 +199,7 @@ public class BlockSimulatorServiceImpl implements BlockSimulationService {
   private MutableWorldState getWorldState(final BlockHeader header, final boolean isPersisting) {
     final WorldStateQueryParams worldStateQueryParams =
         WorldStateQueryParams.newBuilder()
-            .withBlockHeader(header)
+            .withParentBlockHeader(header)
             .withShouldWorldStateUpdateHead(isPersisting)
             .build();
     return worldStateArchive

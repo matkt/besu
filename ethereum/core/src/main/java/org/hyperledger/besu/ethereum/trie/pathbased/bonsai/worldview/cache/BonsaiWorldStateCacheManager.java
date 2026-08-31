@@ -65,6 +65,11 @@ public class BonsaiWorldStateCacheManager implements StorageSubscriber {
     this.codeCache = codeCache;
   }
 
+  /** Returns the shared code cache (used by the PBT migrator to build its own world state). */
+  public BonsaiCodeCache getCodeCache() {
+    return codeCache;
+  }
+
   public synchronized void addCachedLayer(
       final BlockHeader blockHeader,
       final Hash worldStateRootHash,

@@ -50,6 +50,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.rlp.RLP;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Path-based state-root committer that materializes accumulator updates into the Patricia trie (no
@@ -57,6 +59,8 @@ import org.apache.tuweni.units.bigints.UInt256;
  */
 public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
 
+  private static final Logger LOG =
+      LoggerFactory.getLogger(DefaultPatriciaStateRootCommitter.class);
   private final BiFunction<BonsaiWorldState, Address, Hash> addressHasher;
 
   public DefaultPatriciaStateRootCommitter() {
@@ -91,6 +95,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
     if (blockHeader != null && bonsai.isTrieDisabled()) {
       return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
     }
+    LOG.atInfo().setMessage("DIRECT patricia state root computed: root={}").addArgument(root).log();
     return StateRootComputations.pathBased(root, writes);
   }
 

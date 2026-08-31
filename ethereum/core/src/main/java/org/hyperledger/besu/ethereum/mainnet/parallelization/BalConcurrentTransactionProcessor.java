@@ -84,7 +84,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
                 .getWorldStateArchive()
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(blockHeader)
+                        .withParentBlockHeader(blockHeader)
                         .withShouldWorldStateUpdateHead(false)
                         .withBalOverlay(
                             new BlockAccessListOverlay(
@@ -114,7 +114,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
                           .getWorldStateArchive()
                           .getWorldState(
                               WorldStateQueryParams.newBuilder()
-                                  .withBlockHeader(parentHeader)
+                                  .withParentBlockHeader(parentHeader)
                                   .withShouldWorldStateUpdateHead(false)
                                   .build())
                           .map(BonsaiWorldState.class::cast));

@@ -25,7 +25,6 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -115,7 +114,7 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
       }
     }
 
-    if (BinaryTrieForkSupport.isBinaryTrieActive(blockHeader.getTimestamp(), binaryTrieMilestone)) {
+    if (binaryTrieMilestone.isPresent()) {
       layer.setWireVersion(WIRE_VERSION_EXTENDED);
       for (final Hash codeHash : accumulator.getIntroducedCodeHashes()) {
         layer.addIntroducedCodeHash(codeHash);

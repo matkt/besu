@@ -36,6 +36,7 @@ import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -77,7 +78,8 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
         trieLogManager,
         evmConfiguration,
         createStatefulConfigWithTrie(),
-        new BonsaiCodeCache());
+        new BonsaiCodeCache(),
+        TrieBranchType.PATRICIA);
     this.refTestStorage = worldStateKeyValueStorage;
     this.preImageProxy = preImageProxy;
     this.evmConfiguration = evmConfiguration;

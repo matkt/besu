@@ -75,7 +75,7 @@ public class MainnetBlockImporter implements BlockImporter {
                     .getWorldStateArchive()
                     .getWorldState(
                         WorldStateQueryParams.newBuilder()
-                            .withBlockHeader(block.getHeader())
+                            .withParentBlockHeader(block.getHeader())
                             .withShouldWorldStateUpdateHead(true)
                             .build());
               });

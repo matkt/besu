@@ -50,4 +50,19 @@ public final class BinaryTrieForkSupport {
       final long blockTimestamp, final Optional<Long> milestone) {
     return milestone.map(m -> Long.compareUnsigned(blockTimestamp, m) >= 0).orElse(false);
   }
+
+  /**
+   * True when {@code parentBlockTimestamp} is still pre-PBT and {@code nextBlockTimestamp} is at or
+   * past {@code binaryTrieTime} — i.e. the lookup is for the parent of the first PBT block.
+   */
+  public static boolean isBinaryTrieTransition(
+      final long parentBlockTimestamp,
+      final Optional<Long> binaryTrieMilestone,
+      final Optional<Long> nextBlockTimestamp) {
+    if (nextBlockTimestamp.isEmpty()) {
+      return false;
+    }
+    return !isBinaryTrieActive(parentBlockTimestamp, binaryTrieMilestone)
+        && isBinaryTrieActive(nextBlockTimestamp.get(), binaryTrieMilestone);
+  }
 }

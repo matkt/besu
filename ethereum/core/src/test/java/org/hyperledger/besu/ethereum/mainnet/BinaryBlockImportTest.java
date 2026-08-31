@@ -199,7 +199,7 @@ class BinaryBlockImportTest {
             stateArchive
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(block.getHeader())
+                        .withParentBlockHeader(block.getHeader())
                         .withShouldWorldStateUpdateHead(true)
                         .build())
                 .orElseThrow()) {
@@ -215,7 +215,7 @@ class BinaryBlockImportTest {
             stateArchive
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(block.getHeader())
+                        .withParentBlockHeader(block.getHeader())
                         .withShouldWorldStateUpdateHead(false)
                         .build())
                 .orElseThrow()) {

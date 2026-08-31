@@ -388,7 +388,7 @@ class StateRootCommitterIntegrationTest {
                   .getWorldStateArchive()
                   .getWorldState(
                       WorldStateQueryParams.newBuilder()
-                          .withBlockHeader(parent)
+                          .withParentBlockHeader(parent)
                           .withShouldWorldStateUpdateHead(false)
                           .build())
                   .orElseThrow()) {

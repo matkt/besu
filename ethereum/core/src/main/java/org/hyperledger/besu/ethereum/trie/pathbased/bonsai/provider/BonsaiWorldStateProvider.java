@@ -28,9 +28,11 @@ import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
@@ -261,21 +263,96 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     return headWorldState;
   }
 
+  /**
+   * Loads a world state for {@code queryParams}, selecting MPT vs PBT by the target block and (when
+   * provided) the next-block timestamp:
+   *
+   * <ul>
+   *   <li><b>Case 1 (pre-PBT):</b> roll/load in MPT; no format conversion.
+   *   <li><b>Case 2 (transition):</b> parent pre-PBT, next block PBT — reset cache, roll in MPT,
+   *       then switch the returned view to BINARY (binary root from migrator column when present).
+   *   <li><b>Case 3 (post-PBT):</b> target is already PBT — ensure BINARY before rolling so persist
+   *       verifies against the PBT header state root.
+   * </ul>
+   */
   protected Optional<MutableWorldState> getFullWorldState(final WorldStateQueryParams queryParams) {
-    return queryParams.shouldWorldStateUpdateHead()
-        ? getFullWorldStateFromHead(queryParams.getBlockHash())
-        : getFullWorldStateFromCache(
-            queryParams.getBlockHeader(), queryParams.getBlockAccessListOverlay());
+    final BlockHeader targetHeader =
+        Optional.ofNullable(queryParams.getBlockHeader())
+            .orElseGet(() -> headerOrThrow(queryParams.getBlockHash()));
+    final Optional<Long> nextTimestamp =
+        queryParams.getTimeStamp().or(() -> Optional.of(targetHeader.getTimestamp()));
+    final boolean isPbtTransition =
+        BinaryTrieForkSupport.isBinaryTrieTransition(
+            targetHeader.getTimestamp(), binaryTrieMilestone, nextTimestamp);
+    final boolean targetIsPbt =
+        BinaryTrieForkSupport.isBinaryTrieActive(targetHeader.getTimestamp(), binaryTrieMilestone);
+
+    if (isPbtTransition) {
+      // Case 2: drop cached MPT snapshots so we do not serve a stale pre-transition view.
+      worldStateCacheManager.reset();
+    }
+
+    // Case 1 / Case 2 roll in MPT; Case 3 rolls in BINARY.
+    final TrieBranchType rollBranchType =
+        targetIsPbt ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+
+    final Optional<MutableWorldState> maybeWorldState =
+        queryParams.shouldWorldStateUpdateHead()
+            ? getFullWorldStateFromHead(queryParams.getBlockHash(), rollBranchType)
+            : getFullWorldStateFromCache(
+                targetHeader, queryParams.getBlockAccessListOverlay(), rollBranchType);
+
+    return maybeWorldState
+        .map(BonsaiWorldState.class::cast)
+        .map(
+            worldState -> {
+              if (isPbtTransition) {
+                // Case 2: after MPT roll, switch format for building/validating the first PBT
+                // block.
+                ensureTrieBranchType(worldState, TrieBranchType.BINARY);
+              }
+              return worldState;
+            });
   }
 
-  private Optional<MutableWorldState> getFullWorldStateFromHead(final Hash blockHash) {
+  /**
+   * Migration-driven world state retrieval. The migrator calls this with {@code isMigration ==
+   * true} to reuse the provider's rolling/reorg mechanism (the same code path PMT uses) while
+   * keeping every non-binary-trie column untouched.
+   *
+   * <p>The returned world state is backed by a {@link MigrationScopedWorldStateKeyValueStorage}
+   * (writes scoped to the binary-trie branch column), its accumulator trusts trie-log priors (no
+   * flat-DB prior reads — the flat DB is PMT's), and state-root verification is skipped for
+   * pre-{@code binaryTime} blocks (whose headers carry a PMT root). The snapshot cache is neither
+   * read nor written: migration builds PBT state asynchronously and a cached snapshot taken before
+   * the binary trie is materialised would be stale.
+   *
+   * <p>Progress is durable: the binary-trie branch column records the last migrated block hash, so
+   * successive calls seed from that point and roll forward incrementally.
+   */
+  public BonsaiWorldState getMigrationWorldState() {
+    return new BonsaiWorldState(
+        worldStateKeyValueStorage,
+        new NoOpBonsaiCachedMerkleTrieLoader(),
+        worldStateCacheManager,
+        trieLogManager,
+        evmConfiguration,
+        worldStateConfig,
+        worldStateCacheManager.getCodeCache(),
+        TrieBranchType.BINARY);
+  }
+
+  private Optional<MutableWorldState> getFullWorldStateFromHead(
+      final Hash blockHash, final TrieBranchType rollBranchType) {
+    ensureTrieBranchType(headWorldState, rollBranchType);
     return rollFullWorldStateToBlockHash(headWorldState, blockHash)
         .map(MutableWorldState.class::cast);
   }
 
   private Optional<MutableWorldState> getFullWorldStateFromCache(
       final BlockHeader blockHeader,
-      final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay) {
+      final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay,
+      final TrieBranchType rollBranchType) {
     final BlockHeader chainHeadBlockHeader = blockchain.getChainHeadHeader();
     if (chainHeadBlockHeader.getNumber() - blockHeader.getNumber()
         >= trieLogManager.getMaxLayersToLoad()) {
@@ -292,6 +369,11 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
                 worldStateCacheManager.getHeadWorldState(
                     blockHeaderHash ->
                         blockchain.getBlockHeader(blockHeaderHash).map(BlockHeader.class::cast)))
+        .map(
+            worldState -> {
+              ensureTrieBranchType(worldState, rollBranchType);
+              return worldState;
+            })
         .flatMap(
             worldState -> rollFullWorldStateToBlockHash(worldState, blockHeader.getBlockHash()))
         .map(
@@ -300,6 +382,22 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
               return worldState;
             })
         .map(MutableWorldState::freezeStorage);
+  }
+
+  /** Aligns in-memory trie branch with the format required for the upcoming roll/persist. */
+  private void ensureTrieBranchType(
+      final BonsaiWorldState worldState, final TrieBranchType rollBranchType) {
+    if (worldState.getTrieBranchType() != rollBranchType) {
+      final Hash stateroot =
+          Hash.wrap(
+              Bytes32.wrap(
+                  worldStateKeyValueStorage
+                      .getWorldStateRootHash(rollBranchType)
+                      .orElse(Bytes32.ZERO)));
+      final Hash blockhash =
+          worldStateKeyValueStorage.getWorldStateBlockHash(rollBranchType).orElseThrow();
+      worldState.resetWorldStateTo(blockhash, stateroot, rollBranchType);
+    }
   }
 
   private BlockHeader headerOrThrow(final Hash blockHash) {
@@ -417,7 +515,8 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
 
   @Override
   public void resetArchiveStateTo(final BlockHeader blockHeader) {
-    headWorldState.resetWorldStateTo(blockHeader);
+    headWorldState.resetWorldStateTo(
+        blockHeader.getBlockHash(), blockHeader.getStateRoot(), resolveTrieBranchType(blockHeader));
     this.worldStateCacheManager.reset();
     this.worldStateCacheManager.addCachedLayer(
         blockHeader, headWorldState.getWorldStateRootHash(), headWorldState);

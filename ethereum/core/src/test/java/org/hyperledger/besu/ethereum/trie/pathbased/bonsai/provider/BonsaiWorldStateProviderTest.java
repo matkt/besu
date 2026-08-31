@@ -47,6 +47,7 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
 
@@ -306,6 +307,7 @@ class BonsaiWorldStateProviderTest {
     final BonsaiWorldState mockWorldState = mock(BonsaiWorldState.class);
     when(mockWorldState.blockHash()).thenReturn(blockHash);
     when(mockWorldState.freezeStorage()).thenReturn(mockWorldState);
+    when(mockWorldState.getTrieBranchType()).thenReturn(TrieBranchType.PATRICIA);
     return mockWorldState;
   }
 

@@ -33,6 +33,8 @@ import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Binary BAL root: replays BAL changes onto the partitioned binary trie via {@link
@@ -41,6 +43,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
 
   public static final BinaryBalEngine INSTANCE = new BinaryBalEngine();
+  private static final Logger LOG = LoggerFactory.getLogger(BinaryBalEngine.class);
 
   private BinaryBalEngine() {}
 
@@ -92,7 +95,12 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
       }
 
       final Hash root = writer.commit();
-      System.out.println("Used BAL PBT for  " + root);
+      LOG.atInfo()
+          .setMessage("BAL binary state root computed: root={} parentRoot={} accountChanges={}")
+          .addArgument(root)
+          .addArgument(worldState.getWorldStateRootHash())
+          .addArgument(accountLookup.accountChanges().size())
+          .log();
       return new BalStateRootCommitter.Result(
           StateRootComputations.pathBased(root, writer.writes()),
           Map.of(),

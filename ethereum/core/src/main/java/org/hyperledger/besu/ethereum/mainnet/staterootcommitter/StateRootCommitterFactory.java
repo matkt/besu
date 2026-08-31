@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.Default
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.PatriciaBalEngine;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
@@ -61,7 +60,7 @@ public final class StateRootCommitterFactory {
       final BlockHeader blockHeader,
       final Optional<BlockAccessList> maybeBal,
       final boolean storageFrozen) {
-    final TrieBranchType trieBranchType = resolveTrieBranchType(protocolContext);
+    final TrieBranchType trieBranchType = resolveTrieBranchType(protocolContext, blockHeader);
     return switch (resolveStrategy(protocolContext, maybeBal)) {
       case BAL ->
           new BalStateRootCommitter(
@@ -97,9 +96,10 @@ public final class StateRootCommitterFactory {
         : PatriciaBalEngine.INSTANCE;
   }
 
-  private static TrieBranchType resolveTrieBranchType(final ProtocolContext protocolContext) {
-    if (isBinaryTrie(protocolContext)) {
-      return TrieBranchType.BINARY;
+  private static TrieBranchType resolveTrieBranchType(
+      final ProtocolContext protocolContext, final BlockHeader blockHeader) {
+    if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider) {
+      return provider.resolveTrieBranchType(blockHeader);
     }
     return TrieBranchType.PATRICIA;
   }
@@ -107,13 +107,5 @@ public final class StateRootCommitterFactory {
   private static boolean isTrieDisabled(final ProtocolContext protocolContext) {
     return protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider
         && provider.getWorldStateSharedSpec().isTrieDisabled();
-  }
-
-  private static boolean isBinaryTrie(final ProtocolContext protocolContext) {
-    if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider
-        && provider.getWorldState() instanceof BonsaiWorldState worldState) {
-      return worldState.getTrieBranchType() == TrieBranchType.BINARY;
-    }
-    return false;
   }
 }

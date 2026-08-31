@@ -70,7 +70,6 @@ import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.assertj.core.api.Assertions;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 public class BlockchainReferenceTestTools {
@@ -208,7 +207,7 @@ public class BlockchainReferenceTestTools {
                             protocolContext.getBlockchain().appendBlock(block, outputs.getReceipts(), outputs.getBlockAccessList());
                             protocolContext.getWorldStateArchive().getWorldState(
                                     WorldStateQueryParams.newBuilder()
-                                            .withBlockHeader(block.getHeader())
+                                            .withParentBlockHeader(block.getHeader())
                                             .withShouldWorldStateUpdateHead(true)
                                             .build());
                         });

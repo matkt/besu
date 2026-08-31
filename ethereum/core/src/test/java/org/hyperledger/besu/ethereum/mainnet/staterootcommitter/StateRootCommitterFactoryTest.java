@@ -605,7 +605,7 @@ class StateRootCommitterFactoryTest {
             .getWorldStateArchive()
             .getWorldState(
                 WorldStateQueryParams.newBuilder()
-                    .withBlockHeader(chainHeadHeader)
+                    .withParentBlockHeader(chainHeadHeader)
                     .withShouldWorldStateUpdateHead(shouldUpdateHead)
                     .build())
             .orElseThrow();

@@ -211,7 +211,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
                             parentHash, blockHeader.getBlockHash())));
     final WorldStateQueryParams.Builder queryParams =
         WorldStateQueryParams.newBuilder()
-            .withBlockHeader(parentHeader)
+            .withParentBlockHeader(parentHeader)
             .withShouldWorldStateUpdateHead(false);
     if (engine.useBalOverlay()) {
       queryParams.withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE));

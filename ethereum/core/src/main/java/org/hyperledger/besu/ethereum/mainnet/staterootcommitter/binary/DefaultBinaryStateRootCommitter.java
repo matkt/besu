@@ -18,6 +18,8 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
@@ -40,6 +42,8 @@ import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Path-based state-root committer that materializes accumulator updates into the partitioned binary
@@ -51,6 +55,8 @@ import org.apache.tuweni.units.bigints.UInt256;
  * storage accumulator when in scope).
  */
 public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
+
+  private static final Logger LOG = LoggerFactory.getLogger(DefaultBinaryStateRootCommitter.class);
 
   @Override
   public TrieBranchType getTrieBranchType() {
@@ -109,7 +115,7 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
 
       final Hash root = writer.commit();
       writeSink.addAll(writer.writes());
-      System.out.println("Used PBT for  " + root);
+      LOG.atInfo().setMessage("DIRECT binary state root computed: root={}").addArgument(root).log();
       return root;
     }
 
@@ -147,7 +153,12 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
           updatedAccount.getBalance(),
           updatedCode,
           updatedAccount.getCodeHash(),
-          updatedAccount.serializeAccount());
+          RLP.encode(
+              new BinaryTrieAccountValue(
+                      updatedAccount.getNonce(),
+                      updatedAccount.getBalance(),
+                      updatedAccount.getCodeHash())
+                  ::writeTo));
     }
 
     private void applyCode(final Address address) {

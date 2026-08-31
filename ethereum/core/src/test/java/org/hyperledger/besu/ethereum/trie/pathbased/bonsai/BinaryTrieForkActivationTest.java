@@ -43,4 +43,34 @@ class BinaryTrieForkActivationTest {
     assertThat(BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(amsterdamOnly)).isFalse();
     assertThat(BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(binaryTrieAtGenesis)).isTrue();
   }
+
+  @Test
+  void isBinaryTrieTransition_onlyWhenCrossingFromPrePbtParentToPbtNext() {
+    final Optional<Long> milestone = Optional.of(100L);
+
+    // Case 2: parent pre-PBT, next at/after milestone
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(99L, milestone, Optional.of(100L)))
+        .isTrue();
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(50L, milestone, Optional.of(150L)))
+        .isTrue();
+
+    // Case 1: both pre-PBT
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(50L, milestone, Optional.of(99L)))
+        .isFalse();
+
+    // Case 3: parent already PBT (including parent.ts == milestone)
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(100L, milestone, Optional.of(100L)))
+        .isFalse();
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(100L, milestone, Optional.of(200L)))
+        .isFalse();
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(150L, milestone, Optional.of(200L)))
+        .isFalse();
+
+    // No milestone / no next timestamp → never a transition
+    assertThat(
+            BinaryTrieForkSupport.isBinaryTrieTransition(99L, Optional.empty(), Optional.of(100L)))
+        .isFalse();
+    assertThat(BinaryTrieForkSupport.isBinaryTrieTransition(99L, milestone, Optional.empty()))
+        .isFalse();
+  }
 }

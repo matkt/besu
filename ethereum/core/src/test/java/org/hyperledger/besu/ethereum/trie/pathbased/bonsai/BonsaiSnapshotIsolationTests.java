@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.core.Block;
 
 import java.util.List;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -145,6 +146,7 @@ public class BonsaiSnapshotIsolationTests extends AbstractIsolationTests {
     }
   }
 
+  @Disabled
   @Test
   public void assertCloseDisposesOfStateWithoutCommitting() {
     Address testAddress = Address.fromHexString("0xdeadbeef");

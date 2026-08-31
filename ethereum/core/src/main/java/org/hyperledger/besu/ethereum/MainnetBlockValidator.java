@@ -175,11 +175,11 @@ public class MainnetBlockValidator implements BlockValidator {
       handleFailedBlockProcessing(block, blockAccessList, retval, false, context);
       return retval;
     }
-
     final WorldStateQueryParams worldStateQueryParams =
         WorldStateQueryParams.newBuilder()
-            .withBlockHeader(parentHeader)
+            .withParentBlockHeader(parentHeader)
             .withShouldWorldStateUpdateHead(shouldUpdateHead)
+            .withTimeStamp(header.getTimestamp())
             .build();
     try (final var worldState =
         context.getWorldStateArchive().getWorldState(worldStateQueryParams).orElse(null)) {

@@ -89,6 +89,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiArchive
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiArchiveWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiFlatDbToArchiveMigrator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
@@ -974,6 +975,28 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       }
     }
 
+    if (DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())
+        && worldStateArchive instanceof BonsaiWorldStateProvider bonsaiProvider) {
+      final Optional<Long> binaryTrieMilestone = protocolSchedule.milestoneFor(BINARY_TRIE);
+      if (binaryTrieMilestone.isPresent()) {
+        final PbtMigrator pbtMigrator =
+            createPbtMigrator(bonsaiProvider, blockchain, binaryTrieMilestone);
+        closeables.addFirst(pbtMigrator::stop);
+        final AtomicBoolean pbtMigrationStarted = new AtomicBoolean(false);
+        final AtomicLong pbtSyncSubscriptionId = new AtomicLong();
+        pbtSyncSubscriptionId.set(
+            synchronizer.subscribeInSync(
+                (inSync) -> {
+                  if (inSync && pbtMigrationStarted.compareAndSet(false, true)) {
+                    synchronizer.unsubscribeInSync(pbtSyncSubscriptionId.get());
+                    LOG.info("Node is in sync, starting PBT background migrator");
+                    pbtMigrator.start();
+                  }
+                },
+                0));
+      }
+    }
+
     return new BesuController(
         protocolSchedule,
         protocolContext,
@@ -993,6 +1016,22 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         storageProvider,
         dataStorageConfiguration,
         transactionSimulator);
+  }
+
+  private PbtMigrator createPbtMigrator(
+      final BonsaiWorldStateProvider provider,
+      final Blockchain blockchain,
+      final Optional<Long> binaryTrieMilestone) {
+    final ScheduledExecutorService migrationExecutor =
+        MonitoredExecutors.newScheduledThreadPool("pbt-migrator", 1, metricsSystem);
+    // Poll every second; the migrator is idle when caught up and bursts when new blocks arrive.
+    return new PbtMigrator(
+        provider,
+        blockchain,
+        binaryTrieMilestone,
+        migrationExecutor,
+        genesisConfig.streamAllocations(),
+        1000L);
   }
 
   private void preloadBlockHeaderCache(
@@ -1376,17 +1415,19 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
             worldStateStorageCoordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
 
-        yield new BonsaiWorldStateProvider(
-            worldStateKeyValueStorage,
-            blockchain,
-            dataStorageConfiguration.getPathBasedExtraStorageConfiguration(),
-            bonsaiCachedMerkleTrieLoader,
-            besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
-            evmConfiguration,
-            worldStateHealerSupplier,
-            codeCache,
-            amsterdamMilestone,
-            binaryTrieMilestone);
+        final BonsaiWorldStateProvider provider =
+            new BonsaiWorldStateProvider(
+                worldStateKeyValueStorage,
+                blockchain,
+                dataStorageConfiguration.getPathBasedExtraStorageConfiguration(),
+                bonsaiCachedMerkleTrieLoader,
+                besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
+                evmConfiguration,
+                worldStateHealerSupplier,
+                codeCache,
+                amsterdamMilestone,
+                binaryTrieMilestone);
+        yield provider;
       }
       case X_BONSAI_ARCHIVE -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =

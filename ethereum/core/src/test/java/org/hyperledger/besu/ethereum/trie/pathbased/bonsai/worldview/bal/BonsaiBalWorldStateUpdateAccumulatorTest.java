@@ -223,7 +223,7 @@ class BonsaiBalWorldStateUpdateAccumulatorTest {
                 .getWorldStateArchive()
                 .getWorldState(
                     WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(chainHeadHeader)
+                        .withParentBlockHeader(chainHeadHeader)
                         .withShouldWorldStateUpdateHead(false)
                         .withBalOverlay(
                             new BlockAccessListOverlay(

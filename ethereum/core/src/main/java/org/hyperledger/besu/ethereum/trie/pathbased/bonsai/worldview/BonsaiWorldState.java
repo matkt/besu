@@ -88,7 +88,6 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   private final BonsaiCodeCache codeCache;
   private final EvmConfiguration evmConfiguration;
   protected TrieBranchType trieBranchType;
-  private final BonsaiWorldStateProvider archive;
 
   public BonsaiWorldState(
       final BonsaiWorldStateProvider archive,
@@ -113,7 +112,6 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
       final BonsaiCodeCache codeCache,
       final BlockHeader blockHeader) {
     this(
-        archive,
         worldStateKeyValueStorage,
         archive.getCachedMerkleTrieLoader(),
         archive.getWorldStateCacheManager(),
@@ -133,7 +131,6 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache) {
     this(
-        null,
         worldStateKeyValueStorage,
         bonsaiCachedMerkleTrieLoader,
         worldStateCacheManager,
@@ -153,29 +150,6 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache,
       final TrieBranchType trieBranchType) {
-    this(
-        null,
-        worldStateKeyValueStorage,
-        bonsaiCachedMerkleTrieLoader,
-        worldStateCacheManager,
-        trieLogManager,
-        evmConfiguration,
-        worldStateConfig,
-        codeCache,
-        trieBranchType);
-  }
-
-  private BonsaiWorldState(
-      final BonsaiWorldStateProvider archive,
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
-      final BonsaiWorldStateCacheManager worldStateCacheManager,
-      final TrieLogManager trieLogManager,
-      final EvmConfiguration evmConfiguration,
-      final WorldStateConfig worldStateConfig,
-      final BonsaiCodeCache codeCache,
-      final TrieBranchType trieBranchType) {
-    this.archive = archive;
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.trieBranchType = trieBranchType;
     this.worldStateRootHash =
@@ -266,14 +240,14 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   /**
    * Reset the worldState to this block header
    *
-   * @param blockHeader block to use
+   * @param blockHash to use
+   * @param stateroot to use
    */
-  public void resetWorldStateTo(final BlockHeader blockHeader) {
-    worldStateBlockHash = blockHeader.getBlockHash();
-    worldStateRootHash = blockHeader.getStateRoot();
-    if (archive != null) {
-      trieBranchType = archive.resolveTrieBranchType(blockHeader);
-    }
+  public void resetWorldStateTo(
+      final Hash blockHash, final Hash stateroot, final TrieBranchType trieBranchType) {
+    this.trieBranchType = trieBranchType;
+    this.worldStateRootHash = stateroot;
+    this.worldStateBlockHash = blockHash;
   }
 
   @Override
