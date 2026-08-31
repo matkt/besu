@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
@@ -53,10 +53,11 @@ import org.slf4j.LoggerFactory;
  * Versioned cache implementation using Caffeine.
  *
  * Trie node focus:
- * - direct log visibility
- * - hit/miss by shallow/deep/account
+ * - visible logs
+ * - hit/miss by shallow/deep/account and finer depth buckets
  * - per-account weighted cache
  * - stricter admission for cold trie nodes
+ * - shallower nodes favored more than deeper ones
  */
 public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(VersionedFlatDbCacheManager.class);
@@ -65,11 +66,24 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private static final long MAX_INITIAL_CAPACITY = Integer.MAX_VALUE;
   private static final int HASHED_ADDRESS_SIZE = 32;
   private static final int SHALLOW_TRIE_MAX_DEPTH = 4;
-  private static final long PER_ACCOUNT_TRIE_WEIGHT_BYTES = 64 * 1024L;
+
+  /** More aggressive shallow budget because shallow nodes are hotter on your workload. */
+  private static final int SHALLOW_WEIGHT_PERCENT = 40;
+
+  /** Admission size cutoff for trie nodes. */
   private static final int ADMISSION_MAX_NODE_SIZE_BYTES = 16 * 1024;
+
+  /** Extra stricter cutoff for deep / account nodes. */
+  private static final int ADMISSION_MAX_DEEP_NODE_SIZE_BYTES = 8 * 1024;
+
+  /** Node-size buckets for logs. */
   private static final int SMALL_NODE_LIMIT = 64;
   private static final int MEDIUM_NODE_LIMIT = 256;
   private static final int LARGE_NODE_LIMIT = 1024;
+  private static final int HUGE_NODE_LIMIT = 4096;
+
+  /** Per-account cache weight budget. */
+  private static final long PER_ACCOUNT_TRIE_WEIGHT_BYTES = 64 * 1024L;
 
   private final AtomicLong globalVersion = new AtomicLong(0);
 
@@ -104,6 +118,16 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private final AtomicLong trieMissesShallow = new AtomicLong();
   private final AtomicLong trieMissesDeep = new AtomicLong();
   private final AtomicLong trieMissesAccount = new AtomicLong();
+
+  /** Finer depth buckets. */
+  private final AtomicLong depth0to2Hits = new AtomicLong();
+  private final AtomicLong depth0to2Misses = new AtomicLong();
+  private final AtomicLong depth3to4Hits = new AtomicLong();
+  private final AtomicLong depth3to4Misses = new AtomicLong();
+  private final AtomicLong depth5to8Hits = new AtomicLong();
+  private final AtomicLong depth5to8Misses = new AtomicLong();
+  private final AtomicLong depth9PlusHits = new AtomicLong();
+  private final AtomicLong depth9PlusMisses = new AtomicLong();
 
   private final AtomicLong trieAdmitted = new AtomicLong();
   private final AtomicLong trieRejected = new AtomicLong();
@@ -212,7 +236,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     this.accountCache = createCache(accountCacheSize);
     this.storageCache = createCache(storageCacheSize);
 
-    final long shallowWeight = Math.max(1L, trieNodeCacheWeight / 4);
+    final long shallowWeight = Math.max(1L, trieNodeCacheWeight * SHALLOW_WEIGHT_PERCENT / 100);
     final long deepWeight = Math.max(1L, trieNodeCacheWeight - shallowWeight);
 
     this.trieNodeShallowCache = createWeightedCache(shallowWeight);
@@ -658,6 +682,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private void recordTrieHit(final Bytes key) {
     trieRequestsTotal.incrementAndGet();
     trieHitsTotal.incrementAndGet();
+    final int depth = trieNibbleDepth(key);
+    recordDepthHit(depth);
+
     if (key.size() >= HASHED_ADDRESS_SIZE) {
       trieHitsAccount.incrementAndGet();
     } else if (isShallowTrieKey(key)) {
@@ -670,12 +697,39 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private void recordTrieMiss(final Bytes key) {
     trieRequestsTotal.incrementAndGet();
     trieMissesTotal.incrementAndGet();
+    final int depth = trieNibbleDepth(key);
+    recordDepthMiss(depth);
+
     if (key.size() >= HASHED_ADDRESS_SIZE) {
       trieMissesAccount.incrementAndGet();
     } else if (isShallowTrieKey(key)) {
       trieMissesShallow.incrementAndGet();
     } else {
       trieMissesDeep.incrementAndGet();
+    }
+  }
+
+  private void recordDepthHit(final int depth) {
+    if (depth <= 2) {
+      depth0to2Hits.incrementAndGet();
+    } else if (depth <= 4) {
+      depth3to4Hits.incrementAndGet();
+    } else if (depth <= 8) {
+      depth5to8Hits.incrementAndGet();
+    } else {
+      depth9PlusHits.incrementAndGet();
+    }
+  }
+
+  private void recordDepthMiss(final int depth) {
+    if (depth <= 2) {
+      depth0to2Misses.incrementAndGet();
+    } else if (depth <= 4) {
+      depth3to4Misses.incrementAndGet();
+    } else if (depth <= 8) {
+      depth5to8Misses.incrementAndGet();
+    } else {
+      depth9PlusMisses.incrementAndGet();
     }
   }
 
@@ -686,12 +740,28 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
 
     final int size = value.size();
+
     if (size > ADMISSION_MAX_NODE_SIZE_BYTES) {
       trieRejected.incrementAndGet();
       return false;
     }
 
-    if (key.size() >= HASHED_ADDRESS_SIZE) {
+    final boolean isAccountTrieNode = key.size() >= HASHED_ADDRESS_SIZE;
+    final boolean isShallow = isShallowTrieKey(key);
+
+    // Shallow nodes are always admitted if not too large.
+    if (isShallow) {
+      trieAdmitted.incrementAndGet();
+      return true;
+    }
+
+    // Deep and account nodes are stricter.
+    if (isAccountTrieNode && size > ADMISSION_MAX_DEEP_NODE_SIZE_BYTES) {
+      trieRejected.incrementAndGet();
+      return false;
+    }
+
+    if (isAccountTrieNode) {
       final CacheKey accountKey = CacheKey.of(key.slice(0, HASHED_ADDRESS_SIZE));
       final AccountTrieStats stats =
               accountTrieStats.computeIfAbsent(accountKey, k -> new AccountTrieStats());
@@ -702,6 +772,12 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
         trieRejected.incrementAndGet();
       }
       return accepted;
+    }
+
+    // Non-shallow, non-account trie nodes: admit only if acceptable size.
+    if (size > ADMISSION_MAX_DEEP_NODE_SIZE_BYTES) {
+      trieRejected.incrementAndGet();
+      return false;
     }
 
     trieAdmitted.incrementAndGet();
@@ -715,6 +791,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       trieMediumNodes.incrementAndGet();
     } else if (size <= LARGE_NODE_LIMIT) {
       trieLargeNodes.incrementAndGet();
+    } else if (size <= HUGE_NODE_LIMIT) {
+      trieHugeNodes.incrementAndGet();
     } else {
       trieHugeNodes.incrementAndGet();
     }
@@ -754,8 +832,22 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
               (accountHits + accountMisses) == 0 ? 0.0 : (100.0 * accountHits / (accountHits + accountMisses));
       final double avgNodeBytes = insertedEntries == 0 ? 0.0 : (double) insertedBytes / insertedEntries;
 
+      final long d0h = depth0to2Hits.get();
+      final long d0m = depth0to2Misses.get();
+      final long d1h = depth3to4Hits.get();
+      final long d1m = depth3to4Misses.get();
+      final long d2h = depth5to8Hits.get();
+      final long d2m = depth5to8Misses.get();
+      final long d3h = depth9PlusHits.get();
+      final long d3m = depth9PlusMisses.get();
+
+      final double depth0HitRate = (d0h + d0m) == 0 ? 0.0 : (100.0 * d0h / (d0h + d0m));
+      final double depth1HitRate = (d1h + d1m) == 0 ? 0.0 : (100.0 * d1h / (d1h + d1m));
+      final double depth2HitRate = (d2h + d2m) == 0 ? 0.0 : (100.0 * d2h / (d2h + d2m));
+      final double depth3HitRate = (d3h + d3m) == 0 ? 0.0 : (100.0 * d3h / (d3h + d3m));
+
       LOG.warn(
-              "[TRIE CACHE STATS] req={} hits={} misses={} hitRate={}%; shallowHits={} shallowMisses={} shallowHitRate={}%; deepHits={} deepMisses={} deepHitRate={}%; accountHits={} accountMisses={} accountHitRate={}%; admitted={} rejected={} avgNodeBytes={} insertedBytes={} entries={}; sizeBuckets: small={} medium={} large={} huge={}",
+              "[TRIE CACHE STATS] req={} hits={} misses={} hitRate={}%; shallowHits={} shallowMisses={} shallowHitRate={}%; deepHits={} deepMisses={} deepHitRate={}%; accountHits={} accountMisses={} accountHitRate={}%; depthHitRates: d0to2={}%, d3to4={}%, d5to8={}%, d9plus={}%; admitted={} rejected={} avgNodeBytes={} insertedBytes={} entries={}; sizeBuckets: small={} medium={} large={} huge={}",
               requests,
               hits,
               misses,
@@ -769,6 +861,10 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
               accountHits,
               accountMisses,
               String.format("%.2f", accountHitRate),
+              String.format("%.2f", depth0HitRate),
+              String.format("%.2f", depth1HitRate),
+              String.format("%.2f", depth2HitRate),
+              String.format("%.2f", depth3HitRate),
               admitted,
               rejected,
               String.format("%.2f", avgNodeBytes),
@@ -790,7 +886,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     boolean shouldAdmit(final int size) {
       final long r = requests.incrementAndGet();
-      if (size > ADMISSION_MAX_NODE_SIZE_BYTES) {
+      if (size > ADMISSION_MAX_DEEP_NODE_SIZE_BYTES) {
         return false;
       }
       if (r <= 8) {
