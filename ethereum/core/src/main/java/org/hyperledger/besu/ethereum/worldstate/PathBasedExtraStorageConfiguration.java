@@ -128,6 +128,7 @@ public interface PathBasedExtraStorageConfiguration {
       return DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
     }
 
+    @Value.Default
     default long getBonsaiCrossBlockCacheTrieNodeWeight() {
       return DEFAULT_BONSAI_CROSS_BLOCK_CACHE_TRIE_NODE_WEIGHT;
     }
