@@ -15,11 +15,13 @@
 package org.hyperledger.besu.ethereum.chain;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.util.log.LogUtil;
 
 import java.util.Collection;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
@@ -28,6 +30,7 @@ import org.slf4j.LoggerFactory;
 public class ChainDataPruner implements BlockAddedObserver {
   private static final Logger LOG = LoggerFactory.getLogger(ChainDataPruner.class);
   private static final int LOG_PRUNING_PROGRESS_REPEAT_DELAY_SECONDS = 300;
+
   /** Catch-up cap per job: a few frequencies, not millions of keys in one txn. */
   private static final int PRUNE_BATCH_FREQUENCY_MULTIPLIER = 3;
 
@@ -87,7 +90,30 @@ public class ChainDataPruner implements BlockAddedObserver {
     }
 
     pruningExecutor.submit(
-        () -> pruneChainAndBalData(event, storedBlockPruningMark, storedBalPruningMark));
+        () ->
+            pruneChainAndBalData(event.getHeader(), storedBlockPruningMark, storedBalPruningMark));
+  }
+
+  /**
+   * Drives catch-up chain/BAL pruning from the unsafe snap-sync import path, which bypasses {@code
+   * BlockAddedEvent} (see {@code DefaultBlockchain#unsafeImportSyncBodiesAndReceipts}). Called once
+   * per imported batch with the new chain head header. No-op unless block/BAL pruning is enabled;
+   * pre-merge-only pruning is driven by the observer path.
+   */
+  public void pruneForSyncedHead(final BlockHeader header) {
+    if (pruningMode != PruningMode.CHAIN_PRUNING) {
+      return;
+    }
+    final long storedBlockPruningMark = prunerStorage.getChainPruningMark().orElse(1L);
+    final long storedBalPruningMark = prunerStorage.getBalPruningMark().orElse(1L);
+    try {
+      pruningExecutor.submit(
+          () -> pruneChainAndBalData(header, storedBlockPruningMark, storedBalPruningMark));
+    } catch (final RejectedExecutionException e) {
+      LOG.debug(
+          "Chain pruning task rejected for head {}; will retry on the next imported batch",
+          header.getNumber());
+    }
   }
 
   private void validatePruningMarks(
@@ -114,13 +140,12 @@ public class ChainDataPruner implements BlockAddedObserver {
   }
 
   private void pruneChainAndBalData(
-      final BlockAddedEvent event,
+      final BlockHeader header,
       final long storedBlockPruningMark,
       final long storedBalPruningMark) {
 
-    final long blockPruningMark =
-        event.getHeader().getNumber() - config.chainPruningBlocksRetained();
-    final long balPruningMark = event.getHeader().getNumber() - config.chainPruningBalsRetained();
+    final long blockPruningMark = header.getNumber() - config.chainPruningBlocksRetained();
+    final long balPruningMark = header.getNumber() - config.chainPruningBalsRetained();
 
     final boolean shouldPruneBlock =
         config.isBlockPruningEnabled() && shouldPrune(blockPruningMark, storedBlockPruningMark);
@@ -128,9 +153,9 @@ public class ChainDataPruner implements BlockAddedObserver {
         config.isBalPruningEnabled() && shouldPrune(balPruningMark, storedBalPruningMark);
 
     if (!shouldPruneBlock && !shouldPruneBal) {
-      if (config.isBalPruningEnabled() && event.getHeader().getBalHash().isEmpty()) {
+      if (config.isBalPruningEnabled() && header.getBalHash().isEmpty()) {
         final KeyValueStorageTransaction tx = prunerStorage.startTransaction();
-        prunerStorage.setBalPruningMark(tx, event.getHeader().getNumber());
+        prunerStorage.setBalPruningMark(tx, header.getNumber());
         tx.commit();
       }
       return;
@@ -191,9 +216,9 @@ public class ChainDataPruner implements BlockAddedObserver {
     updater.commit();
 
     prunerStorage.setChainPruningMark(pruningTransaction, currentChainMark);
-    if (event.getHeader().getBalHash().isEmpty() && !config.isBlockPruningEnabled()) {
+    if (header.getBalHash().isEmpty() && !config.isBlockPruningEnabled()) {
       // BAL not activated yet; only advance the BAL mark in BAL-only mode
-      currentBalMark = event.getHeader().getNumber();
+      currentBalMark = header.getNumber();
     }
     prunerStorage.setBalPruningMark(pruningTransaction, currentBalMark);
     pruningTransaction.commit();

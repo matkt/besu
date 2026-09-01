@@ -1653,6 +1653,47 @@ public class ChainDataPrunerTest {
   }
 
   @Test
+  public void prunesBlocksDrivenBySyncImportHookWithoutObserverEvents() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final BlockchainStorage blockchainStorage =
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            new InMemoryKeyValueStorage(),
+            new VariablesKeyValueStorage(new InMemoryKeyValueStorage()),
+            new MainnetBlockHeaderFunctions(),
+            false);
+    final Block genesisBlock = gen.genesisBlock();
+    final MutableBlockchain blockchain =
+        DefaultBlockchain.createMutable(
+            genesisBlock, blockchainStorage, new NoOpMetricsSystem(), 0);
+
+    final int importedWithoutObserver = 40;
+    gen.blockSequence(genesisBlock, importedWithoutObserver)
+        .forEach(block -> blockchain.appendBlock(block, gen.receipts(block)));
+
+    final int retention = 8;
+    final ChainDataPruner chainDataPruner =
+        new ChainDataPruner(
+            blockchainStorage,
+            () -> {},
+            new ChainDataPrunerStorage(new InMemoryKeyValueStorage()),
+            0,
+            ChainDataPruner.PruningMode.CHAIN_PRUNING,
+            new ChainPrunerConfiguration(
+                ChainDataPruner.ChainPruningStrategy.ALL, retention, retention, retention, 0, 0),
+            new BlockingExecutor());
+
+    // The snap-sync unsafe import path never fires BlockAddedEvents, so the pruner is not
+    // registered as an observer; catch-up pruning is driven by pruneForSyncedHead, which the
+    // blockchain invokes via the sync-import pruning hook after each unsafe batch commits.
+    chainDataPruner.pruneForSyncedHead(blockchain.getChainHeadBlock().getHeader());
+
+    final long head = blockchain.getChainHeadBlockNumber();
+    assertThat(blockchain.getBlockHeader(0)).isPresent();
+    assertThat(blockchain.getBlockHeader(head - retention)).isEmpty();
+    assertThat(blockchain.getBlockHeader(head - retention + 1)).isPresent();
+  }
+
+  @Test
   public void doesNotInitializePruningMarkToHeadOnFirstEvent() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final BlockchainStorage blockchainStorage =
