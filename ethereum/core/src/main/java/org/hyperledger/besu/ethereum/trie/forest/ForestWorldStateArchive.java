@@ -110,7 +110,10 @@ public class ForestWorldStateArchive implements WorldStateArchive {
       final Function<Optional<WorldStateProof>, ? extends Optional<U>> mapper) {
     return mapper.apply(
         worldStateProof.getAccountProof(
-            blockHeader.getStateRoot(), accountAddress, accountStorageKeys));
+            blockHeader.getStateRoot(),
+            blockHeader.getBlockHash(),
+            accountAddress,
+            accountStorageKeys));
   }
 
   @Override

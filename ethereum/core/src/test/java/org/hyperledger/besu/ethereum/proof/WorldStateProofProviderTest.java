@@ -60,7 +60,7 @@ public class WorldStateProofProviderTest {
   @Test
   public void getProofWhenWorldStateNotAvailable() {
     Optional<WorldStateProof> accountProof =
-        worldStateProofProvider.getAccountProof(Hash.EMPTY, address, new ArrayList<>());
+        worldStateProofProvider.getAccountProof(Hash.EMPTY, null, address, new ArrayList<>());
 
     assertThat(accountProof).isEmpty();
   }
@@ -96,7 +96,7 @@ public class WorldStateProofProviderTest {
         Arrays.asList(UInt256.ONE, UInt256.valueOf(3L), UInt256.valueOf(6L));
     final Optional<WorldStateProof> accountProof =
         worldStateProofProvider.getAccountProof(
-            Hash.wrap(worldStateTrie.getRootHash()), address, storageKeys);
+            Hash.wrap(worldStateTrie.getRootHash()), null, address, storageKeys);
 
     assertThat(accountProof).isPresent();
     Assertions.assertThat(accountProof.get().getStateTrieAccountValue()).contains(accountValue);
@@ -140,6 +140,7 @@ public class WorldStateProofProviderTest {
     final Optional<WorldStateProof> accountProof =
         worldStateProofProvider.getAccountProof(
             Hash.wrap(worldStateTrie.getRootHash()),
+            null,
             Address.ZERO,
             new ArrayList<>()); // missing address
 
