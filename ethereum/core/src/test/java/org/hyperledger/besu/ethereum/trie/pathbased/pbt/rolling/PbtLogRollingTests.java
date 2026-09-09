@@ -30,7 +30,11 @@ import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -153,6 +157,67 @@ class PbtLogRollingTests {
     return new DefaultBinaryStateRootCommitter()
         .compute(worldState, null, worldState.updater().copy())
         .root();
+  }
+
+  /**
+   * Reorg/switch invariant: rolling back a PBT tip change whose trie-log prior is Patricia must
+   * restore 4-field flat account bytes even while the live branch is BINARY. Binary persist must
+   * not hard-code 3-field flat encodings over that prior.
+   */
+  @Test
+  void rollBackPatriciaPriorOnBinaryBranchRestoresFourFieldFlat() {
+    final BonsaiWorldState worldState = newWorldState(archive, provider);
+    final Hash storageRoot =
+        Hash.fromHexString("0x1111111111111111111111111111111111111111111111111111111111111111");
+
+    WorldUpdater updater = worldState.updater();
+    updater.createAccount(ADDRESS_ONE, 2L, Wei.of(20L));
+    updater.commit();
+    final Hash tipRoot = liveRoot(worldState);
+    final BlockHeader tipHeader =
+        new BlockHeaderTestFixture()
+            .parentHash(Hash.ZERO)
+            .number(1)
+            .stateRoot(tipRoot)
+            .buildHeader();
+    worldState.persist(tipHeader, binaryCommitter);
+
+    assertThat(accountFieldCount(worldState, ADDRESS_ONE)).isEqualTo(3);
+
+    final PatriciaTrieAccountValue prior =
+        new PatriciaTrieAccountValue(1L, Wei.of(10L), storageRoot, Hash.EMPTY);
+    final BinaryTrieAccountValue updated = new BinaryTrieAccountValue(2L, Wei.of(20L), Hash.EMPTY);
+    final TrieLogLayer layer =
+        new TrieLogLayer()
+            .setBlockHash(tipHeader.getBlockHash())
+            .setWireVersion(BonsaiTrieLogFactory.WIRE_VERSION_EXTENDED)
+            .addAccountChange(ADDRESS_ONE, prior, updated);
+
+    final BonsaiWorldStateUpdateAccumulator rollUpdater = worldState.updater();
+    rollUpdater.rollBack(layer);
+    rollUpdater.commit();
+    worldState.persist(null, binaryCommitter);
+
+    final Bytes flat =
+        worldState.getWorldStateStorage().getAccount(ADDRESS_ONE.addressHash()).orElseThrow();
+    assertThat(accountFieldCount(flat)).isEqualTo(4);
+    final PatriciaTrieAccountValue decoded = PatriciaTrieAccountValue.readFrom(RLP.input(flat));
+    assertThat(decoded.getNonce()).isEqualTo(1L);
+    assertThat(decoded.getBalance()).isEqualTo(Wei.of(10L));
+    assertThat(decoded.getStorageRoot()).isEqualTo(storageRoot);
+    assertThat(decoded.getCodeHash()).isEqualTo(Hash.EMPTY);
+  }
+
+  private static int accountFieldCount(final BonsaiWorldState worldState, final Address address) {
+    return accountFieldCount(
+        worldState.getWorldStateStorage().getAccount(address.addressHash()).orElseThrow());
+  }
+
+  private static int accountFieldCount(final Bytes accountRlp) {
+    final RLPInput in = RLP.input(accountRlp);
+    final int count = in.enterList();
+    in.leaveListLenient();
+    return count;
   }
 
   @Test
@@ -696,6 +761,50 @@ class PbtLogRollingTests {
     }
   }
 
+  @Test
+  void rollForward_materializesCodeZoneWhenCodeAlreadyExistsInFlatDb() {
+    final Bytes code = Bytes.repeat((byte) 0x03, 128);
+    try (final BinaryFixture f = new BinaryFixture()) {
+      final PersistedBlock block =
+          f.applyAndPersist(
+              u -> {
+                final MutableAccount account = u.createAccount(ADDRESS_ONE, 1, Wei.of(1L));
+                account.setCode(code);
+              });
+
+      f.rollback(block);
+      f.putFlatCode(ADDRESS_ONE, code);
+
+      assertThat(f.rollforward(block))
+          .as("trie roll after flat DB phase must restore CODE_ZONE")
+          .isEqualTo(block.root);
+    }
+  }
+
+  @Test
+  void reorg_keepsCodeZoneWhenSameCodeMovesBetweenAccounts() {
+    final Bytes code = Bytes.repeat((byte) 0x04, 128);
+    try (final BinaryFixture oldFork = new BinaryFixture();
+        final BinaryFixture newFork = new BinaryFixture()) {
+      final PersistedBlock oldBlock =
+          oldFork.applyAndPersist(
+              u -> {
+                final MutableAccount account = u.createAccount(ADDRESS_ONE, 1, Wei.of(1L));
+                account.setCode(code);
+              });
+      final PersistedBlock newBlock =
+          newFork.applyAndPersist(
+              u -> {
+                final MutableAccount account = u.createAccount(ADDRESS_TWO, 1, Wei.of(1L));
+                account.setCode(code);
+              });
+
+      assertThat(oldFork.reorg(oldBlock, newBlock))
+          .as("reorg must not delete code chunks still referenced on the new fork")
+          .isEqualTo(newBlock.root);
+    }
+  }
+
   // --------------------------------------------------------------------------------------------
   // Fixture: a fresh binary-trie BonsaiWorldState backed by ExecutionContextTestFixture with an
   // empty
@@ -765,6 +874,23 @@ class PbtLogRollingTests {
       acc.commit();
       worldState.persist(null, committer);
       return worldState.rootHash();
+    }
+
+    Hash reorg(final PersistedBlock oldBlock, final PersistedBlock newBlock) {
+      final BonsaiWorldStateUpdateAccumulator acc = worldState.updater();
+      acc.rollBack(oldBlock.layer);
+      acc.rollForward(newBlock.layer);
+      acc.commit();
+      worldState.persist(null, committer);
+      return worldState.rootHash();
+    }
+
+    void putFlatCode(final Address address, final Bytes code) {
+      worldState
+          .getWorldStateStorage()
+          .updater()
+          .putCode(address.addressHash(), Hash.hash(code), code)
+          .commitComposedOnly();
     }
 
     private TrieLogLayer readLayer(final Hash blockHash) {

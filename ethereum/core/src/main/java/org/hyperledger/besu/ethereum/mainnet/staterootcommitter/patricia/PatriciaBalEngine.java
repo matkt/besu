@@ -33,7 +33,6 @@ import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -126,8 +125,7 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
       return new BalStateRootCommitter.Result(
           StateRootComputations.pathBased(
               Hash.wrap(accountTrie.getRootHash()), new ArrayList<>(writes)),
-          storageRoots,
-          Set.of());
+          storageRoots);
     }
 
     private Optional<Bytes> resolveAccount(
@@ -162,7 +160,7 @@ public final class PatriciaBalEngine implements BalStateRootCommitter.Engine {
         if (!storageFrozen) {
           if (codeChange.newCode().isEmpty()) {
             if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
-              writes.add(updater -> updater.removeCodeByAddress(accountHash));
+              writes.add(updater -> updater.removeCode(accountHash));
             }
           } else {
             writes.add(updater -> updater.putCode(accountHash, newCodeHash, codeChange.newCode()));

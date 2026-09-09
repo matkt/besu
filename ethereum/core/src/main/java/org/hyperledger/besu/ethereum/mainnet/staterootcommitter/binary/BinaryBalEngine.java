@@ -27,9 +27,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.evm.account.Account;
 
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -65,7 +63,6 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
     private final BonsaiWorldState worldState;
     private final BlockAccessListAccountLookup accountLookup;
     private final BinaryTrieWriter writer;
-    private final Set<Hash> introducedCodeHashes = new HashSet<>();
 
     Computation(
         final BonsaiWorldState worldState,
@@ -74,11 +71,7 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
       this.worldState = worldState;
       this.accountLookup = accountLookup;
       this.writer =
-          new BinaryTrieWriter(
-              worldState,
-              storageFrozen,
-              introducedCodeHashes,
-              BinaryTrieFactory.createStateTrie(worldState));
+          new BinaryTrieWriter(storageFrozen, BinaryTrieFactory.createStateTrie(worldState));
     }
 
     BalStateRootCommitter.Result execute() {
@@ -102,9 +95,7 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
           .addArgument(accountLookup.accountChanges().size())
           .log();
       return new BalStateRootCommitter.Result(
-          StateRootComputations.pathBased(root, writer.writes()),
-          Map.of(),
-          Set.copyOf(introducedCodeHashes));
+          StateRootComputations.pathBased(root, writer.writes()), Map.of());
     }
 
     private void applyAccount(

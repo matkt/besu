@@ -16,14 +16,21 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.core.WorldStateHealerHelper.throwingWorldStateHealerSupplier;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.FLAT_DB_METADATA_STORAGE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.FLAT_DB_BLOCK_HASH_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead;
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withStateRootAndBlockHashAndUpdateNodeHead;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -124,6 +131,11 @@ class BonsaiWorldStateProviderTest {
         .isPresent()
         .hasValueSatisfying(
             ws -> assertThat(ws.getWorldStateBlockHash()).isEqualTo(blockHeader1.getBlockHash()));
+    verify(segmentedKeyValueStorageTransaction, atLeastOnce())
+        .put(
+            eq(FLAT_DB_METADATA_STORAGE),
+            aryEq(FLAT_DB_BLOCK_HASH_KEY),
+            aryEq(blockHeader1.getBlockHash().getBytes().toArrayUnsafe()));
   }
 
   @Test
@@ -241,10 +253,11 @@ class BonsaiWorldStateProviderTest {
   }
 
   @Test
-  void shouldRollbackAndRollForwardDuringReorg() {
+  void shouldSynchronizeFlatDbBeforeTrieDuringForkReorg() {
     final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
-        new BonsaiWorldStateKeyValueStorage(
-            storageProvider, new NoOpMetricsSystem(), DEFAULT_CONFIG);
+        spy(
+            new BonsaiWorldStateKeyValueStorage(
+                storageProvider, new NoOpMetricsSystem(), DEFAULT_CONFIG));
 
     bonsaiWorldStateArchive = spy(createBonsaiWorldStateProvider(worldStateKeyValueStorage));
 
@@ -269,6 +282,9 @@ class BonsaiWorldStateProviderTest {
         .thenReturn(Optional.of(trieLogLayer1));
     when(trieLogManager.getTrieLogLayer(blockHeader1Reorg.getHash()))
         .thenReturn(Optional.of(trieLogLayer1Reorg));
+    doReturn(Optional.of(blockHeader1.getHash()))
+        .when(worldStateKeyValueStorage)
+        .getFlatDbBlockHash();
 
     assertThat(
             bonsaiWorldStateArchive.getWorldState(
@@ -276,9 +292,9 @@ class BonsaiWorldStateProviderTest {
         .isPresent()
         .containsInstanceOf(BonsaiWorldState.class);
 
-    // Verify that both rollback and roll forward were performed
-    verify(trieLogManager).getTrieLogLayer(blockHeader1.getHash());
-    verify(trieLogManager).getTrieLogLayer(blockHeader1Reorg.getHash());
+    // Phase one synchronizes the flat DB; phase two performs the normal trie roll.
+    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1.getHash());
+    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1Reorg.getHash());
   }
 
   // Helper methods
@@ -305,9 +321,12 @@ class BonsaiWorldStateProviderTest {
 
   private BonsaiWorldState createMockWorldState(final Hash blockHash) {
     final BonsaiWorldState mockWorldState = mock(BonsaiWorldState.class);
+    final BonsaiWorldStateKeyValueStorage mockStorage = mock(BonsaiWorldStateKeyValueStorage.class);
     when(mockWorldState.blockHash()).thenReturn(blockHash);
     when(mockWorldState.freezeStorage()).thenReturn(mockWorldState);
     when(mockWorldState.getTrieBranchType()).thenReturn(TrieBranchType.PATRICIA);
+    when(mockWorldState.getWorldStateStorage()).thenReturn(mockStorage);
+    when(mockStorage.getFlatDbBlockHash()).thenReturn(Optional.empty());
     return mockWorldState;
   }
 

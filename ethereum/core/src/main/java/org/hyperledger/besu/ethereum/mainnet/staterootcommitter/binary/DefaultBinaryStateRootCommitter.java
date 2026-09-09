@@ -18,8 +18,6 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
-import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
@@ -93,12 +91,7 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
         final boolean storageFrozen) {
       this.bonsai = bonsai;
       this.worldStateUpdater = worldStateUpdater;
-      this.writer =
-          new BinaryTrieWriter(
-              bonsai,
-              storageFrozen,
-              worldStateUpdater.getIntroducedCodeHashes(),
-              BinaryTrieFactory.createStateTrie(bonsai));
+      this.writer = new BinaryTrieWriter(storageFrozen, BinaryTrieFactory.createStateTrie(bonsai));
     }
 
     Hash executeInto(final List<StateRootComputations.UpdaterWrite> writeSink) {
@@ -144,6 +137,9 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
 
       final Bytes priorCode = resolvePriorCode(address, priorAccount);
       final Bytes updatedCode = resolveUpdatedCode(address, updatedAccount);
+      // Flat encoding follows the account's strategy (serializeAccount): Patricia-shaped roll
+      // replacements stay 4-field even on a BINARY branch; native binary accounts stay 3-field.
+      // Hard-coding BinaryTrieAccountValue here used to overwrite flat-roll-restored PMT priors.
       writer.putAccountHeader(
           address,
           priorAccount != null,
@@ -153,12 +149,7 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
           updatedAccount.getBalance(),
           updatedCode,
           updatedAccount.getCodeHash(),
-          RLP.encode(
-              new BinaryTrieAccountValue(
-                      updatedAccount.getNonce(),
-                      updatedAccount.getBalance(),
-                      updatedAccount.getCodeHash())
-                  ::writeTo));
+          updatedAccount.serializeAccount());
     }
 
     private void applyCode(final Address address) {

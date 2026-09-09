@@ -26,7 +26,6 @@ import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBi
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.StorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiSnapshotWorldStateKeyValueStorage;
@@ -88,6 +87,13 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   private final BonsaiCodeCache codeCache;
   private final EvmConfiguration evmConfiguration;
   protected TrieBranchType trieBranchType;
+
+  /**
+   * When {@code true}, {@link #persist} does not compare the computed root to the block header.
+   * Used when serving or rolling the migrated PBT view for a pre-{@code binaryTime} parent block
+   * whose header still carries a PMT state root.
+   */
+  private boolean skipStateRootVerification;
 
   public BonsaiWorldState(
       final BonsaiWorldStateProvider archive,
@@ -312,9 +318,11 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
                 trieBranchSegment,
                 WORLD_BLOCK_HASH_KEY,
                 blockHeader.getBlockHash().getBytes().toArrayUnsafe());
+        stateUpdater.putFlatDbBlockHash(blockHeader.getBlockHash());
         worldStateBlockHash = blockHeader.getBlockHash();
       } else {
         stateUpdater.getWorldStateTransaction().remove(trieBranchSegment, WORLD_BLOCK_HASH_KEY);
+        stateUpdater.removeFlatDbBlockHash();
         worldStateBlockHash = null;
       }
 
@@ -353,9 +361,16 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   }
 
   protected void verifyWorldStateRoot(final Hash calculatedStateRoot, final BlockHeader header) {
+    if (skipStateRootVerification) {
+      return;
+    }
     if (!worldStateConfig.isTrieDisabled() && !calculatedStateRoot.equals(header.getStateRoot())) {
       throw new StateRootMismatchException(header.getStateRoot(), calculatedStateRoot);
     }
+  }
+
+  public void setSkipStateRootVerification(final boolean skipStateRootVerification) {
+    this.skipStateRootVerification = skipStateRootVerification;
   }
 
   @Override
@@ -500,15 +515,7 @@ public class BonsaiWorldState implements MutableWorldState, BonsaiWorldView, Sto
   public Account get(final Address address) {
     return getWorldStateStorage()
         .getAccount(address.addressHash())
-        .map(
-            bytes ->
-                BonsaiAccount.fromFlatBytes(
-                    accumulator,
-                    address,
-                    bytes,
-                    true,
-                    codeCache,
-                    StorageRootStrategy.forTrieBranchType(getTrieBranchType())))
+        .map(bytes -> BonsaiAccount.fromFlatBytes(accumulator, address, bytes, true, codeCache))
         .orElse(null);
   }
 

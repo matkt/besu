@@ -43,19 +43,11 @@ public class CodeHashCodeStorageStrategy implements CodeStorageStrategy {
   }
 
   @Override
-  public void removeFlatCodeByAddress(
+  public void removeFlatCode(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash) {
     // Content-addressed code is keyed by hash; PBT callers use removeFlatCodeByHash.
-  }
-
-  @Override
-  public void removeFlatCodeByHash(
-      final SegmentedKeyValueStorage storage,
-      final SegmentedKeyValueStorageTransaction transaction,
-      final Hash codeHash) {
-    transaction.remove(CODE_STORAGE, codeHash.getBytes().toArrayUnsafe());
   }
 
   public static boolean isCodeHashValue(final byte[] key, final byte[] value) {

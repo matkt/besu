@@ -52,12 +52,16 @@ import org.apache.tuweni.units.bigints.UInt256;
  * <ul>
  *   <li>Version 0 (legacy, implicit): {@code [blockHash, changes...]} with storage entries {@code
  *       [slotHash, prior, updated, isCleared?]}
- *   <li>Version 1 (extended): {@code [1, blockHash, introducedCodeHashes|null, changes...]} with
- *       storage entries {@code [slotKey, prior, updated, isCleared?]}
+ *   <li>Version 1 (extended): {@code [1, blockHash]} with storage entries {@code [slotKey, prior,
+ *       updated, isCleared?]}
  * </ul>
  *
  * <p>Version is detected on decode: if the first element is not a 32-byte block hash, it is read as
  * an explicit version scalar; absent version means 0.
+ *
+ * <p>Account values preserve the shape read from flat storage: Patricia priors are 4-field {@code
+ * [nonce, balance, storageRoot, codeHash]}; binary updates are 3-field {@code [nonce, balance,
+ * codeHash]}.
  */
 public class BonsaiTrieLogFactory implements TrieLogFactory {
 
@@ -116,9 +120,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
 
     if (binaryTrieMilestone.isPresent()) {
       layer.setWireVersion(WIRE_VERSION_EXTENDED);
-      for (final Hash codeHash : accumulator.getIntroducedCodeHashes()) {
-        layer.addIntroducedCodeHash(codeHash);
-      }
     }
     return layer;
   }
@@ -155,9 +156,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     newLayer.setBlockHash(Hash.wrap(input.readBytes32()));
     newLayer.setWireVersion(wireVersion);
 
-    if (wireVersion >= WIRE_VERSION_EXTENDED) {
-      readIntroducedCodeHashesSlot(input, newLayer);
-    }
     while (!input.isEndOfCurrentList()) {
       readAddressChange(input, newLayer, wireVersion);
     }
@@ -188,21 +186,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
       output.writeInt(wireVersion);
     }
     output.writeBytes(layer.getBlockHash().getBytes());
-    if (wireVersion >= WIRE_VERSION_EXTENDED) {
-      writeIntroducedCodeHashesSlot(output, layer);
-    }
-  }
-
-  private static void writeIntroducedCodeHashesSlot(final RLPOutput output, final TrieLog layer) {
-    if (layer.getIntroducedCodeHashes().isEmpty()) {
-      output.writeNull();
-      return;
-    }
-    output.startList();
-    for (final Hash codeHash : layer.getIntroducedCodeHashes()) {
-      output.writeBytes(codeHash.getBytes());
-    }
-    output.endList();
   }
 
   private static void writeAddressChange(
@@ -266,19 +249,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
       return;
     }
     output.writeBytes(slotKey.getSlotHash().getBytes());
-  }
-
-  private static void readIntroducedCodeHashesSlot(
-      final RLPInput input, final TrieLogLayer newLayer) {
-    if (input.nextIsNull()) {
-      input.skipNext();
-      return;
-    }
-    input.enterList();
-    while (!input.isEndOfCurrentList()) {
-      newLayer.addIntroducedCodeHash(Hash.wrap(input.readBytes32()));
-    }
-    input.leaveList();
   }
 
   private static void readAddressChange(

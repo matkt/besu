@@ -14,16 +14,17 @@
  */
 package org.hyperledger.besu.ethereum.trie.common;
 
-import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BinaryStorageRootStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.StorageRootStrategy;
 
 import java.util.Objects;
 
 /** Binary-trie account value for trie logs: {@code [nonce, balance, codeHash]}. */
-public final class BinaryTrieAccountValue implements AccountValue {
+public final class BinaryTrieAccountValue implements TrieAccountValue {
 
   private final long nonce;
   private final Wei balance;
@@ -48,6 +49,11 @@ public final class BinaryTrieAccountValue implements AccountValue {
   @Override
   public Hash getCodeHash() {
     return codeHash;
+  }
+
+  @Override
+  public StorageRootStrategy storageRootStrategy() {
+    return BinaryStorageRootStrategy.INSTANCE;
   }
 
   @Override

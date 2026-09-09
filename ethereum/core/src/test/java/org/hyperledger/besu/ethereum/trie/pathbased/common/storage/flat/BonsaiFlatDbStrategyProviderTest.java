@@ -332,7 +332,7 @@ class FlatDbStrategyProviderTest {
     putTx.commit();
 
     final SegmentedKeyValueStorageTransaction removeByAddressTx = storage.startTransaction();
-    strategy.removeFlatCodeByAddress(storage, removeByAddressTx, accountHash);
+    strategy.removeFlatCode(storage, removeByAddressTx, accountHash);
     removeByAddressTx.commit();
     assertThat(
             storage.get(
@@ -340,7 +340,7 @@ class FlatDbStrategyProviderTest {
         .isPresent();
 
     final SegmentedKeyValueStorageTransaction removeByHashTx = storage.startTransaction();
-    strategy.removeFlatCodeByHash(storage, removeByHashTx, codeHash);
+    strategy.removeFlatCode(storage, removeByHashTx, codeHash);
     removeByHashTx.commit();
     assertThat(
             storage.get(
@@ -363,7 +363,7 @@ class FlatDbStrategyProviderTest {
     putTx.commit();
 
     final SegmentedKeyValueStorageTransaction removeByHashTx = storage.startTransaction();
-    strategy.removeFlatCodeByHash(storage, removeByHashTx, codeHash);
+    strategy.removeFlatCode(storage, removeByHashTx, codeHash);
     removeByHashTx.commit();
     assertThat(
             storage.get(
@@ -371,7 +371,7 @@ class FlatDbStrategyProviderTest {
         .isPresent();
 
     final SegmentedKeyValueStorageTransaction removeByAddressTx = storage.startTransaction();
-    strategy.removeFlatCodeByAddress(storage, removeByAddressTx, accountHash);
+    strategy.removeFlatCode(storage, removeByAddressTx, accountHash);
     removeByAddressTx.commit();
     assertThat(
             storage.get(

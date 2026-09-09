@@ -14,16 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator;
 
-import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.PatriciaTrieFactory;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.common.TrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BinaryStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
@@ -82,9 +81,6 @@ public class BonsaiWorldStateUpdateAccumulator
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
 
-  /** Code hashes newly introduced by the block currently flowing through the accumulator. */
-  private final Set<Hash> introducedCodeHashes = Collections.synchronizedSet(new HashSet<>());
-
   protected boolean isAccumulatorStateChanged;
 
   public BonsaiWorldStateUpdateAccumulator(
@@ -109,7 +105,6 @@ public class BonsaiWorldStateUpdateAccumulator
     storageToUpdate.putAll(source.storageToUpdate);
     updatedAccounts.putAll(source.updatedAccounts);
     deletedAccounts.addAll(source.deletedAccounts);
-    introducedCodeHashes.addAll(source.introducedCodeHashes);
     this.isAccumulatorStateChanged = true;
   }
 
@@ -431,7 +426,12 @@ public class BonsaiWorldStateUpdateAccumulator
         }
         final Account account = wrappedWorldView().get(address);
         if (account instanceof BonsaiAccount pathBasedAccount) {
-          final BonsaiAccount updatedAccount = copyAccount(pathBasedAccount, this, true);
+          final StorageRootStrategy updatedStrategy = storageRootStrategy();
+          if (updatedStrategy.hasStorageRoot() && pathBasedAccount.hasStorageRoot()) {
+            updatedStrategy.setStorageRoot(pathBasedAccount.getStorageRoot());
+          }
+          final BonsaiAccount updatedAccount =
+              new BonsaiAccount(pathBasedAccount, this, true, updatedStrategy);
           final BonsaiValue<BonsaiAccount> accountValue =
               new BonsaiValue<>(pathBasedAccount, updatedAccount);
           onAccountValueLoaded(address, accountValue);
@@ -451,7 +451,7 @@ public class BonsaiWorldStateUpdateAccumulator
     } catch (MerkleTrieException e) {
       // need to throw to trigger the heal
       throw new MerkleTrieException(
-          e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+          e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
     }
   }
 
@@ -692,7 +692,7 @@ public class BonsaiWorldStateUpdateAccumulator
     } catch (MerkleTrieException e) {
       // need to throw to trigger the heal
       throw new MerkleTrieException(
-          e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+          e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
     }
   }
 
@@ -755,7 +755,10 @@ public class BonsaiWorldStateUpdateAccumulator
         .getAccountChanges()
         .forEach(
             (address, change) ->
-                rollAccountChange(address, change.getPrior(), change.getUpdated()));
+                rollAccountChange(
+                    address,
+                    (TrieAccountValue) change.getPrior(),
+                    (TrieAccountValue) change.getUpdated()));
     layer
         .getCodeChanges()
         .forEach(
@@ -775,7 +778,10 @@ public class BonsaiWorldStateUpdateAccumulator
         .getAccountChanges()
         .forEach(
             (address, change) ->
-                rollAccountChange(address, change.getUpdated(), change.getPrior()));
+                rollAccountChange(
+                    address,
+                    (TrieAccountValue) change.getUpdated(),
+                    (TrieAccountValue) change.getPrior()));
     layer
         .getCodeChanges()
         .forEach(
@@ -788,27 +794,12 @@ public class BonsaiWorldStateUpdateAccumulator
                     (storageSlotKey, value) ->
                         rollStorageChange(
                             address, storageSlotKey, value.getUpdated(), value.getPrior())));
-    introducedCodeHashes.addAll(layer.getIntroducedCodeHashes());
-  }
-
-  /**
-   * Returns the mutable set of code hashes newly introduced by the block currently flowing through
-   * the accumulator. The binary committer records into this set during the forward commit (flat-DB
-   * presence check) and reads it during rollback to drop CODE_ZONE chunks; {@link
-   * org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory#create} copies
-   * it into the trie-log layer for persistence.
-   *
-   * @return the live, mutable set.
-   */
-  @Override
-  public Set<Hash> getIntroducedCodeHashes() {
-    return introducedCodeHashes;
   }
 
   private void rollAccountChange(
       final Address address,
-      final AccountValue expectedValue,
-      final AccountValue replacementValue) {
+      final TrieAccountValue expectedValue,
+      final TrieAccountValue replacementValue) {
     if (Objects.equals(expectedValue, replacementValue)) {
       // non-change, a cached read.
       return;
@@ -849,7 +840,7 @@ public class BonsaiWorldStateUpdateAccumulator
     } catch (MerkleTrieException e) {
       // need to throw to trigger the heal
       throw new MerkleTrieException(
-          e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+          e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
     }
   }
 
@@ -953,7 +944,6 @@ public class BonsaiWorldStateUpdateAccumulator
     storageToUpdate.clear();
     codeToUpdate.clear();
     accountsToUpdate.clear();
-    introducedCodeHashes.clear();
     resetAccumulatorStateChanged();
     updatedAccounts.clear();
     deletedAccounts.clear();
@@ -998,23 +988,15 @@ public class BonsaiWorldStateUpdateAccumulator
   protected BonsaiAccount createAccount(
       final BonsaiWorldView context,
       final Address address,
-      final AccountValue stateTrieAccount,
+      final TrieAccountValue stateTrieAccount,
       final boolean mutable) {
-    // Seed the MPT strategy with the AccountValue's root; for binary the strategy is stateless.
-    final StorageRootStrategy strategy = storageRootStrategy();
-    if (strategy.hasStorageRoot()) {
-      strategy.setStorageRoot(
-          stateTrieAccount instanceof MptAccountValue mpt
-              ? mpt.getStorageRoot()
-              : Hash.EMPTY_TRIE_HASH);
-    }
     return new BonsaiAccount(
         context,
         address,
         address.addressHash(),
         stateTrieAccount.getNonce(),
         stateTrieAccount.getBalance(),
-        strategy,
+        stateTrieAccount.storageRootStrategy(),
         stateTrieAccount.getCodeHash(),
         mutable,
         codeCache);
@@ -1044,11 +1026,6 @@ public class BonsaiWorldStateUpdateAccumulator
   protected BonsaiAccount createAccount(
       final BonsaiWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
     return new BonsaiAccount(context, tracked, storageRootStrategy(), codeCache);
-  }
-
-  protected void assertCloseEnoughForDiffing(
-      final BonsaiAccount source, final AccountValue account, final String context) {
-    BonsaiAccount.assertCloseEnoughForDiffing(source, account, context);
   }
 
   @Override

@@ -94,18 +94,11 @@ public abstract class FlatDbStrategy {
     }
   }
 
-  public void removeFlatCodeByAddress(
+  public void removeFlatCode(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash) {
-    codeStorageStrategy.removeFlatCodeByAddress(storage, transaction, accountHash);
-  }
-
-  public void removeFlatCodeByHash(
-      final SegmentedKeyValueStorage storage,
-      final SegmentedKeyValueStorageTransaction transaction,
-      final Hash codeHash) {
-    codeStorageStrategy.removeFlatCodeByHash(storage, transaction, codeHash);
+    codeStorageStrategy.removeFlatCode(storage, transaction, accountHash);
   }
 
   /*

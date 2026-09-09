@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.referencetests;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiPreImageProxy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -80,12 +79,7 @@ public class BonsaiReferenceTestWorldStateStorage extends BonsaiWorldStateLayerS
                         address -> {
                           final BonsaiAccount decoded =
                               BonsaiAccount.fromFlatBytes(
-                                  context,
-                                  address,
-                                  entry.getValue(),
-                                  false,
-                                  new BonsaiCodeCache(),
-                                  new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH));
+                                  context, address, entry.getValue(), false, new BonsaiCodeCache());
                           return new WorldState.StreamableAccount(Optional.of(address), decoded);
                         }))
         .filter(Optional::isPresent)

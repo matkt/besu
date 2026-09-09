@@ -17,29 +17,55 @@ package org.hyperledger.besu.ethereum.trie.common;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.StorageRootStrategy;
 
 import java.util.Objects;
 
 /** Patricia (MPT) account value: {@code [nonce, balance, storageRoot, codeHash]}. */
-public class PatriciaTrieAccountValue extends AbstractStateTrieAccountValue
-    implements MptAccountValue {
+public class PatriciaTrieAccountValue implements TrieAccountValue {
 
-  protected final Hash storageRoot;
+  private final long nonce;
+  private final Wei balance;
+  protected final StorageRootStrategy storageRootStrategy;
+  private final Hash codeHash;
 
   public PatriciaTrieAccountValue(
       final long nonce, final Wei balance, final Hash storageRoot, final Hash codeHash) {
-    super(nonce, balance, codeHash);
+    checkNotNull(balance, "balance cannot be null");
     checkNotNull(storageRoot, "storageRoot cannot be null");
-    this.storageRoot = storageRoot;
+    checkNotNull(codeHash, "codeHash cannot be null");
+    this.nonce = nonce;
+    this.balance = balance;
+    this.storageRootStrategy = new MptStorageRootStrategy(storageRoot);
+    this.codeHash = codeHash;
   }
 
   @Override
+  public long getNonce() {
+    return nonce;
+  }
+
+  @Override
+  public Wei getBalance() {
+    return balance;
+  }
+
   public Hash getStorageRoot() {
-    return storageRoot;
+    return storageRootStrategy.getStorageRoot();
+  }
+
+  @Override
+  public Hash getCodeHash() {
+    return codeHash;
+  }
+
+  @Override
+  public StorageRootStrategy storageRootStrategy() {
+    return storageRootStrategy;
   }
 
   @Override
@@ -48,13 +74,14 @@ public class PatriciaTrieAccountValue extends AbstractStateTrieAccountValue
     if (!(o instanceof PatriciaTrieAccountValue that)) return false;
     return nonce == that.nonce
         && Objects.equals(balance, that.balance)
-        && Objects.equals(storageRoot, that.storageRoot)
+        && Objects.equals(
+            storageRootStrategy.getStorageRoot(), that.storageRootStrategy.getStorageRoot())
         && Objects.equals(codeHash, that.codeHash);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(nonce, balance, storageRoot, codeHash);
+    return Objects.hash(nonce, balance, storageRootStrategy.getStorageRoot(), codeHash);
   }
 
   @Override
@@ -62,7 +89,7 @@ public class PatriciaTrieAccountValue extends AbstractStateTrieAccountValue
     out.startList();
     out.writeLongScalar(nonce);
     out.writeUInt256Scalar(balance);
-    out.writeBytes(storageRoot.getBytes());
+    out.writeBytes(storageRootStrategy.getStorageRoot().getBytes());
     out.writeBytes(codeHash.getBytes());
     out.endList();
   }

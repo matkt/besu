@@ -35,7 +35,6 @@ import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -70,16 +69,11 @@ public final class BalStateRootCommitter implements StateRootCommitter {
    * @param computation root and deferred KV writes
    * @param storageRoots Patricia per-account storage roots to patch into the EVM accumulator (empty
    *     for Binary)
-   * @param introducedCodeHashes Binary code hashes newly introduced by this block (empty for
-   *     Patricia)
    */
-  public record Result(
-      StateRootComputation computation,
-      Map<Address, Hash> storageRoots,
-      Set<Hash> introducedCodeHashes) {
+  public record Result(StateRootComputation computation, Map<Address, Hash> storageRoots) {
 
     static Result empty(final Hash parentRoot) {
-      return new Result(StateRootComputations.pathBased(parentRoot, List.of()), Map.of(), Set.of());
+      return new Result(StateRootComputations.pathBased(parentRoot, List.of()), Map.of());
     }
   }
 
@@ -151,7 +145,6 @@ public final class BalStateRootCommitter implements StateRootCommitter {
                 entry.getUpdated().setStorageRoot(newStorageRoot);
               }
             });
-    accumulator.getIntroducedCodeHashes().addAll(result.introducedCodeHashes());
 
     if (blockHeader != null && !result.computation().root().equals(blockHeader.getStateRoot())) {
       throw new IllegalStateException(

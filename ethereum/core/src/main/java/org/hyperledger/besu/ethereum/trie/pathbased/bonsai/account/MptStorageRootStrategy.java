@@ -16,9 +16,9 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account;
 
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.MptAccountValue;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -91,10 +91,10 @@ public final class MptStorageRootStrategy implements StorageRootStrategy {
         throw new IllegalStateException(context + ": Storage Roots differ (mpt vs binary)");
       }
       otherRoot = otherBonsai.getStorageRoot();
-    } else if (other instanceof MptAccountValue mpt) {
-      otherRoot = mpt.getStorageRoot();
+    } else if (other instanceof PatriciaTrieAccountValue patricia) {
+      otherRoot = patricia.getStorageRoot();
     } else {
-      // Non-MPT account value (e.g. a binary BinaryAccountValue) carries no storage root: an
+      // Non-MPT account value (e.g. a binary BinaryTrieAccountValue) carries no storage root: an
       // MPT-vs-binary mismatch.
       throw new IllegalStateException(context + ": Storage Roots differ (mpt vs binary)");
     }

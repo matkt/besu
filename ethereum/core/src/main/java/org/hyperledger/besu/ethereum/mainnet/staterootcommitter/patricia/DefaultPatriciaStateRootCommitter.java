@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputa
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
@@ -172,7 +171,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
         }
       }
 
@@ -248,7 +247,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(updatedAddress), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(updatedAddress), e.getHash(), e.getLocation());
         }
       }
 
@@ -275,12 +274,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
                 .map(
                     bytes ->
                         BonsaiAccount.fromFlatBytes(
-                            bonsai,
-                            address,
-                            bytes,
-                            true,
-                            bonsai.codeCache(),
-                            new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH)))
+                            bonsai, address, bytes, true, bonsai.codeCache()))
                 .orElse(null);
         if (oldAccount == null) {
           continue;
@@ -337,7 +331,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
         }
       }
     }
@@ -355,7 +349,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
         }
 
         if (codeIsEmpty(updatedCode)) {
-          writes.add(updater -> updater.removeCodeByAddress(accountHash));
+          writes.add(updater -> updater.removeCode(accountHash));
         } else {
           final Hash codeHash = Hash.hash(updatedCode);
           writes.add(updater -> updater.putCode(accountHash, codeHash, updatedCode));

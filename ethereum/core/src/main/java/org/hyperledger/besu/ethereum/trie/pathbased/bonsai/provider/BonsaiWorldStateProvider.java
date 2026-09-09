@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider;
 
 import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
 
+import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
@@ -38,6 +39,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQu
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
@@ -292,27 +294,13 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
       worldStateCacheManager.reset();
     }
 
-    // Case 1 / Case 2 roll in MPT; Case 3 rolls in BINARY.
+    // Case 1 rolls in MPT; Case 2 (transition) and Case 3 roll in BINARY.
     final TrieBranchType rollBranchType =
-        targetIsPbt ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
-
-    final Optional<MutableWorldState> maybeWorldState =
-        queryParams.shouldWorldStateUpdateHead()
-            ? getFullWorldStateFromHead(queryParams.getBlockHash(), rollBranchType)
-            : getFullWorldStateFromCache(
-                targetHeader, queryParams.getBlockAccessListOverlay(), rollBranchType);
-
-    return maybeWorldState
-        .map(BonsaiWorldState.class::cast)
-        .map(
-            worldState -> {
-              if (isPbtTransition) {
-                // Case 2: after MPT roll, switch format for building/validating the first PBT
-                // block.
-                ensureTrieBranchType(worldState, TrieBranchType.BINARY);
-              }
-              return worldState;
-            });
+        targetIsPbt || isPbtTransition ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+    return queryParams.shouldWorldStateUpdateHead()
+        ? getFullWorldStateFromHead(queryParams.getBlockHash(), rollBranchType, isPbtTransition)
+        : getFullWorldStateFromCache(
+            targetHeader, queryParams.getBlockAccessListOverlay(), rollBranchType, isPbtTransition);
   }
 
   /**
@@ -343,16 +331,20 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
   }
 
   private Optional<MutableWorldState> getFullWorldStateFromHead(
-      final Hash blockHash, final TrieBranchType rollBranchType) {
+      final Hash blockHash,
+      final TrieBranchType rollBranchType,
+      final boolean skipStateRootVerificationOnRollPersist) {
     ensureTrieBranchType(headWorldState, rollBranchType);
-    return rollFullWorldStateToBlockHash(headWorldState, blockHash)
+    return rollFullWorldStateToBlockHash(
+            headWorldState, blockHash, skipStateRootVerificationOnRollPersist)
         .map(MutableWorldState.class::cast);
   }
 
   private Optional<MutableWorldState> getFullWorldStateFromCache(
       final BlockHeader blockHeader,
       final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay,
-      final TrieBranchType rollBranchType) {
+      final TrieBranchType rollBranchType,
+      final boolean skipStateRootVerificationOnRollPersist) {
     final BlockHeader chainHeadBlockHeader = blockchain.getChainHeadHeader();
     if (chainHeadBlockHeader.getNumber() - blockHeader.getNumber()
         >= trieLogManager.getMaxLayersToLoad()) {
@@ -375,7 +367,9 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
               return worldState;
             })
         .flatMap(
-            worldState -> rollFullWorldStateToBlockHash(worldState, blockHeader.getBlockHash()))
+            worldState ->
+                rollFullWorldStateToBlockHash(
+                    worldState, blockHeader.getBlockHash(), skipStateRootVerificationOnRollPersist))
         .map(
             worldState -> {
               maybeBlockAccessListOverlay.ifPresent(worldState::applyBlockAccessListOverlay);
@@ -414,8 +408,24 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
             () -> new IllegalStateException("Missing trie log for block hash " + blockHash));
   }
 
-  private Optional<BonsaiWorldState> rollFullWorldStateToBlockHash(
-      final BonsaiWorldState mutableState, final Hash blockHash) {
+  private synchronized Optional<BonsaiWorldState> rollFullWorldStateToBlockHash(
+      final BonsaiWorldState mutableState,
+      final Hash blockHash,
+      final boolean skipStateRootVerificationOnRollPersist) {
+    try {
+      rollFlatDbToBlockHash(mutableState, blockHash);
+    } catch (final RuntimeException re) {
+      LOG.warn("Flat DB rolling failed for block hash " + blockHash, re);
+      if (re instanceof MerkleTrieException) {
+        throw re;
+      }
+      throw new MerkleTrieException(
+          "Flat DB rolling failed for block hash " + blockHash + ": " + re.getMessage(),
+          re,
+          Optional.of(Address.ZERO),
+          Bytes32.wrap(Hash.EMPTY.getBytes()),
+          Bytes.EMPTY);
+    }
     if (blockHash.equals(mutableState.blockHash())) {
       return Optional.of(mutableState);
     } else {
@@ -463,12 +473,17 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
             pathBasedUpdater.rollBack(rollBack);
           }
           for (int i = rollForwards.size() - 1; i >= 0; i--) {
-            final var forward = rollForwards.get(i);
-            LOG.debug("Attempting Rollforward of {}", rollForwards.get(i).getBlockHash());
+            final TrieLog forward = rollForwards.get(i);
+            LOG.debug("Attempting Rollforward of {}", forward.getBlockHash());
             pathBasedUpdater.rollForward(forward);
           }
           pathBasedUpdater.commit();
-          mutableState.persist(headerOrThrow(blockHash));
+          mutableState.setSkipStateRootVerification(skipStateRootVerificationOnRollPersist);
+          try {
+            mutableState.persist(headerOrThrow(blockHash));
+          } finally {
+            mutableState.setSkipStateRootVerification(false);
+          }
           LOG.debug(
               "Archive rolling finished, {} now at {}",
               mutableState.getWorldStateStorage().getClass().getSimpleName(),
@@ -492,10 +507,133 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
           throw re;
         }
         throw new MerkleTrieException(
-            "invalid", Optional.of(Address.ZERO), Bytes32.wrap(Hash.EMPTY.getBytes()), Bytes.EMPTY);
+            "Archive rolling failed for block hash " + blockHash + ": " + re.getMessage(),
+            re,
+            Optional.of(Address.ZERO),
+            Bytes32.wrap(Hash.EMPTY.getBytes()),
+            Bytes.EMPTY);
       }
     }
   }
+
+  private void rollFlatDbToBlockHash(
+      final BonsaiWorldState mutableState, final Hash targetBlockHash) {
+    if (mutableState.isStorageFrozen()) {
+      return;
+    }
+    final BonsaiWorldStateKeyValueStorage storage = mutableState.getWorldStateStorage();
+    // PARTIAL reads fall back to the trie on a flat miss, so flat and trie cannot be rolled in
+    // separate commits. ARCHIVE storage is already block-versioned and does not need rolling.
+    if (storage.getFlatDbMode() != FlatDbMode.FULL) {
+      return;
+    }
+    final Optional<Hash> persistedFlatDbBlockHash = storage.getFlatDbBlockHash();
+    final Hash currentFlatDbBlockHash = persistedFlatDbBlockHash.orElseGet(mutableState::blockHash);
+
+    // Existing databases have no flat cursor. Their flat DB and active trie were committed
+    // together, so let the next normal persist establish the cursor.
+    if (persistedFlatDbBlockHash.isEmpty()) {
+      return;
+    }
+
+    final BonsaiWorldStateKeyValueStorage.Updater updater = storage.updater();
+    try {
+      if (!currentFlatDbBlockHash.equals(targetBlockHash)) {
+        LOG.debug(
+            "Synchronizing flat DB from {} to {} before trie rolling",
+            currentFlatDbBlockHash,
+            targetBlockHash);
+        final List<FlatDbRollStep> steps = planFlatDbRoll(currentFlatDbBlockHash, targetBlockHash);
+        for (final FlatDbRollStep step : steps) {
+          applyFlatDbRollStep(updater, step);
+        }
+      }
+      if (!currentFlatDbBlockHash.equals(targetBlockHash)) {
+        updater.putFlatDbBlockHash(targetBlockHash);
+        updater.commitComposedOnly();
+      } else {
+        updater.rollback();
+      }
+    } catch (final RuntimeException e) {
+      updater.rollback();
+      throw e;
+    }
+  }
+
+  private List<FlatDbRollStep> planFlatDbRoll(
+      final Hash currentBlockHash, final Hash targetBlockHash) {
+    BlockHeader currentHeader = headerOrThrow(currentBlockHash);
+    BlockHeader targetHeader = headerOrThrow(targetBlockHash);
+    final List<FlatDbRollStep> rollBacks = new ArrayList<>();
+    final List<FlatDbRollStep> rollForwards = new ArrayList<>();
+
+    while (currentHeader.getNumber() > targetHeader.getNumber()) {
+      rollBacks.add(new FlatDbRollStep(trieLogOrThrow(currentHeader.getBlockHash()), false));
+      currentHeader = headerOrThrow(currentHeader.getParentHash());
+    }
+    while (currentHeader.getNumber() < targetHeader.getNumber()) {
+      rollForwards.add(new FlatDbRollStep(trieLogOrThrow(targetHeader.getBlockHash()), true));
+      targetHeader = headerOrThrow(targetHeader.getParentHash());
+    }
+    while (!currentHeader.getBlockHash().equals(targetHeader.getBlockHash())) {
+      rollBacks.add(new FlatDbRollStep(trieLogOrThrow(currentHeader.getBlockHash()), false));
+      rollForwards.add(new FlatDbRollStep(trieLogOrThrow(targetHeader.getBlockHash()), true));
+      currentHeader = headerOrThrow(currentHeader.getParentHash());
+      targetHeader = headerOrThrow(targetHeader.getParentHash());
+    }
+
+    for (int i = rollForwards.size() - 1; i >= 0; i--) {
+      rollBacks.add(rollForwards.get(i));
+    }
+    return rollBacks;
+  }
+
+  private void applyFlatDbRollStep(
+      final BonsaiWorldStateKeyValueStorage.Updater updater, final FlatDbRollStep step) {
+    final TrieLog trieLog = step.trieLog();
+    trieLog
+        .getAccountChanges()
+        .forEach(
+            (address, change) -> {
+              final AccountValue replacement =
+                  step.forward() ? change.getUpdated() : change.getPrior();
+              if (replacement == null) {
+                updater.removeAccountInfoState(address.addressHash());
+              } else {
+                updater.putAccountInfoState(
+                    address.addressHash(), RLP.encode(replacement::writeTo));
+              }
+            });
+    trieLog
+        .getCodeChanges()
+        .forEach(
+            (address, change) -> {
+              final Bytes replacement = step.forward() ? change.getUpdated() : change.getPrior();
+              if (replacement == null || replacement.isEmpty()) {
+                updater.removeCode(address.addressHash());
+              } else {
+                updater.putCode(address.addressHash(), Hash.hash(replacement), replacement);
+              }
+            });
+    trieLog
+        .getStorageChanges()
+        .forEach(
+            (address, changes) ->
+                changes.forEach(
+                    (slot, change) -> {
+                      final UInt256 replacement =
+                          step.forward() ? change.getUpdated() : change.getPrior();
+                      if (replacement == null || replacement.isZero()) {
+                        updater.removeStorageValueBySlotHash(
+                            address.addressHash(), slot.getSlotHash());
+                      } else {
+                        updater.putStorageValueBySlotHash(
+                            address.addressHash(), slot.getSlotHash(), replacement);
+                      }
+                    }));
+  }
+
+  private record FlatDbRollStep(TrieLog trieLog, boolean forward) {}
 
   public WorldStateConfig getWorldStateSharedSpec() {
     return worldStateConfig;

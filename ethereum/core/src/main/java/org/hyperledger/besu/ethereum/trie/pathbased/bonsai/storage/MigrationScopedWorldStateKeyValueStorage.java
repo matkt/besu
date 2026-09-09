@@ -52,12 +52,7 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
         composedWorldStateStorage) {
 
       @Override
-      public Updater removeCodeByAddress(final Hash accountHash) {
-        return this;
-      }
-
-      @Override
-      public Updater removeCodeByHash(final Hash codeHash) {
+      public Updater removeCode(final Hash accountHash) {
         return this;
       }
 
@@ -78,6 +73,16 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
 
       @Override
       public Updater putAccountInfoState(final Hash accountHash, final Bytes accountValue) {
+        return this;
+      }
+
+      @Override
+      public Updater putFlatDbBlockHash(final Hash blockHash) {
+        return this;
+      }
+
+      @Override
+      public Updater removeFlatDbBlockHash() {
         return this;
       }
 

@@ -41,7 +41,6 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.StorageEntriesCollector;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
@@ -176,6 +175,24 @@ public class BonsaiWorldStateKeyValueStorageTest {
     assertThat(storage.getTrieNode(trieBranchType, location, nodeHash)).contains(node);
     assertThat(storage.getTrieNode(otherBranchType, location, nodeHash)).isEmpty();
     assertThat(storage.getTrieNode(otherBranchType, location)).isEmpty();
+  }
+
+  @Test
+  void putFlatDbBlockHash_persistsIndependentCursor() {
+    setUp(FlatDbMode.FULL);
+    final Hash blockHash = Hash.hash(Bytes.fromHexString("0x1234"));
+
+    assertThat(storage.getFlatDbBlockHash()).isEmpty();
+
+    storage.updater().putFlatDbBlockHash(blockHash).commitComposedOnly();
+
+    assertThat(storage.getFlatDbBlockHash()).contains(blockHash);
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.PATRICIA)).isEmpty();
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isEmpty();
+
+    storage.clearFlatDatabase();
+
+    assertThat(storage.getFlatDbBlockHash()).isEmpty();
   }
 
   @ParameterizedTest
@@ -520,8 +537,7 @@ public class BonsaiWorldStateKeyValueStorageTest {
             account,
             storage.getAccount(account.addressHash()).get(),
             false,
-            new BonsaiCodeCache(),
-            new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH));
+            new BonsaiCodeCache());
     assertThat(retrievedAccount.getBalance())
         .isEqualTo(
             Wei.fromHexString(

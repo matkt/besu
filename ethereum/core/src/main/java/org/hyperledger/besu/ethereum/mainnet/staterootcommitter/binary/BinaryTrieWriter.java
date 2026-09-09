@@ -22,18 +22,15 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.DelegationEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitionedBinaryTrie;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -46,20 +43,13 @@ import org.apache.tuweni.units.bigints.UInt256;
  */
 public final class BinaryTrieWriter {
 
-  private final BonsaiWorldState worldState;
   private final boolean storageFrozen;
   private final StoredPartitionedBinaryTrie stateTrie;
   private final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
-  private final Set<Hash> introducedCodeHashes;
 
   public BinaryTrieWriter(
-      final BonsaiWorldState worldState,
-      final boolean storageFrozen,
-      final Set<Hash> introducedCodeHashes,
-      final StoredPartitionedBinaryTrie stateTrie) {
-    this.worldState = worldState;
+      final boolean storageFrozen, final StoredPartitionedBinaryTrie stateTrie) {
     this.storageFrozen = storageFrozen;
-    this.introducedCodeHashes = introducedCodeHashes;
     this.stateTrie = stateTrie;
   }
 
@@ -177,21 +167,21 @@ public final class BinaryTrieWriter {
     final boolean writingCode = !isEmpty(updatedCode);
     final boolean removingCode = isEmpty(updatedCode) && !isEmpty(priorCode);
 
-    if (writingCode && recordIfNewlyIntroduced(updatedCodeHash)) {
+    if (writingCode) {
       if (!hasCodeDelegation(updatedCode)) {
-        putCodeLeaves(Bytes32.wrap(updatedCodeHash.getBytes()), updatedCode);
+        stateTrie.insertCode(Bytes32.wrap(updatedCodeHash.getBytes()), updatedCode);
       }
       if (!storageFrozen) {
         writes.add(updater -> updater.putCode(accountHash, updatedCodeHash, updatedCode));
       }
     }
 
-    if (removingCode && introducedCodeHashes.contains(priorCodeHash)) {
+    if (removingCode) {
       if (!hasCodeDelegation(priorCode)) {
-        removeCodeLeaves(Bytes32.wrap(priorCodeHash.getBytes()), priorCode);
+        stateTrie.deleteCode(Bytes32.wrap(priorCodeHash.getBytes()));
       }
       if (!storageFrozen) {
-        writes.add(updater -> updater.removeCodeByHash(priorCodeHash));
+        writes.add(updater -> updater.removeCode(accountHash));
       }
     }
   }
@@ -215,40 +205,6 @@ public final class BinaryTrieWriter {
       if (!storageFrozen) {
         writes.add(updater -> updater.putStorageValueBySlotHash(accountHash, slotHash, value));
       }
-    }
-  }
-
-  private boolean recordIfNewlyIntroduced(final Hash codeHash) {
-    if (introducedCodeHashes.contains(codeHash)) {
-      return false;
-    }
-    if (worldState.getWorldStateStorage().getCode(codeHash, null).isPresent()) {
-      return false;
-    }
-    introducedCodeHashes.add(codeHash);
-    return true;
-  }
-
-  private void putCodeLeaves(final Bytes32 codeHash, final Bytes codeBytes) {
-    final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(codeBytes);
-    for (int i = 0; i < chunks.size(); i++) {
-      final Bytes32 chunk = chunks.get(i);
-      final Bytes chunkKey = TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i);
-      if (Bytes32.ZERO.equals(chunk)) {
-        stateTrie.remove(chunkKey);
-      } else {
-        stateTrie.put(chunkKey, chunk);
-      }
-    }
-  }
-
-  private void removeCodeLeaves(final Bytes32 codeHash, final Bytes codeBytes) {
-    final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(codeBytes);
-    for (int i = 0; i < chunks.size(); i++) {
-      if (Bytes32.ZERO.equals(chunks.get(i))) {
-        continue;
-      }
-      stateTrie.remove(TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i));
     }
   }
 

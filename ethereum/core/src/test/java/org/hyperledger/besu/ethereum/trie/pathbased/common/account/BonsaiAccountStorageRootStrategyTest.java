@@ -20,9 +20,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BinaryStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.MptStorageRootStrategy;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.StorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -73,13 +76,7 @@ class BonsaiAccountStorageRootStrategyTest {
     assertThat(encoded.size()).isLessThan(mptEquivalent.serializeAccount().size());
 
     final BonsaiAccount decoded =
-        BonsaiAccount.fromFlatBytes(
-            null,
-            address,
-            encoded,
-            true,
-            new BonsaiCodeCache(),
-            BinaryStorageRootStrategy.INSTANCE);
+        BonsaiAccount.fromFlatBytes(null, address, encoded, true, new BonsaiCodeCache());
 
     assertThat(decoded.getNonce()).isEqualTo(nonce);
     assertThat(decoded.getBalance()).isEqualTo(balance);
@@ -107,13 +104,7 @@ class BonsaiAccountStorageRootStrategyTest {
 
     final Bytes encoded = account.serializeAccount();
     final BonsaiAccount decoded =
-        BonsaiAccount.fromFlatBytes(
-            null,
-            address,
-            encoded,
-            true,
-            new BonsaiCodeCache(),
-            new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH));
+        BonsaiAccount.fromFlatBytes(null, address, encoded, true, new BonsaiCodeCache());
 
     assertThat(decoded.getNonce()).isEqualTo(1L);
     assertThat(decoded.getBalance()).isEqualTo(Wei.ONE);
@@ -123,10 +114,9 @@ class BonsaiAccountStorageRootStrategyTest {
   }
 
   @Test
-  void binaryStrategyReadsLegacyMptRlpAndConsumesStorageRoot() {
-    // A node migrating from MPT to binary still has flat-DB accounts encoded as 4-field MPT RLP
-    // [nonce, balance, storageRoot, codeHash]. The binary strategy must consume+discard the
-    // storageRoot so the following codeHash read stays aligned.
+  void flatDecodeKeepsLegacyMptShapeDuringMigration() {
+    // A node migrating from MPT to binary still has flat-DB accounts encoded as 4-field MPT RLP.
+    // Decoding must preserve that shape and storage root independently of the active branch.
     final Address address = Address.fromHexString("0x00000000000000000000000000000000000000cc");
     final long nonce = 42L;
     final Wei balance = Wei.of(99L);
@@ -147,22 +137,14 @@ class BonsaiAccountStorageRootStrategyTest {
             new BonsaiCodeCache());
     final Bytes legacyMptRlp = mptEncoded.serializeAccount();
 
-    // Decode the legacy 4-field RLP with the BINARY strategy: storageRoot consumed+ignored.
     final BonsaiAccount decoded =
-        BonsaiAccount.fromFlatBytes(
-            null,
-            address,
-            legacyMptRlp,
-            true,
-            new BonsaiCodeCache(),
-            BinaryStorageRootStrategy.INSTANCE);
+        BonsaiAccount.fromFlatBytes(null, address, legacyMptRlp, true, new BonsaiCodeCache());
 
     assertThat(decoded.getNonce()).isEqualTo(nonce);
     assertThat(decoded.getBalance()).isEqualTo(balance);
-    // codeHash must be the real codeHash, not the legacy storageRoot (alignment check).
     assertThat(decoded.getCodeHash()).isEqualTo(codeHash);
-    assertThat(decoded.hasStorageRoot()).isFalse();
-    assertThatThrownBy(decoded::getStorageRoot).isInstanceOf(UnsupportedOperationException.class);
+    assertThat(decoded.hasStorageRoot()).isTrue();
+    assertThat(decoded.getStorageRoot()).isEqualTo(legacyStorageRoot);
   }
 
   @Test
@@ -198,6 +180,32 @@ class BonsaiAccountStorageRootStrategyTest {
         mptAccountWithRoot(Hash.EMPTY_TRIE_HASH), "ctx");
     BinaryStorageRootStrategy.INSTANCE.assertStorageRootMatches(binaryAccount(), "ctx");
     // no exception thrown — binary diffs do not assert on storage root
+  }
+
+  @Test
+  void accountValueOwnsStrategyMatchingItsEncodedShape() {
+    final Hash storageRoot = Hash.hash(Bytes.of(1, 2, 3));
+
+    final StorageRootStrategy priorStrategy =
+        new PatriciaTrieAccountValue(1L, Wei.ONE, storageRoot, Hash.EMPTY).storageRootStrategy();
+    final StorageRootStrategy updatedStrategy =
+        new BinaryTrieAccountValue(2L, Wei.of(2), Hash.EMPTY).storageRootStrategy();
+
+    assertThat(priorStrategy).isInstanceOf(MptStorageRootStrategy.class);
+    assertThat(priorStrategy.getStorageRoot()).isEqualTo(storageRoot);
+    assertThat(updatedStrategy).isSameAs(BinaryStorageRootStrategy.INSTANCE);
+  }
+
+  @Test
+  void bonsaiAccountStrategyIsCopiedSoAccountsNeverShareARoot() {
+    final Hash storageRoot = Hash.hash(Bytes.of(4, 5, 6));
+    final BonsaiAccount account = mptAccountWithRoot(storageRoot);
+
+    final StorageRootStrategy strategy = account.storageRootStrategy();
+    strategy.setStorageRoot(Hash.EMPTY_TRIE_HASH);
+
+    assertThat(strategy).isNotSameAs(account.getStorageRootStrategy());
+    assertThat(account.getStorageRoot()).isEqualTo(storageRoot);
   }
 
   private static BonsaiAccount mptAccountWithRoot(final Hash storageRoot) {

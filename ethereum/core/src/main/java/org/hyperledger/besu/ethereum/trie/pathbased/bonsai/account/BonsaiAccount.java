@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.common.TrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
@@ -54,7 +55,7 @@ import org.apache.tuweni.units.bigints.UInt256;
  * {@link #isStorageEmpty()} throw for binary accounts; callers that may handle binary accounts must
  * guard with {@link #hasStorageRoot()}.
  */
-public class BonsaiAccount implements MutableAccount, AccountValue {
+public class BonsaiAccount implements MutableAccount, TrieAccountValue {
   protected final BonsaiWorldView context;
   protected boolean immutable;
   protected final Address address;
@@ -101,6 +102,14 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
 
   public BonsaiAccount(
       final BonsaiAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
+    this(toCopy, context, mutable, toCopy.storageRootStrategy.copy());
+  }
+
+  public BonsaiAccount(
+      final BonsaiAccount toCopy,
+      final BonsaiWorldView context,
+      final boolean mutable,
+      final StorageRootStrategy storageRootStrategy) {
     this.context = context;
     this.address = toCopy.address;
     this.addressHash = toCopy.addressHash;
@@ -109,7 +118,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
     this.codeHash = toCopy.codeHash;
     this.immutable = !mutable;
     this.codeCache = toCopy.codeCache;
-    this.storageRootStrategy = toCopy.storageRootStrategy.copy();
+    this.storageRootStrategy = storageRootStrategy;
 
     if (toCopy.code == null && toCopy.codeHash.equals(Hash.EMPTY)) {
       this.code = Code.EMPTY_CODE;
@@ -142,6 +151,11 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   /** Returns the {@link StorageRootStrategy} carried by this account. */
   public StorageRootStrategy getStorageRootStrategy() {
     return storageRootStrategy;
+  }
+
+  @Override
+  public StorageRootStrategy storageRootStrategy() {
+    return storageRootStrategy.copy();
   }
 
   @Override
@@ -304,19 +318,14 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
 
   /**
    * Format-agnostic flat-DB decode factory. Reads the account RLP list {@code [nonce, balance,
-   * ...storageRoot..., codeHash]} and constructs a {@link BonsaiAccount} carrying the supplied
-   * {@link StorageRootStrategy}. The strategy reads (and stores) the storage-root field for MPT
-   * accounts and reads nothing for binary accounts (3-field list), so this factory works for both
-   * formats without any format probing in {@code BonsaiAccount}.
+   * ...storageRoot..., codeHash]} and constructs a {@link BonsaiAccount} whose strategy matches the
+   * encoded shape: four fields select MPT, three fields select binary.
    *
    * @param context the surrounding world view (may be {@code null} in tests).
    * @param address the account address.
    * @param encoded the flat-DB encoded bytes.
    * @param mutable whether the returned account is mutable.
    * @param codeCache the code cache.
-   * @param strategy the strategy selected by the caller from the world state's storage format (MPT
-   *     strategies are mutable and must not be shared across decodes; binary is a stateless
-   *     singleton).
    * @return the decoded account.
    * @throws RLPException if the encoded bytes are not valid RLP.
    */
@@ -325,11 +334,19 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
       final Address address,
       final Bytes encoded,
       final boolean mutable,
-      final CodeCache codeCache,
-      final StorageRootStrategy strategy)
+      final CodeCache codeCache)
       throws RLPException {
     final RLPInput in = RLP.input(encoded);
     final int listSize = in.enterList();
+    final StorageRootStrategy strategy;
+    if (listSize == 4) {
+      strategy = new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
+    } else if (listSize == 3) {
+      strategy = BinaryStorageRootStrategy.INSTANCE;
+    } else {
+      throw new IllegalArgumentException(
+          "Unexpected flat account field count: " + listSize + " (expected 3 or 4)");
+    }
 
     final long nonce = in.readLongScalar();
     final Wei balance = Wei.of(in.readUInt256Scalar());
@@ -387,10 +404,9 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
    * binary accounts must guard with {@link #hasStorageRoot()} before invoking this method.
    *
    * <p>This is a concrete accessor on {@code BonsaiAccount} (not inherited from {@link
-   * org.hyperledger.besu.datatypes.AccountValue}, which no longer carries a storage root): the
-   * storage root is delegated to the {@link StorageRootStrategy}. MPT callers that hold a generic
-   * {@link org.hyperledger.besu.datatypes.AccountValue} should project onto {@link
-   * org.hyperledger.besu.datatypes.MptAccountValue} instead.
+   * org.hyperledger.besu.datatypes.AccountValue}, which does not carry a storage root): the storage
+   * root is delegated to the {@link StorageRootStrategy}. Guard with {@link #hasStorageRoot()}
+   * before invoking this method.
    */
   public Hash getStorageRoot() {
     return storageRootStrategy.getStorageRoot();

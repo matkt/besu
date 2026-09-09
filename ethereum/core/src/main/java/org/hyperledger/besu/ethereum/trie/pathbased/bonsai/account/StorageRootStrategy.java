@@ -104,9 +104,9 @@ public interface StorageRootStrategy {
    * {@link IllegalStateException} if they differ. Used by account diffing.
    *
    * <p>The MPT strategy compares its held root against the other account's storage root (read via
-   * {@link org.hyperledger.besu.datatypes.MptAccountValue#getStorageRoot()} or {@link
-   * BonsaiAccount#getStorageRoot()}) and throws on mismatch (including an MPT-vs-binary mismatch,
-   * detected when {@code other} is a binary {@link BonsaiAccount} or a non-MPT {@link
+   * {@link org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue#getStorageRoot()} or
+   * {@link BonsaiAccount#getStorageRoot()}) and throws on mismatch (including an MPT-vs-binary
+   * mismatch, detected when {@code other} is a binary {@link BonsaiAccount} or a non-MPT {@link
    * org.hyperledger.besu.datatypes.AccountValue}). The binary strategy is a no-op: a binary account
    * carries no storage root, so there is nothing to compare (binary account diffs do not assert on
    * storage root).

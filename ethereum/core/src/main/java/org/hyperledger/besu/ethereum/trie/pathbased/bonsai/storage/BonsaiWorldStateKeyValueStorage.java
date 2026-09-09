@@ -18,6 +18,7 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.FLAT_DB_METADATA_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.PATRICIA_TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -70,6 +71,12 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       "worldBlockHash".getBytes(StandardCharsets.UTF_8);
   public static final byte[] WORLD_BLOCK_NUMBER_KEY =
       "worldBlockNumber".getBytes(StandardCharsets.UTF_8);
+  public static final byte[] FLAT_DB_BLOCK_HASH_KEY =
+      "flatDbBlockHash".getBytes(StandardCharsets.UTF_8);
+
+  /** Set once the PBT fork has been crossed; the migrator never runs again after this. */
+  public static final byte[] PBT_MIGRATOR_RETIRED_KEY =
+      "pbtMigratorRetired".getBytes(StandardCharsets.UTF_8);
 
   private final AtomicBoolean shouldClose = new AtomicBoolean(false);
   protected final AtomicBoolean isClosed = new AtomicBoolean(false);
@@ -105,7 +112,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                 CODE_STORAGE,
                 ACCOUNT_STORAGE_STORAGE,
                 PATRICIA_TRIE_BRANCH_STORAGE,
-                BINARY_TRIE_BRANCH_STORAGE));
+                BINARY_TRIE_BRANCH_STORAGE,
+                FLAT_DB_METADATA_STORAGE));
     this.trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
     this.flatDbStrategyProvider =
@@ -219,7 +227,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   public Optional<Bytes> getTrieNode(
       final TrieBranchType trieBranchType, final Bytes location, final Bytes32 nodeHash) {
-    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+    if (MerkleTrie.EMPTY_TRIE_NODE_HASH.equals(nodeHash)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
     return composedWorldStateStorage
@@ -277,6 +285,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void clear() {
     subscribers.forEach(StorageSubscriber::onClearStorage);
     getFlatDbStrategy().clearAll(composedWorldStateStorage);
+    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
     composedWorldStateStorage.clear(PATRICIA_TRIE_BRANCH_STORAGE);
     composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
     trieLogStorage.clear();
@@ -288,6 +297,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void clearFlatDatabase() {
     subscribers.forEach(StorageSubscriber::onClearFlatDatabaseStorage);
     getFlatDbStrategy().resetOnResync(composedWorldStateStorage);
+    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
     cacheManager.clear(ACCOUNT_INFO_STATE);
     cacheManager.clear(ACCOUNT_STORAGE_STORAGE);
   }
@@ -382,6 +392,29 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .get(TrieBranchSegments.segmentFor(trieBranchType), WORLD_BLOCK_HASH_KEY)
         .map(Bytes32::wrap)
         .map(Hash::wrap);
+  }
+
+  public Optional<Hash> getFlatDbBlockHash() {
+    return composedWorldStateStorage
+        .get(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY)
+        .map(Bytes32::wrap)
+        .map(Hash::wrap);
+  }
+
+  /** {@code true} once the PBT fork has been crossed and the migrator has permanently retired. */
+  public boolean isPbtMigratorRetired() {
+    return composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, PBT_MIGRATOR_RETIRED_KEY)
+        .isPresent();
+  }
+
+  /** Marks the PBT migrator as permanently retired; FCU owns the binary column from here on. */
+  public void markPbtMigratorRetired() {
+    final Updater updater = updater();
+    updater
+        .getWorldStateTransaction()
+        .put(BINARY_TRIE_BRANCH_STORAGE, PBT_MIGRATOR_RETIRED_KEY, new byte[] {1});
+    updater.commit();
   }
 
   public Optional<Long> getWorldStateBlockNumber() {
@@ -524,14 +557,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       this.worldStorage = worldStorage;
     }
 
-    public Updater removeCodeByAddress(final Hash accountHash) {
-      flatDbStrategy.removeFlatCodeByAddress(
-          worldStorage, composedWorldStateTransaction, accountHash);
-      return this;
-    }
-
-    public Updater removeCodeByHash(final Hash codeHash) {
-      flatDbStrategy.removeFlatCodeByHash(worldStorage, composedWorldStateTransaction, codeHash);
+    public Updater removeCode(final Hash accountHash) {
+      flatDbStrategy.removeFlatCode(worldStorage, composedWorldStateTransaction, accountHash);
       return this;
     }
 
@@ -563,6 +590,17 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       return this;
     }
 
+    public Updater putFlatDbBlockHash(final Hash blockHash) {
+      composedWorldStateTransaction.put(
+          FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY, blockHash.getBytes().toArrayUnsafe());
+      return this;
+    }
+
+    public Updater removeFlatDbBlockHash() {
+      composedWorldStateTransaction.remove(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY);
+      return this;
+    }
+
     public Updater saveWorldState(final Bytes blockHash, final Bytes32 nodeHash, final Bytes node) {
       return saveWorldState(TrieBranchType.PATRICIA, blockHash, nodeHash, node);
     }
@@ -591,7 +629,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         final Bytes location,
         final Bytes32 nodeHash,
         final Bytes node) {
-      if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      if (MerkleTrie.EMPTY_TRIE_NODE_HASH.equals(nodeHash)) {
         return this;
       }
       composedWorldStateTransaction.put(

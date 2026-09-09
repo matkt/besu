@@ -88,6 +88,14 @@ public class PbtMigrator {
       LOG.info("PBT migrator disabled: no binaryTrieTime fork configured");
       return;
     }
+    final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
+    // Once the fork has been crossed, the migrator is permanently retired — even if a reorg
+    // brings the chain head back to a PMT-era block. FCU owns the binary column from then on.
+    if (storage.isPbtMigratorRetired()) {
+      LOG.info(
+          "PBT migrator not starting: fork already crossed (migrator retired); FCU owns the binary column");
+      return;
+    }
     if (!started.compareAndSet(false, true)) {
       LOG.warn("PBT migrator already started");
       return;
@@ -119,6 +127,9 @@ public class PbtMigrator {
       if (!bootstrapped.get()) {
         bootstrap();
       }
+      if (!started.get()) {
+        return;
+      }
       migrateToward(chainHead);
     } catch (final Throwable t) {
       LOG.atError().setMessage("PBT migrator tick failed (will retry): {}").addArgument(t).log();
@@ -126,8 +137,15 @@ public class PbtMigrator {
   }
 
   private void bootstrap() {
-    final Optional<Hash> existing =
-        provider.getWorldStateKeyValueStorage().getWorldStateBlockHash(TrieBranchType.BINARY);
+    final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
+    if (storage.isPbtMigratorRetired()) {
+      bootstrapped.set(true);
+      LOG.info("PBT migrator bootstrap skipped: migrator already retired; FCU owns binary column");
+      stop();
+      return;
+    }
+
+    final Optional<Hash> existing = storage.getWorldStateBlockHash(TrieBranchType.BINARY);
 
     if (existing.isPresent() && !existing.get().equals(Hash.ZERO)) {
       final Hash baseHash = existing.get();
@@ -137,6 +155,17 @@ public class PbtMigrator {
               h -> {
                 lastMigratedBlockHash = baseHash;
                 lastMigratedBlockNumber = h.getNumber();
+                // Binary column already in PBT era (advanced by FCU): fork was crossed.
+                if (BinaryTrieForkSupport.isBinaryTrieActive(
+                    h.getTimestamp(), binaryTrieMilestone)) {
+                  storage.markPbtMigratorRetired();
+                  LOG.info(
+                      "PBT migrator resuming: binary column at block {} ({}) is in PBT era; "
+                          + "migrator retired, FCU owns the column",
+                      h.getNumber(),
+                      baseHash);
+                  stop();
+                }
               });
       bootstrapped.set(true);
       LOG.info(
@@ -185,17 +214,20 @@ public class PbtMigrator {
 
     if (BinaryTrieForkSupport.isBinaryTrieActive(target.getTimestamp(), binaryTrieMilestone)) {
       final Optional<BlockHeader> lastPmt = lastPmtAncestor(target);
-      if (lastPmt.isPresent() && !lastPmt.get().getBlockHash().equals(lastMigratedBlockHash)) {
+      // First-time transition: catch up to the last PMT block if still behind. Never roll
+      // back — if the column is already at or past lastPmt, FCU owns it from here on.
+      if (lastPmt.isPresent() && lastMigratedBlockNumber < lastPmt.get().getNumber()) {
         rollTo(lastPmt.get());
       }
       LOG.atInfo()
           .setMessage(
-              "PBT migrator reached PBT era at chain head {} ({}); last PMT block {} ({}) is the live path's binary base. Live path takes over; migrator stopping.")
+              "PBT migrator reached PBT era at chain head {} ({}); binary column at block {}. "
+                  + "FCU takes over; migrator permanently retired.")
           .addArgument(target.getNumber())
           .addArgument(target.getBlockHash())
-          .addArgument(lastPmt.map(BlockHeader::getNumber).orElse(-1L))
-          .addArgument(lastPmt.map(BlockHeader::getBlockHash).orElse(Hash.EMPTY))
+          .addArgument(lastMigratedBlockNumber)
           .log();
+      provider.getWorldStateKeyValueStorage().markPbtMigratorRetired();
       stop();
       return;
     }
@@ -276,19 +308,18 @@ public class PbtMigrator {
     final Hash previousRoot = bonsaiWorldState.getWorldStateRootHash();
     final BonsaiWorldStateUpdateAccumulator accumulator = bonsaiWorldState.updater();
 
+    applyTrieLogs(accumulator, rollBacks, false);
+    applyTrieLogs(accumulator, rollForwards, true);
+
+    final BonsaiWorldStateKeyValueStorage worldStateStorage =
+        bonsaiWorldState.getWorldStateStorage();
+    final DefaultBinaryStateRootCommitter committer = new DefaultBinaryStateRootCommitter();
+
+    final StateRootComputation computation;
+    final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
+        new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
     try {
-      applyTrieLogs(accumulator, rollBacks, false);
-      applyTrieLogs(accumulator, rollForwards, true);
-
-      final BonsaiWorldStateKeyValueStorage worldStateStorage =
-          bonsaiWorldState.getWorldStateStorage();
-      final DefaultBinaryStateRootCommitter committer = new DefaultBinaryStateRootCommitter();
-      final StateRootComputation computation =
-          committer.compute(bonsaiWorldState, blockHeader, bonsaiWorldState.updater());
-
-      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
-          new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
-
+      computation = committer.compute(bonsaiWorldState, blockHeader, bonsaiWorldState.updater());
       computation.applyTo(stateUpdater);
       stateUpdater
           .getWorldStateTransaction()
@@ -377,7 +408,6 @@ public class PbtMigrator {
 
           if (code != null && !code.isEmpty()) {
             trieLog.addCodeChange(address, null, code, genesisHeader.getBlockHash());
-            trieLog.addIntroducedCodeHash(codeHash);
           }
 
           if (ga.storage() != null) {

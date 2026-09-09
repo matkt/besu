@@ -34,13 +34,8 @@ public interface CodeStorageStrategy {
       final Hash codeHash,
       final Bytes code);
 
-  void removeFlatCodeByAddress(
+  void removeFlatCode(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,
       final Hash accountHash);
-
-  void removeFlatCodeByHash(
-      final SegmentedKeyValueStorage storage,
-      final SegmentedKeyValueStorageTransaction transaction,
-      final Hash codeHash);
 }
