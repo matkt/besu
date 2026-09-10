@@ -302,16 +302,15 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
   }
 
   @Test
-  public void shouldRespondWithSyncingDuringForwardSync() {
-    BlockHeader mockHeader = setupPayloadV1(getMinSupportedTimestamp());
+  public void shouldExecutePayloadWhenParentKnownEvenIfSyncing() {
+    BlockHeader mockHeader =
+        setupPayloadV1(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.of(new BlockProcessingOutputs(null, List.of()))));
     when(mergeContext.isSyncing()).thenReturn(Boolean.TRUE);
     var resp = resp(requestParams(mockEnginePayloadParam(mockHeader, emptyList())));
 
-    PayloadStatusV1 res = fromSuccessResp(resp);
-    assertThat(res.getError()).isNull();
-    assertThat(res.getStatusAsString()).isEqualTo(SYNCING.name());
-    assertThat(res.getLatestValidHash()).isEmpty();
-    verify(engineCallListener, times(1)).executionEngineCalled();
+    assertValidResponse(mockHeader, resp);
   }
 
   @Test

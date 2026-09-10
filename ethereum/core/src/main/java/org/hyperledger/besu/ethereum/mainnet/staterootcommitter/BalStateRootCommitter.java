@@ -205,6 +205,7 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     final WorldStateQueryParams.Builder queryParams =
         WorldStateQueryParams.newBuilder()
             .withParentBlockHeader(parentHeader)
+            .withTimeStamp(blockHeader.getTimestamp())
             .withShouldWorldStateUpdateHead(false);
     if (engine.useBalOverlay()) {
       queryParams.withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE));

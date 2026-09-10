@@ -237,11 +237,6 @@ public sealed class EngineNewPayloadV1<
       return respondWith(reqId, blockParam, null, SYNCING);
     }
 
-    if (syncInProgress) {
-      logger().debug("We are syncing");
-      return respondWith(reqId, blockParam, null, SYNCING);
-    }
-
     // 6. Client software MUST respond to this method call in the following way:
     // {status: ACCEPTED, latestValidHash: null, validationError: null} if the following conditions
     // are met:
