@@ -1683,8 +1683,8 @@ public class ChainDataPrunerTest {
             new BlockingExecutor());
 
     // The snap-sync unsafe import path never fires BlockAddedEvents, so the pruner is not
-    // registered as an observer; catch-up pruning is driven by pruneForSyncedHead, which the
-    // blockchain invokes via the sync-import pruning hook after each unsafe batch commits.
+    // registered as an observer. Catch-up pruning is driven by pruneForSyncedHead from the
+    // sync pipeline (ImportSyncBlocksStep) after each unsafe batch commits.
     chainDataPruner.pruneForSyncedHead(blockchain.getChainHeadBlock().getHeader());
 
     final long head = blockchain.getChainHeadBlockNumber();

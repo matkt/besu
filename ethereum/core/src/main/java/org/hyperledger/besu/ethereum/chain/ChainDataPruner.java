@@ -31,8 +31,17 @@ public class ChainDataPruner implements BlockAddedObserver {
   private static final Logger LOG = LoggerFactory.getLogger(ChainDataPruner.class);
   private static final int LOG_PRUNING_PROGRESS_REPEAT_DELAY_SECONDS = 300;
 
-  /** Catch-up cap per job: a few frequencies, not millions of keys in one txn. */
+  /**
+   * Catch-up cap per job, as a multiple of {@code chainPruningFrequency}. Default frequency is 256,
+   * so one job deletes at most 768 blocks rather than the full lag (e.g. after snap-sync).
+   */
   private static final int PRUNE_BATCH_FREQUENCY_MULTIPLIER = 3;
+
+  /**
+   * When frequency is 0 (tests / “prune whenever lag exists”), still bound work per transaction so
+   * a single job cannot scan millions of keys.
+   */
+  private static final long MIN_CATCH_UP_BLOCKS_PER_JOB = 1024;
 
   public static final int MAX_PRUNING_THREAD_QUEUE_SIZE = 16;
 
@@ -74,44 +83,49 @@ public class ChainDataPruner implements BlockAddedObserver {
   }
 
   private void chainPrunerAction(final BlockAddedEvent event) {
-    final long blockNumber = event.getHeader().getNumber();
-    // Never default the mark to the current head: during snap, the first BlockAddedEvent is the
-    // tip and that used to persist a mark that skipped all historical blocks (issue #11131).
+    final BlockHeader header = event.getHeader();
+    // Validate on every event, including non-canonical forks: a fork below the mark means
+    // retained may be too small. Canonical heads then share pruneForSyncedHead with snap-sync.
     final long storedBlockPruningMark = prunerStorage.getChainPruningMark().orElse(1L);
     final long storedBalPruningMark = prunerStorage.getBalPruningMark().orElse(1L);
-
-    final boolean isBalHashPresent = event.getHeader().getBalHash().isPresent();
     validatePruningMarks(
-        blockNumber, storedBlockPruningMark, storedBalPruningMark, isBalHashPresent);
-    recordForkBlock(event, blockNumber);
-
+        header.getNumber(),
+        storedBlockPruningMark,
+        storedBalPruningMark,
+        header.getBalHash().isPresent());
+    recordForkBlock(event, header.getNumber());
     if (!event.isNewCanonicalHead()) {
       return;
     }
-
-    pruningExecutor.submit(
-        () ->
-            pruneChainAndBalData(event.getHeader(), storedBlockPruningMark, storedBalPruningMark));
+    pruneForSyncedHead(header);
   }
 
   /**
-   * Drives catch-up chain/BAL pruning from the unsafe snap-sync import path, which bypasses {@code
-   * BlockAddedEvent} (see {@code DefaultBlockchain#unsafeImportSyncBodiesAndReceipts}). Called once
-   * per imported batch with the new chain head header. No-op unless block/BAL pruning is enabled;
+   * Drives catch-up chain/BAL pruning from the snap-sync pipeline ({@code ImportSyncBlocksStep}),
+   * which uses {@code DefaultBlockchain#unsafeImportSyncBodiesAndReceipts} and therefore bypasses
+   * {@code BlockAddedEvent} observers. Also used by {@link #chainPrunerAction} after a new
+   * canonical head. Called with the new chain head header. No-op unless chain pruning is enabled;
    * pre-merge-only pruning is driven by the observer path.
    */
   public void pruneForSyncedHead(final BlockHeader header) {
     if (pruningMode != PruningMode.CHAIN_PRUNING) {
       return;
     }
+    // Never default the mark to the current head: during snap, the first BlockAddedEvent is the
+    // tip and that used to persist a mark that skipped all historical blocks (issue #11131).
     final long storedBlockPruningMark = prunerStorage.getChainPruningMark().orElse(1L);
     final long storedBalPruningMark = prunerStorage.getBalPruningMark().orElse(1L);
+    validatePruningMarks(
+        header.getNumber(),
+        storedBlockPruningMark,
+        storedBalPruningMark,
+        header.getBalHash().isPresent());
     try {
       pruningExecutor.submit(
           () -> pruneChainAndBalData(header, storedBlockPruningMark, storedBalPruningMark));
     } catch (final RejectedExecutionException e) {
       LOG.debug(
-          "Chain pruning task rejected for head {}; will retry on the next imported batch",
+          "Chain pruning task rejected for head {}; will retry on the next head update",
           header.getNumber());
     }
   }
@@ -244,10 +258,9 @@ public class ChainDataPruner implements BlockAddedObserver {
 
   private long cappedEndBlock(final long startBlock, final long targetEnd) {
     final long frequency = config.chainPruningFrequency();
-    if (frequency <= 0) {
-      return targetEnd;
-    }
-    return Math.min(targetEnd, startBlock + frequency * PRUNE_BATCH_FREQUENCY_MULTIPLIER - 1);
+    final long maxBlocks =
+        frequency > 0 ? frequency * PRUNE_BATCH_FREQUENCY_MULTIPLIER : MIN_CATCH_UP_BLOCKS_PER_JOB;
+    return Math.min(targetEnd, startBlock + maxBlocks - 1);
   }
 
   private void removeChainData(final BlockchainStorage.Updater updater, final Hash blockHash) {
