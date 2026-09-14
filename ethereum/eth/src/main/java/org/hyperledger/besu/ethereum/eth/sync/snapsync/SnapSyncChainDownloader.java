@@ -27,7 +27,6 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.common.BackwardHeaderDriver;
 import org.hyperledger.besu.ethereum.eth.sync.common.ChainSyncState;
 import org.hyperledger.besu.ethereum.eth.sync.common.ChainSyncStateStorage;
-import org.hyperledger.besu.ethereum.eth.sync.common.CheckpointReorgException;
 import org.hyperledger.besu.ethereum.eth.sync.common.PivotUpdateListener;
 import org.hyperledger.besu.ethereum.eth.sync.common.SingleBlockHeaderDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.common.WorldStateHealFinishedListener;
@@ -91,6 +90,8 @@ public class SnapSyncChainDownloader
   private final ChainSyncStateStorage chainSyncStateStorage;
   private final BlockHeader initialPivotHeader;
   private final SingleBlockHeaderDownloader headerDownloader;
+
+  private final boolean headersToCheckpointOnly;
 
   private final AtomicBoolean cancelled = new AtomicBoolean(false);
   private final AtomicReference<ChainSyncState> chainSyncState = new AtomicReference<>(null);
@@ -169,6 +170,7 @@ public class SnapSyncChainDownloader
     this.initialPivotHeader = initialPivotHeader;
     this.chainSyncStateStorage = chainStateStorage;
     this.headerDownloader = headerDownloader;
+    this.headersToCheckpointOnly = syncConfig.isSnapSyncHeadersToCheckpointOnly();
   }
 
   public static ChainDownloader create(
@@ -306,13 +308,19 @@ public class SnapSyncChainDownloader
         .handle(
             (ignored, throwable) -> {
               if (throwable != null) {
-                if (throwable instanceof CancellationException) {
+                final Throwable cause =
+                    throwable instanceof CompletionException && throwable.getCause() != null
+                        ? throwable.getCause()
+                        : throwable;
+                if (cause instanceof CancellationException) {
                   LOG.info("Two-stage fast sync chain download cancelled");
+                } else if (cause instanceof WrongChainException) {
+                  LOG.debug(
+                      "Two-stage fast sync chain download stopping to re-pivot: {}",
+                      cause.getMessage());
                 } else {
                   LOG.error("Two-stage fast sync chain download failed", throwable);
                 }
-                // Stop metrics on failure
-                syncDurationMetrics.stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
                 return CompletableFuture.<Void>failedFuture(throwable);
               } else {
                 final Duration totalDuration = Duration.between(overallStartTime, Instant.now());
@@ -382,8 +390,6 @@ public class SnapSyncChainDownloader
         .downloadBlockHeader(checkpointHash)
         .thenApply(
             checkpointBlockHeader -> {
-              // Store checkpoint header in blockchain
-              blockchain.unsafeSetChainHead(checkpointBlockHeader, checkpointDifficulty);
               blockchain.unsafeStoreHeader(checkpointBlockHeader, checkpointDifficulty);
 
               LOG.debug(
@@ -392,10 +398,13 @@ public class SnapSyncChainDownloader
                   checkpoint.blockHash(),
                   checkpoint.totalDifficulty());
 
-              final BlockHeader genesisBlockHeader = blockchain.getGenesisBlockHeader();
+              final BlockHeader headerDownloadAnchor =
+                  headersToCheckpointOnly
+                      ? checkpointBlockHeader
+                      : blockchain.getGenesisBlockHeader();
               final ChainSyncState newState =
                   ChainSyncState.initialSync(
-                      initialPivotHeader, checkpointBlockHeader, genesisBlockHeader);
+                      initialPivotHeader, checkpointBlockHeader, headerDownloadAnchor);
 
               LOG.info("Created initial chain sync state: {}", newState);
               chainSyncState.set(newState);
@@ -452,7 +461,7 @@ public class SnapSyncChainDownloader
         .getBlockHeader(newPivotNumber - 1)
         .orElseThrow(
             () ->
-                new CheckpointReorgException(
+                new WrongChainException(
                     "New pivot #" + newPivotNumber + " has no stored header below it"));
   }
 
@@ -474,9 +483,9 @@ public class SnapSyncChainDownloader
    */
   private Optional<Throwable> shouldRetry(final Throwable error) {
     final Throwable cause = error instanceof CompletionException ? error.getCause() : error;
-    if (cause instanceof CancellationException
-        || cause instanceof WrongChainException
-        || cause instanceof CheckpointReorgException) {
+    // A wrong chain cannot be fixed by retrying this cycle from the saved state: the failure
+    // propagates to SnapSyncDownloader.handleFailure, which re-pivots to a fresh block.
+    if (cause instanceof CancellationException || cause instanceof WrongChainException) {
       return Optional.of(cause);
     }
 
@@ -618,8 +627,12 @@ public class SnapSyncChainDownloader
 
   /**
    * Verifies that the header the backward Stage-1 download produced at the trusted checkpoint
-   * height matches the checkpoint. A mismatch means the pivot is not on the checkpoint's chain,
-   * which is a fatal, non-recoverable condition.
+   * height matches the checkpoint. A mismatch means the pivot is not on the checkpoint's chain, so
+   * this cycle cannot produce a valid chain: {@link WrongChainException} is thrown, which {@link
+   * #shouldRetry} treats as non-retryable so snap sync re-pivots to a fresh block rather than
+   * retrying from the saved state. A checkpoint that is genuinely not canonical therefore keeps
+   * failing this check on every re-pivot; see {@code SnapSyncDownloader.handleFailure}, which warns
+   * the operator once the re-pivots stop looking transient.
    *
    * @param checkpoint the trusted body checkpoint header
    */
@@ -636,9 +649,9 @@ public class SnapSyncChainDownloader
                       + stored.getHash()
                       + ") does not match the trusted checkpoint ("
                       + checkpoint.getHash()
-                      + "). The pivot is not on the checkpoint's chain; stopping snap sync.";
-              LOG.error(message);
-              throw new CheckpointReorgException(message);
+                      + "). The pivot is not on the checkpoint's chain; re-pivoting.";
+              LOG.debug(message);
+              throw new WrongChainException(message);
             });
   }
 
@@ -838,7 +851,9 @@ public class SnapSyncChainDownloader
 
     final Optional<Throwable> failWith = shouldRetry(error);
     if (failWith.isPresent()) {
-      // Non-retryable error - fail (metrics will be stopped by outer handler)
+      // Non-retryable error - fail. The CHAIN_DOWNLOAD_DURATION timer is deliberately left
+      // running: the phase is measured once across re-pivots, so a later successful cycle records
+      // it (see SyncDurationMetrics).
       failSnapV2PivotCatchupIfNeeded(failWith.get());
       overallResult.completeExceptionally(failWith.get());
     } else {
