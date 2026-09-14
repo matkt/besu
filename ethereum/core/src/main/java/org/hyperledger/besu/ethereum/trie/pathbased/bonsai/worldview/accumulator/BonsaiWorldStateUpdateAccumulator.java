@@ -20,11 +20,10 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
@@ -42,15 +41,15 @@ public class BonsaiWorldStateUpdateAccumulator
         public void onReset() {}
       };
 
-  private final PathBasedCodeCache codeCache;
+  private final BonsaiCodeCache codeCache;
   private CommittedTransactionListener committedTransactionListener = NO_OP_LISTENER;
 
   public BonsaiWorldStateUpdateAccumulator(
       final PathBasedWorldView world,
-      final Consumer<PathBasedValue<BonsaiAccount>> accountPreloader,
+      final Consumer<BonsaiValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
-      final PathBasedCodeCache codeCache) {
+      final BonsaiCodeCache codeCache) {
     super(world, accountPreloader, storagePreloader, evmConfiguration);
 
     this.codeCache = codeCache;
@@ -155,7 +154,7 @@ public class BonsaiWorldStateUpdateAccumulator
   }
 
   @Override
-  public PathBasedCodeCache codeCache() {
+  public BonsaiCodeCache codeCache() {
     return codeCache;
   }
 }

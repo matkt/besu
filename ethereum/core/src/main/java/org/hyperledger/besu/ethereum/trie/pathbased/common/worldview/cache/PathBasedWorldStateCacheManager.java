@@ -14,17 +14,18 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache;
 
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateLayerStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiCachedWorldStateView;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedLayeredWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 
@@ -47,13 +48,13 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
   protected final WorldStateConfig worldStateConfig;
   private final Map<Hash, BlockHeader> stateRootToBlockHeaderCache = new ConcurrentHashMap<>();
 
-  private final PathBasedWorldStateKeyValueStorage rootWorldStateStorage;
-  private final Map<Hash, PathBasedCachedWorldStateView> cachedWorldStatesByHash;
+  private final BonsaiWorldStateKeyValueStorage rootWorldStateStorage;
+  private final Map<Hash, BonsaiCachedWorldStateView> cachedWorldStatesByHash;
 
   protected PathBasedWorldStateCacheManager(
       final PathBasedWorldStateProvider archive,
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final Map<Hash, PathBasedCachedWorldStateView> cachedWorldStatesByHash,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Map<Hash, BonsaiCachedWorldStateView> cachedWorldStatesByHash,
       final EvmConfiguration evmConfiguration,
       final WorldStateConfig worldStateConfig) {
     worldStateKeyValueStorage.subscribe(this);
@@ -68,13 +69,13 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
       final BlockHeader blockHeader,
       final Hash worldStateRootHash,
       final PathBasedWorldState forWorldState) {
-    final Optional<PathBasedCachedWorldStateView> cachedPathBasedWorldView =
+    final Optional<BonsaiCachedWorldStateView> cachedPathBasedWorldView =
         Optional.ofNullable(this.cachedWorldStatesByHash.get(blockHeader.getBlockHash()));
     if (cachedPathBasedWorldView.isPresent()) {
       // only replace if it is a layered storage
       if (forWorldState.isModifyingHeadWorldState()
           && cachedPathBasedWorldView.get().getWorldStateStorage()
-              instanceof PathBasedLayeredWorldStateKeyValueStorage) {
+              instanceof BonsaiWorldStateLayerStorage) {
         LOG.atDebug()
             .setMessage("updating layered world state for block {}, state root hash {}")
             .addArgument(blockHeader::toLogString)
@@ -94,16 +95,15 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
       if (forWorldState.isModifyingHeadWorldState()) {
         cachedWorldStatesByHash.put(
             blockHeader.getBlockHash(),
-            new PathBasedCachedWorldStateView(
+            new BonsaiCachedWorldStateView(
                 blockHeader, createSnapshotKeyValueStorage(forWorldState.getWorldStateStorage())));
       } else {
         // otherwise, add the layer to the cache
         cachedWorldStatesByHash.put(
             blockHeader.getBlockHash(),
-            new PathBasedCachedWorldStateView(
+            new BonsaiCachedWorldStateView(
                 blockHeader,
-                ((PathBasedLayeredWorldStateKeyValueStorage) forWorldState.getWorldStateStorage())
-                    .clone()));
+                ((BonsaiWorldStateLayerStorage) forWorldState.getWorldStateStorage()).clone()));
       }
       // add stateroot -> blockHeader cache entry
       stateRootToBlockHeaderCache.put(blockHeader.getStateRoot(), blockHeader);
@@ -153,7 +153,7 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
 
     return Optional.ofNullable(
             cachedWorldStatesByHash.get(blockHeader.getParentHash())) // search parent block
-        .map(PathBasedCachedWorldStateView::getWorldStateStorage)
+        .map(BonsaiCachedWorldStateView::getWorldStateStorage)
         .or(
             () -> {
               // or else search the nearest state in the cache
@@ -162,13 +162,13 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
                   .addArgument(blockHeader::toLogString)
                   .log();
 
-              final List<PathBasedCachedWorldStateView> cachedPathBasedWorldViews =
+              final List<BonsaiCachedWorldStateView> cachedPathBasedWorldViews =
                   new ArrayList<>(cachedWorldStatesByHash.values());
               return cachedPathBasedWorldViews.stream()
                   .sorted(
                       Comparator.comparingLong(
                           view -> Math.abs(blockHeader.getNumber() - view.getBlockNumber())))
-                  .map(PathBasedCachedWorldStateView::getWorldStateStorage)
+                  .map(BonsaiCachedWorldStateView::getWorldStateStorage)
                   .findFirst();
             })
         .map(
@@ -223,13 +223,13 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
    * @param rootHash rootHash to supply worldstate storage for
    * @return Optional worldstate storage
    */
-  public synchronized Optional<PathBasedWorldStateKeyValueStorage> getStorageByRootHash(
+  public synchronized Optional<BonsaiWorldStateKeyValueStorage> getStorageByRootHash(
       final Hash rootHash) {
     return Optional.ofNullable(stateRootToBlockHeaderCache.get(rootHash))
         .flatMap(
             header ->
                 Optional.ofNullable(cachedWorldStatesByHash.get(header.getBlockHash()))
-                    .map(PathBasedCachedWorldStateView::getWorldStateStorage)
+                    .map(BonsaiCachedWorldStateView::getWorldStateStorage)
                     .or(
                         () -> {
                           // if not cached already, maybe fetch and cache this worldstate
@@ -275,12 +275,12 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
 
   public abstract PathBasedWorldState createWorldState(
       final PathBasedWorldStateProvider archive,
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final EvmConfiguration evmConfiguration);
 
-  public abstract PathBasedWorldStateKeyValueStorage createLayeredKeyValueStorage(
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage);
+  public abstract BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage);
 
-  public abstract PathBasedWorldStateKeyValueStorage createSnapshotKeyValueStorage(
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage);
+  public abstract BonsaiWorldStateKeyValueStorage createSnapshotKeyValueStorage(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage);
 }

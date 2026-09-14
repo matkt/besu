@@ -22,13 +22,14 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.account.PathBasedAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.AccountConsumingMap;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.AccountConsumingMap;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.Consumer;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.preload.StorageConsumingMap;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -57,23 +58,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("unchecked")
-public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathBasedAccount>
+public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends BonsaiAccount>
     extends AbstractWorldUpdater<PathBasedWorldView, ACCOUNT>
     implements PathBasedWorldView, TrieLogAccumulator {
   private static final Logger LOG =
       LoggerFactory.getLogger(PathBasedWorldStateUpdateAccumulator.class);
-  protected final Consumer<PathBasedValue<ACCOUNT>> accountPreloader;
+  protected final Consumer<BonsaiValue<ACCOUNT>> accountPreloader;
   protected final Consumer<StorageSlotKey> storagePreloader;
 
-  private final AccountConsumingMap<PathBasedValue<ACCOUNT>> accountsToUpdate;
-  private final Map<Address, PathBasedValue<Bytes>> codeToUpdate = new ConcurrentHashMap<>();
+  private final AccountConsumingMap<BonsaiValue<ACCOUNT>> accountsToUpdate;
+  private final Map<Address, BonsaiValue<Bytes>> codeToUpdate = new ConcurrentHashMap<>();
   private final Set<Address> storageToClear = Collections.synchronizedSet(new HashSet<>());
   protected final EvmConfiguration evmConfiguration;
 
   // storage sub mapped by _hashed_ key.  This is because in self_destruct calls we need to
   // enumerate the old storage and delete it.  Those are trie stored by hashed key by spec and the
   // alternative was to keep a giant pre-image cache of the entire trie.
-  private final Map<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>
+  private final Map<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
       storageToUpdate = new ConcurrentHashMap<>();
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
@@ -81,7 +82,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
 
   public PathBasedWorldStateUpdateAccumulator(
       final PathBasedWorldView world,
-      final Consumer<PathBasedValue<ACCOUNT>> accountPreloader,
+      final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
     super(world, evmConfiguration);
@@ -136,7 +137,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
 
   /**
    * Imports writes from a {@link PartialBlockAccessView} produced by parallel BAL execution.
-   * Account and storage changes are inserted directly as {@link PathBasedValue} entries so {@link
+   * Account and storage changes are inserted directly as {@link BonsaiValue} entries so {@link
    * #commit()} does not need to re-read prior values from the database.
    *
    * @param partialView partial access list for a single transaction
@@ -180,7 +181,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       }
 
       if (hasStorageChange) {
-        final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> pendingStorageUpdates =
+        final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> pendingStorageUpdates =
             storageToUpdate.computeIfAbsent(
                 address,
                 k ->
@@ -194,9 +195,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
           final UInt256 updated =
               slotChange.newValue() != null ? slotChange.newValue() : UInt256.ZERO;
 
-          final PathBasedValue<UInt256> pendingValue = pendingStorageUpdates.get(slotKey);
+          final BonsaiValue<UInt256> pendingValue = pendingStorageUpdates.get(slotKey);
           if (pendingValue == null) {
-            pendingStorageUpdates.put(slotKey, new PathBasedValue<>(prior, updated));
+            pendingStorageUpdates.put(slotKey, new BonsaiValue<>(prior, updated));
           } else {
             pendingValue.setUpdated(updated);
           }
@@ -237,10 +238,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                       : (srcValue.getUpdated() != null
                           ? copyAccount(srcValue.getUpdated(), this, true)
                           : null);
-              final PathBasedValue<ACCOUNT> newValue =
+              final BonsaiValue<ACCOUNT> newValue =
                   priorOnly
-                      ? new PathBasedValue<>(copyPrior, copyUpdated)
-                      : new PathBasedValue<>(copyPrior, copyUpdated, srcValue.isLastStepCleared());
+                      ? new BonsaiValue<>(copyPrior, copyUpdated)
+                      : new BonsaiValue<>(copyPrior, copyUpdated, srcValue.isLastStepCleared());
               if (priorOnly) {
                 accountsToUpdate.putIfAbsent(address, newValue);
               } else {
@@ -254,10 +255,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
             (address, srcValue) -> {
               final Bytes prior = srcValue.getPrior();
               final Bytes updated = priorOnly ? prior : srcValue.getUpdated();
-              final PathBasedValue<Bytes> newValue =
+              final BonsaiValue<Bytes> newValue =
                   priorOnly
-                      ? new PathBasedValue<>(prior, updated)
-                      : new PathBasedValue<>(prior, updated, srcValue.isLastStepCleared());
+                      ? new BonsaiValue<>(prior, updated)
+                      : new BonsaiValue<>(prior, updated, srcValue.isLastStepCleared());
               if (priorOnly) {
                 codeToUpdate.putIfAbsent(address, newValue);
               } else {
@@ -269,7 +270,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
         .getStorageToUpdate()
         .forEach(
             (address, slots) -> {
-              final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> targetSlots =
+              final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> targetSlots =
                   storageToUpdate.computeIfAbsent(
                       address,
                       k ->
@@ -279,10 +280,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                   (slotKey, srcSlot) -> {
                     final UInt256 slotPrior = srcSlot.getPrior();
                     final UInt256 slotUpdated = priorOnly ? slotPrior : srcSlot.getUpdated();
-                    final PathBasedValue<UInt256> newSlotValue =
+                    final BonsaiValue<UInt256> newSlotValue =
                         priorOnly
-                            ? new PathBasedValue<>(slotPrior, slotUpdated)
-                            : new PathBasedValue<>(
+                            ? new BonsaiValue<>(slotPrior, slotUpdated)
+                            : new BonsaiValue<>(
                                 slotPrior, slotUpdated, srcSlot.isLastStepCleared());
                     if (priorOnly) {
                       targetSlots.putIfAbsent(slotKey, newSlotValue);
@@ -296,7 +297,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     this.isAccumulatorStateChanged = true;
   }
 
-  protected Consumer<PathBasedValue<ACCOUNT>> getAccountPreloader() {
+  protected Consumer<BonsaiValue<ACCOUNT>> getAccountPreloader() {
     return accountPreloader;
   }
 
@@ -325,10 +326,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
 
   @Override
   public MutableAccount createAccount(final Address address, final long nonce, final Wei balance) {
-    PathBasedValue<ACCOUNT> pathBasedValue = accountsToUpdate.get(address);
+    BonsaiValue<ACCOUNT> pathBasedValue = accountsToUpdate.get(address);
 
     if (pathBasedValue == null) {
-      pathBasedValue = new PathBasedValue<>(null, null);
+      pathBasedValue = new BonsaiValue<>(null, null);
       accountsToUpdate.put(address, pathBasedValue);
     } else if (pathBasedValue.getUpdated() != null) {
       if (pathBasedValue.getUpdated().isEmpty()) {
@@ -353,12 +354,12 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   }
 
   @Override
-  public Map<Address, PathBasedValue<ACCOUNT>> getAccountsToUpdate() {
+  public Map<Address, BonsaiValue<ACCOUNT>> getAccountsToUpdate() {
     return accountsToUpdate;
   }
 
   @Override
-  public Map<Address, PathBasedValue<Bytes>> getCodeToUpdate() {
+  public Map<Address, BonsaiValue<Bytes>> getCodeToUpdate() {
     return codeToUpdate;
   }
 
@@ -367,18 +368,18 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   }
 
   @Override
-  public Map<Address, StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>>>
+  public Map<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
       getStorageToUpdate() {
     return storageToUpdate;
   }
 
   @Override
   protected ACCOUNT getForMutation(final Address address) {
-    return loadAccount(address, PathBasedValue::getUpdated);
+    return loadAccount(address, BonsaiValue::getUpdated);
   }
 
   protected Optional<ACCOUNT> loadAccountFromParentAccumulator(
-      final Address address, final Function<PathBasedValue<ACCOUNT>, ACCOUNT> accountFunction) {
+      final Address address, final Function<BonsaiValue<ACCOUNT>, ACCOUNT> accountFunction) {
     if (wrappedWorldView() instanceof PathBasedWorldStateUpdateAccumulator<?> parentAccumulator) {
       @SuppressWarnings("unchecked")
       final PathBasedWorldStateUpdateAccumulator<ACCOUNT> parent =
@@ -389,19 +390,19 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   }
 
   protected void onAccountValueLoaded(
-      final Address address, final PathBasedValue<ACCOUNT> accountValue) {}
+      final Address address, final BonsaiValue<ACCOUNT> accountValue) {}
 
-  protected void onCodeValueLoaded(final Address address, final PathBasedValue<Bytes> codeValue) {}
+  protected void onCodeValueLoaded(final Address address, final BonsaiValue<Bytes> codeValue) {}
 
   protected void onStorageValueLoaded(
       final Address address,
       final StorageSlotKey storageSlotKey,
-      final PathBasedValue<UInt256> storageValue) {}
+      final BonsaiValue<UInt256> storageValue) {}
 
   public ACCOUNT loadAccount(
-      final Address address, final Function<PathBasedValue<ACCOUNT>, ACCOUNT> accountFunction) {
+      final Address address, final Function<BonsaiValue<ACCOUNT>, ACCOUNT> accountFunction) {
     try {
-      final PathBasedValue<ACCOUNT> pathBasedValue = accountsToUpdate.get(address);
+      final BonsaiValue<ACCOUNT> pathBasedValue = accountsToUpdate.get(address);
       if (pathBasedValue == null) {
         final Optional<ACCOUNT> fromParent =
             loadAccountFromParentAccumulator(address, accountFunction);
@@ -409,18 +410,18 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
           return fromParent.get();
         }
         final Account account = wrappedWorldView().get(address);
-        if (account instanceof PathBasedAccount pathBasedAccount) {
+        if (account instanceof BonsaiAccount pathBasedAccount) {
           final ACCOUNT updatedAccount = copyAccount((ACCOUNT) pathBasedAccount, this, true);
-          final PathBasedValue<ACCOUNT> accountValue =
-              new PathBasedValue<>((ACCOUNT) pathBasedAccount, updatedAccount);
+          final BonsaiValue<ACCOUNT> accountValue =
+              new BonsaiValue<>((ACCOUNT) pathBasedAccount, updatedAccount);
           onAccountValueLoaded(address, accountValue);
           accountsToUpdate.put(address, accountValue);
           return accountFunction.apply(accountValue);
         }
-        final PathBasedValue<ACCOUNT> accountValue = new PathBasedValue<>(null, null);
+        final BonsaiValue<ACCOUNT> accountValue = new BonsaiValue<>(null, null);
         onAccountValueLoaded(address, accountValue);
         if (accountValue.getUpdated() == null) {
-          accountsToUpdate.put(address, new PathBasedValue<>(null, null));
+          accountsToUpdate.put(address, new BonsaiValue<>(null, null));
           return null;
         }
         accountsToUpdate.put(address, accountValue);
@@ -449,12 +450,12 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     this.isAccumulatorStateChanged = true;
 
     for (final Address deletedAddress : getDeletedAccounts()) {
-      final PathBasedValue<ACCOUNT> accountValue =
+      final BonsaiValue<ACCOUNT> accountValue =
           accountsToUpdate.computeIfAbsent(
               deletedAddress,
-              __ -> loadAccountFromParent(deletedAddress, new PathBasedValue<>(null, null, true)));
+              __ -> loadAccountFromParent(deletedAddress, new BonsaiValue<>(null, null, true)));
       storageToClear.add(deletedAddress);
-      final PathBasedValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
+      final BonsaiValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
       if (codeValue != null) {
         codeValue.setUpdated(null).setCleared();
       } else {
@@ -462,27 +463,26 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
             .getCode(
                 deletedAddress,
                 Optional.ofNullable(accountValue)
-                    .map(PathBasedValue::getPrior)
-                    .map(PathBasedAccount::getCodeHash)
+                    .map(BonsaiValue::getPrior)
+                    .map(BonsaiAccount::getCodeHash)
                     .orElse(Hash.EMPTY))
             .ifPresent(
                 deletedCode ->
-                    codeToUpdate.put(
-                        deletedAddress, new PathBasedValue<>(deletedCode, null, true)));
+                    codeToUpdate.put(deletedAddress, new BonsaiValue<>(deletedCode, null, true)));
       }
 
       // mark all updated storage as to be cleared
-      final Map<StorageSlotKey, PathBasedValue<UInt256>> deletedStorageUpdates =
+      final Map<StorageSlotKey, BonsaiValue<UInt256>> deletedStorageUpdates =
           storageToUpdate.computeIfAbsent(
               deletedAddress,
               k ->
                   new StorageConsumingMap<>(
                       deletedAddress, new ConcurrentHashMap<>(), storagePreloader));
-      final Iterator<Map.Entry<StorageSlotKey, PathBasedValue<UInt256>>> iter =
+      final Iterator<Map.Entry<StorageSlotKey, BonsaiValue<UInt256>>> iter =
           deletedStorageUpdates.entrySet().iterator();
       while (iter.hasNext()) {
-        final Map.Entry<StorageSlotKey, PathBasedValue<UInt256>> updateEntry = iter.next();
-        final PathBasedValue<UInt256> updatedSlot = updateEntry.getValue();
+        final Map.Entry<StorageSlotKey, BonsaiValue<UInt256>> updateEntry = iter.next();
+        final BonsaiValue<UInt256> updatedSlot = updateEntry.getValue();
         if (updatedSlot.getPrior() == null || updatedSlot.getPrior().isZero()) {
           iter.remove();
         } else {
@@ -501,8 +501,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                       new StorageSlotKey(Hash.wrap(keyHash), Optional.empty());
                   if (!deletedStorageUpdates.containsKey(storageSlotKey)) {
                     final UInt256 value = UInt256.fromBytes(RLP.decodeOne(entryValue));
-                    deletedStorageUpdates.put(
-                        storageSlotKey, new PathBasedValue<>(value, null, true));
+                    deletedStorageUpdates.put(storageSlotKey, new BonsaiValue<>(value, null, true));
                   }
                 });
       }
@@ -517,9 +516,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
             tracked -> {
               final Address updatedAddress = tracked.getAddress();
               final ACCOUNT updatedAccount;
-              final PathBasedValue<ACCOUNT> updatedAccountValue =
-                  accountsToUpdate.get(updatedAddress);
-              final Map<StorageSlotKey, PathBasedValue<UInt256>> pendingStorageUpdates =
+              final BonsaiValue<ACCOUNT> updatedAccountValue = accountsToUpdate.get(updatedAddress);
+              final Map<StorageSlotKey, BonsaiValue<UInt256>> pendingStorageUpdates =
                   storageToUpdate.computeIfAbsent(
                       updatedAddress,
                       k ->
@@ -530,9 +528,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                 updatedAccount = createAccount(this, tracked);
                 tracked.setWrappedAccount(updatedAccount);
                 if (updatedAccountValue == null) {
-                  accountsToUpdate.put(updatedAddress, new PathBasedValue<>(null, updatedAccount));
+                  accountsToUpdate.put(updatedAddress, new BonsaiValue<>(null, updatedAccount));
                   codeToUpdate.put(
-                      updatedAddress, new PathBasedValue<>(null, updatedAccount.getCode()));
+                      updatedAddress, new BonsaiValue<>(null, updatedAccount.getCode()));
                 } else {
                   updatedAccountValue.setUpdated(updatedAccount);
                 }
@@ -550,17 +548,17 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
               }
 
               if (tracked.codeWasUpdated()) {
-                final PathBasedValue<Bytes> pendingCode =
+                final BonsaiValue<Bytes> pendingCode =
                     codeToUpdate.computeIfAbsent(
                         updatedAddress,
                         addr ->
-                            new PathBasedValue<>(
+                            new BonsaiValue<>(
                                 wrappedWorldView()
                                     .getCode(
                                         addr,
                                         Optional.ofNullable(updatedAccountValue)
-                                            .map(PathBasedValue::getPrior)
-                                            .map(PathBasedAccount::getCodeHash)
+                                            .map(BonsaiValue::getPrior)
+                                            .map(BonsaiAccount::getCodeHash)
                                             .orElse(Hash.EMPTY))
                                     .orElse(null),
                                 null));
@@ -583,12 +581,12 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                             new StorageSlotKey(
                                 hashAndSaveSlotPreImage(keyUInt), Optional.of(keyUInt));
                         final UInt256 value = storageUpdate.getValue();
-                        final PathBasedValue<UInt256> pendingValue =
+                        final BonsaiValue<UInt256> pendingValue =
                             pendingStorageUpdates.get(slotKey);
                         if (pendingValue == null) {
                           pendingStorageUpdates.put(
                               slotKey,
-                              new PathBasedValue<>(
+                              new BonsaiValue<>(
                                   updatedAccount.getOriginalStorageValue(keyUInt), value));
                         } else {
                           pendingValue.setUpdated(value);
@@ -609,11 +607,11 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
 
   @Override
   public Optional<Bytes> getCode(final Address address, final Hash codeHash) {
-    final PathBasedValue<Bytes> localCode = codeToUpdate.get(address);
+    final BonsaiValue<Bytes> localCode = codeToUpdate.get(address);
     if (localCode == null) {
       final Supplier<Bytes> loader =
           Suppliers.memoize(() -> wrappedWorldView().getCode(address, codeHash).orElse(null));
-      final PathBasedValue<Bytes> codeValue = PathBasedValue.withLazy(loader, loader);
+      final BonsaiValue<Bytes> codeValue = BonsaiValue.withLazy(loader, loader);
       onCodeValueLoaded(address, codeValue);
       codeToUpdate.put(address, codeValue);
       return Optional.ofNullable(codeValue.getUpdated());
@@ -632,10 +630,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   @Override
   public Optional<UInt256> getStorageValueByStorageSlotKey(
       final Address address, final StorageSlotKey storageSlotKey) {
-    final Map<StorageSlotKey, PathBasedValue<UInt256>> localAccountStorage =
+    final Map<StorageSlotKey, BonsaiValue<UInt256>> localAccountStorage =
         storageToUpdate.get(address);
     if (localAccountStorage != null) {
-      final PathBasedValue<UInt256> value = localAccountStorage.get(storageSlotKey);
+      final BonsaiValue<UInt256> value = localAccountStorage.get(storageSlotKey);
       if (value != null) {
         return Optional.ofNullable(value.getUpdated());
       }
@@ -651,7 +649,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                       : wrappedWorldView()
                           .getStorageValueByStorageSlotKey(address, storageSlotKey)
                           .orElse(null));
-      final PathBasedValue<UInt256> storageValue = PathBasedValue.withLazy(loader, loader);
+      final BonsaiValue<UInt256> storageValue = BonsaiValue.withLazy(loader, loader);
       onStorageValueLoaded(address, storageSlotKey, storageValue);
 
       storageToUpdate
@@ -674,10 +672,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     // TODO maybe log the read into the trie layer?
     StorageSlotKey storageSlotKey =
         new StorageSlotKey(hashAndSaveSlotPreImage(storageKey), Optional.of(storageKey));
-    final Map<StorageSlotKey, PathBasedValue<UInt256>> localAccountStorage =
+    final Map<StorageSlotKey, BonsaiValue<UInt256>> localAccountStorage =
         storageToUpdate.get(address);
     if (localAccountStorage != null) {
-      final PathBasedValue<UInt256> value = localAccountStorage.get(storageSlotKey);
+      final BonsaiValue<UInt256> value = localAccountStorage.get(storageSlotKey);
       if (value != null) {
         if (value.isLastStepCleared()) {
           return UInt256.ZERO;
@@ -701,7 +699,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   @Override
   public Map<Bytes32, Bytes> getAllAccountStorage(final Address address, final Hash rootHash) {
     final Map<Bytes32, Bytes> results = wrappedWorldView().getAllAccountStorage(address, rootHash);
-    final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> pathBasedValueStorage =
+    final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> pathBasedValueStorage =
         storageToUpdate.get(address);
     if (pathBasedValueStorage != null) {
       // hash the key to match the implied storage interface of hashed slotKey
@@ -733,7 +731,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   }
 
   @Override
-  public PathBasedWorldStateKeyValueStorage getWorldStateStorage() {
+  public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
     return wrappedWorldView().getWorldStateStorage();
   }
 
@@ -785,15 +783,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       // non-change, a cached read.
       return;
     }
-    PathBasedValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
+    BonsaiValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
     if (accountValue == null) {
       accountValue = loadAccountFromParent(address, accountValue);
     }
     if (accountValue == null) {
       if (expectedValue == null && replacementValue != null) {
         accountsToUpdate.put(
-            address,
-            new PathBasedValue<>(null, createAccount(this, address, replacementValue, true)));
+            address, new BonsaiValue<>(null, createAccount(this, address, replacementValue, true)));
       } else {
         throw new IllegalStateException(
             String.format(
@@ -826,13 +823,13 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     }
   }
 
-  private PathBasedValue<ACCOUNT> loadAccountFromParent(
-      final Address address, final PathBasedValue<ACCOUNT> defaultValue) {
+  private BonsaiValue<ACCOUNT> loadAccountFromParent(
+      final Address address, final BonsaiValue<ACCOUNT> defaultValue) {
     try {
       final Account parentAccount = wrappedWorldView().get(address);
-      if (parentAccount instanceof PathBasedAccount account) {
-        final PathBasedValue<ACCOUNT> loadedAccountValue =
-            new PathBasedValue<>(copyAccount((ACCOUNT) account), ((ACCOUNT) account));
+      if (parentAccount instanceof BonsaiAccount account) {
+        final BonsaiValue<ACCOUNT> loadedAccountValue =
+            new BonsaiValue<>(copyAccount((ACCOUNT) account), ((ACCOUNT) account));
         accountsToUpdate.put(address, loadedAccountValue);
         return loadedAccountValue;
       } else {
@@ -851,7 +848,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       // non-change, a cached read.
       return;
     }
-    PathBasedValue<Bytes> codeValue = codeToUpdate.get(address);
+    BonsaiValue<Bytes> codeValue = codeToUpdate.get(address);
     if (codeValue == null) {
       final Bytes storedCode =
           wrappedWorldView()
@@ -859,14 +856,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                   address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
               .orElse(Bytes.EMPTY);
       if (!storedCode.isEmpty()) {
-        codeValue = new PathBasedValue<>(storedCode, storedCode);
+        codeValue = new BonsaiValue<>(storedCode, storedCode);
         codeToUpdate.put(address, codeValue);
       }
     }
 
     if (codeValue == null) {
       if ((expectedCode == null || expectedCode.isEmpty()) && replacementCode != null) {
-        codeToUpdate.put(address, new PathBasedValue<>(null, replacementCode));
+        codeToUpdate.put(address, new BonsaiValue<>(null, replacementCode));
       } else {
         throw new IllegalStateException(
             String.format(
@@ -894,10 +891,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     }
   }
 
-  private Map<StorageSlotKey, PathBasedValue<UInt256>> maybeCreateStorageMap(
-      final Map<StorageSlotKey, PathBasedValue<UInt256>> storageMap, final Address address) {
+  private Map<StorageSlotKey, BonsaiValue<UInt256>> maybeCreateStorageMap(
+      final Map<StorageSlotKey, BonsaiValue<UInt256>> storageMap, final Address address) {
     if (storageMap == null) {
-      final StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> newMap =
+      final StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>> newMap =
           new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader);
       storageToUpdate.put(address, newMap);
       return newMap;
@@ -919,13 +916,13 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
       // corner case on deletes, non-change
       return;
     }
-    final Map<StorageSlotKey, PathBasedValue<UInt256>> storageMap = storageToUpdate.get(address);
-    PathBasedValue<UInt256> slotValue = storageMap == null ? null : storageMap.get(storageSlotKey);
+    final Map<StorageSlotKey, BonsaiValue<UInt256>> storageMap = storageToUpdate.get(address);
+    BonsaiValue<UInt256> slotValue = storageMap == null ? null : storageMap.get(storageSlotKey);
     if (slotValue == null) {
       final Optional<UInt256> storageValue =
           wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
       if (storageValue.isPresent()) {
-        slotValue = new PathBasedValue<>(storageValue.get(), storageValue.get());
+        slotValue = new BonsaiValue<>(storageValue.get(), storageValue.get());
         storageToUpdate
             .computeIfAbsent(
                 address,
@@ -937,7 +934,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
     if (slotValue == null) {
       if ((expectedValue == null || expectedValue.isZero()) && replacementValue != null) {
         maybeCreateStorageMap(storageMap, address)
-            .put(storageSlotKey, new PathBasedValue<>(null, replacementValue));
+            .put(storageSlotKey, new BonsaiValue<>(null, replacementValue));
       } else {
         throw new IllegalStateException(
             String.format(
@@ -964,7 +961,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                 existingSlotValue == null ? "null" : existingSlotValue.toShortHexString()));
       }
       if (replacementValue == null && slotValue.getPrior() == null) {
-        final Map<StorageSlotKey, PathBasedValue<UInt256>> thisStorageUpdate =
+        final Map<StorageSlotKey, BonsaiValue<UInt256>> thisStorageUpdate =
             maybeCreateStorageMap(storageMap, address);
         thisStorageUpdate.remove(storageSlotKey);
         if (thisStorageUpdate.isEmpty()) {

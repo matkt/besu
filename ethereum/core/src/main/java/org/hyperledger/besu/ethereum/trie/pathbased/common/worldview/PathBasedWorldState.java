@@ -15,9 +15,9 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -26,11 +26,12 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOv
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.TrieDisabledStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedLayeredWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedSnapshotWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiSnapshotWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateLayerStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.evm.account.Account;
@@ -74,7 +75,7 @@ public abstract class PathBasedWorldState
         : DEFAULT_STATE_ROOT_COMMITTER;
   }
 
-  protected PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage;
+  protected BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
   protected final PathBasedWorldStateCacheManager worldStateCacheManager;
   protected final TrieLogManager trieLogManager;
   protected PathBasedWorldStateUpdateAccumulator<?> accumulator;
@@ -96,7 +97,7 @@ public abstract class PathBasedWorldState
   protected boolean isStorageFrozen;
 
   protected PathBasedWorldState(
-      final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedWorldStateCacheManager worldStateCacheManager,
       final TrieLogManager trieLogManager,
       final WorldStateConfig worldStateConfig) {
@@ -158,7 +159,7 @@ public abstract class PathBasedWorldState
 
   private boolean isModifyingHeadWorldState(
       final WorldStateKeyValueStorage worldStateKeyValueStorage) {
-    return !(worldStateKeyValueStorage instanceof PathBasedSnapshotWorldStateKeyValueStorage);
+    return !(worldStateKeyValueStorage instanceof BonsaiSnapshotWorldStateKeyValueStorage);
   }
 
   @Override
@@ -177,7 +178,7 @@ public abstract class PathBasedWorldState
   }
 
   @Override
-  public PathBasedWorldStateKeyValueStorage getWorldStateStorage() {
+  public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
     return worldStateKeyValueStorage;
   }
 
@@ -209,7 +210,7 @@ public abstract class PathBasedWorldState
 
     boolean success = false;
 
-    final PathBasedWorldStateKeyValueStorage.Updater stateUpdater =
+    final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
         worldStateKeyValueStorage.updater();
     Runnable saveTrieLog = () -> {};
     Runnable cacheWorldState = () -> {};
@@ -375,8 +376,8 @@ public abstract class PathBasedWorldState
 
   private void closeFrozenStorage() {
     try {
-      final PathBasedLayeredWorldStateKeyValueStorage worldStateLayerStorage =
-          (PathBasedLayeredWorldStateKeyValueStorage) worldStateKeyValueStorage;
+      final BonsaiWorldStateLayerStorage worldStateLayerStorage =
+          (BonsaiWorldStateLayerStorage) worldStateKeyValueStorage;
       if (!isModifyingHeadWorldState(worldStateLayerStorage.getParentWorldStateStorage())) {
         worldStateLayerStorage.getParentWorldStateStorage().close();
       }

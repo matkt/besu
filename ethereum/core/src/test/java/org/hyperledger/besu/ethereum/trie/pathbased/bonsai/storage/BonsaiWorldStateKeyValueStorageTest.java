@@ -18,9 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
-import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
+import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -42,14 +42,13 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.StorageEntriesCollector;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -448,7 +447,7 @@ public class BonsaiWorldStateKeyValueStorageTest {
             account,
             storage.getAccount(account.addressHash()).get(),
             false,
-            new PathBasedCodeCache());
+            new BonsaiCodeCache());
     assertThat(retrievedAccount.getBalance())
         .isEqualTo(
             Wei.fromHexString(
@@ -926,11 +925,11 @@ public class BonsaiWorldStateKeyValueStorageTest {
         new NoOpMetricsSystem(),
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .pathBasedExtraStorageConfiguration(
-                ImmutablePathBasedExtraStorageConfiguration.builder()
+            .bonsaiExtraStorageConfiguration(
+                ImmutableBonsaiExtraStorageConfiguration.builder()
                     .maxLayersToLoad(DEFAULT_MAX_LAYERS_TO_LOAD)
                     .unstable(
-                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
                             .codeStoredByCodeHashEnabled(useCodeHashStorage)
                             .build())
                     .build())
@@ -943,11 +942,11 @@ public class BonsaiWorldStateKeyValueStorageTest {
         new NoOpMetricsSystem(),
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .pathBasedExtraStorageConfiguration(
-                ImmutablePathBasedExtraStorageConfiguration.builder()
+            .bonsaiExtraStorageConfiguration(
+                ImmutableBonsaiExtraStorageConfiguration.builder()
                     .maxLayersToLoad(DEFAULT_MAX_LAYERS_TO_LOAD)
                     .unstable(
-                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
                             .fullFlatDbEnabled(false)
                             .codeStoredByCodeHashEnabled(useCodeHashStorage)
                             .build())
@@ -962,12 +961,12 @@ public class BonsaiWorldStateKeyValueStorageTest {
             new NoOpMetricsSystem(),
             ImmutableDataStorageConfiguration.builder()
                 .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-                .pathBasedExtraStorageConfiguration(
-                    ImmutablePathBasedExtraStorageConfiguration.builder()
+                .bonsaiExtraStorageConfiguration(
+                    ImmutableBonsaiExtraStorageConfiguration.builder()
                         .maxLayersToLoad(3L)
                         .limitTrieLogsEnabled(true)
                         .unstable(
-                            ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                            ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
                                 .codeStoredByCodeHashEnabled(useCodeHashStorage)
                                 .build())
                         .build())
@@ -1030,8 +1029,8 @@ public class BonsaiWorldStateKeyValueStorageTest {
     final DataStorageConfiguration config =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-            .pathBasedExtraStorageConfiguration(
-                ImmutablePathBasedExtraStorageConfiguration.builder().build())
+            .bonsaiExtraStorageConfiguration(
+                ImmutableBonsaiExtraStorageConfiguration.builder().build())
             .build();
     final BonsaiWorldStateKeyValueStorage storage =
         new BonsaiWorldStateKeyValueStorage(storageProvider, new NoOpMetricsSystem(), config);

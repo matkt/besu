@@ -19,10 +19,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiCachedWorldStateView;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.util.Map;
@@ -47,9 +48,9 @@ class PathBasedWorldStateCacheManagerTest {
 
   @BeforeEach
   void setUp() {
-    final Map<Hash, PathBasedCachedWorldStateView> worldStatesByHash = new ConcurrentHashMap<>();
-    final PathBasedWorldStateKeyValueStorage mockStorage =
-        Mockito.mock(PathBasedWorldStateKeyValueStorage.class);
+    final Map<Hash, BonsaiCachedWorldStateView> worldStatesByHash = new ConcurrentHashMap<>();
+    final BonsaiWorldStateKeyValueStorage mockStorage =
+        Mockito.mock(BonsaiWorldStateKeyValueStorage.class);
     cacheManager = new TestCacheManager(mockStorage, worldStatesByHash);
 
     for (int i = 0; i <= BLOCK_COUNT; i++) {
@@ -120,8 +121,8 @@ class PathBasedWorldStateCacheManagerTest {
   private static class TestCacheManager extends PathBasedWorldStateCacheManager {
 
     TestCacheManager(
-        final PathBasedWorldStateKeyValueStorage storage,
-        final Map<Hash, PathBasedCachedWorldStateView> map) {
+        final BonsaiWorldStateKeyValueStorage storage,
+        final Map<Hash, BonsaiCachedWorldStateView> map) {
       super(
           null,
           storage,
@@ -133,20 +134,20 @@ class PathBasedWorldStateCacheManagerTest {
     @Override
     public PathBasedWorldState createWorldState(
         final PathBasedWorldStateProvider archive,
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
         final EvmConfiguration evmConfiguration) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public PathBasedWorldStateKeyValueStorage createLayeredKeyValueStorage(
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    public BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    public PathBasedWorldStateKeyValueStorage createSnapshotKeyValueStorage(
-        final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
+    public BonsaiWorldStateKeyValueStorage createSnapshotKeyValueStorage(
+        final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
       return worldStateKeyValueStorage;
     }
   }

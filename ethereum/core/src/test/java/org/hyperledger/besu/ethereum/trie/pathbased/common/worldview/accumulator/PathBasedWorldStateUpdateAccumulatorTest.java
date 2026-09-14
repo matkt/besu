@@ -12,10 +12,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig.createStatefulConfigWithTrie;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -24,15 +24,14 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpBonsaiWorldStateCacheManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.NoOpTrieLogManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -66,8 +65,7 @@ class PathBasedWorldStateUpdateAccumulatorTest {
       accumulator.importStateChangesFromPartialView(tx0);
       accumulator.importStateChangesFromPartialView(tx1);
 
-      final PathBasedValue<UInt256> merged =
-          accumulator.getStorageToUpdate().get(ACCOUNT).get(SLOT);
+      final BonsaiValue<UInt256> merged = accumulator.getStorageToUpdate().get(ACCOUNT).get(SLOT);
       assertThat(merged.getPrior()).isEqualTo(V0);
       assertThat(merged.getUpdated()).isEqualTo(V2);
 
@@ -76,7 +74,7 @@ class PathBasedWorldStateUpdateAccumulatorTest {
               .create(
                   accumulator,
                   new BlockHeaderTestFixture().number(1).stateRoot(Hash.EMPTY).buildHeader());
-      final PathBasedValue<UInt256> trieLogSlot = trieLog.getStorageChanges(ACCOUNT).get(SLOT);
+      final BonsaiValue<UInt256> trieLogSlot = trieLog.getStorageChanges(ACCOUNT).get(SLOT);
       assertThat(trieLogSlot.getPrior()).isEqualTo(V0);
       assertThat(trieLogSlot.getUpdated()).isEqualTo(V2);
     }
@@ -100,10 +98,10 @@ class PathBasedWorldStateUpdateAccumulatorTest {
         storage,
         new NoOpBonsaiCachedMerkleTrieLoader(),
         new NoOpBonsaiWorldStateCacheManager(
-            storage, EvmConfiguration.DEFAULT, new PathBasedCodeCache()),
+            storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
         createStatefulConfigWithTrie(),
-        new PathBasedCodeCache());
+        new BonsaiCodeCache());
   }
 }

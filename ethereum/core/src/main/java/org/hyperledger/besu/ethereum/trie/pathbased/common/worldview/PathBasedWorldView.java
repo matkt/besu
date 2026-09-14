@@ -18,8 +18,8 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 
@@ -58,9 +58,9 @@ public interface PathBasedWorldView extends WorldView {
 
   boolean isModifyingHeadWorldState();
 
-  PathBasedWorldStateKeyValueStorage getWorldStateStorage();
+  BonsaiWorldStateKeyValueStorage getWorldStateStorage();
 
   WorldUpdater updater();
 
-  PathBasedCodeCache codeCache();
+  BonsaiCodeCache codeCache();
 }

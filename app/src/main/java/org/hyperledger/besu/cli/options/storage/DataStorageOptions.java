@@ -66,8 +66,7 @@ public class DataStorageOptions implements CLIOptions<DataStorageConfiguration> 
    * path-based storage, such as the Bonsai mode or a future binary trie mode.
    */
   @Mixin
-  private PathBasedExtraStorageOptions pathBasedExtraStorageOptions =
-      PathBasedExtraStorageOptions.create();
+  private BonsaiExtraStorageOptions bonsaiExtraStorageOptions = BonsaiExtraStorageOptions.create();
 
   /** Default Constructor. */
   DataStorageOptions() {}
@@ -87,7 +86,7 @@ public class DataStorageOptions implements CLIOptions<DataStorageConfiguration> 
    * @param commandLine the full commandLine to check all the options specified by the user
    */
   public void validate(final CommandLine commandLine) {
-    pathBasedExtraStorageOptions.validate(commandLine, dataStorageFormat);
+    bonsaiExtraStorageOptions.validate(commandLine, dataStorageFormat);
   }
 
   /**
@@ -101,9 +100,8 @@ public class DataStorageOptions implements CLIOptions<DataStorageConfiguration> 
     dataStorageOptions.dataStorageFormat = domainObject.getDataStorageFormat();
     dataStorageOptions.receiptCompactionEnabled = domainObject.getReceiptCompactionEnabled();
     dataStorageOptions.revertReasonEnabled = domainObject.getRevertReasonEnabled();
-    dataStorageOptions.pathBasedExtraStorageOptions =
-        PathBasedExtraStorageOptions.fromConfig(
-            domainObject.getPathBasedExtraStorageConfiguration());
+    dataStorageOptions.bonsaiExtraStorageOptions =
+        BonsaiExtraStorageOptions.fromConfig(domainObject.getBonsaiExtraStorageConfiguration());
     dataStorageOptions.historyExpiryPrune = domainObject.getHistoryExpiryPruneEnabled();
     return dataStorageOptions;
   }
@@ -116,14 +114,14 @@ public class DataStorageOptions implements CLIOptions<DataStorageConfiguration> 
             .receiptCompactionEnabled(receiptCompactionEnabled)
             .revertReasonEnabled(revertReasonEnabled)
             .historyExpiryPruneEnabled(historyExpiryPrune)
-            .pathBasedExtraStorageConfiguration(pathBasedExtraStorageOptions.toDomainObject());
+            .bonsaiExtraStorageConfiguration(bonsaiExtraStorageOptions.toDomainObject());
     return builder.build();
   }
 
   @Override
   public List<String> getCLIOptions() {
     final List<String> cliOptions = CommandLineUtils.getCLIOptions(this, new DataStorageOptions());
-    cliOptions.addAll(pathBasedExtraStorageOptions.getCLIOptions());
+    cliOptions.addAll(bonsaiExtraStorageOptions.getCLIOptions());
     return cliOptions;
   }
 
