@@ -318,7 +318,7 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
   }
 
   @Test
-  public void shouldRespondWithSyncingDuringForwardSync() {
+  public void shouldReturnValidDuringForwardSync() {
     BlockHeader mockHeader =
         setupPayloadV1(
             getMinSupportedTimestamp(),
