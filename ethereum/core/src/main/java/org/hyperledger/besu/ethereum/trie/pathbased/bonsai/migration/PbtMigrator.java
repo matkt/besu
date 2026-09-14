@@ -47,12 +47,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
+
+  private static final int SHADOW_ROOT_CACHE_SIZE = 1024;
 
   private final BonsaiWorldStateProvider provider;
   private final Blockchain blockchain;
@@ -67,6 +71,15 @@ public class PbtMigrator {
   private volatile long lastMigratedBlockNumber = -1L;
   private volatile Hash lastMigratedBlockHash = null;
   private volatile long lastTickTimeMs = 0L;
+
+  /**
+   * Binary roots this migrator computed, keyed by block hash. The binary column only records its
+   * cursor, so without this {@code debug_shadowStateRoot} could answer for the tip alone — and the
+   * tip moves every block. Memory-only and bounded: a missed root is a missing sample, not a
+   * correctness problem.
+   */
+  private final Cache<Hash, Hash> shadowRoots =
+      CacheBuilder.newBuilder().maximumSize(SHADOW_ROOT_CACHE_SIZE).build();
 
   public PbtMigrator(
       final BonsaiWorldStateProvider provider,
@@ -116,6 +129,11 @@ public class PbtMigrator {
 
   public long getLastTickTimeMs() {
     return lastTickTimeMs;
+  }
+
+  /** The binary root this migrator computed for a block, while it is still cached. */
+  public Optional<Hash> shadowRootFor(final Hash blockHash) {
+    return Optional.ofNullable(shadowRoots.getIfPresent(blockHash));
   }
 
   private void tick() {
@@ -307,19 +325,23 @@ public class PbtMigrator {
       final List<TrieLog> rollForwards) {
     final Hash previousRoot = bonsaiWorldState.getWorldStateRootHash();
     final BonsaiWorldStateUpdateAccumulator accumulator = bonsaiWorldState.updater();
-
-    applyTrieLogs(accumulator, rollBacks, false);
-    applyTrieLogs(accumulator, rollForwards, true);
-
     final BonsaiWorldStateKeyValueStorage worldStateStorage =
         bonsaiWorldState.getWorldStateStorage();
     final DefaultBinaryStateRootCommitter committer = new DefaultBinaryStateRootCommitter();
+
+    for (final TrieLog trieLog : rollBacks) {
+      applyTrieLogBackward(accumulator, trieLog);
+    }
+    // rollForwards is collected from target to ancestor, so apply it oldest-first.
+    for (int i = rollForwards.size() - 1; i >= 0; i--) {
+      applyTrieLogForward(accumulator, rollForwards.get(i));
+    }
 
     final StateRootComputation computation;
     final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
         new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
     try {
-      computation = committer.compute(bonsaiWorldState, blockHeader, bonsaiWorldState.updater());
+      computation = committer.compute(bonsaiWorldState, blockHeader, accumulator);
       computation.applyTo(stateUpdater);
       stateUpdater
           .getWorldStateTransaction()
@@ -343,6 +365,7 @@ public class PbtMigrator {
           .log();
 
       stateUpdater.commit();
+      shadowRoots.put(blockHeader.getBlockHash(), computation.root());
 
     } catch (final Exception e) {
       LOG.error(
@@ -354,21 +377,16 @@ public class PbtMigrator {
     }
   }
 
-  private void applyTrieLogs(
-      final BonsaiWorldStateUpdateAccumulator accumulator,
-      final List<TrieLog> trieLogs,
-      final boolean forward) {
-    if (forward) {
-      for (final TrieLog trieLog : trieLogs) {
-        accumulator.rollForward(trieLog);
-        LOG.info("Attempting rollForward of {}", trieLog.getBlockHash());
-      }
-    } else {
-      for (final TrieLog trieLog : trieLogs) {
-        accumulator.rollBack(trieLog);
-        LOG.info("Attempting Rollback of {}", trieLog.getBlockHash());
-      }
-    }
+  private void applyTrieLogForward(
+      final BonsaiWorldStateUpdateAccumulator accumulator, final TrieLog trieLog) {
+    accumulator.rollForward(trieLog);
+    LOG.info("Attempting rollForward of {}", trieLog.getBlockHash());
+  }
+
+  private void applyTrieLogBackward(
+      final BonsaiWorldStateUpdateAccumulator accumulator, final TrieLog trieLog) {
+    accumulator.rollBack(trieLog);
+    LOG.info("Attempting rollback of {}", trieLog.getBlockHash());
   }
 
   private Optional<BlockHeader> lastPmtAncestor(final BlockHeader head) {

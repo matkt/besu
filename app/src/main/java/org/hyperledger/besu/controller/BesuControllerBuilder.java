@@ -29,6 +29,9 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ConsensusContext;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.api.ApiConfiguration;
+import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.DebugShadowStateRoot;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.JsonRpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.methods.JsonRpcMethods;
 import org.hyperledger.besu.ethereum.blockcreation.MiningCoordinator;
 import org.hyperledger.besu.ethereum.chain.BadBlockManager;
@@ -117,6 +120,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -910,7 +914,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     final SubProtocolConfiguration subProtocolConfiguration =
         createSubProtocolConfiguration(ethProtocolManager, maybeSnapProtocolManager);
 
-    final JsonRpcMethods additionalJsonRpcMethodFactory =
+    JsonRpcMethods additionalJsonRpcMethodFactory =
         createAdditionalJsonRpcMethodFactory(
             protocolContext, protocolSchedule, miningConfiguration);
 
@@ -981,6 +985,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       if (binaryTrieMilestone.isPresent()) {
         final PbtMigrator pbtMigrator =
             createPbtMigrator(bonsaiProvider, blockchain, binaryTrieMilestone);
+        additionalJsonRpcMethodFactory =
+            withShadowStateRoot(
+                additionalJsonRpcMethodFactory, protocolContext, protocolSchedule, pbtMigrator);
         closeables.addFirst(pbtMigrator::stop);
         final AtomicBoolean pbtMigrationStarted = new AtomicBoolean(false);
         final AtomicLong pbtSyncSubscriptionId = new AtomicLong();
@@ -1016,6 +1023,20 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         storageProvider,
         dataStorageConfiguration,
         transactionSimulator);
+  }
+
+  private JsonRpcMethods withShadowStateRoot(
+      final JsonRpcMethods existing,
+      final ProtocolContext protocolContext,
+      final ProtocolSchedule protocolSchedule,
+      final PbtMigrator pbtMigrator) {
+    return apis -> {
+      final Map<String, JsonRpcMethod> methods = new HashMap<>(existing.create(apis));
+      methods.put(
+          RpcMethod.DEBUG_SHADOW_STATE_ROOT.getMethodName(),
+          new DebugShadowStateRoot(protocolContext, protocolSchedule, pbtMigrator));
+      return methods;
+    };
   }
 
   private PbtMigrator createPbtMigrator(
