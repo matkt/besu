@@ -1213,9 +1213,7 @@ public class MergeCoordinatorTest implements MergeGenesisConfigHelper {
     // Simulate world state roll failure (storage error, pruned trie logs, etc.)
     WorldStateArchive failingArchive = mock(WorldStateArchive.class);
     when(failingArchive.getWorldState(
-            any(
-                org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.WorldStateQueryParams
-                    .class)))
+            any(org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.class)))
         .thenReturn(Optional.empty());
 
     ProtocolContext failingProtocolContext =
