@@ -193,12 +193,22 @@ public class TrieLogPruner implements TrieLogEvent.TrieLogObserver {
       return 0;
     }
 
-    final long retainAboveThisBlockOrFinalized =
+    long retainAboveThisBlockOrFinalized =
         finalized
             .flatMap(blockchain::getBlockHeader)
             .map(ProcessableBlockHeader::getNumber)
             .map(finalizedBlock -> Math.min(finalizedBlock, retainAboveThisBlock))
             .orElse(retainAboveThisBlock);
+
+    // Never prune trie logs at or above the durable layered-head checkpoint; recovery needs them.
+    final Optional<Long> layeredCheckpoint =
+        rootWorldStateStorage.getWorldStateCheckpointNumber();
+    if (layeredCheckpoint.isPresent()) {
+      retainAboveThisBlockOrFinalized =
+          Math.max(retainAboveThisBlockOrFinalized, layeredCheckpoint.get());
+    }
+
+    final long pruneBelowBlockNumber = retainAboveThisBlockOrFinalized;
 
     LOG.atTrace()
         .setMessage(
@@ -212,12 +222,12 @@ public class TrieLogPruner implements TrieLogEvent.TrieLogObserver {
                     .flatMap(blockchain::getBlockHeader)
                     .map(ProcessableBlockHeader::getNumber)
                     .orElse(null))
-        .addArgument(retainAboveThisBlockOrFinalized)
+        .addArgument(pruneBelowBlockNumber)
         .log();
 
     final var pruneWindowEntries =
         trieLogBlocksAndForksByDescendingBlockNumber.asMap().entrySet().stream()
-            .dropWhile((e) -> e.getKey() > retainAboveThisBlockOrFinalized)
+            .dropWhile((e) -> e.getKey() > pruneBelowBlockNumber)
             .limit(pruningLimit);
 
     final Multimap<Long, Hash> wasPruned = ArrayListMultimap.create();

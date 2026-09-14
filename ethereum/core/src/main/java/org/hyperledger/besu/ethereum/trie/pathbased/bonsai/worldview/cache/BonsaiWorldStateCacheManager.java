@@ -26,6 +26,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWo
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
+import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -73,5 +74,19 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
       final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
     return new BonsaiSnapshotWorldStateKeyValueStorage(
         (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage);
+  }
+
+  @Override
+  protected void maybeRegisterPayloadLayerCandidate(
+      final BlockHeader blockHeader, final PathBasedWorldState forWorldState) {
+    if (!(archive instanceof BonsaiWorldStateProvider bonsaiProvider)
+        || !bonsaiProvider.isLayeredHeadEnabled()) {
+      return;
+    }
+    if (!(forWorldState.getWorldStateStorage() instanceof BonsaiWorldStateLayerStorage layer)
+        || forWorldState.isStorageFrozen()) {
+      return;
+    }
+    bonsaiProvider.registerPayloadLayerCandidate(blockHeader, layer.clone());
   }
 }

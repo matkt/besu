@@ -73,6 +73,30 @@ public interface WorldStateArchive extends Closeable {
   void resetArchiveStateTo(BlockHeader blockHeader);
 
   /**
+   * When layered head is enabled, promotes a previously retained payload layer to the canonical
+   * head without replaying trie logs or flushing RocksDB. Default is unsupported.
+   *
+   * @param blockHeader the header to promote
+   * @return true if promotion succeeded
+   */
+  default boolean promoteCachedWorldState(final BlockHeader blockHeader) {
+    return false;
+  }
+
+  /** Whether this archive uses durable layered-head promotion instead of per-block RocksDB flush. */
+  default boolean isLayeredHeadEnabled() {
+    return false;
+  }
+
+  /**
+   * Lowest durable checkpoint block number that trie logs must be retained above. Empty when
+   * layered head is disabled or no checkpoint exists.
+   */
+  default Optional<Long> getLayeredHeadCheckpointNumber() {
+    return Optional.empty();
+  }
+
+  /**
    * Retrieves an account proof based on the provided parameters.
    *
    * @param blockHeader The header of the block for which to retrieve the account proof.

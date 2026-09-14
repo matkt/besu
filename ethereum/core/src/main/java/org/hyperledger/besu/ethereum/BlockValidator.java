@@ -19,6 +19,7 @@ import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateUpdateMode;
 
 import java.util.List;
 import java.util.Optional;
@@ -54,7 +55,7 @@ public interface BlockValidator {
    * @param headerValidationMode the header validation mode
    * @param ommerValidationMode the ommer validation mode
    * @param blockAccessList optional block access list for validation and processing
-   * @param shouldPersist flag indicating whether the block should be persisted
+   * @param shouldPersist flag indicating whether the block should update the head world state
    * @return the result of the block processing
    */
   BlockProcessingResult validateAndProcessBlock(
@@ -66,6 +67,36 @@ public interface BlockValidator {
       final boolean shouldPersist);
 
   /**
+   * Validates and processes a block with an explicit world-state update mode.
+   *
+   * @param context the protocol context
+   * @param block the block to validate and process
+   * @param headerValidationMode the header validation mode
+   * @param ommerValidationMode the ommer validation mode
+   * @param blockAccessList optional block access list
+   * @param worldStateUpdateMode how the world state should be retained after processing
+   * @param shouldRecordBadBlock whether to record bad blocks
+   * @return the result of the block processing
+   */
+  default BlockProcessingResult validateAndProcessBlock(
+      final ProtocolContext context,
+      final Block block,
+      final HeaderValidationMode headerValidationMode,
+      final HeaderValidationMode ommerValidationMode,
+      final Optional<BlockAccessList> blockAccessList,
+      final WorldStateUpdateMode worldStateUpdateMode,
+      final boolean shouldRecordBadBlock) {
+    return validateAndProcessBlock(
+        context,
+        block,
+        headerValidationMode,
+        ommerValidationMode,
+        blockAccessList,
+        worldStateUpdateMode.updatesHead(),
+        shouldRecordBadBlock);
+  }
+
+  /**
    * Validates and processes a block with the given context, block, header validation mode, ommer
    * validation mode, persistence flag, and bad block recording flag.
    *
@@ -74,7 +105,7 @@ public interface BlockValidator {
    * @param headerValidationMode the header validation mode
    * @param ommerValidationMode the ommer validation mode
    * @param blockAccessList optional block access list for validation and processing
-   * @param shouldPersist flag indicating whether the block should be persisted
+   * @param shouldPersist flag indicating whether the block should update the head world state
    * @param shouldRecordBadBlock flag indicating whether bad blocks should be recorded
    * @return the result of the block processing
    */

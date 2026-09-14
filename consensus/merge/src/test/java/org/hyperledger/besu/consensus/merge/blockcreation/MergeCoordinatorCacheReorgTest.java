@@ -67,7 +67,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCac
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.StubMetricsSystem;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -148,22 +148,29 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
 
   @BeforeEach
   public void setUp() {
+    initCoordinator(false);
+  }
+
+  private void initCoordinator(final boolean layeredHeadEnabled) {
     when(mergeContext.as(MergeContext.class)).thenReturn(mergeContext);
     when(mergeContext.getTerminalTotalDifficulty())
         .thenReturn(genesisState.getBlock().getHeader().getDifficulty().plus(1L));
 
     final StorageProvider storageProvider = new InMemoryKeyValueStorageProvider();
     final NoOpMetricsSystem noOpMetrics = new NoOpMetricsSystem();
+    final ImmutablePathBasedExtraStorageConfiguration pathConfig =
+        ImmutablePathBasedExtraStorageConfiguration.builder()
+            .unstable(
+                ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                    .bonsaiCrossBlockCacheEnabled(true)
+                    .bonsaiLayeredHeadEnabled(layeredHeadEnabled)
+                    .bonsaiLayeredHeadCheckpointInterval(32)
+                    .build())
+            .build();
     final DataStorageConfiguration dataStorageConfig =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .pathBasedExtraStorageConfiguration(
-                ImmutablePathBasedExtraStorageConfiguration.builder()
-                    .unstable(
-                        ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
-                            .bonsaiCrossBlockCacheEnabled(true)
-                            .build())
-                    .build())
+            .pathBasedExtraStorageConfiguration(pathConfig)
             .build();
 
     final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
@@ -178,7 +185,7 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
         new BonsaiWorldStateProvider(
             worldStateKeyValueStorage,
             blockchain,
-            PathBasedExtraStorageConfiguration.DEFAULT,
+            pathConfig,
             cachedMerkleTrieLoader,
             pluginContext,
             EvmConfiguration.DEFAULT,
@@ -261,6 +268,37 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
    *   <li>rememberBlock(B1) → BUG: cache returns stale nonce=1, tx rejected
    * </ol>
    */
+  @Test
+  public void rememberBlockAndForkChoiceSucceedWithLayeredHeadEnabled() throws Exception {
+    initCoordinator(true);
+    assertThat(worldStateArchive.isLayeredHeadEnabled()).isTrue();
+
+    final Block block =
+        buildBlockWithTransaction(
+            Wei.of(1),
+            Bytes32.fromHexString(
+                "0x00000000000000000000000000000000000000000000000000000000000000ab"));
+
+    final BlockProcessingResult result = coordinator.rememberBlock(block);
+    assertThat(result.getYield()).isPresent();
+    result.getYield().get().getWorldState().persist(block.getHeader());
+
+    coordinator.updateForkChoice(
+        block.getHeader(),
+        genesisState.getBlock().getHash(),
+        genesisState.getBlock().getHash());
+
+    assertThat(blockchain.getChainHeadHash()).isEqualTo(block.getHash());
+    assertThat(
+            worldStateArchive.getWorldState(
+                WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(block.getHeader())))
+        .isPresent()
+        .get()
+        .satisfies(
+            worldState ->
+                assertThat(worldState.rootHash()).isEqualTo(block.getHeader().getStateRoot()));
+  }
+
   @Test
   public void rememberBlockShouldNotFailWithStaleNonceAfterReorg() throws Exception {
 

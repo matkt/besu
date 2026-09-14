@@ -59,13 +59,16 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
    */
   private volatile boolean closedCache = false;
 
+  /** When true, mutations are rejected. Used for immutable candidate layers awaiting promotion. */
+  private final boolean readOnly;
+
   /**
    * Instantiates a new Layered key value storage.
    *
    * @param parent the parent key value storage for this layered storage.
    */
   public LayeredKeyValueStorage(final SegmentedKeyValueStorage parent) {
-    this(new ConcurrentHashMap<>(), parent);
+    this(new ConcurrentHashMap<>(), parent, false);
   }
 
   /**
@@ -77,8 +80,23 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
   public LayeredKeyValueStorage(
       final ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>> map,
       final SegmentedKeyValueStorage parent) {
+    this(map, parent, false);
+  }
+
+  /**
+   * Constructor which takes an explicit backing map and read-only flag.
+   *
+   * @param map the backing map
+   * @param parent the parent key value storage for this layered storage
+   * @param readOnly when true, rejects write transactions and merge mutations
+   */
+  public LayeredKeyValueStorage(
+      final ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>> map,
+      final SegmentedKeyValueStorage parent,
+      final boolean readOnly) {
     super(map);
     this.parent = parent;
+    this.readOnly = readOnly;
   }
 
   @Override
@@ -319,6 +337,7 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
 
   @Override
   public boolean tryDelete(final SegmentIdentifier segmentId, final byte[] key) {
+    throwIfReadOnly();
     hashValueStore
         .computeIfAbsent(segmentId, __ -> newSegmentMap())
         .put(Bytes.wrap(key), Optional.empty());
@@ -328,6 +347,7 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
   @Override
   public SegmentedKeyValueStorageTransaction startTransaction() {
     throwIfClosed();
+    throwIfReadOnly();
 
     return new SegmentedKeyValueStorageTransactionValidatorDecorator(
         new SegmentedInMemoryTransaction() {
@@ -376,15 +396,184 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
     return false;
   }
 
+  /**
+   * Returns a copy-on-write clone that owns an independent deep copy of this layer's map. Mutations
+   * on the clone do not affect this layer, and vice versa. The parent reference is shared.
+   *
+   * @return an independent layered storage sharing the same parent
+   */
   @Override
   public SnappedKeyValueStorage clone() {
-    return new LayeredKeyValueStorage(hashValueStore, parent);
+    return new LayeredKeyValueStorage(deepCopyStore(), parent);
+  }
+
+  /**
+   * Returns an immutable snapshot of this layer's local diff (not including parent). The returned
+   * storage rejects writes; callers use it as a durable candidate layer for promotion.
+   *
+   * @return a read-only layered storage with a frozen copy of this layer's map
+   */
+  public LayeredKeyValueStorage snapshotDiff() {
+    return new LayeredKeyValueStorage(deepCopyStore(), parent, true);
+  }
+
+  /**
+   * Deep-copies this layer's local map for checkpoint compaction. The returned map is independent
+   * of this layer; parents are not included.
+   *
+   * @return a deep copy of the local segment map
+   */
+  public ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>>
+      deepCopyForCheckpoint() {
+    return deepCopyStore();
+  }
+
+  /**
+   * Merges another layer's local entries into this layer (latest wins). Tombstones from {@code
+   * other} overwrite existing values. Parent references are unchanged.
+   *
+   * @param other the layer whose local diff is merged into this one
+   */
+  public void mergeLatestInto(final LayeredKeyValueStorage other) {
+    throwIfClosed();
+    throwIfReadOnly();
+    if (other == null) {
+      return;
+    }
+    final Lock lock = rwLock.writeLock();
+    lock.lock();
+    final Lock otherLock = other.rwLock.readLock();
+    otherLock.lock();
+    try {
+      other.hashValueStore.forEach(
+          (segment, entries) -> {
+            final NavigableMap<Bytes, Optional<byte[]>> target =
+                hashValueStore.computeIfAbsent(segment, __ -> newSegmentMap());
+            entries.forEach(target::put);
+          });
+    } finally {
+      otherLock.unlock();
+      lock.unlock();
+    }
+  }
+
+  /**
+   * Flattens a chain of layered storages into a single layer whose parent is the first non-layered
+   * ancestor. Intermediate layered parents are merged (nearest child wins over older parents).
+   *
+   * @return this storage if already flat against a non-layered parent; otherwise a new compacted
+   *     layer
+   */
+  public LayeredKeyValueStorage compact() {
+    throwIfClosed();
+    if (!(parent instanceof LayeredKeyValueStorage)) {
+      return this;
+    }
+    final ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>> compacted =
+        new ConcurrentHashMap<>();
+    SegmentedKeyValueStorage ancestor = this;
+    while (ancestor instanceof LayeredKeyValueStorage layered) {
+      final Lock lock = layered.rwLock.readLock();
+      lock.lock();
+      try {
+        layered.hashValueStore.forEach(
+            (segment, entries) -> {
+              final NavigableMap<Bytes, Optional<byte[]>> target =
+                  compacted.computeIfAbsent(segment, __ -> newSegmentMap());
+              entries.forEach(target::putIfAbsent);
+            });
+        ancestor = layered.parent;
+      } finally {
+        lock.unlock();
+      }
+    }
+    return new LayeredKeyValueStorage(compacted, ancestor);
+  }
+
+  /**
+   * Estimates the number of bytes retained by this layer's local diff (keys + present values).
+   * Tombstone entries count only the key size.
+   *
+   * @return approximate local diff size in bytes
+   */
+  public long estimatedDiffBytes() {
+    final Lock lock = rwLock.readLock();
+    lock.lock();
+    try {
+      long total = 0L;
+      for (final NavigableMap<Bytes, Optional<byte[]>> segment : hashValueStore.values()) {
+        for (final Map.Entry<Bytes, Optional<byte[]>> entry : segment.entrySet()) {
+          total += entry.getKey().size();
+          if (entry.getValue().isPresent()) {
+            total += entry.getValue().get().length;
+          }
+        }
+      }
+      return total;
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /**
+   * Returns the number of local entries (including tombstones) across all segments.
+   *
+   * @return local entry count
+   */
+  public long localEntryCount() {
+    final Lock lock = rwLock.readLock();
+    lock.lock();
+    try {
+      long count = 0L;
+      for (final NavigableMap<Bytes, Optional<byte[]>> segment : hashValueStore.values()) {
+        count += segment.size();
+      }
+      return count;
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /**
+   * Returns the parent storage this layer overlays.
+   *
+   * @return the parent
+   */
+  public SegmentedKeyValueStorage getParent() {
+    return parent;
+  }
+
+  /**
+   * Whether this layer rejects writes.
+   *
+   * @return true if snapshot/read-only
+   */
+  public boolean isReadOnly() {
+    return readOnly;
+  }
+
+  private ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>> deepCopyStore() {
+    final Lock lock = rwLock.readLock();
+    lock.lock();
+    try {
+      return hashValueStore.entrySet().stream()
+          .collect(
+              Collectors.toConcurrentMap(Map.Entry::getKey, e -> newSegmentMap(e.getValue())));
+    } finally {
+      lock.unlock();
+    }
   }
 
   private void throwIfClosed() {
     if (isClosed()) {
       LOG.error("Attempting to use a closed RocksDBKeyValueStorage");
       throw new StorageException("Storage has been closed");
+    }
+  }
+
+  private void throwIfReadOnly() {
+    if (readOnly) {
+      throw new StorageException("Cannot mutate a read-only layered storage snapshot");
     }
   }
 

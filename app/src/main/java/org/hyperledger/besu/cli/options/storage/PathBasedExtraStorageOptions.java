@@ -24,6 +24,9 @@ import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConf
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_LAYERED_HEAD_CHECKPOINT_INTERVAL;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_LAYERED_HEAD_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_LAYERED_HEAD_MEMORY_BUDGET_BYTES;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_FULL_FLAT_DB_ENABLED;
 
@@ -152,6 +155,31 @@ public class PathBasedExtraStorageOptions
             "Enables eth_getProof for historical blocks backed by the bonsai archive trie-node store. Requires --data-storage-format=X_BONSAI_ARCHIVE and trie-node capture during initial sync. (default: ${DEFAULT-VALUE})")
     private Boolean bonsaiArchiveStateProofsEnabled = DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
 
+    @Option(
+        hidden = true,
+        names = {"--Xbonsai-layered-head-enabled"},
+        arity = "1",
+        description =
+            "Keeps validated payload world-state layers in memory and promotes them on forkchoiceUpdated instead of flushing RocksDB every block. (default: ${DEFAULT-VALUE})")
+    private Boolean bonsaiLayeredHeadEnabled = DEFAULT_BONSAI_LAYERED_HEAD_ENABLED;
+
+    @Option(
+        hidden = true,
+        names = {"--Xbonsai-layered-head-checkpoint-interval"},
+        paramLabel = "<INTEGER>",
+        description =
+            "Canonical blocks between RocksDB checkpoints when layered head is enabled (default: ${DEFAULT-VALUE}).")
+    private Integer bonsaiLayeredHeadCheckpointInterval =
+        DEFAULT_BONSAI_LAYERED_HEAD_CHECKPOINT_INTERVAL;
+
+    @Option(
+        hidden = true,
+        names = {"--Xbonsai-layered-head-memory-budget-bytes"},
+        paramLabel = "<LONG>",
+        description =
+            "Soft memory budget for layered head diffs; exceeding it forces a RocksDB checkpoint (default: ${DEFAULT-VALUE}).")
+    private Long bonsaiLayeredHeadMemoryBudgetBytes = DEFAULT_BONSAI_LAYERED_HEAD_MEMORY_BUDGET_BYTES;
+
     /** Default Constructor. */
     Unstable() {}
   }
@@ -227,6 +255,12 @@ public class PathBasedExtraStorageOptions
         domainObject.getUnstable().getBonsaiCrossBlockCacheStorageSize();
     dataStorageOptions.unstableOptions.bonsaiArchiveStateProofsEnabled =
         domainObject.getUnstable().getBonsaiArchiveStateProofsEnabled();
+    dataStorageOptions.unstableOptions.bonsaiLayeredHeadEnabled =
+        domainObject.getUnstable().getBonsaiLayeredHeadEnabled();
+    dataStorageOptions.unstableOptions.bonsaiLayeredHeadCheckpointInterval =
+        domainObject.getUnstable().getBonsaiLayeredHeadCheckpointInterval();
+    dataStorageOptions.unstableOptions.bonsaiLayeredHeadMemoryBudgetBytes =
+        domainObject.getUnstable().getBonsaiLayeredHeadMemoryBudgetBytes();
     dataStorageOptions.isParallelTxProcessingEnabled =
         domainObject.getParallelTxProcessingEnabled();
     dataStorageOptions.isParallelStateRootComputationEnabled =
@@ -251,6 +285,11 @@ public class PathBasedExtraStorageOptions
                 .bonsaiCrossBlockCacheAccountSize(unstableOptions.bonsaiCrossBlockCacheAccountSize)
                 .bonsaiCrossBlockCacheStorageSize(unstableOptions.bonsaiCrossBlockCacheStorageSize)
                 .bonsaiArchiveStateProofsEnabled(unstableOptions.bonsaiArchiveStateProofsEnabled)
+                .bonsaiLayeredHeadEnabled(unstableOptions.bonsaiLayeredHeadEnabled)
+                .bonsaiLayeredHeadCheckpointInterval(
+                    unstableOptions.bonsaiLayeredHeadCheckpointInterval)
+                .bonsaiLayeredHeadMemoryBudgetBytes(
+                    unstableOptions.bonsaiLayeredHeadMemoryBudgetBytes)
                 .build())
         .build();
   }

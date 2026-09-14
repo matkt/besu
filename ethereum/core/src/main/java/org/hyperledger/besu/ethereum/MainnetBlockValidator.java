@@ -30,6 +30,7 @@ import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateUpdateMode;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
@@ -107,7 +108,13 @@ public class MainnetBlockValidator implements BlockValidator {
       final HeaderValidationMode headerValidationMode,
       final HeaderValidationMode ommerValidationMode) {
     return validateAndProcessBlock(
-        context, block, headerValidationMode, ommerValidationMode, Optional.empty(), true, true);
+        context,
+        block,
+        headerValidationMode,
+        ommerValidationMode,
+        Optional.empty(),
+        WorldStateUpdateMode.HEAD,
+        true);
   }
 
   @Override
@@ -124,7 +131,7 @@ public class MainnetBlockValidator implements BlockValidator {
         headerValidationMode,
         ommerValidationMode,
         blockAccessList,
-        shouldPersist,
+        WorldStateUpdateMode.fromShouldUpdateHead(shouldPersist),
         true);
   }
 
@@ -136,6 +143,25 @@ public class MainnetBlockValidator implements BlockValidator {
       final HeaderValidationMode ommerValidationMode,
       final Optional<BlockAccessList> blockAccessList,
       final boolean shouldUpdateHead,
+      final boolean shouldRecordBadBlock) {
+    return validateAndProcessBlock(
+        context,
+        block,
+        headerValidationMode,
+        ommerValidationMode,
+        blockAccessList,
+        WorldStateUpdateMode.fromShouldUpdateHead(shouldUpdateHead),
+        shouldRecordBadBlock);
+  }
+
+  @Override
+  public BlockProcessingResult validateAndProcessBlock(
+      final ProtocolContext context,
+      final Block block,
+      final HeaderValidationMode headerValidationMode,
+      final HeaderValidationMode ommerValidationMode,
+      final Optional<BlockAccessList> blockAccessList,
+      final WorldStateUpdateMode worldStateUpdateMode,
       final boolean shouldRecordBadBlock) {
 
     final int blockSize = block.getSize();
@@ -181,7 +207,7 @@ public class MainnetBlockValidator implements BlockValidator {
     final WorldStateQueryParams worldStateQueryParams =
         WorldStateQueryParams.newBuilder()
             .withBlockHeader(parentHeader)
-            .withShouldWorldStateUpdateHead(shouldUpdateHead)
+            .withWorldStateUpdateMode(worldStateUpdateMode)
             .build();
     try (final var worldState =
         context.getWorldStateArchive().getWorldState(worldStateQueryParams).orElse(null)) {

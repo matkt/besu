@@ -103,6 +103,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
   protected void loadHeadWorldState(
       final BlockHeader blockHeader, final PathBasedWorldState headWorldState) {
     this.headWorldState = headWorldState;
+    this.headWorldState.markAsHeadWorldState();
     this.worldStateCacheManager.addCachedLayer(
         blockHeader, headWorldState.getWorldStateRootHash(), headWorldState);
   }
@@ -177,8 +178,8 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
    * <p>The method follows these steps: 1. Check if the query parameters indicate that the world
    * state should update the head. 2. If true, call {@link #getFullWorldStateFromHead(Hash)} with
    * the block hash from the query parameters. 3. If false, call {@link
-   * #getFullWorldStateFromCache(BlockHeader, Optional)} with the block header and optional BAL
-   * overlay from the query parameters.
+   * #getFullWorldStateFromCache(BlockHeader, Optional, WorldStateUpdateMode)} with the block
+   * header, optional BAL overlay, and update mode from the query parameters.
    *
    * @param queryParams the query parameters
    * @return the stateful world state, if available
@@ -187,7 +188,9 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
     return queryParams.shouldWorldStateUpdateHead()
         ? getFullWorldStateFromHead(queryParams.getBlockHash())
         : getFullWorldStateFromCache(
-            queryParams.getBlockHeader(), queryParams.getBlockAccessListOverlay());
+            queryParams.getBlockHeader(),
+            queryParams.getBlockAccessListOverlay(),
+            queryParams.getWorldStateUpdateMode());
   }
 
   /**
@@ -227,7 +230,8 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
    */
   private Optional<MutableWorldState> getFullWorldStateFromCache(
       final BlockHeader blockHeader,
-      final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay) {
+      final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay,
+      final WorldStateUpdateMode worldStateUpdateMode) {
     final BlockHeader chainHeadBlockHeader = blockchain.getChainHeadHeader();
     if (chainHeadBlockHeader.getNumber() - blockHeader.getNumber()
         >= trieLogManager.getMaxLayersToLoad()) {
@@ -253,7 +257,20 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
               maybeBlockAccessListOverlay.ifPresent(worldState::applyBlockAccessListOverlay);
               return worldState;
             })
-        .map(MutableWorldState::freezeStorage);
+        .map(
+            worldState ->
+                worldStateUpdateMode.retainsDurableLayer()
+                    ? openPayloadLayer(worldState)
+                    : worldState.freezeStorage());
+  }
+
+  private MutableWorldState openPayloadLayer(final PathBasedWorldState worldState) {
+    if (worldState instanceof org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState
+        bonsai) {
+      return bonsai.openPayloadLayer();
+    }
+    // Non-Bonsai path-based formats fall back to frozen behaviour.
+    return worldState.freezeStorage();
   }
 
   private BlockHeader headerOrThrow(final Hash blockHash) {

@@ -59,6 +59,12 @@ public abstract class PathBasedWorldStateKeyValueStorage
   // 0x776f726c64426c6f636b4e756d626572
   public static final byte[] WORLD_BLOCK_NUMBER_KEY =
       "worldBlockNumber".getBytes(StandardCharsets.UTF_8);
+  /** Hash of the last RocksDB checkpoint for layered-head mode. */
+  public static final byte[] WORLD_CHECKPOINT_HASH_KEY =
+      "worldCheckpointHash".getBytes(StandardCharsets.UTF_8);
+  /** Block number of the last RocksDB checkpoint for layered-head mode. */
+  public static final byte[] WORLD_CHECKPOINT_NUMBER_KEY =
+      "worldCheckpointNumber".getBytes(StandardCharsets.UTF_8);
 
   private final AtomicBoolean shouldClose = new AtomicBoolean(false);
 
@@ -127,6 +133,19 @@ public abstract class PathBasedWorldStateKeyValueStorage
   public Optional<Long> getWorldStateBlockNumber() {
     return composedWorldStateStorage
         .get(TRIE_BRANCH_STORAGE, WORLD_BLOCK_NUMBER_KEY)
+        .map(bytes -> Bytes.wrap(bytes).toLong());
+  }
+
+  public Optional<Hash> getWorldStateCheckpointHash() {
+    return composedWorldStateStorage
+        .get(TRIE_BRANCH_STORAGE, WORLD_CHECKPOINT_HASH_KEY)
+        .map(Bytes32::wrap)
+        .map(Hash::wrap);
+  }
+
+  public Optional<Long> getWorldStateCheckpointNumber() {
+    return composedWorldStateStorage
+        .get(TRIE_BRANCH_STORAGE, WORLD_CHECKPOINT_NUMBER_KEY)
         .map(bytes -> Bytes.wrap(bytes).toLong());
   }
 

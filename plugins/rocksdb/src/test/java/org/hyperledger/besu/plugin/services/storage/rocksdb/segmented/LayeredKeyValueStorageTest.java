@@ -17,15 +17,19 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.atMostOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
+import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
 import java.util.List;
 import java.util.NavigableMap;
@@ -377,5 +381,110 @@ public class LayeredKeyValueStorageTest {
     assertArrayEquals(value2, resultList.get(1).getValue());
     assertArrayEquals(key3, resultList.get(2).getKey());
     assertArrayEquals(value3, resultList.get(2).getValue());
+  }
+
+  @Test
+  void cloneIsIndependentFromOriginalLayer() {
+    final SegmentedKeyValueStorage root = new SegmentedInMemoryKeyValueStorage();
+    final byte[] parentKey = {1};
+    final byte[] parentValue = {10};
+    commitPut(root, segmentId, parentKey, parentValue);
+
+    final LayeredKeyValueStorage original = new LayeredKeyValueStorage(root);
+    final byte[] layerKey = {2};
+    final byte[] layerValue = {20};
+    commitPut(original, segmentId, layerKey, layerValue);
+
+    final LayeredKeyValueStorage clone = (LayeredKeyValueStorage) original.clone();
+    final byte[] cloneOnlyKey = {3};
+    final byte[] cloneOnlyValue = {30};
+    commitPut(clone, segmentId, cloneOnlyKey, cloneOnlyValue);
+
+    assertTrue(original.get(segmentId, cloneOnlyKey).isEmpty());
+    assertTrue(clone.get(segmentId, cloneOnlyKey).isPresent());
+    assertArrayEquals(layerValue, original.get(segmentId, layerKey).orElseThrow());
+    commitPut(original, segmentId, layerKey, new byte[] {99});
+    assertArrayEquals(new byte[] {99}, original.get(segmentId, layerKey).orElseThrow());
+    assertArrayEquals(layerValue, clone.get(segmentId, layerKey).orElseThrow());
+  }
+
+  @Test
+  void snapshotDiffRejectsWrites() {
+    final LayeredKeyValueStorage writable = new LayeredKeyValueStorage(new SegmentedInMemoryKeyValueStorage());
+    commitPut(writable, segmentId, new byte[] {1}, new byte[] {1});
+
+    final LayeredKeyValueStorage snapshot = writable.snapshotDiff();
+    assertTrue(snapshot.isReadOnly());
+    assertThrows(StorageException.class, () -> commitPut(snapshot, segmentId, new byte[] {2}, new byte[] {2}));
+    assertThrows(StorageException.class, snapshot::startTransaction);
+  }
+
+  @Test
+  void mergeLatestIntoAppliesLatestWinsAndTombstones() {
+    final SegmentedKeyValueStorage root = new SegmentedInMemoryKeyValueStorage();
+    final byte[] sharedKey = {1};
+    final byte[] removedKey = {2};
+    commitPut(root, segmentId, removedKey, new byte[] {20});
+
+    final LayeredKeyValueStorage base = new LayeredKeyValueStorage(root);
+    commitPut(base, segmentId, sharedKey, new byte[] {10});
+
+    final LayeredKeyValueStorage latest = new LayeredKeyValueStorage(base);
+    commitPut(latest, segmentId, sharedKey, new byte[] {11});
+    latest.tryDelete(segmentId, removedKey);
+
+    base.mergeLatestInto(latest);
+
+    assertArrayEquals(new byte[] {11}, base.get(segmentId, sharedKey).orElseThrow());
+    assertTrue(base.get(segmentId, removedKey).isEmpty());
+    assertTrue(root.get(segmentId, removedKey).isPresent());
+  }
+
+  @Test
+  void compactFlattensLayerChainToSingleParent() {
+    final SegmentedKeyValueStorage root = new SegmentedInMemoryKeyValueStorage();
+    final byte[] rootKey = {0};
+    commitPut(root, segmentId, rootKey, new byte[] {0});
+
+    final LayeredKeyValueStorage layer1 = new LayeredKeyValueStorage(root);
+    commitPut(layer1, segmentId, rootKey, new byte[] {1});
+    commitPut(layer1, segmentId, new byte[] {1}, new byte[] {10});
+
+    final LayeredKeyValueStorage layer2 = new LayeredKeyValueStorage(layer1);
+    commitPut(layer2, segmentId, new byte[] {2}, new byte[] {20});
+
+    final LayeredKeyValueStorage compacted = layer2.compact();
+    assertFalse(compacted.getParent() instanceof LayeredKeyValueStorage);
+    assertArrayEquals(new byte[] {1}, compacted.get(segmentId, rootKey).orElseThrow());
+    assertArrayEquals(new byte[] {10}, compacted.get(segmentId, new byte[] {1}).orElseThrow());
+    assertArrayEquals(new byte[] {20}, compacted.get(segmentId, new byte[] {2}).orElseThrow());
+  }
+
+  @Test
+  void estimatedDiffBytesAndLocalEntryCountReflectLocalLayerOnly() {
+    final LayeredKeyValueStorage layer = new LayeredKeyValueStorage(new SegmentedInMemoryKeyValueStorage());
+    assertEquals(0L, layer.localEntryCount());
+    assertEquals(0L, layer.estimatedDiffBytes());
+
+    final byte[] key = {1, 2};
+    final byte[] value = {3, 4, 5};
+    commitPut(layer, segmentId, key, value);
+
+    assertEquals(1L, layer.localEntryCount());
+    assertEquals(key.length + value.length, layer.estimatedDiffBytes());
+
+    layer.tryDelete(segmentId, key);
+    assertEquals(1L, layer.localEntryCount());
+    assertEquals(key.length, layer.estimatedDiffBytes());
+  }
+
+  private static void commitPut(
+      final SegmentedKeyValueStorage storage,
+      final SegmentIdentifier segmentId,
+      final byte[] key,
+      final byte[] value) {
+    final SegmentedKeyValueStorageTransaction tx = storage.startTransaction();
+    tx.put(segmentId, key, value);
+    tx.commit();
   }
 }

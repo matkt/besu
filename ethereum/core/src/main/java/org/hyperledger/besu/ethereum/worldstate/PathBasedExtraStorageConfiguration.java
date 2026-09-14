@@ -91,6 +91,9 @@ public interface PathBasedExtraStorageConfiguration {
     long DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE = 100_000L;
     long DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE = 500_000L;
     boolean DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED = false;
+    boolean DEFAULT_BONSAI_LAYERED_HEAD_ENABLED = false;
+    int DEFAULT_BONSAI_LAYERED_HEAD_CHECKPOINT_INTERVAL = 32;
+    long DEFAULT_BONSAI_LAYERED_HEAD_MEMORY_BUDGET_BYTES = 512L * 1024L * 1024L;
 
     @Value.Default
     default boolean getFullFlatDbEnabled() {
@@ -120,6 +123,31 @@ public interface PathBasedExtraStorageConfiguration {
     @Value.Default
     default boolean getBonsaiArchiveStateProofsEnabled() {
       return DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
+    }
+
+    /**
+     * When enabled, validated payloads keep a durable in-memory layer (flat + trie) and
+     * forkchoiceUpdated promotes that layer instead of replaying and flushing RocksDB every block.
+     * RocksDB is checkpointed periodically.
+     */
+    @Value.Default
+    default boolean getBonsaiLayeredHeadEnabled() {
+      return DEFAULT_BONSAI_LAYERED_HEAD_ENABLED;
+    }
+
+    /** Canonical blocks between RocksDB checkpoints when layered head is enabled. */
+    @Value.Default
+    default int getBonsaiLayeredHeadCheckpointInterval() {
+      return DEFAULT_BONSAI_LAYERED_HEAD_CHECKPOINT_INTERVAL;
+    }
+
+    /**
+     * Soft memory budget for candidate + canonical layered diffs. Crossing the budget forces a
+     * checkpoint even before the interval is reached.
+     */
+    @Value.Default
+    default long getBonsaiLayeredHeadMemoryBudgetBytes() {
+      return DEFAULT_BONSAI_LAYERED_HEAD_MEMORY_BUDGET_BYTES;
     }
   }
 }

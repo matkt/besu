@@ -95,6 +95,18 @@ public abstract class PathBasedWorldState
    */
   protected boolean isStorageFrozen;
 
+  /**
+   * When true, {@link #close()} does not close the layered storage so a payload-layer candidate can
+   * survive the validator try-with-resources.
+   */
+  protected boolean retainStorageOnClose;
+
+  /**
+   * Marks this instance as the archive head world state, even when backed by layered storage after
+   * a layered-head promotion.
+   */
+  protected boolean treatAsHeadWorldState;
+
   protected PathBasedWorldState(
       final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedWorldStateCacheManager worldStateCacheManager,
@@ -112,6 +124,8 @@ public abstract class PathBasedWorldState
     this.trieLogManager = trieLogManager;
     this.worldStateConfig = worldStateConfig;
     this.isStorageFrozen = false;
+    this.retainStorageOnClose = false;
+    this.treatAsHeadWorldState = false;
   }
 
   /**
@@ -153,7 +167,12 @@ public abstract class PathBasedWorldState
    */
   @Override
   public boolean isModifyingHeadWorldState() {
-    return isModifyingHeadWorldState(worldStateKeyValueStorage);
+    return treatAsHeadWorldState || isModifyingHeadWorldState(worldStateKeyValueStorage);
+  }
+
+  /** Marks this world state as the archive head instance. */
+  public void markAsHeadWorldState() {
+    this.treatAsHeadWorldState = true;
   }
 
   private boolean isModifyingHeadWorldState(
@@ -362,7 +381,7 @@ public abstract class PathBasedWorldState
   @Override
   public void close() {
     try {
-      if (!isModifyingHeadWorldState()) {
+      if (!isModifyingHeadWorldState() && !retainStorageOnClose) {
         this.worldStateKeyValueStorage.close();
         if (isStorageFrozen) {
           closeFrozenStorage();
@@ -371,6 +390,23 @@ public abstract class PathBasedWorldState
     } catch (Exception e) {
       // no op
     }
+  }
+
+  /**
+   * Replaces the underlying key-value storage used by this world state (used when promoting a
+   * layered-head candidate to the live head).
+   *
+   * @param newStorage the storage to use
+   * @param blockHeader the header this storage corresponds to
+   */
+  public void replaceWorldStateStorage(
+      final PathBasedWorldStateKeyValueStorage newStorage, final BlockHeader blockHeader) {
+    this.worldStateKeyValueStorage = newStorage;
+    this.worldStateBlockHash = blockHeader.getBlockHash();
+    this.worldStateRootHash = blockHeader.getStateRoot();
+    this.isStorageFrozen = false;
+    this.retainStorageOnClose = false;
+    this.treatAsHeadWorldState = true;
   }
 
   private void closeFrozenStorage() {

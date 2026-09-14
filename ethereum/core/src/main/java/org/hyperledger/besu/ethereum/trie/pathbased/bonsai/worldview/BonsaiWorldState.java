@@ -217,6 +217,20 @@ public class BonsaiWorldState extends PathBasedWorldState {
     return this;
   }
 
+  /**
+   * Opens a writable layered storage over the current parent for engine newPayload. Unlike {@link
+   * #freezeStorage()}, flat and trie writes from {@link #persist} are applied to the layer and can
+   * be retained for later forkchoice promotion.
+   *
+   * @return this world state with a writable payload layer
+   */
+  public MutableWorldState openPayloadLayer() {
+    this.isStorageFrozen = false;
+    this.retainStorageOnClose = true;
+    this.worldStateKeyValueStorage = new BonsaiWorldStateLayerStorage(getWorldStateStorage());
+    return this;
+  }
+
   public void disableCacheMerkleTrieLoader() {
     this.bonsaiCachedMerkleTrieLoader = new NoOpBonsaiCachedMerkleTrieLoader();
   }

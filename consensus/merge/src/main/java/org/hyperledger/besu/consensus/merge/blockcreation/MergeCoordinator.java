@@ -48,6 +48,7 @@ import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateUpdateMode;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
@@ -640,37 +641,36 @@ public class MergeCoordinator implements MergeMiningCoordinator, BadChainListene
 
   private BlockProcessingResult validateBlock(
       final Block block, final Optional<BlockAccessList> blockAccessList) {
-    final var validationResult =
-        protocolSchedule
-            .getByBlockHeader(block.getHeader())
-            .getBlockValidator()
-            .validateAndProcessBlock(
-                protocolContext,
-                block,
-                HeaderValidationMode.FULL,
-                HeaderValidationMode.NONE,
-                blockAccessList,
-                false);
-
-    return validationResult;
+    final WorldStateUpdateMode updateMode =
+        protocolContext.getWorldStateArchive().isLayeredHeadEnabled()
+            ? WorldStateUpdateMode.PAYLOAD_LAYER
+            : WorldStateUpdateMode.READ_ONLY;
+    return protocolSchedule
+        .getByBlockHeader(block.getHeader())
+        .getBlockValidator()
+        .validateAndProcessBlock(
+            protocolContext,
+            block,
+            HeaderValidationMode.FULL,
+            HeaderValidationMode.NONE,
+            blockAccessList,
+            updateMode,
+            true);
   }
 
   private BlockProcessingResult validateProposedBlock(
       final Block block, final Optional<BlockAccessList> blockAccessList) {
-    final var validationResult =
-        protocolSchedule
-            .getByBlockHeader(block.getHeader())
-            .getBlockValidator()
-            .validateAndProcessBlock(
-                protocolContext,
-                block,
-                HeaderValidationMode.FULL,
-                HeaderValidationMode.NONE,
-                blockAccessList,
-                false,
-                false);
-
-    return validationResult;
+    return protocolSchedule
+        .getByBlockHeader(block.getHeader())
+        .getBlockValidator()
+        .validateAndProcessBlock(
+            protocolContext,
+            block,
+            HeaderValidationMode.FULL,
+            HeaderValidationMode.NONE,
+            blockAccessList,
+            WorldStateUpdateMode.READ_ONLY,
+            false);
   }
 
   @Override
@@ -775,6 +775,14 @@ public class MergeCoordinator implements MergeMiningCoordinator, BadChainListene
   }
 
   private boolean moveWorldStateTo(final BlockHeader newHead) {
+    if (protocolContext.getWorldStateArchive().promoteCachedWorldState(newHead)) {
+      LOG.atDebug()
+          .setMessage("Promoted layered head world state to {}")
+          .addArgument(newHead::toLogString)
+          .log();
+      return true;
+    }
+
     Optional<MutableWorldState> newWorldState =
         protocolContext
             .getWorldStateArchive()

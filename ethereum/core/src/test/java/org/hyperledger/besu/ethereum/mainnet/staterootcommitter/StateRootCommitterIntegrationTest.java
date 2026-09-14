@@ -56,6 +56,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutablePathBasedExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
@@ -403,6 +405,52 @@ class StateRootCommitterIntegrationTest {
       assertThat(harness.codeFlatDbKeyCount()).isEqualTo(codeKeysBefore);
       assertThat(harness.storageFlatDbKeyCount()).isEqualTo(storageKeysBefore);
       assertThat(harness.accountExistsInFlatDb(CONTRACT)).isFalse();
+    }
+
+    @Test
+    void layeredHeadPayloadLayer_containsFlatAndTrie_andPromoteMatchesPersistRoot() {
+      harness = BonsaiKvHarness.createWithLayeredHead();
+      final BlockChange blockChange = BlockChange.complex();
+      final BlockHeader parent = harness.persistParent();
+      final BlockHeader blockHeader = harness.childHeader(parent, blockChange);
+      final int accountKeysBefore = harness.accountFlatDbKeyCount();
+
+      try (BonsaiWorldState worldState =
+          (BonsaiWorldState)
+              harness
+                  .protocolContext()
+                  .getWorldStateArchive()
+                  .getWorldState(WorldStateQueryParams.withBlockHeaderAndPayloadLayer(parent))
+                  .orElseThrow()) {
+        blockChange.apply(worldState.updater());
+        worldState.updater().commit();
+        worldState.persist(blockHeader, new DefaultStateRootCommitter());
+      }
+
+      assertThat(harness.trieLogExists(blockHeader)).isTrue();
+      assertThat(harness.accountFlatDbKeyCount()).isEqualTo(accountKeysBefore);
+      assertThat(harness.accountExistsInFlatDb(CONTRACT)).isFalse();
+      assertThat(harness.archive().getHeadLayerManager()).isPresent();
+      assertThat(harness.archive().getHeadLayerManager().orElseThrow().hasCandidate(blockHeader.getBlockHash()))
+          .isTrue();
+
+      harness
+          .protocolContext()
+          .getBlockchain()
+          .appendBlock(new Block(blockHeader, BlockBody.empty()), List.of(), Optional.empty());
+
+      assertThat(harness.archive().promoteCachedWorldState(blockHeader)).isTrue();
+
+      final Optional<MutableWorldState> headAfterFcu =
+          harness
+              .protocolContext()
+              .getWorldStateArchive()
+              .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(blockHeader));
+
+      assertThat(headAfterFcu).isPresent();
+      assertThat(headAfterFcu.get().rootHash()).isEqualTo(blockHeader.getStateRoot());
+      assertThat(headAfterFcu.get().get(CONTRACT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
+          .isEqualTo(SLOT_VALUE);
     }
 
     @Test
@@ -890,6 +938,26 @@ class StateRootCommitterIntegrationTest {
     }
 
     static BonsaiKvHarness create() {
+      return create(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    }
+
+    static BonsaiKvHarness createWithLayeredHead() {
+      final ImmutablePathBasedExtraStorageConfiguration pathConfig =
+          ImmutablePathBasedExtraStorageConfiguration.builder()
+              .unstable(
+                  ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.builder()
+                      .bonsaiLayeredHeadEnabled(true)
+                      .bonsaiLayeredHeadCheckpointInterval(32)
+                      .build())
+              .build();
+      return create(
+          ImmutableDataStorageConfiguration.builder()
+              .dataStorageFormat(DataStorageFormat.BONSAI)
+              .pathBasedExtraStorageConfiguration(pathConfig)
+              .build());
+    }
+
+    static BonsaiKvHarness create(final DataStorageConfiguration dataStorageConfiguration) {
       final InMemoryKeyValueStorageProvider provider = new InMemoryKeyValueStorageProvider();
       final var protocolSchedule =
           new ProtocolScheduleBuilder(
@@ -911,13 +979,12 @@ class StateRootCommitterIntegrationTest {
           InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesisState.getBlock());
       final BonsaiWorldStateKeyValueStorage kvStorage =
           new BonsaiWorldStateKeyValueStorage(
-              provider, new NoOpMetricsSystem(), DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+              provider, new NoOpMetricsSystem(), dataStorageConfiguration);
       final BonsaiWorldStateProvider archive =
           new BonsaiWorldStateProvider(
               kvStorage,
               blockchain,
-              DataStorageConfiguration.DEFAULT_BONSAI_CONFIG
-                  .getPathBasedExtraStorageConfiguration(),
+              dataStorageConfiguration.getPathBasedExtraStorageConfiguration(),
               new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
               null,
               EvmConfiguration.DEFAULT,
@@ -940,6 +1007,10 @@ class StateRootCommitterIntegrationTest {
 
     ProtocolContext protocolContext() {
       return protocolContext;
+    }
+
+    BonsaiWorldStateProvider archive() {
+      return archive;
     }
 
     BonsaiWorldState newWritableWorldState() {

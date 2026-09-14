@@ -25,7 +25,7 @@ import java.util.Optional;
 public class WorldStateQueryParams {
 
   private final BlockHeader blockHeader;
-  private final boolean shouldWorldStateUpdateHead;
+  private final WorldStateUpdateMode worldStateUpdateMode;
   private final Hash blockHash;
   private final Optional<Hash> stateRoot;
   private final Optional<BlockAccessListOverlay> blockAccessListOverlay;
@@ -37,7 +37,7 @@ public class WorldStateQueryParams {
    */
   private WorldStateQueryParams(final Builder builder) {
     this.blockHeader = builder.blockHeader;
-    this.shouldWorldStateUpdateHead = builder.shouldWorldStateUpdateHead;
+    this.worldStateUpdateMode = builder.worldStateUpdateMode;
     this.blockHash = builder.blockHash;
     this.stateRoot = builder.stateRoot;
     this.blockAccessListOverlay = builder.blockAccessListOverlay;
@@ -58,7 +58,16 @@ public class WorldStateQueryParams {
    * @return true if the world state should update the node head, false otherwise
    */
   public boolean shouldWorldStateUpdateHead() {
-    return shouldWorldStateUpdateHead;
+    return worldStateUpdateMode.updatesHead();
+  }
+
+  /**
+   * How the retrieved world state should treat persistence after processing.
+   *
+   * @return the update mode
+   */
+  public WorldStateUpdateMode getWorldStateUpdateMode() {
+    return worldStateUpdateMode;
   }
 
   /**
@@ -101,7 +110,10 @@ public class WorldStateQueryParams {
    */
   public static WorldStateQueryParams withBlockHeaderAndUpdateNodeHead(
       final BlockHeader blockHeader) {
-    return newBuilder().withBlockHeader(blockHeader).withShouldWorldStateUpdateHead(true).build();
+    return newBuilder()
+        .withBlockHeader(blockHeader)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.HEAD)
+        .build();
   }
 
   /**
@@ -112,7 +124,24 @@ public class WorldStateQueryParams {
    */
   public static WorldStateQueryParams withBlockHeaderAndNoUpdateNodeHead(
       final BlockHeader blockHeader) {
-    return newBuilder().withBlockHeader(blockHeader).withShouldWorldStateUpdateHead(false).build();
+    return newBuilder()
+        .withBlockHeader(blockHeader)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.READ_ONLY)
+        .build();
+  }
+
+  /**
+   * Creates an instance that retains a durable payload layer without updating head.
+   *
+   * @param blockHeader the parent block header used as the base for the payload layer
+   * @return an instance of WorldStateQueryParams
+   */
+  public static WorldStateQueryParams withBlockHeaderAndPayloadLayer(
+      final BlockHeader blockHeader) {
+    return newBuilder()
+        .withBlockHeader(blockHeader)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.PAYLOAD_LAYER)
+        .build();
   }
 
   /**
@@ -128,7 +157,7 @@ public class WorldStateQueryParams {
     return newBuilder()
         .withStateRoot(stateRoot)
         .withBlockHash(blockHash)
-        .withShouldWorldStateUpdateHead(true)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.HEAD)
         .build();
   }
 
@@ -139,7 +168,10 @@ public class WorldStateQueryParams {
    * @return an instance of WorldStateQueryParams
    */
   public static WorldStateQueryParams withStateRootAndUpdateNodeHead(final Hash stateRoot) {
-    return newBuilder().withStateRoot(stateRoot).withShouldWorldStateUpdateHead(true).build();
+    return newBuilder()
+        .withStateRoot(stateRoot)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.HEAD)
+        .build();
   }
 
   /**
@@ -154,7 +186,7 @@ public class WorldStateQueryParams {
     return newBuilder()
         .withStateRoot(stateRoot)
         .withBlockHash(blockHash)
-        .withShouldWorldStateUpdateHead(false)
+        .withWorldStateUpdateMode(WorldStateUpdateMode.READ_ONLY)
         .build();
   }
 
@@ -162,7 +194,7 @@ public class WorldStateQueryParams {
   public boolean equals(final Object o) {
     if (o == null || getClass() != o.getClass()) return false;
     WorldStateQueryParams that = (WorldStateQueryParams) o;
-    return shouldWorldStateUpdateHead == that.shouldWorldStateUpdateHead
+    return worldStateUpdateMode == that.worldStateUpdateMode
         && Objects.equals(blockHeader, that.blockHeader)
         && Objects.equals(blockHash, that.blockHash)
         && Objects.equals(stateRoot, that.stateRoot)
@@ -172,12 +204,12 @@ public class WorldStateQueryParams {
   @Override
   public int hashCode() {
     return Objects.hash(
-        blockHeader, shouldWorldStateUpdateHead, blockHash, stateRoot, blockAccessListOverlay);
+        blockHeader, worldStateUpdateMode, blockHash, stateRoot, blockAccessListOverlay);
   }
 
   public static class Builder {
     private BlockHeader blockHeader;
-    private boolean shouldWorldStateUpdateHead = false;
+    private WorldStateUpdateMode worldStateUpdateMode = WorldStateUpdateMode.READ_ONLY;
     private Hash blockHash;
     private Optional<Hash> stateRoot = Optional.empty();
     private Optional<BlockAccessListOverlay> blockAccessListOverlay = Optional.empty();
@@ -205,7 +237,19 @@ public class WorldStateQueryParams {
      * @return the builder
      */
     public Builder withShouldWorldStateUpdateHead(final boolean shouldWorldStateUpdateHead) {
-      this.shouldWorldStateUpdateHead = shouldWorldStateUpdateHead;
+      this.worldStateUpdateMode =
+          WorldStateUpdateMode.fromShouldUpdateHead(shouldWorldStateUpdateHead);
+      return this;
+    }
+
+    /**
+     * Sets the world-state update mode for this query.
+     *
+     * @param worldStateUpdateMode the mode
+     * @return the builder
+     */
+    public Builder withWorldStateUpdateMode(final WorldStateUpdateMode worldStateUpdateMode) {
+      this.worldStateUpdateMode = worldStateUpdateMode;
       return this;
     }
 

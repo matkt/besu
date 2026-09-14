@@ -42,7 +42,7 @@ import org.slf4j.LoggerFactory;
 public abstract class PathBasedWorldStateCacheManager implements StorageSubscriber {
   public static final long RETAINED_LAYERS = 512; // at least 256 + typical rollbacks
   private static final Logger LOG = LoggerFactory.getLogger(PathBasedWorldStateCacheManager.class);
-  private final PathBasedWorldStateProvider archive;
+  protected final PathBasedWorldStateProvider archive;
   private final EvmConfiguration evmConfiguration;
   protected final WorldStateConfig worldStateConfig;
   private final Map<Hash, BlockHeader> stateRootToBlockHeaderCache = new ConcurrentHashMap<>();
@@ -109,6 +109,18 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
       stateRootToBlockHeaderCache.put(blockHeader.getStateRoot(), blockHeader);
     }
     scrubCachedLayers(blockHeader.getNumber());
+    maybeRegisterPayloadLayerCandidate(blockHeader, forWorldState);
+  }
+
+  /**
+   * Hook for Bonsai layered-head: register a durable payload layer candidate after it was cached.
+   *
+   * @param blockHeader the block header for the candidate
+   * @param forWorldState the world state that produced the layer
+   */
+  protected void maybeRegisterPayloadLayerCandidate(
+      final BlockHeader blockHeader, final PathBasedWorldState forWorldState) {
+    // default no-op
   }
 
   private synchronized void scrubCachedLayers(final long newMaxHeight) {
