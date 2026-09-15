@@ -17,6 +17,7 @@ package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.atMostOnce;
@@ -458,6 +459,32 @@ public class LayeredKeyValueStorageTest {
     assertArrayEquals(new byte[] {1}, compacted.get(segmentId, rootKey).orElseThrow());
     assertArrayEquals(new byte[] {10}, compacted.get(segmentId, new byte[] {1}).orElseThrow());
     assertArrayEquals(new byte[] {20}, compacted.get(segmentId, new byte[] {2}).orElseThrow());
+  }
+
+  @Test
+  void compactIntoFlattensOntoNewParentWithoutExtraDeepCopy() {
+    final SegmentedKeyValueStorage oldRoot = new SegmentedInMemoryKeyValueStorage();
+    final SegmentedKeyValueStorage newRoot = new SegmentedInMemoryKeyValueStorage();
+    commitPut(oldRoot, segmentId, new byte[] {0}, new byte[] {0});
+    commitPut(newRoot, segmentId, new byte[] {9}, new byte[] {9});
+
+    final LayeredKeyValueStorage layer1 = new LayeredKeyValueStorage(oldRoot);
+    commitPut(layer1, segmentId, new byte[] {1}, new byte[] {10});
+    final LayeredKeyValueStorage layer2 = new LayeredKeyValueStorage(layer1);
+    commitPut(layer2, segmentId, new byte[] {2}, new byte[] {20});
+
+    final LayeredKeyValueStorage overNewRoot = layer2.compactInto(newRoot);
+    assertTrue(overNewRoot.isDirectlyOver(newRoot));
+    assertArrayEquals(new byte[] {10}, overNewRoot.get(segmentId, new byte[] {1}).orElseThrow());
+    assertArrayEquals(new byte[] {20}, overNewRoot.get(segmentId, new byte[] {2}).orElseThrow());
+    assertArrayEquals(new byte[] {9}, overNewRoot.get(segmentId, new byte[] {9}).orElseThrow());
+    assertTrue(overNewRoot.get(segmentId, new byte[] {0}).isEmpty());
+
+    // Already flat over newRoot → clone sharing parent, not a second flatten.
+    final LayeredKeyValueStorage clone = overNewRoot.compactInto(newRoot);
+    assertTrue(clone.isDirectlyOver(newRoot));
+    assertNotSame(overNewRoot, clone);
+    assertArrayEquals(new byte[] {10}, clone.get(segmentId, new byte[] {1}).orElseThrow());
   }
 
   @Test

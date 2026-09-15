@@ -188,10 +188,10 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
         && headLayerManager.getCanonicalWindowDepth() == 0) {
       headWorldState.replaceWorldStateStorage(worldStateKeyValueStorage, blockHeader);
     } else {
-      // Ensure head layer parents onto durable root RocksDB, never a closable cache snapshot.
-      final BonsaiWorldStateLayerStorage stable =
-          promoted.get().reparentOnto((BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage);
-      headWorldState.replaceWorldStateStorage(stable, blockHeader);
+      final BonsaiWorldStateKeyValueStorage root =
+          (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage;
+      // Candidates are already reparented at registration; reparentOnto is a cheap clone then.
+      headWorldState.replaceWorldStateStorage(promoted.get().reparentOnto(root), blockHeader);
     }
     worldStateCacheManager.addCachedLayer(
         blockHeader, blockHeader.getStateRoot(), headWorldState);

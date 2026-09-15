@@ -84,11 +84,14 @@ public class BonsaiHeadLayerManager {
 
   /**
    * Registers an immutable candidate layer produced by a validated payload. The layer must already
-   * contain flat state and trie-node writes for that block.
+   * contain flat state and trie-node writes for that block and should already be parented onto the
+   * durable root.
    */
   public synchronized void registerCandidate(
       final BlockHeader blockHeader, final BonsaiWorldStateLayerStorage layerStorage) {
     final LayeredKeyValueStorage composed = layerStorage.getComposedWorldStateStorage();
+    // Freeze local diff once for the canonical window; worldStateStorage is already isolated from
+    // the live payload world-state (reparented/cloned into the cache before registration).
     final LayeredKeyValueStorage diff = composed.snapshotDiff();
     final long bytes = diff.estimatedDiffBytes();
     final CandidateLayer previous =

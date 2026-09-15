@@ -68,6 +68,7 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
       final BlockHeader blockHeader,
       final Hash worldStateRootHash,
       final PathBasedWorldState forWorldState) {
+    final PathBasedWorldStateKeyValueStorage storageForCache;
     final Optional<PathBasedCachedWorldStateView> cachedPathBasedWorldView =
         Optional.ofNullable(this.cachedWorldStatesByHash.get(blockHeader.getBlockHash()));
     if (cachedPathBasedWorldView.isPresent()) {
@@ -80,9 +81,10 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
             .addArgument(blockHeader::toLogString)
             .addArgument(() -> worldStateRootHash.getBytes().toShortHexString())
             .log();
-        cachedPathBasedWorldView
-            .get()
-            .updateWorldStateStorage(stableCopyOf(forWorldState.getWorldStateStorage()));
+        storageForCache = stableCopyOf(forWorldState.getWorldStateStorage());
+        cachedPathBasedWorldView.get().updateWorldStateStorage(storageForCache);
+      } else {
+        storageForCache = cachedPathBasedWorldView.get().getWorldStateStorage();
       }
     } else {
       LOG.atDebug()
@@ -91,25 +93,21 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
           .addArgument(() -> worldStateRootHash.getBytes().toShortHexString())
           .log();
       if (forWorldState.isModifyingHeadWorldState()) {
-        cachedWorldStatesByHash.put(
-            blockHeader.getBlockHash(),
-            new PathBasedCachedWorldStateView(
-                blockHeader, stableCopyOf(forWorldState.getWorldStateStorage())));
+        storageForCache = stableCopyOf(forWorldState.getWorldStateStorage());
       } else {
-        // otherwise, add the layer to the cache
-        cachedWorldStatesByHash.put(
-            blockHeader.getBlockHash(),
-            new PathBasedCachedWorldStateView(
-                blockHeader,
-                copyLayerForCache(
-                    (PathBasedLayeredWorldStateKeyValueStorage)
-                        forWorldState.getWorldStateStorage())));
+        storageForCache =
+            copyLayerForCache(
+                (PathBasedLayeredWorldStateKeyValueStorage) forWorldState.getWorldStateStorage());
       }
+      cachedWorldStatesByHash.put(
+          blockHeader.getBlockHash(),
+          new PathBasedCachedWorldStateView(blockHeader, storageForCache));
       // add stateroot -> blockHeader cache entry
       stateRootToBlockHeaderCache.put(blockHeader.getStateRoot(), blockHeader);
     }
     scrubCachedLayers(blockHeader.getNumber());
-    maybeRegisterPayloadLayerCandidate(blockHeader, forWorldState);
+    // Pass the cache storage (already reparented/cloned once) so registration does not redo it.
+    maybeRegisterPayloadLayerCandidate(blockHeader, forWorldState, storageForCache);
   }
 
   /**
@@ -141,9 +139,12 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
    *
    * @param blockHeader the block header for the candidate
    * @param forWorldState the world state that produced the layer
+   * @param storageForCache the storage already placed in the cache (reparented/cloned once)
    */
   protected void maybeRegisterPayloadLayerCandidate(
-      final BlockHeader blockHeader, final PathBasedWorldState forWorldState) {
+      final BlockHeader blockHeader,
+      final PathBasedWorldState forWorldState,
+      final PathBasedWorldStateKeyValueStorage storageForCache) {
     // default no-op
   }
 

@@ -59,16 +59,27 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
    * live head does not depend on cache snapshots that may later be closed (closed parents make
    * account reads return empty → apparent balance 0x0).
    *
+   * <p>Fast path: when already a single layer over {@code durableRoot}, returns a cheap {@link
+   * #clone()} (no compact / deep-copy of the full chain).
+   *
    * @param durableRoot the long-lived root world-state storage (RocksDB)
    * @return a layer reparented onto the durable root
    */
   public BonsaiWorldStateLayerStorage reparentOnto(
       final BonsaiWorldStateKeyValueStorage durableRoot) {
-    final LayeredKeyValueStorage compacted = getComposedWorldStateStorage().compact();
-    final LayeredKeyValueStorage overRoot =
-        new LayeredKeyValueStorage(
-            compacted.deepCopyForCheckpoint(), durableRoot.getComposedWorldStateStorage());
+    final SegmentedKeyValueStorage rootComposed = durableRoot.getComposedWorldStateStorage();
+    final LayeredKeyValueStorage composed = getComposedWorldStateStorage();
+    if (composed.isDirectlyOver(rootComposed) && parentWorldStateStorage == durableRoot) {
+      return clone();
+    }
+    final LayeredKeyValueStorage overRoot = composed.compactInto(rootComposed);
     return new BonsaiWorldStateLayerStorage(overRoot, trieLogStorage, durableRoot);
+  }
+
+  /** Whether this layer is already a single overlay on the given durable root storage. */
+  public boolean isParentedOnto(final BonsaiWorldStateKeyValueStorage durableRoot) {
+    return parentWorldStateStorage == durableRoot
+        && getComposedWorldStateStorage().isDirectlyOver(durableRoot.getComposedWorldStateStorage());
   }
 
   @Override

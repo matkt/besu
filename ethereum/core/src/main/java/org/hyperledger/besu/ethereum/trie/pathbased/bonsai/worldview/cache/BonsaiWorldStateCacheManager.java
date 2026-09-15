@@ -92,18 +92,21 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
 
   @Override
   protected void maybeRegisterPayloadLayerCandidate(
-      final BlockHeader blockHeader, final PathBasedWorldState forWorldState) {
+      final BlockHeader blockHeader,
+      final PathBasedWorldState forWorldState,
+      final PathBasedWorldStateKeyValueStorage storageForCache) {
     if (!(archive instanceof BonsaiWorldStateProvider bonsaiProvider)
         || !bonsaiProvider.isLayeredHeadEnabled()) {
       return;
     }
-    if (!(forWorldState.getWorldStateStorage() instanceof BonsaiWorldStateLayerStorage layer)
-        || forWorldState.isStorageFrozen()) {
+    // Only payload layers (non-head) become FCU candidates. Head updates must not re-register.
+    if (forWorldState.isModifyingHeadWorldState() || forWorldState.isStorageFrozen()) {
       return;
     }
-    // Reparent onto durable root before registering so promotion never depends on cache snapshots.
-    final BonsaiWorldStateKeyValueStorage root =
-        (BonsaiWorldStateKeyValueStorage) bonsaiProvider.getWorldStateKeyValueStorage();
-    bonsaiProvider.registerPayloadLayerCandidate(blockHeader, layer.reparentOnto(root));
+    if (!(storageForCache instanceof BonsaiWorldStateLayerStorage cachedLayer)) {
+      return;
+    }
+    // storageForCache was already reparented/cloned once in copyLayerForCache — reuse it.
+    bonsaiProvider.registerPayloadLayerCandidate(blockHeader, cachedLayer);
   }
 }

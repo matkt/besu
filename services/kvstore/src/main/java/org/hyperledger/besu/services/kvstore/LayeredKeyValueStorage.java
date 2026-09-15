@@ -469,6 +469,46 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
     if (!(parent instanceof LayeredKeyValueStorage)) {
       return this;
     }
+    return new LayeredKeyValueStorage(flattenLocalDiffs(), parentOfLayerChain());
+  }
+
+  /**
+   * Flattens this layer chain into a single writable layer whose parent is {@code newParent}. When
+   * already flat against {@code newParent}, returns a deep-copied clone sharing that parent.
+   * Avoids an extra deep-copy after {@link #compact()} when the caller needs a different parent.
+   *
+   * @param newParent the parent to attach the compacted diffs to
+   * @return a single layer over {@code newParent}
+   */
+  public LayeredKeyValueStorage compactInto(final SegmentedKeyValueStorage newParent) {
+    throwIfClosed();
+    if (!(parent instanceof LayeredKeyValueStorage) && parent == newParent) {
+      return (LayeredKeyValueStorage) clone();
+    }
+    return new LayeredKeyValueStorage(flattenLocalDiffs(), newParent);
+  }
+
+  /**
+   * Whether this layer's parent is exactly {@code candidateParent} and there are no intermediate
+   * layered parents.
+   */
+  public boolean isDirectlyOver(final SegmentedKeyValueStorage candidateParent) {
+    return !(parent instanceof LayeredKeyValueStorage) && parent == candidateParent;
+  }
+
+  private SegmentedKeyValueStorage parentOfLayerChain() {
+    SegmentedKeyValueStorage ancestor = parent;
+    while (ancestor instanceof LayeredKeyValueStorage layered) {
+      ancestor = layered.parent;
+    }
+    return ancestor;
+  }
+
+  private ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>>
+      flattenLocalDiffs() {
+    if (!(parent instanceof LayeredKeyValueStorage)) {
+      return deepCopyStore();
+    }
     final ConcurrentMap<SegmentIdentifier, NavigableMap<Bytes, Optional<byte[]>>> compacted =
         new ConcurrentHashMap<>();
     SegmentedKeyValueStorage ancestor = this;
@@ -487,7 +527,7 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
         lock.unlock();
       }
     }
-    return new LayeredKeyValueStorage(compacted, ancestor);
+    return compacted;
   }
 
   /**
