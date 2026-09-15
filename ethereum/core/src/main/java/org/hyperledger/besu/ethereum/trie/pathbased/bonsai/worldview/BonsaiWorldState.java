@@ -57,9 +57,13 @@ import jakarta.validation.constraints.NotNull;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("rawtypes")
 public class BonsaiWorldState extends PathBasedWorldState {
+
+  private static final Logger LOG = LoggerFactory.getLogger(BonsaiWorldState.class);
 
   protected BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader;
   private final PathBasedCodeCache codeCache;
@@ -138,6 +142,14 @@ public class BonsaiWorldState extends PathBasedWorldState {
     final PersistentImmutableTreeCache treeCache =
         bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
     final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
+    LOG.atDebug()
+        .setMessage(
+            "State root compute via immutable tree cache: baseRoot={} head={} nodes={} block={}")
+        .addArgument(baseRoot::toShortHexString)
+        .addArgument(isModifyingHeadWorldState())
+        .addArgument(treeCache::cachedNodeCount)
+        .addArgument(() -> blockHeader == null ? "null" : blockHeader.toLogString())
+        .log();
     try (TreeTraversalLock ignored = treeCache.beginTraversal(baseRoot, RootKind.STATE)) {
       super.persist(blockHeader, committer);
     }
@@ -150,6 +162,12 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final PersistentImmutableTreeCache treeCache =
           bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
       final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
+      LOG.atDebug()
+          .setMessage(
+              "Frozen rootHash compute via immutable tree cache: baseRoot={} nodes={}")
+          .addArgument(baseRoot::toShortHexString)
+          .addArgument(treeCache::cachedNodeCount)
+          .log();
       try (TreeTraversalLock ignored = treeCache.beginTraversal(baseRoot, RootKind.STATE)) {
         worldStateRootHash =
             resolveDefaultCommitter().compute(this, null, accumulator.copy()).root();
@@ -165,12 +183,32 @@ public class BonsaiWorldState extends PathBasedWorldState {
     final Bytes32 root = Bytes32.wrap(worldStateRootHash.getBytes());
     if (isModifyingHeadWorldState()) {
       treeCache.setHead(root, RootKind.STATE);
+      LOG.atDebug()
+          .setMessage(
+              "Immutable tree cache registered HEAD state root={} nodes={} roots={}")
+          .addArgument(root::toShortHexString)
+          .addArgument(treeCache::cachedNodeCount)
+          .addArgument(treeCache::cachedRootCount)
+          .log();
     } else {
       treeCache.setNewPayload(root, RootKind.STATE);
+      LOG.atDebug()
+          .setMessage(
+              "Immutable tree cache registered NEW_PAYLOAD state root={} nodes={} roots={}")
+          .addArgument(root::toShortHexString)
+          .addArgument(treeCache::cachedNodeCount)
+          .addArgument(treeCache::cachedRootCount)
+          .log();
     }
     if (blockHeader != null) {
       treeCache.advanceBlock(blockHeader.getNumber());
-      treeCache.prune();
+      final int pruned = treeCache.prune();
+      LOG.atDebug()
+          .setMessage("Immutable tree cache prune after block {}: removed={} remainingNodes={}")
+          .addArgument(blockHeader::getNumber)
+          .addArgument(pruned)
+          .addArgument(treeCache::cachedNodeCount)
+          .log();
     }
   }
 
