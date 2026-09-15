@@ -39,6 +39,9 @@ public final class PersistentImmutableTreeCache {
   /** Content-addressed in-memory nodes. */
   private final ConcurrentHashMap<Bytes32, CachedNodeRecord> nodes = new ConcurrentHashMap<>();
 
+  /** Raw RLP payloads observed during state-root walks (independent of decode success). */
+  private final ConcurrentHashMap<Bytes32, Bytes> rlpByHash = new ConcurrentHashMap<>();
+
   /** Live roots indexed by hash + kind. */
   private final ConcurrentHashMap<RootKey, TreeRootHandle> roots = new ConcurrentHashMap<>();
 
@@ -76,26 +79,81 @@ public final class PersistentImmutableTreeCache {
 
   /** Promote a root to head (e.g. after forkchoice). Keeps the previous head as a fork root. */
   public void setHead(final Bytes32 rootHash, final RootKind kind) {
-    final TreeRootHandle handle =
-        roots.computeIfAbsent(
-            new RootKey(rootHash, kind),
-            key -> {
-              final ImmutableTreeNode node = materializeRoot(rootHash, Bytes.EMPTY);
-              return new TreeRootHandle(rootHash, kind, TreeRole.HEAD, node);
-            });
-    headState = handle;
+    headState = bindRoot(rootHash, kind, TreeRole.HEAD);
   }
 
   /** Bind the in-memory newPayload tree to a specific root. */
   public void setNewPayload(final Bytes32 rootHash, final RootKind kind) {
-    final TreeRootHandle handle =
-        roots.computeIfAbsent(
-            new RootKey(rootHash, kind),
-            key -> {
-              final ImmutableTreeNode node = materializeRoot(rootHash, Bytes.EMPTY);
-              return new TreeRootHandle(rootHash, kind, TreeRole.NEW_PAYLOAD, node);
-            });
-    newPayloadState = handle;
+    newPayloadState = bindRoot(rootHash, kind, TreeRole.NEW_PAYLOAD);
+  }
+
+  /**
+   * Ensures a root handle exists for {@code rootHash}. Missing trees stay as {@link StoredTreeNode}
+   * until nodes are loaded during state-root walks.
+   */
+  public TreeRootHandle bindRoot(
+      final Bytes32 rootHash, final RootKind kind, final TreeRole role) {
+    final long block = currentBlock.get();
+    return roots.compute(
+        new RootKey(rootHash, kind),
+        (key, existing) -> {
+          if (existing != null) {
+            existing.touch(block);
+            return existing;
+          }
+          final ImmutableTreeNode node = materializeRoot(rootHash, Bytes.EMPTY);
+          final TreeRootHandle created = new TreeRootHandle(rootHash, kind, role, node);
+          created.touch(block);
+          return created;
+        });
+  }
+
+  /**
+   * Returns RLP for a node if it is already materialized in the tree cache (or can be loaded via
+   * {@link DiskNodeLoader}). Used on every state-root trie walk.
+   */
+  public Optional<Bytes> getNodeRlp(final Bytes location, final Bytes32 hash) {
+    if (hash.equals(TreeCodec.EMPTY_HASH)) {
+      return Optional.of(TreeCodec.EMPTY_RLP);
+    }
+    final Bytes cachedRlp = rlpByHash.get(hash);
+    if (cachedRlp != null) {
+      final CachedNodeRecord record = nodes.get(hash);
+      if (record != null) {
+        record.touch(currentBlock.get());
+      }
+      return Optional.of(cachedRlp);
+    }
+    final CachedNodeRecord cached = nodes.get(hash);
+    if (cached != null && !cached.node().isStored()) {
+      cached.touch(currentBlock.get());
+      final Bytes rlp = cached.node().rlp();
+      rlpByHash.put(hash, rlp);
+      return Optional.of(rlp);
+    }
+    final Optional<Bytes> fromDisk = diskLoader.load(location, hash);
+    fromDisk.ifPresent(rlp -> cacheNodeRlp(location, hash, rlp));
+    return fromDisk;
+  }
+
+  /** Caches a node loaded from Bonsai storage during state-root computation. */
+  public void cacheNodeRlp(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+    if (hash.equals(TreeCodec.EMPTY_HASH)) {
+      return;
+    }
+    rlpByHash.put(hash, rlp);
+    try {
+      final ImmutableTreeNode decoded = TreeNodeDecoder.decode(location, hash, rlp);
+      touchAndGet(decoded);
+    } catch (final RuntimeException ignored) {
+      // Keep the raw RLP for subsequent state-root reads even if structural decode fails.
+      touchAndGet(new StoredTreeNode(location, hash));
+    }
+  }
+
+  /** Locked traversal for the tree at {@code rootHash} (creates a stored placeholder if needed). */
+  public TreeTraversalLock beginTraversal(final Bytes32 rootHash, final RootKind kind) {
+    return beginTraversal(treeForRoot(rootHash, kind));
   }
 
   /**
@@ -250,6 +308,7 @@ public final class PersistentImmutableTreeCache {
         continue;
       }
       if (nodes.remove(entry.getKey(), record)) {
+        rlpByHash.remove(entry.getKey());
         removed++;
       }
     }
@@ -325,16 +384,18 @@ public final class PersistentImmutableTreeCache {
       cached.touch(currentBlock.get());
       return cached.node();
     }
-    final Bytes rlp =
-        diskLoader
-            .load(location, hash)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "Missing trie node on disk hash=" + hash + " location=" + location));
-    final ImmutableTreeNode decoded = TreeNodeDecoder.decode(location, hash, rlp);
-    touchAndGet(decoded);
-    return decoded;
+    final Optional<Bytes> rlp = diskLoader.load(location, hash);
+    if (rlp.isPresent()) {
+      final Bytes payload = rlp.get();
+      rlpByHash.put(hash, payload);
+      final ImmutableTreeNode decoded = TreeNodeDecoder.decode(location, hash, payload);
+      touchAndGet(decoded);
+      return decoded;
+    }
+    // Not loaded yet — keep a disk placeholder; state-root walks will cacheNodeRlp later.
+    final StoredTreeNode stored = new StoredTreeNode(location, hash);
+    touchAndGet(stored);
+    return stored;
   }
 
   private record RootKey(Bytes32 hash, RootKind kind) {}

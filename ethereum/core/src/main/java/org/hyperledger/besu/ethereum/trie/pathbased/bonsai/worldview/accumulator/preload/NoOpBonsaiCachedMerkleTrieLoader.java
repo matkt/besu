@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulato
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.trie.immutabletree.PersistentImmutableTreeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
@@ -24,6 +25,10 @@ public class NoOpBonsaiCachedMerkleTrieLoader extends BonsaiCachedMerkleTrieLoad
 
   public NoOpBonsaiCachedMerkleTrieLoader() {
     super(new NoOpMetricsSystem());
+  }
+
+  public NoOpBonsaiCachedMerkleTrieLoader(final PersistentImmutableTreeCache immutableTreeCache) {
+    super(new NoOpMetricsSystem(), immutableTreeCache);
   }
 
   @Override

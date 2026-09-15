@@ -22,6 +22,10 @@ import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExec
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NoOpMerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
+import org.hyperledger.besu.ethereum.trie.immutabletree.PersistentImmutableTreeCache;
+import org.hyperledger.besu.ethereum.trie.immutabletree.RootKind;
+import org.hyperledger.besu.ethereum.trie.immutabletree.TreeRole;
+import org.hyperledger.besu.ethereum.trie.immutabletree.TreeTraversalLock;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -131,7 +135,43 @@ public class BonsaiWorldState extends PathBasedWorldState {
   @Override
   public void persist(final BlockHeader blockHeader, final StateRootCommitter committer) {
     frontierRootHashTracker.reset();
-    super.persist(blockHeader, committer);
+    final PersistentImmutableTreeCache treeCache =
+        bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
+    final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
+    try (TreeTraversalLock ignored = treeCache.beginTraversal(baseRoot, RootKind.STATE)) {
+      super.persist(blockHeader, committer);
+    }
+    registerComputedStateRoot(treeCache, blockHeader);
+  }
+
+  @Override
+  public Hash rootHash() {
+    if (isStorageFrozen && accumulator.isAccumulatorStateChanged()) {
+      final PersistentImmutableTreeCache treeCache =
+          bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
+      final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
+      try (TreeTraversalLock ignored = treeCache.beginTraversal(baseRoot, RootKind.STATE)) {
+        worldStateRootHash =
+            resolveDefaultCommitter().compute(this, null, accumulator.copy()).root();
+      }
+      accumulator.resetAccumulatorStateChanged();
+      registerComputedStateRoot(treeCache, null);
+    }
+    return worldStateRootHash;
+  }
+
+  private void registerComputedStateRoot(
+      final PersistentImmutableTreeCache treeCache, final BlockHeader blockHeader) {
+    final Bytes32 root = Bytes32.wrap(worldStateRootHash.getBytes());
+    if (isModifyingHeadWorldState()) {
+      treeCache.setHead(root, RootKind.STATE);
+    } else {
+      treeCache.setNewPayload(root, RootKind.STATE);
+    }
+    if (blockHeader != null) {
+      treeCache.advanceBlock(blockHeader.getNumber());
+      treeCache.prune();
+    }
   }
 
   @Override
@@ -218,7 +258,9 @@ public class BonsaiWorldState extends PathBasedWorldState {
   }
 
   public void disableCacheMerkleTrieLoader() {
-    this.bonsaiCachedMerkleTrieLoader = new NoOpBonsaiCachedMerkleTrieLoader();
+    this.bonsaiCachedMerkleTrieLoader =
+        new NoOpBonsaiCachedMerkleTrieLoader(
+            this.bonsaiCachedMerkleTrieLoader.getImmutableTreeCache());
   }
 
   /**
@@ -237,6 +279,12 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   /** Account state trie rooted at the current world state root. */
   public MerkleTrie<Bytes, Bytes> createAccountStateTrie() {
+    final PersistentImmutableTreeCache treeCache =
+        bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
+    treeCache.bindRoot(
+        Bytes32.wrap(worldStateRootHash.getBytes()),
+        RootKind.STATE,
+        isModifyingHeadWorldState() ? TreeRole.HEAD : TreeRole.NEW_PAYLOAD);
     return createTrie(
         (location, hash) ->
             bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
@@ -248,6 +296,9 @@ public class BonsaiWorldState extends PathBasedWorldState {
   /** Storage trie for the given account rooted at the provided storage root. */
   public MerkleTrie<Bytes, Bytes> createStorageTrie(
       final Hash accountHash, final Hash storageRoot) {
+    bonsaiCachedMerkleTrieLoader
+        .getImmutableTreeCache()
+        .bindRoot(Bytes32.wrap(storageRoot.getBytes()), RootKind.STORAGE, TreeRole.FORK);
     return createTrie(
         (location, key) ->
             bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(

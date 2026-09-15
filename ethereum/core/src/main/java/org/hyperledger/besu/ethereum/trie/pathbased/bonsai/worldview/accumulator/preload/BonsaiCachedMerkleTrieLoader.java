@@ -21,6 +21,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.immutabletree.PersistentImmutableTreeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -44,14 +45,30 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
 
   private static final int ACCOUNT_CACHE_SIZE = 100_000;
   private static final int STORAGE_CACHE_SIZE = 200_000;
+  /** Default age before unused immutable-tree nodes may be pruned (aligned with layered cache). */
+  private static final long IMMUTABLE_TREE_PRUNE_AFTER_BLOCKS = 512;
+
   private final Cache<Bytes, Bytes> accountNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(ACCOUNT_CACHE_SIZE).build();
   private final Cache<Bytes, Bytes> storageNodes =
       CacheBuilder.newBuilder().recordStats().maximumSize(STORAGE_CACHE_SIZE).build();
 
+  private final PersistentImmutableTreeCache immutableTreeCache;
+
   public BonsaiCachedMerkleTrieLoader(final ObservableMetricsSystem metricsSystem) {
+    this(metricsSystem, new PersistentImmutableTreeCache((location, hash) -> Optional.empty(), IMMUTABLE_TREE_PRUNE_AFTER_BLOCKS));
+  }
+
+  public BonsaiCachedMerkleTrieLoader(
+      final ObservableMetricsSystem metricsSystem,
+      final PersistentImmutableTreeCache immutableTreeCache) {
+    this.immutableTreeCache = immutableTreeCache;
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "accountsNodes", accountNodes);
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "storageNodes", storageNodes);
+  }
+
+  public PersistentImmutableTreeCache getImmutableTreeCache() {
+    return immutableTreeCache;
   }
 
   public void preLoadAccount(
@@ -139,10 +156,20 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Bytes32 nodeHash) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return Optional.ofNullable(accountNodes.getIfPresent(nodeHash))
-          .or(() -> worldStateKeyValueStorage.getAccountStateTrieNode(location, nodeHash));
     }
+    return immutableTreeCache
+        .getNodeRlp(location, nodeHash)
+        .or(() -> Optional.ofNullable(accountNodes.getIfPresent(nodeHash)))
+        .or(
+            () ->
+                worldStateKeyValueStorage
+                    .getAccountStateTrieNode(location, nodeHash)
+                    .map(
+                        bytes -> {
+                          immutableTreeCache.cacheNodeRlp(location, nodeHash, bytes);
+                          accountNodes.put(nodeHash, bytes);
+                          return bytes;
+                        }));
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
@@ -152,12 +179,19 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
       final Bytes32 nodeHash) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
-    } else {
-      return Optional.ofNullable(storageNodes.getIfPresent(nodeHash))
-          .or(
-              () ->
-                  worldStateKeyValueStorage.getAccountStorageTrieNode(
-                      accountHash, location, nodeHash));
     }
+    return immutableTreeCache
+        .getNodeRlp(location, nodeHash)
+        .or(() -> Optional.ofNullable(storageNodes.getIfPresent(nodeHash)))
+        .or(
+            () ->
+                worldStateKeyValueStorage
+                    .getAccountStorageTrieNode(accountHash, location, nodeHash)
+                    .map(
+                        bytes -> {
+                          immutableTreeCache.cacheNodeRlp(location, nodeHash, bytes);
+                          storageNodes.put(nodeHash, bytes);
+                          return bytes;
+                        }));
   }
 }
