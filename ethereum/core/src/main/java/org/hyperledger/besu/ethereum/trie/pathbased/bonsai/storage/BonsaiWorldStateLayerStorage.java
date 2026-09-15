@@ -54,6 +54,32 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
   }
 
   /**
+   * Returns a new layered storage whose local diff is the compacted view of this layer chain, but
+   * whose parent is {@code durableRoot}. Use this before promoting a payload layer to head so the
+   * live head does not depend on cache snapshots that may later be closed (closed parents make
+   * account reads return empty → apparent balance 0x0).
+   *
+   * @param durableRoot the long-lived root world-state storage (RocksDB)
+   * @return a layer reparented onto the durable root
+   */
+  public BonsaiWorldStateLayerStorage reparentOnto(
+      final BonsaiWorldStateKeyValueStorage durableRoot) {
+    final LayeredKeyValueStorage compacted = getComposedWorldStateStorage().compact();
+    final LayeredKeyValueStorage overRoot =
+        new LayeredKeyValueStorage(
+            compacted.deepCopyForCheckpoint(), durableRoot.getComposedWorldStateStorage());
+    return new BonsaiWorldStateLayerStorage(overRoot, trieLogStorage, durableRoot);
+  }
+
+  @Override
+  public BonsaiWorldStateLayerStorage clone() {
+    return new BonsaiWorldStateLayerStorage(
+        ((LayeredKeyValueStorage) composedWorldStateStorage).clone(),
+        trieLogStorage,
+        parentWorldStateStorage);
+  }
+
+  /**
    * Get value from layer with cache support.
    *
    * @param segment the segment identifier
@@ -127,14 +153,6 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
   @Override
   public FlatDbMode getFlatDbMode() {
     return parentWorldStateStorage.getFlatDbMode();
-  }
-
-  @Override
-  public BonsaiWorldStateLayerStorage clone() {
-    return new BonsaiWorldStateLayerStorage(
-        ((LayeredKeyValueStorage) composedWorldStateStorage).clone(),
-        trieLogStorage,
-        parentWorldStateStorage);
   }
 
   /** Merge this layer to a storage transaction. */

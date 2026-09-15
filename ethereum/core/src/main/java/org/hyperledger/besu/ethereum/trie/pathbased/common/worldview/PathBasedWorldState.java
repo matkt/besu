@@ -195,6 +195,11 @@ public abstract class PathBasedWorldState
     worldStateRootHash = blockHeader.getStateRoot();
   }
 
+  public void resetWorldStateTo(final Hash blockHash, final Hash stateRoot) {
+    worldStateBlockHash = blockHash;
+    worldStateRootHash = stateRoot;
+  }
+
   @Override
   public PathBasedWorldStateKeyValueStorage getWorldStateStorage() {
     return worldStateKeyValueStorage;

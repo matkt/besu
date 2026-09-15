@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedLayeredWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
@@ -77,6 +78,19 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
   }
 
   @Override
+  protected PathBasedWorldStateKeyValueStorage copyLayerForCache(
+      final PathBasedLayeredWorldStateKeyValueStorage layered) {
+    if (archive instanceof BonsaiWorldStateProvider bonsaiProvider
+        && bonsaiProvider.isLayeredHeadEnabled()
+        && layered instanceof BonsaiWorldStateLayerStorage bonsaiLayer) {
+      final BonsaiWorldStateKeyValueStorage root =
+          (BonsaiWorldStateKeyValueStorage) bonsaiProvider.getWorldStateKeyValueStorage();
+      return bonsaiLayer.reparentOnto(root);
+    }
+    return layered.clone();
+  }
+
+  @Override
   protected void maybeRegisterPayloadLayerCandidate(
       final BlockHeader blockHeader, final PathBasedWorldState forWorldState) {
     if (!(archive instanceof BonsaiWorldStateProvider bonsaiProvider)
@@ -87,6 +101,9 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
         || forWorldState.isStorageFrozen()) {
       return;
     }
-    bonsaiProvider.registerPayloadLayerCandidate(blockHeader, layer.clone());
+    // Reparent onto durable root before registering so promotion never depends on cache snapshots.
+    final BonsaiWorldStateKeyValueStorage root =
+        (BonsaiWorldStateKeyValueStorage) bonsaiProvider.getWorldStateKeyValueStorage();
+    bonsaiProvider.registerPayloadLayerCandidate(blockHeader, layer.reparentOnto(root));
   }
 }

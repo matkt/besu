@@ -82,8 +82,7 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
             .log();
         cachedPathBasedWorldView
             .get()
-            .updateWorldStateStorage(
-                createSnapshotKeyValueStorage(forWorldState.getWorldStateStorage()));
+            .updateWorldStateStorage(stableCopyOf(forWorldState.getWorldStateStorage()));
       }
     } else {
       LOG.atDebug()
@@ -95,21 +94,46 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
         cachedWorldStatesByHash.put(
             blockHeader.getBlockHash(),
             new PathBasedCachedWorldStateView(
-                blockHeader, createSnapshotKeyValueStorage(forWorldState.getWorldStateStorage())));
+                blockHeader, stableCopyOf(forWorldState.getWorldStateStorage())));
       } else {
         // otherwise, add the layer to the cache
         cachedWorldStatesByHash.put(
             blockHeader.getBlockHash(),
             new PathBasedCachedWorldStateView(
                 blockHeader,
-                ((PathBasedLayeredWorldStateKeyValueStorage) forWorldState.getWorldStateStorage())
-                    .clone()));
+                copyLayerForCache(
+                    (PathBasedLayeredWorldStateKeyValueStorage)
+                        forWorldState.getWorldStateStorage())));
       }
       // add stateroot -> blockHeader cache entry
       stateRootToBlockHeaderCache.put(blockHeader.getStateRoot(), blockHeader);
     }
     scrubCachedLayers(blockHeader.getNumber());
     maybeRegisterPayloadLayerCandidate(blockHeader, forWorldState);
+  }
+
+  /**
+   * Cache entries must not hold RocksDB snapshots of layered head storage (not snappable) and must
+   * not pin ephemeral snapshots that can be closed while still referenced by a live payload/head
+   * layer chain. Prefer cloning layered storage; otherwise take a root snapshot.
+   */
+  private PathBasedWorldStateKeyValueStorage stableCopyOf(
+      final PathBasedWorldStateKeyValueStorage storage) {
+    if (storage instanceof PathBasedLayeredWorldStateKeyValueStorage layered) {
+      return copyLayerForCache(layered);
+    }
+    return createSnapshotKeyValueStorage(storage);
+  }
+
+  /**
+   * Copy a layered storage into the cache. Subclasses may reparent onto durable root storage.
+   *
+   * @param layered the layered storage to copy
+   * @return a cache-safe copy
+   */
+  protected PathBasedWorldStateKeyValueStorage copyLayerForCache(
+      final PathBasedLayeredWorldStateKeyValueStorage layered) {
+    return layered.clone();
   }
 
   /**

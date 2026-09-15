@@ -232,6 +232,10 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
       final BlockHeader blockHeader,
       final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay,
       final WorldStateUpdateMode worldStateUpdateMode) {
+    if (worldStateUpdateMode.retainsDurableLayer()) {
+      return getPayloadLayerWorldState(blockHeader, maybeBlockAccessListOverlay);
+    }
+
     final BlockHeader chainHeadBlockHeader = blockchain.getChainHeadHeader();
     if (chainHeadBlockHeader.getNumber() - blockHeader.getNumber()
         >= trieLogManager.getMaxLayersToLoad()) {
@@ -257,16 +261,66 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
               maybeBlockAccessListOverlay.ifPresent(worldState::applyBlockAccessListOverlay);
               return worldState;
             })
+        .map(MutableWorldState::freezeStorage);
+  }
+
+  /**
+   * Builds a writable payload layer for engine newPayload. Starts from the live head world state
+   * (whose storage is never closed by the cache) rather than from cache snapshots, which can be
+   * closed and then cause all account reads to return empty.
+   */
+  private Optional<MutableWorldState> getPayloadLayerWorldState(
+      final BlockHeader parentHeader,
+      final Optional<BlockAccessListOverlay> maybeBlockAccessListOverlay) {
+    final BlockHeader chainHeadBlockHeader = blockchain.getChainHeadHeader();
+    if (chainHeadBlockHeader.getNumber() - parentHeader.getNumber()
+        >= trieLogManager.getMaxLayersToLoad()) {
+      LOG.warn(
+          "Exceeded the limit of historical blocks that can be loaded ({}). If you need to make older historical queries, configure your `--bonsai-historical-block-limit`.",
+          trieLogManager.getMaxLayersToLoad());
+      return Optional.empty();
+    }
+
+    // Prefer a world state already cached for the parent (reparented payload/head layers).
+    // Otherwise copy the live head storage into an isolated layer and roll to the parent.
+    final Optional<PathBasedWorldState> base =
+        worldStateCacheManager
+            .getWorldState(parentHeader.getBlockHash())
+            .or(() -> Optional.ofNullable(copyLiveHeadAsLayeredWorldState()));
+
+    return base.flatMap(
+            worldState -> rollFullWorldStateToBlockHash(worldState, parentHeader.getBlockHash()))
         .map(
-            worldState ->
-                worldStateUpdateMode.retainsDurableLayer()
-                    ? openPayloadLayer(worldState)
-                    : worldState.freezeStorage());
+            worldState -> {
+              maybeBlockAccessListOverlay.ifPresent(worldState::applyBlockAccessListOverlay);
+              return openPayloadLayer(worldState);
+            });
+  }
+
+  /**
+   * Creates an isolated layered world state over the live head storage. The head storage itself is
+   * not closed when this copy is discarded.
+   */
+  private PathBasedWorldState copyLiveHeadAsLayeredWorldState() {
+    final PathBasedWorldState copy =
+        worldStateCacheManager.createWorldState(
+            this,
+            worldStateCacheManager.createLayeredKeyValueStorage(
+                headWorldState.getWorldStateStorage()),
+            evmConfiguration);
+    // RocksDB WORLD_* metadata may lag behind a layered head; align the copy to the live head.
+    blockchain
+        .getBlockHeader(headWorldState.blockHash())
+        .ifPresentOrElse(
+            copy::resetWorldStateTo,
+            () -> copy.resetWorldStateTo(headWorldState.blockHash(), headWorldState.rootHash()));
+    return copy;
   }
 
   private MutableWorldState openPayloadLayer(final PathBasedWorldState worldState) {
-    if (worldState instanceof org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState
-        bonsai) {
+    if (worldState
+        instanceof
+        org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState bonsai) {
       return bonsai.openPayloadLayer();
     }
     // Non-Bonsai path-based formats fall back to frozen behaviour.
