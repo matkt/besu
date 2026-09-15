@@ -39,8 +39,8 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link PathBasedWorldStateUpdateAccumulator#importStateChangesFromPartialView}. */
-class PathBasedWorldStateUpdateAccumulatorTest {
+/** Tests for {@link BonsaiWorldStateUpdateAccumulator#importStateChangesFromPartialView}. */
+class BonsaiWorldStateUpdateAccumulatorTest {
 
   private static final Address ACCOUNT =
       Address.fromHexString("0x1000000000000000000000000000000000000001");

@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,9 +21,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiCachedWorldStateView;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.util.Map;
@@ -36,7 +36,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-class PathBasedWorldStateCacheManagerTest {
+/**
+ * Retention/eviction behaviour of the world-state cache manager. Uses a test double of {@link
+ * PathBasedWorldStateCacheManager} (shared base) because {@link BonsaiWorldStateCacheManager} does
+ * not expose a map-injecting constructor; the eviction logic under test lives on the base class.
+ */
+class BonsaiWorldStateCacheManagerTest {
 
   private static final int BLOCK_COUNT = 2000;
   private static final long HEAD = BLOCK_COUNT;
