@@ -1132,6 +1132,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
    * @param syncState the sync state
    * @param ethProtocolManager the eth protocol manager
    * @param pivotBlockSelector the pivot block selector
+   * @param chainDataPruner the chain data pruner
    * @return the synchronizer
    */
   protected DefaultSynchronizer createSynchronizer(
