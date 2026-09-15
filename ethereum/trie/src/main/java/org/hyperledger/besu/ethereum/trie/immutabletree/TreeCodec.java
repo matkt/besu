@@ -79,6 +79,10 @@ final class TreeCodec {
     if (node instanceof EmptyTreeNode) {
       return EMPTY_RLP;
     }
+    // Stored placeholders are hash refs only — never ask them for RLP.
+    if (node.isStored()) {
+      return RLP.encodeOne(node.hash());
+    }
     final Bytes rlp = node.rlp();
     if (rlp.size() < 32) {
       return rlp;
