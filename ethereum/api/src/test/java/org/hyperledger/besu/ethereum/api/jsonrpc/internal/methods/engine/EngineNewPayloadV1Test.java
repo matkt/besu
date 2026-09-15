@@ -48,6 +48,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcError;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.PayloadStatusV1;
+import org.hyperledger.besu.ethereum.chain.BadBlockManager;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
@@ -116,12 +117,15 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
 
   @Mock protected TransactionPool transactionPool;
 
+  @Mock protected BadBlockManager badBlockManager;
+
   @BeforeEach
   @Override
   public void before() {
     super.before();
     when(protocolContext.safeConsensusContext(any())).thenReturn(Optional.of(mergeContext));
     when(protocolContext.getBlockchain()).thenReturn(blockchain);
+    when(protocolContext.getBadBlockManager()).thenReturn(badBlockManager);
     when(protocolSchedule.getByBlockHeader(any())).thenReturn(protocolSpec);
     when(protocolContext.getWorldStateArchive()).thenReturn(worldStateArchive);
     when(ethPeers.peerCount()).thenReturn(1);
@@ -202,6 +206,7 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
     assertThat(res.getLatestValidHash().get()).isEqualTo(mockHash);
     assertThat(res.getStatus()).isEqualTo(INVALID);
     assertThat(res.getError()).isEqualTo("error 42");
+    verify(badBlockManager).addLatestValidHash(mockHeader.getHash(), mockHash);
     verify(engineCallListener, times(1)).executionEngineCalled();
   }
 
