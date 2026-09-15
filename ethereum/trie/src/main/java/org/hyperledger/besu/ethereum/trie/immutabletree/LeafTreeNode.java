@@ -19,22 +19,28 @@ import java.util.Optional;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-/** Immutable leaf node. */
+/** Immutable leaf node. Path includes the leaf terminator (Besu CompactEncoding convention). */
 public final class LeafTreeNode implements ImmutableTreeNode {
-  private final Bytes pathNibbles;
+  private final Bytes path;
   private final Bytes value;
   private final Bytes rlp;
   private final Bytes32 hash;
 
-  public LeafTreeNode(final Bytes pathNibbles, final Bytes value) {
-    this.pathNibbles = pathNibbles;
+  public LeafTreeNode(final Bytes path, final Bytes value) {
+    this.path = path;
     this.value = value;
-    this.rlp = TreeCodec.encodeLeaf(pathNibbles, value);
+    this.rlp = TreeCodec.encodeLeaf(path, value);
     this.hash = TreeCodec.hashOf(this.rlp);
   }
 
+  public Bytes path() {
+    return path;
+  }
+
+  /** @deprecated use {@link #path()} */
+  @Deprecated
   public Bytes pathNibbles() {
-    return pathNibbles;
+    return path;
   }
 
   @Override
@@ -50,5 +56,9 @@ public final class LeafTreeNode implements ImmutableTreeNode {
   @Override
   public Bytes rlp() {
     return rlp;
+  }
+
+  LeafTreeNode replacePath(final Bytes newPath) {
+    return new LeafTreeNode(newPath, value);
   }
 }

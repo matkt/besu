@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.trie.immutabletree;
 
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.trie.CompactEncoding;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -31,20 +32,25 @@ final class TreeNodeDecoder {
     final Bytes32 actual = TreeCodec.hashOf(rlp);
     if (!actual.equals(expectedHash)) {
       throw new IllegalStateException(
-          "Loaded node hash mismatch at " + location + ": expected " + expectedHash + " got " + actual);
+          "Loaded node hash mismatch at "
+              + location
+              + ": expected "
+              + expectedHash
+              + " got "
+              + actual);
     }
     final RLPInput in = RLP.input(rlp);
     final int items = in.enterList();
     if (items == 2) {
       final Bytes compact = in.readBytes();
-      final int flag = compact.isEmpty() ? 0 : compact.get(0) & 0xff;
-      final boolean leaf = (flag & 0x20) != 0;
+      final Bytes path = CompactEncoding.decode(compact);
+      final boolean leaf =
+          !path.isEmpty() && path.get(path.size() - 1) == CompactEncoding.LEAF_TERMINATOR;
       if (leaf) {
         final Bytes value = in.readBytes();
         in.leaveList();
-        return new LeafTreeNode(TreeCodec.decodePath(compact, true), value);
+        return new LeafTreeNode(path, value);
       }
-      final Bytes path = TreeCodec.decodePath(compact, false);
       final ImmutableTreeNode child = readChild(in, Bytes.concatenate(location, path));
       in.leaveList();
       return new ExtensionTreeNode(path, child);
@@ -56,8 +62,7 @@ final class TreeNodeDecoder {
           in.skipNext();
           children[i] = null;
         } else {
-          children[i] =
-              readChild(in, Bytes.concatenate(location, Bytes.of((byte) i)));
+          children[i] = readChild(in, Bytes.concatenate(location, Bytes.of((byte) i)));
         }
       }
       final Bytes value;
@@ -88,7 +93,6 @@ final class TreeNodeDecoder {
     if (ref.size() == 32) {
       return new StoredTreeNode(childLocation, Bytes32.wrap(ref));
     }
-    // Unexpected non-list, non-hash payload: treat as inline RLP if hashable
     final Bytes32 hash = TreeCodec.hashOf(ref);
     return decode(childLocation, hash, ref);
   }

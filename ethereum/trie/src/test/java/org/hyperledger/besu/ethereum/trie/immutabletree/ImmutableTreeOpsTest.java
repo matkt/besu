@@ -62,7 +62,7 @@ class ImmutableTreeOpsTest {
   @Test
   void encodeDecodeLeafPreservesValue() {
     final LeafTreeNode leaf =
-        new LeafTreeNode(TreeCodec.bytesToNibbles(Bytes.fromHexString("0xabcd")), Bytes.of(1, 2, 3));
+        new LeafTreeNode(TreeCodec.bytesToPath(Bytes.fromHexString("0xabcd")), Bytes.of(1, 2, 3));
     final ImmutableTreeNode decoded =
         TreeNodeDecoder.decode(Bytes.EMPTY, leaf.hash(), leaf.rlp());
     assertThat(decoded).isInstanceOf(LeafTreeNode.class);

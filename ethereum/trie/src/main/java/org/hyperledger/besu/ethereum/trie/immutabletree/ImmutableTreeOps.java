@@ -14,14 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.trie.immutabletree;
 
+import org.hyperledger.besu.ethereum.trie.CompactEncoding;
+
 import java.util.Optional;
-import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 
 /**
- * Copy-on-write Patricia operations. Existing nodes are never mutated; every put returns a new root
- * while sharing unchanged branches with the previous root.
+ * Copy-on-write Patricia operations aligned with Besu {@code PutVisitor}/{@code GetVisitor}/{@code
+ * RemoveVisitor} semantics (paths include the leaf terminator).
  */
 public final class ImmutableTreeOps {
 
@@ -34,7 +35,7 @@ public final class ImmutableTreeOps {
 
   public static Optional<Bytes> get(
       final ImmutableTreeNode root, final Bytes key, final NodeResolver resolver) {
-    return getAt(resolver.resolve(root), TreeCodec.bytesToNibbles(key), resolver);
+    return getAt(resolver.resolve(root), TreeCodec.bytesToPath(key), resolver);
   }
 
   private static Optional<Bytes> getAt(
@@ -43,28 +44,25 @@ public final class ImmutableTreeOps {
     return switch (current) {
       case EmptyTreeNode ignored -> Optional.empty();
       case LeafTreeNode leaf -> {
-        if (leaf.pathNibbles().equals(path)) {
+        if (leaf.path().commonPrefixLength(path) == leaf.path().size()) {
           yield leaf.value();
         }
         yield Optional.empty();
       }
       case ExtensionTreeNode ext -> {
-        final Bytes extPath = ext.pathNibbles();
-        if (path.size() < extPath.size() || !path.slice(0, extPath.size()).equals(extPath)) {
+        final Bytes extPath = ext.path();
+        final int common = extPath.commonPrefixLength(path);
+        if (common < extPath.size()) {
           yield Optional.empty();
         }
-        yield getAt(ext.child(), path.slice(extPath.size()), resolver);
+        yield getAt(ext.child(), path.slice(common), resolver);
       }
       case BranchTreeNode branch -> {
-        if (path.isEmpty()) {
+        final byte childIndex = path.get(0);
+        if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
           yield branch.value();
         }
-        final int nibble = path.get(0) & 0x0f;
-        final ImmutableTreeNode child = branch.child(nibble);
-        if (child == null || child instanceof EmptyTreeNode) {
-          yield Optional.empty();
-        }
-        yield getAt(child, path.slice(1), resolver);
+        yield getAt(branch.child(childIndex & 0xff), path.slice(1), resolver);
       }
       case StoredTreeNode stored ->
           throw new IllegalStateException("Resolver failed to materialize " + stored.hash());
@@ -76,7 +74,7 @@ public final class ImmutableTreeOps {
     if (value == null || value.isEmpty()) {
       throw new IllegalArgumentException("value must be non-empty; use remove for deletions");
     }
-    return putAt(resolver.resolve(root), TreeCodec.bytesToNibbles(key), value, resolver);
+    return putAt(resolver.resolve(root), TreeCodec.bytesToPath(key), value, resolver);
   }
 
   private static ImmutableTreeNode putAt(
@@ -97,30 +95,24 @@ public final class ImmutableTreeOps {
 
   private static ImmutableTreeNode putIntoLeaf(
       final LeafTreeNode leaf, final Bytes path, final Bytes value) {
-    final Bytes leafPath = leaf.pathNibbles();
-    final int common = TreeCodec.commonPrefixLength(leafPath, path);
+    final Bytes leafPath = leaf.path();
+    final int common = leafPath.commonPrefixLength(path);
     if (common == leafPath.size() && common == path.size()) {
       return new LeafTreeNode(leafPath, value);
     }
-    if (common == leafPath.size()) {
-      final ImmutableTreeNode[] children = emptyChildren();
-      children[path.get(common) & 0x0f] = new LeafTreeNode(path.slice(common + 1), value);
-      final BranchTreeNode branch = new BranchTreeNode(children, leaf.value().orElse(null));
-      return wrapExtension(leafPath.slice(0, common), branch);
+
+    final byte newLeafIndex = path.get(common);
+    final Bytes newLeafPath = path.slice(common + 1);
+    final byte updatedLeafIndex = leafPath.get(common);
+    final ImmutableTreeNode updatedLeaf = leaf.replacePath(leafPath.slice(common + 1));
+    final ImmutableTreeNode newLeaf = new LeafTreeNode(newLeafPath, value);
+
+    final BranchTreeNode branch =
+        createBranch(updatedLeafIndex, updatedLeaf, newLeafIndex, newLeaf);
+    if (common > 0) {
+      return new ExtensionTreeNode(leafPath.slice(0, common), branch);
     }
-    if (common == path.size()) {
-      final ImmutableTreeNode[] children = emptyChildren();
-      children[leafPath.get(common) & 0x0f] =
-          new LeafTreeNode(leafPath.slice(common + 1), leaf.value().orElseThrow());
-      final BranchTreeNode branch = new BranchTreeNode(children, value);
-      return wrapExtension(path.slice(0, common), branch);
-    }
-    final ImmutableTreeNode[] children = emptyChildren();
-    children[leafPath.get(common) & 0x0f] =
-        new LeafTreeNode(leafPath.slice(common + 1), leaf.value().orElseThrow());
-    children[path.get(common) & 0x0f] = new LeafTreeNode(path.slice(common + 1), value);
-    final BranchTreeNode branch = new BranchTreeNode(children, null);
-    return wrapExtension(path.slice(0, common), branch);
+    return branch;
   }
 
   private static ImmutableTreeNode putIntoExtension(
@@ -128,29 +120,50 @@ public final class ImmutableTreeOps {
       final Bytes path,
       final Bytes value,
       final NodeResolver resolver) {
-    final Bytes extPath = ext.pathNibbles();
-    final int common = TreeCodec.commonPrefixLength(extPath, path);
-    if (common == extPath.size()) {
-      final ImmutableTreeNode newChild =
-          putAt(ext.child(), path.slice(common), value, resolver);
-      return new ExtensionTreeNode(extPath, newChild);
+    final Bytes extensionPath = ext.path();
+    final int common = extensionPath.commonPrefixLength(path);
+    if (common == extensionPath.size()) {
+      final ImmutableTreeNode newChild = putAt(ext.child(), path.slice(common), value, resolver);
+      return ext.replaceChild(newChild);
     }
-    final ImmutableTreeNode[] children = emptyChildren();
-    if (common < extPath.size()) {
-      final Bytes remainingExt = extPath.slice(common + 1);
-      final ImmutableTreeNode oldChild =
-          remainingExt.isEmpty()
-              ? resolver.resolve(ext.child())
-              : new ExtensionTreeNode(remainingExt, ext.child());
-      children[extPath.get(common) & 0x0f] = oldChild;
+
+    final byte leafIndex = path.get(common);
+    final Bytes leafPath = path.slice(common + 1);
+    final byte extensionIndex = extensionPath.get(common);
+    final Bytes remainingExt = extensionPath.slice(common + 1);
+    final ImmutableTreeNode updatedExtension =
+        remainingExt.isEmpty() ? resolver.resolve(ext.child()) : ext.replacePath(remainingExt);
+    final ImmutableTreeNode leaf = new LeafTreeNode(leafPath, value);
+
+    final BranchTreeNode branch =
+        createBranch(leafIndex, leaf, extensionIndex, updatedExtension);
+    if (common > 0) {
+      return new ExtensionTreeNode(extensionPath.slice(0, common), branch);
     }
-    if (common == path.size()) {
-      final BranchTreeNode branch = new BranchTreeNode(children, value);
-      return wrapExtension(path.slice(0, common), branch);
+    return branch;
+  }
+
+  /**
+   * Mirrors {@code DefaultNodeFactory#createBranch}: index {@link
+   * CompactEncoding#LEAF_TERMINATOR} (16) places the node's value onto the branch.
+   */
+  private static BranchTreeNode createBranch(
+      final byte leftIndex,
+      final ImmutableTreeNode left,
+      final byte rightIndex,
+      final ImmutableTreeNode right) {
+    final ImmutableTreeNode[] children = new ImmutableTreeNode[16];
+    if ((leftIndex & 0xff) == CompactEncoding.LEAF_TERMINATOR) {
+      children[rightIndex & 0x0f] = right;
+      return new BranchTreeNode(children, left.value().orElse(null));
     }
-    children[path.get(common) & 0x0f] = new LeafTreeNode(path.slice(common + 1), value);
-    final BranchTreeNode branch = new BranchTreeNode(children, null);
-    return wrapExtension(path.slice(0, common), branch);
+    if ((rightIndex & 0xff) == CompactEncoding.LEAF_TERMINATOR) {
+      children[leftIndex & 0x0f] = left;
+      return new BranchTreeNode(children, right.value().orElse(null));
+    }
+    children[leftIndex & 0x0f] = left;
+    children[rightIndex & 0x0f] = right;
+    return new BranchTreeNode(children, null);
   }
 
   private static ImmutableTreeNode putIntoBranch(
@@ -158,37 +171,55 @@ public final class ImmutableTreeOps {
       final Bytes path,
       final Bytes value,
       final NodeResolver resolver) {
-    if (path.isEmpty()) {
-      return new BranchTreeNode(branch.childrenArray(), value);
+    final byte childIndex = path.get(0);
+    if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
+      return branch.replaceValue(value);
     }
-    final int nibble = path.get(0) & 0x0f;
-    final ImmutableTreeNode[] children = branch.childrenArray();
-    final ImmutableTreeNode existing = children[nibble];
-    final ImmutableTreeNode base =
-        existing == null || existing instanceof EmptyTreeNode
-            ? EmptyTreeNode.INSTANCE
-            : existing;
-    children[nibble] = putAt(base, path.slice(1), value, resolver);
-    return new BranchTreeNode(children, branch.value().orElse(null));
+    final ImmutableTreeNode updatedChild =
+        putAt(branch.child(childIndex & 0xff), path.slice(1), value, resolver);
+    return branch.replaceChild(childIndex & 0x0f, updatedChild);
   }
 
-  private static ImmutableTreeNode wrapExtension(
-      final Bytes prefix, final ImmutableTreeNode child) {
-    if (prefix.isEmpty()) {
-      return child;
-    }
-    return new ExtensionTreeNode(prefix, child);
+  public static ImmutableTreeNode remove(
+      final ImmutableTreeNode root, final Bytes key, final NodeResolver resolver) {
+    return removeAt(resolver.resolve(root), TreeCodec.bytesToPath(key), resolver);
   }
 
-  private static ImmutableTreeNode[] emptyChildren() {
-    return new ImmutableTreeNode[16];
-  }
-
-  /** Applies a function while walking; useful for lock acquisition around traversal. */
-  public static <T> T withResolvedRoot(
-      final ImmutableTreeNode root,
-      final NodeResolver resolver,
-      final Function<ImmutableTreeNode, T> fn) {
-    return fn.apply(resolver.resolve(root));
+  private static ImmutableTreeNode removeAt(
+      final ImmutableTreeNode node, final Bytes path, final NodeResolver resolver) {
+    final ImmutableTreeNode current = resolver.resolve(node);
+    return switch (current) {
+      case EmptyTreeNode ignored -> EmptyTreeNode.INSTANCE;
+      case LeafTreeNode leaf -> {
+        if (leaf.path().commonPrefixLength(path) == leaf.path().size()) {
+          yield EmptyTreeNode.INSTANCE;
+        }
+        yield leaf;
+      }
+      case ExtensionTreeNode ext -> {
+        final Bytes extensionPath = ext.path();
+        final int common = extensionPath.commonPrefixLength(path);
+        if (common == extensionPath.size()) {
+          final ImmutableTreeNode newChild =
+              removeAt(ext.child(), path.slice(common), resolver);
+          if (newChild instanceof EmptyTreeNode) {
+            yield EmptyTreeNode.INSTANCE;
+          }
+          yield ext.replaceChild(newChild);
+        }
+        yield ext;
+      }
+      case BranchTreeNode branch -> {
+        final byte childIndex = path.get(0);
+        if (childIndex == CompactEncoding.LEAF_TERMINATOR) {
+          yield branch.removeValue();
+        }
+        final ImmutableTreeNode updatedChild =
+            removeAt(branch.child(childIndex & 0xff), path.slice(1), resolver);
+        yield branch.replaceChild(childIndex & 0x0f, updatedChild, true);
+      }
+      case StoredTreeNode stored ->
+          throw new IllegalStateException("Resolver failed to materialize " + stored.hash());
+    };
   }
 }
