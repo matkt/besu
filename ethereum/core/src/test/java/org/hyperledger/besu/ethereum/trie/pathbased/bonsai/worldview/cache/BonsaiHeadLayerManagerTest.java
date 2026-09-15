@@ -50,6 +50,9 @@ class BonsaiHeadLayerManagerTest {
 
   @AfterEach
   void tearDown() throws Exception {
+    if (manager != null) {
+      manager.close();
+    }
     if (rootStorage != null) {
       rootStorage.close();
     }

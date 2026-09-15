@@ -222,7 +222,7 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
 
   @Override
   protected synchronized void doClose() throws Exception {
-    if (!isClosedGet()) {
+    if (!isClosed.get()) {
       // alert any subscribers we are closing:
       subscribers.forEach(StorageSubscriber::onCloseStorage);
 

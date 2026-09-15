@@ -190,7 +190,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
     } else {
       final BonsaiWorldStateKeyValueStorage root =
           (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage;
-      // Candidates are already reparented at registration; reparentOnto is a cheap clone then.
+      // Idle prep usually finished in the inter-block gap; otherwise join/sync reparent here.
       headWorldState.replaceWorldStateStorage(promoted.get().reparentOnto(root), blockHeader);
     }
     worldStateCacheManager.addCachedLayer(

@@ -33,8 +33,14 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -48,6 +54,10 @@ import org.slf4j.LoggerFactory;
  * <p>When enabled, validated payloads keep a durable in-memory layer (flat + trie). Forkchoice
  * promotion swaps the head to that layer without flushing RocksDB. A checkpoint flushes the
  * compacted window atomically and advances the durable checkpoint metadata.
+ *
+ * <p>Expensive {@code reparentOnto(durableRoot)} work is scheduled on a dedicated idle-prep thread
+ * so {@code newPayload} only pays for a cheap layer clone + local diff snapshot. {@code
+ * forkchoiceUpdated} joins that prep (usually already finished in the inter-block gap).
  */
 public class BonsaiHeadLayerManager {
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiHeadLayerManager.class);
@@ -55,6 +65,7 @@ public class BonsaiHeadLayerManager {
   private final BonsaiWorldStateKeyValueStorage rootStorage;
   private final int checkpointInterval;
   private final long memoryBudgetBytes;
+  private final ExecutorService prepExecutor;
   private Consumer<BlockHeader> onCheckpoint = header -> {};
 
   private final Map<Hash, CandidateLayer> candidates = new ConcurrentHashMap<>();
@@ -76,6 +87,16 @@ public class BonsaiHeadLayerManager {
     this.memoryBudgetBytes = Math.max(1L, memoryBudgetBytes);
     this.checkpointHash = rootStorage.getWorldStateCheckpointHash().orElse(Hash.ZERO);
     this.checkpointNumber = rootStorage.getWorldStateCheckpointNumber().orElse(0L);
+    this.prepExecutor =
+        Executors.newSingleThreadExecutor(
+            new ThreadFactory() {
+              @Override
+              public Thread newThread(final Runnable r) {
+                final Thread t = new Thread(r, "bonsai-layered-head-prep");
+                t.setDaemon(true);
+                return t;
+              }
+            });
   }
 
   public void setOnCheckpoint(final Consumer<BlockHeader> onCheckpoint) {
@@ -83,28 +104,56 @@ public class BonsaiHeadLayerManager {
   }
 
   /**
-   * Registers an immutable candidate layer produced by a validated payload. The layer must already
-   * contain flat state and trie-node writes for that block and should already be parented onto the
-   * durable root.
+   * Registers a candidate from a validated payload. Hot path: freeze the local diff only. {@code
+   * reparentOnto(root)} runs asynchronously on the idle-prep thread (inter-block gap).
+   *
+   * <p>{@code layerStorage} may be shared with the world-state cache — this manager never closes
+   * that source layer. Only the exclusive reparented copy created during prep is owned here.
    */
   public synchronized void registerCandidate(
       final BlockHeader blockHeader, final BonsaiWorldStateLayerStorage layerStorage) {
     final LayeredKeyValueStorage composed = layerStorage.getComposedWorldStateStorage();
-    // Freeze local diff once for the canonical window; worldStateStorage is already isolated from
-    // the live payload world-state (reparented/cloned into the cache before registration).
     final LayeredKeyValueStorage diff = composed.snapshotDiff();
     final long bytes = diff.estimatedDiffBytes();
-    final CandidateLayer previous =
-        candidates.put(
-            blockHeader.getBlockHash(),
-            new CandidateLayer(blockHeader, layerStorage, diff, bytes));
+
+    final CompletableFuture<BonsaiWorldStateLayerStorage> prepFuture =
+        CompletableFuture.supplyAsync(() -> layerStorage.reparentOnto(rootStorage), prepExecutor);
+
+    final CandidateLayer candidate =
+        new CandidateLayer(blockHeader, layerStorage, diff, bytes, prepFuture);
+    prepFuture.whenComplete(
+        (prepared, error) -> {
+          if (error != null) {
+            LOG.warn(
+                "Layered-head idle reparent failed for {}: {}",
+                blockHeader.toLogString(),
+                error.toString());
+            return;
+          }
+          synchronized (BonsaiHeadLayerManager.this) {
+            final CandidateLayer current = candidates.get(blockHeader.getBlockHash());
+            if (current != candidate || candidate.ownershipTransferred) {
+              // Superseded, pruned, or already promoted while prep was running.
+              closeQuietly(prepared);
+              return;
+            }
+            if (!candidate.preparedStorage.compareAndSet(null, prepared)) {
+              // ensurePrepared already installed the same (or equivalent) result.
+              if (candidate.preparedStorage.get() != prepared) {
+                closeQuietly(prepared);
+              }
+            }
+          }
+        });
+
+    final CandidateLayer previous = candidates.put(blockHeader.getBlockHash(), candidate);
     if (previous != null) {
       estimatedWindowBytes.addAndGet(-previous.estimatedBytes());
-      closeQuietly(previous.worldStateStorage());
+      previous.cancelAndCloseOwned();
     }
     estimatedWindowBytes.addAndGet(bytes);
     LOG.debug(
-        "Registered layered-head candidate {} ({} bytes, {} candidates)",
+        "Registered layered-head candidate {} ({} bytes, {} candidates; reparent deferred)",
         blockHeader.toLogString(),
         bytes,
         candidates.size());
@@ -115,63 +164,84 @@ public class BonsaiHeadLayerManager {
   }
 
   public Optional<BonsaiWorldStateLayerStorage> getCandidateStorage(final Hash blockHash) {
-    return Optional.ofNullable(candidates.get(blockHash)).map(CandidateLayer::worldStateStorage);
+    final CandidateLayer candidate = candidates.get(blockHash);
+    if (candidate == null) {
+      return Optional.empty();
+    }
+    ensurePrepared(candidate);
+    return Optional.ofNullable(candidate.preparedStorage.get());
   }
 
   /**
    * Promotes a previously registered candidate to canonical head. Returns the storage that should
-   * become the live head world-state storage, or empty when the candidate is missing.
+   * become the live head world-state storage, or empty when the candidate is missing. Joins idle
+   * prep if the inter-block gap was too short.
    */
-  public synchronized Optional<BonsaiWorldStateLayerStorage> promote(final BlockHeader newHead) {
+  public Optional<BonsaiWorldStateLayerStorage> promote(final BlockHeader newHead) {
     final CandidateLayer candidate = candidates.get(newHead.getBlockHash());
     if (candidate == null) {
       trieLogFallbacks.incrementAndGet();
       return Optional.empty();
     }
 
-    // Drop candidates that are neither the new head nor siblings of its parent (keep siblings for
-    // competing FCUs within the window).
-    candidates
-        .entrySet()
-        .removeIf(
-            entry -> {
-              final BlockHeader header = entry.getValue().blockHeader();
-              final boolean keep =
-                  header.getBlockHash().equals(newHead.getBlockHash())
-                      || header.getParentHash().equals(newHead.getParentHash());
-              if (!keep) {
-                estimatedWindowBytes.addAndGet(-entry.getValue().estimatedBytes());
-                closeQuietly(entry.getValue().worldStateStorage());
-              }
-              return !keep;
-            });
+    // Join idle prep OUTSIDE the manager monitor — prep.whenComplete also needs this lock.
+    ensurePrepared(candidate);
 
-    // Truncate canonical window above the parent (reorg within RAM window).
-    while (!canonicalWindow.isEmpty()
-        && !canonicalWindow.peekLast().blockHash().equals(newHead.getParentHash())
-        && canonicalWindow.peekLast().blockNumber() >= newHead.getNumber()) {
-      final CanonicalLayer removed = canonicalWindow.removeLast();
-      estimatedWindowBytes.addAndGet(-removed.estimatedBytes());
+    synchronized (this) {
+      if (candidates.get(newHead.getBlockHash()) != candidate) {
+        trieLogFallbacks.incrementAndGet();
+        return Optional.empty();
+      }
+      final BonsaiWorldStateLayerStorage promotedStorage = candidate.takePreparedStorage();
+      if (promotedStorage == null) {
+        trieLogFallbacks.incrementAndGet();
+        return Optional.empty();
+      }
+
+      // Drop candidates that are neither the new head nor siblings of its parent (keep siblings for
+      // competing FCUs within the window).
+      candidates
+          .entrySet()
+          .removeIf(
+              entry -> {
+                final BlockHeader header = entry.getValue().blockHeader();
+                final boolean keep =
+                    header.getBlockHash().equals(newHead.getBlockHash())
+                        || header.getParentHash().equals(newHead.getParentHash());
+                if (!keep) {
+                  estimatedWindowBytes.addAndGet(-entry.getValue().estimatedBytes());
+                  entry.getValue().cancelAndCloseOwned();
+                }
+                return !keep;
+              });
+
+      // Truncate canonical window above the parent (reorg within RAM window).
+      while (!canonicalWindow.isEmpty()
+          && !canonicalWindow.peekLast().blockHash().equals(newHead.getParentHash())
+          && canonicalWindow.peekLast().blockNumber() >= newHead.getNumber()) {
+        final CanonicalLayer removed = canonicalWindow.removeLast();
+        estimatedWindowBytes.addAndGet(-removed.estimatedBytes());
+      }
+
+      final CanonicalLayer promoted =
+          new CanonicalLayer(
+              newHead.getBlockHash(),
+              newHead.getNumber(),
+              newHead.getStateRoot(),
+              candidate.diff(),
+              candidate.estimatedBytes());
+      canonicalWindow.addLast(promoted);
+      promotions.incrementAndGet();
+
+      LOG.debug(
+          "Promoted layered head to {} (window={}, bytes={})",
+          newHead.toLogString(),
+          canonicalWindow.size(),
+          estimatedWindowBytes.get());
+
+      maybeCheckpoint(newHead);
+      return Optional.of(promotedStorage);
     }
-
-    final CanonicalLayer promoted =
-        new CanonicalLayer(
-            newHead.getBlockHash(),
-            newHead.getNumber(),
-            newHead.getStateRoot(),
-            candidate.diff(),
-            candidate.estimatedBytes());
-    canonicalWindow.addLast(promoted);
-    promotions.incrementAndGet();
-
-    LOG.debug(
-        "Promoted layered head to {} (window={}, bytes={})",
-        newHead.toLogString(),
-        canonicalWindow.size(),
-        estimatedWindowBytes.get());
-
-    maybeCheckpoint(newHead);
-    return Optional.of(candidate.worldStateStorage());
   }
 
   /** Forces a RocksDB checkpoint of the compacted canonical window. */
@@ -232,7 +302,7 @@ public class BonsaiHeadLayerManager {
           .removeIf(
               entry -> {
                 if (entry.getValue().blockHeader().getNumber() <= checkpointNumber) {
-                  closeQuietly(entry.getValue().worldStateStorage());
+                  entry.getValue().cancelAndCloseOwned();
                   return true;
                 }
                 return false;
@@ -251,6 +321,33 @@ public class BonsaiHeadLayerManager {
           headHeader.toLogString(),
           e);
       return false;
+    }
+  }
+
+  private void ensurePrepared(final CandidateLayer candidate) {
+    if (candidate.ownershipTransferred) {
+      return;
+    }
+    if (candidate.preparedStorage.get() != null) {
+      return;
+    }
+    try {
+      final BonsaiWorldStateLayerStorage prepared = candidate.prepFuture.join();
+      if (!candidate.ownershipTransferred) {
+        candidate.preparedStorage.compareAndSet(null, prepared);
+      } else if (candidate.preparedStorage.get() != prepared) {
+        closeQuietly(prepared);
+      }
+    } catch (final CompletionException e) {
+      LOG.warn(
+          "Layered-head prep join failed for {}, falling back to sync reparent: {}",
+          candidate.blockHeader().toLogString(),
+          e.toString());
+      if (!candidate.ownershipTransferred) {
+        final BonsaiWorldStateLayerStorage fallback =
+            candidate.sourceLayer().reparentOnto(rootStorage);
+        candidate.preparedStorage.compareAndSet(null, fallback);
+      }
     }
   }
 
@@ -286,19 +383,79 @@ public class BonsaiHeadLayerManager {
     trieLogFallbacks.incrementAndGet();
   }
 
+  /** Shuts down the idle-prep executor. Safe to call multiple times. */
+  public void close() {
+    prepExecutor.shutdownNow();
+  }
+
   private static void closeQuietly(final PathBasedWorldStateKeyValueStorage storage) {
+    if (storage == null) {
+      return;
+    }
     try {
+      if (storage.isClosed()) {
+        return;
+      }
       storage.close();
     } catch (final Exception e) {
       LOG.debug("Failed closing layered-head storage", e);
     }
   }
 
-  private record CandidateLayer(
-      BlockHeader blockHeader,
-      BonsaiWorldStateLayerStorage worldStateStorage,
-      LayeredKeyValueStorage diff,
-      long estimatedBytes) {}
+  private static final class CandidateLayer {
+    private final BlockHeader blockHeader;
+    private final BonsaiWorldStateLayerStorage sourceLayer;
+    private final LayeredKeyValueStorage diff;
+    private final long estimatedBytes;
+    private final CompletableFuture<BonsaiWorldStateLayerStorage> prepFuture;
+    private final AtomicReference<BonsaiWorldStateLayerStorage> preparedStorage =
+        new AtomicReference<>();
+    private volatile boolean ownershipTransferred;
+
+    private CandidateLayer(
+        final BlockHeader blockHeader,
+        final BonsaiWorldStateLayerStorage sourceLayer,
+        final LayeredKeyValueStorage diff,
+        final long estimatedBytes,
+        final CompletableFuture<BonsaiWorldStateLayerStorage> prepFuture) {
+      this.blockHeader = blockHeader;
+      this.sourceLayer = sourceLayer;
+      this.diff = diff;
+      this.estimatedBytes = estimatedBytes;
+      this.prepFuture = prepFuture;
+    }
+
+    private BlockHeader blockHeader() {
+      return blockHeader;
+    }
+
+    private BonsaiWorldStateLayerStorage sourceLayer() {
+      return sourceLayer;
+    }
+
+    private LayeredKeyValueStorage diff() {
+      return diff;
+    }
+
+    private long estimatedBytes() {
+      return estimatedBytes;
+    }
+
+    /** Transfers ownership of the prepared storage to the caller (promote). */
+    private BonsaiWorldStateLayerStorage takePreparedStorage() {
+      ownershipTransferred = true;
+      return preparedStorage.getAndSet(null);
+    }
+
+    private void cancelAndCloseOwned() {
+      ownershipTransferred = true;
+      // Do not close sourceLayer — it is shared with the world-state cache.
+      final BonsaiWorldStateLayerStorage prepared = preparedStorage.getAndSet(null);
+      if (prepared != null && prepared != sourceLayer) {
+        closeQuietly(prepared);
+      }
+    }
+  }
 
   private record CanonicalLayer(
       Hash blockHash,

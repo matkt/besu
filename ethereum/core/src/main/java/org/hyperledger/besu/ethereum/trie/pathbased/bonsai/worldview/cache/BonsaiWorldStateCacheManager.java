@@ -80,13 +80,8 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
   @Override
   protected PathBasedWorldStateKeyValueStorage copyLayerForCache(
       final PathBasedLayeredWorldStateKeyValueStorage layered) {
-    if (archive instanceof BonsaiWorldStateProvider bonsaiProvider
-        && bonsaiProvider.isLayeredHeadEnabled()
-        && layered instanceof BonsaiWorldStateLayerStorage bonsaiLayer) {
-      final BonsaiWorldStateKeyValueStorage root =
-          (BonsaiWorldStateKeyValueStorage) bonsaiProvider.getWorldStateKeyValueStorage();
-      return bonsaiLayer.reparentOnto(root);
-    }
+    // Hot path: cheap clone only. reparentOnto(durableRoot) runs on the idle-prep thread after
+    // newPayload returns (inter-block gap), then forkchoiceUpdated joins it.
     return layered.clone();
   }
 
@@ -106,7 +101,7 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
     if (!(storageForCache instanceof BonsaiWorldStateLayerStorage cachedLayer)) {
       return;
     }
-    // storageForCache was already reparented/cloned once in copyLayerForCache — reuse it.
+    // Share the cache layer (no extra deep-copy). Prep reparents asynchronously into an owned copy.
     bonsaiProvider.registerPayloadLayerCandidate(blockHeader, cachedLayer);
   }
 }

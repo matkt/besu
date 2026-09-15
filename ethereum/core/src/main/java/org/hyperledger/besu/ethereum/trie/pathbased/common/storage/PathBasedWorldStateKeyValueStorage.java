@@ -70,6 +70,11 @@ public abstract class PathBasedWorldStateKeyValueStorage
 
   protected final AtomicBoolean isClosed = new AtomicBoolean(false);
 
+  /** Whether this storage has been closed and must not be read or written. */
+  public boolean isClosed() {
+    return isClosed.get();
+  }
+
   protected final Subscribers<StorageSubscriber> subscribers = Subscribers.create();
   protected final SegmentedKeyValueStorage composedWorldStateStorage;
   protected final KeyValueStorage trieLogStorage;
