@@ -18,13 +18,12 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NoOpMerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
-import org.hyperledger.besu.ethereum.trie.immutabletree.ImmutableMerkleTrie;
 import org.hyperledger.besu.ethereum.trie.immutabletree.PersistentImmutableTreeCache;
 import org.hyperledger.besu.ethereum.trie.immutabletree.RootKind;
-import org.hyperledger.besu.ethereum.trie.immutabletree.TreeRole;
 import org.hyperledger.besu.ethereum.trie.immutabletree.TreeTraversalLock;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
@@ -39,6 +38,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogManage
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
+import org.hyperledger.besu.ethereum.trie.patricia.ParallelStoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -47,6 +48,8 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ForkJoinPool;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import jakarta.validation.constraints.NotNull;
@@ -140,7 +143,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
     LOG.atDebug()
         .setMessage(
-            "State root compute via ImmutableMerkleTrie: baseRoot={} head={} nodes={} block={}")
+            "State root compute via StoredMerklePatriciaTrie (+ immutable node cache): baseRoot={} head={} nodes={} block={}")
         .addArgument(baseRoot::toShortHexString)
         .addArgument(isModifyingHeadWorldState())
         .addArgument(treeCache::cachedNodeCount)
@@ -160,7 +163,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final Bytes32 baseRoot = Bytes32.wrap(worldStateRootHash.getBytes());
       LOG.atDebug()
           .setMessage(
-              "Frozen rootHash compute via immutable tree cache: baseRoot={} nodes={}")
+              "Frozen rootHash via StoredMerklePatriciaTrie (+ immutable node cache): baseRoot={} nodes={}")
           .addArgument(baseRoot::toShortHexString)
           .addArgument(treeCache::cachedNodeCount)
           .log();
@@ -305,50 +308,42 @@ public class BonsaiWorldState extends PathBasedWorldState {
     if (worldStateConfig.isTrieDisabled()) {
       return new NoOpMerkleTrie<>();
     }
-    final PersistentImmutableTreeCache treeCache =
-        bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
-    // Do not bindRoot: frontier tries are short-lived and must not pin every intermediate root.
-    return new ImmutableMerkleTrie(treeCache, rootHash, RootKind.STATE, nodeLoader);
+    return new StoredMerklePatriciaTrie<>(
+        nodeLoader, rootHash, Function.identity(), Function.identity());
   }
 
   /** Account state trie rooted at the current world state root. */
   public MerkleTrie<Bytes, Bytes> createAccountStateTrie() {
-    if (worldStateConfig.isTrieDisabled()) {
-      return new NoOpMerkleTrie<>();
-    }
-    final PersistentImmutableTreeCache treeCache =
-        bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
-    final Bytes32 root = Bytes32.wrap(worldStateRootHash.getBytes());
-    treeCache.bindRoot(
-        root,
-        RootKind.STATE,
-        isModifyingHeadWorldState() ? TreeRole.HEAD : TreeRole.NEW_PAYLOAD);
-    return new ImmutableMerkleTrie(
-        treeCache,
-        root,
-        RootKind.STATE,
+    return createTrie(
         (location, hash) ->
             bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
-                getWorldStateStorage(), location, hash));
+                getWorldStateStorage(), location, hash),
+        Bytes32.wrap(worldStateRootHash.getBytes()),
+        BlockProcessingExecutors.accountTrieForkJoinPool());
   }
 
   /** Storage trie for the given account rooted at the provided storage root. */
   public MerkleTrie<Bytes, Bytes> createStorageTrie(
       final Hash accountHash, final Hash storageRoot) {
+    return createTrie(
+        (location, key) ->
+            bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
+                getWorldStateStorage(), accountHash, location, key),
+        Bytes32.wrap(storageRoot.getBytes()),
+        BlockProcessingExecutors.storageTrieForkJoinPool());
+  }
+
+  private MerkleTrie<Bytes, Bytes> createTrie(
+      final NodeLoader nodeLoader, final Bytes32 rootHash, final ForkJoinPool forkJoinPool) {
     if (worldStateConfig.isTrieDisabled()) {
       return new NoOpMerkleTrie<>();
     }
-    final PersistentImmutableTreeCache treeCache =
-        bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
-    final Bytes32 root = Bytes32.wrap(storageRoot.getBytes());
-    // Storage roots are ephemeral per-account; never register them as long-lived FORK handles.
-    return new ImmutableMerkleTrie(
-        treeCache,
-        root,
-        RootKind.STORAGE,
-        (location, hash) ->
-            bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
-                getWorldStateStorage(), accountHash, location, hash));
+    if (worldStateConfig.isParallelStateRootComputationEnabled()) {
+      return new ParallelStoredMerklePatriciaTrie<>(
+          nodeLoader, rootHash, Function.identity(), Function.identity(), forkJoinPool);
+    }
+    return new StoredMerklePatriciaTrie<>(
+        nodeLoader, rootHash, Function.identity(), Function.identity());
   }
 
   public Hash hashAndSavePreImage(final Bytes value) {
