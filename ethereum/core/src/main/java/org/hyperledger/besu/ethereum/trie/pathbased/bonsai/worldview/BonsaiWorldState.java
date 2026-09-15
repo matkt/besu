@@ -307,7 +307,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     }
     final PersistentImmutableTreeCache treeCache =
         bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
-    treeCache.bindRoot(rootHash, RootKind.STATE, TreeRole.FORK);
+    // Do not bindRoot: frontier tries are short-lived and must not pin every intermediate root.
     return new ImmutableMerkleTrie(treeCache, rootHash, RootKind.STATE, nodeLoader);
   }
 
@@ -341,7 +341,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     final PersistentImmutableTreeCache treeCache =
         bonsaiCachedMerkleTrieLoader.getImmutableTreeCache();
     final Bytes32 root = Bytes32.wrap(storageRoot.getBytes());
-    treeCache.bindRoot(root, RootKind.STORAGE, TreeRole.FORK);
+    // Storage roots are ephemeral per-account; never register them as long-lived FORK handles.
     return new ImmutableMerkleTrie(
         treeCache,
         root,

@@ -136,6 +136,14 @@ public final class PersistentImmutableTreeCache {
     return fromDisk;
   }
 
+  /**
+   * Opens a root for trie computation without registering it as a long-lived HEAD/NEW_PAYLOAD/FORK
+   * handle. Only the root node is materialized; children remain {@link StoredTreeNode} placeholders.
+   */
+  public ImmutableTreeNode openRoot(final Bytes32 rootHash) {
+    return materializeRoot(rootHash, Bytes.EMPTY);
+  }
+
   /** Caches a node loaded from Bonsai storage during state-root computation. */
   public void cacheNodeRlp(final Bytes location, final Bytes32 hash, final Bytes rlp) {
     if (hash.equals(TreeCodec.EMPTY_HASH)) {

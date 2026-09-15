@@ -41,7 +41,6 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public final class ImmutableMerkleTrie implements MerkleTrie<Bytes, Bytes> {
 
-  private final PersistentImmutableTreeCache cache;
   private final RootKind kind;
   private final ImmutableTreeOps.NodeResolver resolver;
   private ImmutableTreeNode root;
@@ -51,7 +50,6 @@ public final class ImmutableMerkleTrie implements MerkleTrie<Bytes, Bytes> {
       final Bytes32 rootHash,
       final RootKind kind,
       final NodeLoader diskLoader) {
-    this.cache = cache;
     this.kind = kind;
     this.resolver =
         node -> {
@@ -79,8 +77,9 @@ public final class ImmutableMerkleTrie implements MerkleTrie<Bytes, Bytes> {
           }
           return current;
         };
-    this.root = cache.treeForRoot(rootHash, kind).rootNode();
-    if (!(this.root instanceof EmptyTreeNode)) {
+    // Load only the root node (children stay Stored placeholders until a put/get touches them).
+    this.root = cache.openRoot(rootHash);
+    if (!(this.root instanceof EmptyTreeNode) && this.root.isStored()) {
       this.root = resolver.resolve(this.root);
     }
   }
@@ -141,8 +140,9 @@ public final class ImmutableMerkleTrie implements MerkleTrie<Bytes, Bytes> {
 
   @Override
   public void commit(final NodeUpdater nodeUpdater) {
-    commitNodes(root, Bytes.EMPTY, nodeUpdater);
-    cache.registerRoot(root, kind, TreeRole.FORK);
+    // Only persist nodes already materialized by this trie's puts/removes.
+    // Never resolve StoredTreeNode children — that would load the entire historical trie.
+    commitDirtyNodes(root, Bytes.EMPTY, nodeUpdater);
   }
 
   @Override
@@ -150,28 +150,25 @@ public final class ImmutableMerkleTrie implements MerkleTrie<Bytes, Bytes> {
     commit(nodeUpdater);
   }
 
-  private void commitNodes(
+  private void commitDirtyNodes(
       final ImmutableTreeNode node, final Bytes location, final NodeUpdater updater) {
-    final ImmutableTreeNode current = resolver.resolve(node);
-    if (current instanceof EmptyTreeNode) {
+    if (node instanceof EmptyTreeNode || node.isStored()) {
       return;
     }
-    if (!current.isStored()) {
-      updater.store(location, current.hash(), current.rlp());
-    }
-    switch (current) {
+    updater.store(location, node.hash(), node.rlp());
+    switch (node) {
       case ExtensionTreeNode ext ->
-          commitNodes(ext.child(), Bytes.concatenate(location, ext.path()), updater);
+          commitDirtyNodes(ext.child(), Bytes.concatenate(location, ext.path()), updater);
       case BranchTreeNode branch -> {
         for (int i = 0; i < 16; i++) {
           final ImmutableTreeNode child = branch.child(i);
-          if (!(child instanceof EmptyTreeNode)) {
-            commitNodes(child, Bytes.concatenate(location, Bytes.of((byte) i)), updater);
+          if (!(child instanceof EmptyTreeNode) && !child.isStored()) {
+            commitDirtyNodes(child, Bytes.concatenate(location, Bytes.of((byte) i)), updater);
           }
         }
       }
       default -> {
-        // leaf
+        // leaf: already stored above
       }
     }
   }

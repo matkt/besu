@@ -87,4 +87,15 @@ public final class TreeRootHandle {
   boolean isInUse() {
     return activeUsers.get() > 0;
   }
+
+  /**
+   * Releases the in-memory tree graph while keeping the root hash. Next use reloads from disk/cache
+   * via a {@link StoredTreeNode} placeholder.
+   */
+  void demoteToStored() {
+    if (rootNode instanceof EmptyTreeNode || rootNode.isStored()) {
+      return;
+    }
+    this.rootNode = new StoredTreeNode(org.apache.tuweni.bytes.Bytes.EMPTY, rootHash);
+  }
 }
