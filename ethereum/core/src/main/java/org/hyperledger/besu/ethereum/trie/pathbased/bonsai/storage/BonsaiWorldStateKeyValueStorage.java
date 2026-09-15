@@ -32,6 +32,12 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.TrieNode
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.FlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.VersionedFlatDbCacheManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.HeadMapDbCacheCategory;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.HeadStateCacheAccessPolicy;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.MapDbHeadFlatDbCacheManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.MapDbHeadSnapshot;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.MapDbHeadStateCacheManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.ResolutionSource;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.flat.FlatDbStrategy;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
@@ -63,6 +69,10 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
   protected final FlatDbCacheManager cacheManager;
+  private final MapDbHeadFlatDbCacheManager mapDbHeadFlatDbCacheManager;
+  private final HeadCacheAccessPolicyHolder headCacheAccessPolicyHolder =
+      new HeadCacheAccessPolicyHolder();
+  private MapDbHeadSnapshot pinnedFrozenMapDbSnapshot;
   private volatile long cacheVersion;
   protected volatile TrieNodeStrategy trieNodeStrategy;
 
@@ -70,11 +80,22 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final StorageProvider provider,
       final MetricsSystem metricsSystem,
       final DataStorageConfiguration dataStorageConfiguration) {
-    this(
-        provider,
-        metricsSystem,
-        dataStorageConfiguration,
-        createCacheManager(dataStorageConfiguration, metricsSystem));
+    super(
+        provider.getStorageBySegmentIdentifiers(
+            List.of(
+                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE)),
+        provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE));
+    this.flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(metricsSystem, dataStorageConfiguration);
+    flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
+
+    final FlatDbCacheManager createdCacheManager =
+        createCacheManager(dataStorageConfiguration, metricsSystem, headCacheAccessPolicyHolder);
+    this.cacheManager = createdCacheManager;
+    this.mapDbHeadFlatDbCacheManager =
+        createdCacheManager instanceof MapDbHeadFlatDbCacheManager mapDb ? mapDb : null;
+    this.cacheVersion = cacheManager.getCurrentVersion();
+    this.trieNodeStrategy = new BonsaiTrieNodeStrategy();
   }
 
   public BonsaiWorldStateKeyValueStorage(
@@ -82,6 +103,20 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
       final MetricsSystem metricsSystem,
       final DataStorageConfiguration dataStorageConfiguration,
       final FlatDbCacheManager cacheManager) {
+    this(
+        provider,
+        metricsSystem,
+        dataStorageConfiguration,
+        cacheManager,
+        cacheManager instanceof MapDbHeadFlatDbCacheManager mapDb ? mapDb : null);
+  }
+
+  private BonsaiWorldStateKeyValueStorage(
+      final StorageProvider provider,
+      final MetricsSystem metricsSystem,
+      final DataStorageConfiguration dataStorageConfiguration,
+      final FlatDbCacheManager cacheManager,
+      final MapDbHeadFlatDbCacheManager mapDbHeadFlatDbCacheManager) {
     super(
         provider.getStorageBySegmentIdentifiers(
             List.of(
@@ -92,6 +127,7 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
 
     this.cacheManager = cacheManager;
+    this.mapDbHeadFlatDbCacheManager = mapDbHeadFlatDbCacheManager;
     this.cacheVersion = cacheManager.getCurrentVersion();
     this.trieNodeStrategy = new BonsaiTrieNodeStrategy();
   }
@@ -121,6 +157,8 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     super(composedWorldStateStorage, trieLogStorage);
     this.flatDbStrategyProvider = flatDbStrategyProvider;
     this.cacheManager = cacheManager;
+    this.mapDbHeadFlatDbCacheManager =
+        cacheManager instanceof MapDbHeadFlatDbCacheManager mapDb ? mapDb : null;
     this.cacheVersion = cacheVersion;
     this.trieNodeStrategy = trieNodeStrategy;
   }
@@ -136,7 +174,19 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
   }
 
   private static FlatDbCacheManager createCacheManager(
-      final DataStorageConfiguration dataStorageConfiguration, final MetricsSystem metricsSystem) {
+      final DataStorageConfiguration dataStorageConfiguration,
+      final MetricsSystem metricsSystem,
+      final HeadCacheAccessPolicyHolder policyHolder) {
+    if (dataStorageConfiguration
+        .getPathBasedExtraStorageConfiguration()
+        .getUnstable()
+        .getBonsaiHeadMapDbCacheEnabled()) {
+      final MapDbHeadStateCacheManager headCacheManager =
+          new MapDbHeadStateCacheManager(metricsSystem);
+      final HeadCacheAccessPolicyHolder holder =
+          policyHolder == null ? new HeadCacheAccessPolicyHolder() : policyHolder;
+      return new MapDbHeadFlatDbCacheManager(headCacheManager, holder::get);
+    }
     if (dataStorageConfiguration
         .getPathBasedExtraStorageConfiguration()
         .getUnstable()
@@ -219,26 +269,74 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
     if (codeHash.equals(Hash.EMPTY)) {
       return Optional.of(Bytes.EMPTY);
     }
-    return getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage);
+    return getHeadMapDbCacheManager()
+        .map(
+            mgr ->
+                mgr.readCode(
+                    getHeadCacheAccessPolicy(),
+                    codeCacheKey(codeHash, accountHash),
+                    () ->
+                        getFlatDbStrategy()
+                            .getFlatCode(codeHash, accountHash, composedWorldStateStorage)))
+        .orElseGet(
+            () ->
+                getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage));
   }
 
   public Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
+    return getAccountStateTrieNode(location, nodeHash, Optional.empty());
+  }
+
+  public Optional<Bytes> getAccountStateTrieNode(
+      final Bytes location, final Bytes32 nodeHash, final Optional<ResolutionSource> parentResolution) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return trieNodeStrategy
-        .getFlatAccountTrieNode(location, nodeHash, composedWorldStateStorage)
-        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    final Supplier<Optional<Bytes>> keyValueLookup =
+        () ->
+            trieNodeStrategy
+                .getFlatAccountTrieNode(location, nodeHash, composedWorldStateStorage)
+                .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    return getHeadMapDbCacheManager()
+        .map(
+            mgr ->
+                mgr.readTrieNode(
+                    HeadMapDbCacheCategory.ACCOUNT_TRIE,
+                    MapDbHeadStateCacheManager.trieLogicalKey(location, Bytes.wrap(nodeHash)),
+                    parentResolution,
+                    getHeadCacheAccessPolicy(),
+                    keyValueLookup))
+        .orElseGet(keyValueLookup);
   }
 
   public Optional<Bytes> getAccountStorageTrieNode(
       final Hash accountHash, final Bytes location, final Bytes32 nodeHash) {
+    return getAccountStorageTrieNode(accountHash, location, nodeHash, Optional.empty());
+  }
+
+  public Optional<Bytes> getAccountStorageTrieNode(
+      final Hash accountHash,
+      final Bytes location,
+      final Bytes32 nodeHash,
+      final Optional<ResolutionSource> parentResolution) {
     if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
     }
-    return trieNodeStrategy
-        .getFlatStorageTrieNode(accountHash, location, nodeHash, composedWorldStateStorage)
-        .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    final Supplier<Optional<Bytes>> keyValueLookup =
+        () ->
+            trieNodeStrategy
+                .getFlatStorageTrieNode(accountHash, location, nodeHash, composedWorldStateStorage)
+                .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
+    return getHeadMapDbCacheManager()
+        .map(
+            mgr ->
+                mgr.readTrieNode(
+                    HeadMapDbCacheCategory.STORAGE_TRIE,
+                    MapDbHeadStateCacheManager.trieLogicalKey(location, Bytes.wrap(nodeHash)),
+                    parentResolution,
+                    getHeadCacheAccessPolicy(),
+                    keyValueLookup))
+        .orElseGet(keyValueLookup);
   }
 
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
@@ -317,6 +415,85 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
 
   public FlatDbCacheManager getCacheManager() {
     return cacheManager;
+  }
+
+  public Optional<MapDbHeadStateCacheManager> getHeadMapDbCacheManager() {
+    return Optional.ofNullable(mapDbHeadFlatDbCacheManager)
+        .map(MapDbHeadFlatDbCacheManager::getHeadCacheManager);
+  }
+
+  public HeadStateCacheAccessPolicy getHeadCacheAccessPolicy() {
+    return headCacheAccessPolicyHolder.get();
+  }
+
+  public void setHeadCacheAccessPolicy(final HeadStateCacheAccessPolicy policy) {
+    headCacheAccessPolicyHolder.set(policy);
+  }
+
+  public void demoteHeadMapDbToKeyValueStorageOnly() {
+    setHeadCacheAccessPolicy(HeadStateCacheAccessPolicy.KEY_VALUE_STORAGE_ONLY);
+    closePinnedFrozenMapDbSnapshot();
+  }
+
+  public void attachFrozenHeadMapDbSnapshot(final MapDbHeadSnapshot snapshot) {
+    closePinnedFrozenMapDbSnapshot();
+    pinnedFrozenMapDbSnapshot = snapshot;
+    setHeadCacheAccessPolicy(HeadStateCacheAccessPolicy.FROZEN_SNAPSHOT);
+  }
+
+  public Optional<Bytes> getAccountDirectFromKeyValueStorage(final Hash accountHash) {
+    return getFlatDbStrategy()
+        .getFlatAccount(
+            this::getWorldStateRootHash,
+            this::getAccountStateTrieNode,
+            accountHash,
+            composedWorldStateStorage);
+  }
+
+  public Optional<Bytes> getStorageValueDirectFromKeyValueStorage(
+      final Hash accountHash, final StorageSlotKey storageSlotKey) {
+    return getFlatDbStrategy()
+        .getFlatStorageValueByStorageSlotKey(
+            this::getWorldStateRootHash,
+            () ->
+                getAccountDirectFromKeyValueStorage(accountHash)
+                    .map(
+                        b ->
+                            PmtStateTrieAccountValue.readFrom(
+                                    org.hyperledger.besu.ethereum.rlp.RLP.input(b))
+                                .getStorageRoot()),
+            (location, hash) -> getAccountStorageTrieNode(accountHash, location, hash),
+            accountHash,
+            storageSlotKey,
+            composedWorldStateStorage);
+  }
+
+  public Optional<Bytes> getCodeDirectFromKeyValueStorage(
+      final Hash codeHash, final Hash accountHash) {
+    return getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage);
+  }
+
+  private void closePinnedFrozenMapDbSnapshot() {
+    if (pinnedFrozenMapDbSnapshot != null) {
+      pinnedFrozenMapDbSnapshot.close();
+      pinnedFrozenMapDbSnapshot = null;
+    }
+  }
+
+  private static Bytes codeCacheKey(final Hash codeHash, final Hash accountHash) {
+    return Bytes.concatenate(codeHash.getBytes(), accountHash.getBytes());
+  }
+
+  static final class HeadCacheAccessPolicyHolder {
+    private volatile HeadStateCacheAccessPolicy policy = HeadStateCacheAccessPolicy.CANONICAL_HEAD;
+
+    HeadStateCacheAccessPolicy get() {
+      return policy;
+    }
+
+    void set(final HeadStateCacheAccessPolicy policy) {
+      this.policy = policy;
+    }
   }
 
   public long getCurrentVersion() {

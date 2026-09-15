@@ -213,7 +213,14 @@ public class BonsaiWorldState extends PathBasedWorldState {
   @Override
   public MutableWorldState freezeStorage() {
     this.isStorageFrozen = true;
-    this.worldStateKeyValueStorage = new BonsaiWorldStateLayerStorage(getWorldStateStorage());
+    final BonsaiWorldStateKeyValueStorage parentStorage = getWorldStateStorage();
+    final BonsaiWorldStateLayerStorage layer = new BonsaiWorldStateLayerStorage(parentStorage);
+    parentStorage
+        .getHeadMapDbCacheManager()
+        .ifPresent(
+            manager ->
+                layer.attachFrozenHeadMapDbSnapshot(manager.captureSnapshotForFrozenState()));
+    this.worldStateKeyValueStorage = layer;
     return this;
   }
 

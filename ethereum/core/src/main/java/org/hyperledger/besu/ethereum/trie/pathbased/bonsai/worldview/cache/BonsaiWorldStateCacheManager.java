@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiSnapshotWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -22,6 +23,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.trie.pathbased.common.code.PathBasedCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.PathBasedWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb.HeadStateCacheAccessPolicy;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
@@ -73,5 +75,27 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
       final PathBasedWorldStateKeyValueStorage worldStateKeyValueStorage) {
     return new BonsaiSnapshotWorldStateKeyValueStorage(
         (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage);
+  }
+
+  /**
+   * After FCU, cached states that are no longer canonical head must not consult MapDB.
+   */
+  public void demoteNonHeadMapDbCaches(final Hash newHeadBlockHash) {
+    if (!(rootWorldStateStorage instanceof BonsaiWorldStateKeyValueStorage rootBonsai)) {
+      return;
+    }
+    rootBonsai.setHeadCacheAccessPolicy(HeadStateCacheAccessPolicy.CANONICAL_HEAD);
+    cachedWorldStatesByHash.forEach(
+        (blockHash, cachedView) -> {
+          if (!blockHash.equals(newHeadBlockHash)) {
+            demoteStorageTree(cachedView.getWorldStateStorage());
+          }
+        });
+  }
+
+  private void demoteStorageTree(final PathBasedWorldStateKeyValueStorage storage) {
+    if (storage instanceof BonsaiWorldStateKeyValueStorage bonsai) {
+      bonsai.demoteHeadMapDbToKeyValueStorageOnly();
+    }
   }
 }

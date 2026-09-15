@@ -47,8 +47,8 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
   protected final WorldStateConfig worldStateConfig;
   private final Map<Hash, BlockHeader> stateRootToBlockHeaderCache = new ConcurrentHashMap<>();
 
-  private final PathBasedWorldStateKeyValueStorage rootWorldStateStorage;
-  private final Map<Hash, PathBasedCachedWorldStateView> cachedWorldStatesByHash;
+  protected final PathBasedWorldStateKeyValueStorage rootWorldStateStorage;
+  protected final Map<Hash, PathBasedCachedWorldStateView> cachedWorldStatesByHash;
 
   protected PathBasedWorldStateCacheManager(
       final PathBasedWorldStateProvider archive,

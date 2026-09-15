@@ -107,15 +107,42 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
     blockchain
         .getBlockHeader(headWorldState.getWorldStateBlockHash())
         .ifPresentOrElse(
-            header -> loadHeadWorldState(header, headWorldState),
+            header -> {
+              loadHeadWorldState(header, headWorldState);
+              initializeHeadMapDbCacheFromTrieLogs(header);
+            },
             () -> this.headWorldState = headWorldState);
   }
 
   @Override
   protected void loadHeadWorldState(
       final BlockHeader blockHeader, final PathBasedWorldState headWorldState) {
+    if (worldStateKeyValueStorage instanceof BonsaiWorldStateKeyValueStorage bonsaiStorage) {
+      bonsaiStorage
+          .getHeadMapDbCacheManager()
+          .ifPresent(
+              manager -> {
+                manager.performForkChoiceUpdate(
+                    blockHeader.getBlockHash(), blockHeader.getNumber());
+                ((BonsaiWorldStateCacheManager) worldStateCacheManager)
+                    .demoteNonHeadMapDbCaches(blockHeader.getBlockHash());
+                manager.evictStaleEntries();
+              });
+    }
     super.loadHeadWorldState(blockHeader, headWorldState);
     prepareWorldStateForBlock(blockHeader, headWorldState);
+  }
+
+  public void initializeHeadMapDbCacheFromTrieLogs(final BlockHeader headHeader) {
+    if (worldStateKeyValueStorage instanceof BonsaiWorldStateKeyValueStorage bonsaiStorage) {
+      bonsaiStorage
+          .getHeadMapDbCacheManager()
+          .ifPresent(
+              manager ->
+                  org.hyperledger.besu.ethereum.trie.pathbased.common.storage.cache.headmapdb
+                      .HeadMapDbStartupRebuilder.rebuildHeadCacheFromTrieLogs(
+                      manager, bonsaiStorage, blockchain, headHeader));
+    }
   }
 
   @Override

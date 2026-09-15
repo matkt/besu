@@ -130,6 +130,15 @@ public class PathBasedExtraStorageOptions
 
     @Option(
         hidden = true,
+        names = "--Xbonsai-head-mapdb-cache-enabled",
+        description =
+            "Enables the Bonsai head MapDB cache for canonical head state reads (default: ${DEFAULT-VALUE}).",
+        fallbackValue = "false")
+    private Boolean bonsaiHeadMapDbCacheEnabled =
+        PathBasedExtraStorageConfiguration.PathBasedUnstable.DEFAULT_BONSAI_HEAD_MAPDB_CACHE_ENABLED;
+
+    @Option(
+        hidden = true,
         names = "--Xbonsai-cross-block-cache-account-max-size",
         paramLabel = "<LONG>",
         description =
@@ -221,6 +230,8 @@ public class PathBasedExtraStorageOptions
         domainObject.getUnstable().getCodeStoredByCodeHashEnabled();
     dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheEnabled =
         domainObject.getUnstable().getBonsaiCrossBlockCacheEnabled();
+    dataStorageOptions.unstableOptions.bonsaiHeadMapDbCacheEnabled =
+        domainObject.getUnstable().getBonsaiHeadMapDbCacheEnabled();
     dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheAccountSize =
         domainObject.getUnstable().getBonsaiCrossBlockCacheAccountSize();
     dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheStorageSize =
@@ -248,6 +259,7 @@ public class PathBasedExtraStorageOptions
                 .fullFlatDbEnabled(unstableOptions.fullFlatDbEnabled)
                 .codeStoredByCodeHashEnabled(unstableOptions.codeUsingCodeHashEnabled)
                 .bonsaiCrossBlockCacheEnabled(unstableOptions.bonsaiCrossBlockCacheEnabled)
+                .bonsaiHeadMapDbCacheEnabled(unstableOptions.bonsaiHeadMapDbCacheEnabled)
                 .bonsaiCrossBlockCacheAccountSize(unstableOptions.bonsaiCrossBlockCacheAccountSize)
                 .bonsaiCrossBlockCacheStorageSize(unstableOptions.bonsaiCrossBlockCacheStorageSize)
                 .bonsaiArchiveStateProofsEnabled(unstableOptions.bonsaiArchiveStateProofsEnabled)
