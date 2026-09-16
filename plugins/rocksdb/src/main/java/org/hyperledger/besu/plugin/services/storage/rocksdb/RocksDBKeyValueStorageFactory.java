@@ -397,6 +397,22 @@ public class RocksDBKeyValueStorageFactory implements KeyValueStorageFactory {
   }
 
   @Override
+  public void afterForkchoiceUpdated() {
+    if (rocksDBConfiguration == null || !rocksDBConfiguration.isCompactStateColumnFamiliesAfterFcu()) {
+      return;
+    }
+    if (segmentedStorage instanceof OptimisticRocksDBColumnarKeyValueStorage optimisticStorage) {
+      optimisticStorage.scheduleCompactBonsaiStateColumnFamilies();
+    }
+  }
+
+  @Override
+  public boolean isCompactStateColumnFamiliesAfterFcuEnabled() {
+    return rocksDBConfiguration != null
+        && rocksDBConfiguration.isCompactStateColumnFamiliesAfterFcu();
+  }
+
+  @Override
   public void close() throws IOException {
     if (segmentedStorage != null) {
       segmentedStorage.close();

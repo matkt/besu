@@ -84,6 +84,22 @@ public class RocksDBCLIOptions {
   public static final String BLOB_GARBAGE_COLLECTION_FORCE_THRESHOLD =
       "--Xplugin-rocksdb-blob-garbage-collection-force-threshold";
 
+  /**
+   * Enables experimental Bonsai state LSM tuning on this branch: {@code num_levels=2}, at most one
+   * open RocksDB snapshot, and compaction of state column families after each successful FCU.
+   */
+  public static final String STATE_LSM_EXPERIMENT_FLAG = "--Xplugin-rocksdb-state-lsm-experiment";
+
+  /** Override RocksDB {@code num_levels} for Bonsai state column families (0x06, 0x08, 0x09). */
+  public static final String NUM_LEVELS_FLAG = "--Xplugin-rocksdb-num-levels";
+
+  /** Maximum concurrent RocksDB {@code Snapshot} handles ({@code 0} = unlimited). */
+  public static final String MAX_OPEN_SNAPSHOTS_FLAG = "--Xplugin-rocksdb-max-open-snapshots";
+
+  /** Compact Bonsai state column families after each successful {@code engine_forkchoiceUpdated}. */
+  public static final String COMPACT_STATE_AFTER_FCU_FLAG =
+      "--Xplugin-rocksdb-compact-state-after-fcu";
+
   /** The Max open files. */
   @CommandLine.Option(
       names = {MAX_OPEN_FILES_FLAG},
@@ -110,6 +126,44 @@ public class RocksDBCLIOptions {
       paramLabel = "<INTEGER>",
       description = "Number of RocksDB background threads (default: ${DEFAULT-VALUE})")
   int backgroundThreadCount;
+
+  @CommandLine.Option(
+      names = {STATE_LSM_EXPERIMENT_FLAG},
+      hidden = true,
+      defaultValue = "true",
+      paramLabel = "<BOOLEAN>",
+      description =
+          "EXPERIMENTAL: enable 2-level state LSM, max 1 RocksDB snapshot, compact state CFs "
+              + "after FCU (default: ${DEFAULT-VALUE})")
+  boolean stateLsmExperimentEnabled = true;
+
+  @CommandLine.Option(
+      names = {NUM_LEVELS_FLAG},
+      hidden = true,
+      paramLabel = "<INTEGER>",
+      description =
+          "RocksDB num_levels for ACCOUNT_INFO, ACCOUNT_STORAGE, TRIE_BRANCH (default: 2 when "
+              + STATE_LSM_EXPERIMENT_FLAG + " is true)")
+  Optional<Integer> numLevels = Optional.empty();
+
+  @CommandLine.Option(
+      names = {MAX_OPEN_SNAPSHOTS_FLAG},
+      hidden = true,
+      defaultValue = "0",
+      paramLabel = "<INTEGER>",
+      description =
+          "Max open RocksDB snapshots (default: 1 when " + STATE_LSM_EXPERIMENT_FLAG
+              + " is true, else unlimited)")
+  int maxOpenRocksDbSnapshots;
+
+  @CommandLine.Option(
+      names = {COMPACT_STATE_AFTER_FCU_FLAG},
+      hidden = true,
+      paramLabel = "<BOOLEAN>",
+      description =
+          "Compact Bonsai state CFs after each successful FCU (default: same as "
+              + STATE_LSM_EXPERIMENT_FLAG + ")")
+  Optional<Boolean> compactStateColumnFamiliesAfterFcu = Optional.empty();
 
   /** The Is high spec. */
   @CommandLine.Option(
@@ -193,6 +247,11 @@ public class RocksDBCLIOptions {
     options.isBlockchainGarbageCollectionEnabled = config.isBlockchainGarbageCollectionEnabled();
     options.blobGarbageCollectionAgeCutoff = config.getBlobGarbageCollectionAgeCutoff();
     options.blobGarbageCollectionForceThreshold = config.getBlobGarbageCollectionForceThreshold();
+    options.stateLsmExperimentEnabled = config.isStateLsmExperimentEnabled();
+    options.numLevels = config.getNumLevels();
+    options.maxOpenRocksDbSnapshots = config.getMaxOpenRocksDbSnapshots();
+    options.compactStateColumnFamiliesAfterFcu =
+        Optional.of(config.isCompactStateColumnFamiliesAfterFcu());
     return options;
   }
 
@@ -202,6 +261,14 @@ public class RocksDBCLIOptions {
    * @return the rocks db factory configuration
    */
   public RocksDBFactoryConfiguration toDomainObject() {
+    final Optional<Integer> resolvedNumLevels =
+        numLevels.or(() -> stateLsmExperimentEnabled ? Optional.of(2) : Optional.empty());
+    final int resolvedMaxOpenSnapshots =
+        maxOpenRocksDbSnapshots > 0
+            ? maxOpenRocksDbSnapshots
+            : (stateLsmExperimentEnabled ? 1 : 0);
+    final boolean resolvedCompactAfterFcu =
+        compactStateColumnFamiliesAfterFcu.orElse(stateLsmExperimentEnabled);
     return new RocksDBFactoryConfiguration(
         resolveMaxOpenFiles(),
         backgroundThreadCount,
@@ -210,7 +277,11 @@ public class RocksDBCLIOptions {
         enableReadCacheForSnapshots,
         isBlockchainGarbageCollectionEnabled,
         blobGarbageCollectionAgeCutoff,
-        blobGarbageCollectionForceThreshold);
+        blobGarbageCollectionForceThreshold,
+        resolvedNumLevels,
+        resolvedMaxOpenSnapshots,
+        resolvedCompactAfterFcu,
+        stateLsmExperimentEnabled);
   }
 
   private int resolveMaxOpenFiles() {

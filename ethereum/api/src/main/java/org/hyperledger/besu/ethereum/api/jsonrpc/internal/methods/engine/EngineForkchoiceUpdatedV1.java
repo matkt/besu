@@ -265,6 +265,7 @@ public sealed class EngineForkchoiceUpdatedV1<
     }
 
     logFCU(VALID, forkChoice);
+    engineCallListener.forkchoiceApplied();
     return new JsonRpcSuccessResponse(
         requestId,
         new ForkchoiceUpdatedResultV1(

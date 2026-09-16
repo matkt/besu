@@ -36,6 +36,10 @@ public class RocksDBConfigurationBuilder {
   private boolean isBlockchainGarbageCollectionEnabled = false;
   private Optional<Double> blobGarbageCollectionAgeCutoff = Optional.empty();
   private Optional<Double> blobGarbageCollectionForceThreshold = Optional.empty();
+  private Optional<Integer> numLevels = Optional.empty();
+  private int maxOpenRocksDbSnapshots;
+  private boolean compactStateColumnFamiliesAfterFcu;
+  private boolean stateLsmExperimentEnabled;
 
   /** Instantiates a new Rocks db configuration builder. */
   public RocksDBConfigurationBuilder() {}
@@ -170,7 +174,33 @@ public class RocksDBConfigurationBuilder {
         .isBlockchainGarbageCollectionEnabled(configuration.isBlockchainGarbageCollectionEnabled())
         .blobGarbageCollectionAgeCutoff(configuration.getBlobGarbageCollectionAgeCutoff())
         .blobGarbageCollectionForceThreshold(
-            configuration.getBlobGarbageCollectionForceThreshold());
+            configuration.getBlobGarbageCollectionForceThreshold())
+        .numLevels(configuration.getNumLevels())
+        .maxOpenRocksDbSnapshots(configuration.getMaxOpenRocksDbSnapshots())
+        .compactStateColumnFamiliesAfterFcu(configuration.isCompactStateColumnFamiliesAfterFcu())
+        .stateLsmExperimentEnabled(configuration.isStateLsmExperimentEnabled());
+  }
+
+  public RocksDBConfigurationBuilder numLevels(final Optional<Integer> numLevels) {
+    this.numLevels = numLevels;
+    return this;
+  }
+
+  public RocksDBConfigurationBuilder maxOpenRocksDbSnapshots(final int maxOpenRocksDbSnapshots) {
+    this.maxOpenRocksDbSnapshots = maxOpenRocksDbSnapshots;
+    return this;
+  }
+
+  public RocksDBConfigurationBuilder compactStateColumnFamiliesAfterFcu(
+      final boolean compactStateColumnFamiliesAfterFcu) {
+    this.compactStateColumnFamiliesAfterFcu = compactStateColumnFamiliesAfterFcu;
+    return this;
+  }
+
+  public RocksDBConfigurationBuilder stateLsmExperimentEnabled(
+      final boolean stateLsmExperimentEnabled) {
+    this.stateLsmExperimentEnabled = stateLsmExperimentEnabled;
+    return this;
   }
 
   /**
@@ -189,6 +219,10 @@ public class RocksDBConfigurationBuilder {
         enableReadCacheForSnapshots,
         isBlockchainGarbageCollectionEnabled,
         blobGarbageCollectionAgeCutoff,
-        blobGarbageCollectionForceThreshold);
+        blobGarbageCollectionForceThreshold,
+        numLevels,
+        maxOpenRocksDbSnapshots,
+        compactStateColumnFamiliesAfterFcu,
+        stateLsmExperimentEnabled);
   }
 }

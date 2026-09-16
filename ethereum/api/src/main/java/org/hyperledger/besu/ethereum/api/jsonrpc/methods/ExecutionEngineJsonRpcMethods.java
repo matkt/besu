@@ -55,7 +55,12 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineN
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineNewPayloadV3;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineNewPayloadV4;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineNewPayloadV5;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.CompositeEngineCallListener;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineCallListener;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineQosTimer;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.ForkchoiceStorageMaintenanceListener;
+import org.hyperledger.besu.plugin.services.StorageService;
+import org.hyperledger.besu.plugin.services.storage.KeyValueStorageFactory;
 import org.hyperledger.besu.ethereum.blockcreation.MiningCoordinator;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
@@ -118,12 +123,13 @@ public class ExecutionEngineJsonRpcMethods extends ApiGroupJsonRpcMethods {
   @Override
   protected Map<String, JsonRpcMethod> create() {
     final EngineQosTimer engineQosTimer = new EngineQosTimer(consensusEngineServer);
+    final EngineCallListener engineCallListener = createEngineCallListener(engineQosTimer);
     final ConstructorArgumentsBuilder constructorArgumentsBuilder =
         new ConstructorArgumentsBuilder()
             .protocolSchedule(protocolSchedule)
             .protocolContext(protocolContext)
             .vertx(consensusEngineServer)
-            .engineCallListener(engineQosTimer)
+            .engineCallListener(engineCallListener)
             .ethPeers(ethPeers)
             .metricsSystem(metricsSystem)
             .transactionPool(transactionPool)
@@ -317,5 +323,19 @@ public class ExecutionEngineJsonRpcMethods extends ApiGroupJsonRpcMethods {
         return new MethodVersionBuildData(factory, null, null);
       }
     }
+  }
+
+  private EngineCallListener createEngineCallListener(final EngineQosTimer engineQosTimer) {
+    return protocolContext
+        .getPluginServiceManager()
+        .getService(StorageService.class)
+        .flatMap(storageService -> storageService.getByName("rocksdb"))
+        .filter(KeyValueStorageFactory::isCompactStateColumnFamiliesAfterFcuEnabled)
+        .map(
+            factory ->
+                CompositeEngineCallListener.of(
+                    engineQosTimer,
+                    new ForkchoiceStorageMaintenanceListener(factory::afterForkchoiceUpdated)))
+        .orElse(engineQosTimer);
   }
 }

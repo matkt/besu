@@ -73,7 +73,11 @@ public class NearestKeyValueStorageTest {
                     DEFAULT_ENABLE_READ_CACHE_FOR_SNAPSHOTS,
                     false,
                     Optional.empty(),
-                    Optional.empty()),
+                    Optional.empty(),
+                    Optional.empty(),
+                    0,
+                    false,
+                    false),
             Arrays.asList(KeyValueSegmentIdentifier.values()),
             RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS);
 

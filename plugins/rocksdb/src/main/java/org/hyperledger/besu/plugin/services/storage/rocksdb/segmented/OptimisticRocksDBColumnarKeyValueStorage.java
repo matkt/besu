@@ -24,17 +24,36 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBTransaction;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfiguration;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 import org.rocksdb.OptimisticTransactionDB;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.WriteOptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Optimistic RocksDB Columnar key value storage */
 public class OptimisticRocksDBColumnarKeyValueStorage extends RocksDBColumnarKeyValueStorage
     implements SnappableKeyValueStorage {
+  private static final Logger LOG =
+      LoggerFactory.getLogger(OptimisticRocksDBColumnarKeyValueStorage.class);
+
   private final OptimisticTransactionDB db;
+  private final Object snapshotLock = new Object();
+  private RocksDBColumnarKeyValueSnapshot trackedSnapshot;
+  private final ExecutorService fcuCompactionExecutor =
+      Executors.newSingleThreadExecutor(
+          (ThreadFactory)
+              r -> {
+                final Thread thread = new Thread(r, "rocksdb-fcu-state-compact");
+                thread.setDaemon(true);
+                return thread;
+              });
 
   /**
    * Instantiates a new Rocks db columnar key value optimistic storage.
@@ -110,7 +129,40 @@ public class OptimisticRocksDBColumnarKeyValueStorage extends RocksDBColumnarKey
   @Override
   public RocksDBColumnarKeyValueSnapshot takeSnapshot() throws StorageException {
     throwIfClosed();
-    return new RocksDBColumnarKeyValueSnapshot(
-        db, configuration.isReadCacheEnabledForSnapshots(), this::safeColumnHandle, metrics);
+    synchronized (snapshotLock) {
+      final int maxOpenSnapshots = configuration.getMaxOpenRocksDbSnapshots();
+      if (maxOpenSnapshots > 0 && trackedSnapshot != null && !trackedSnapshot.isClosed()) {
+        LOG.warn(
+            "Closing previous RocksDB snapshot to enforce max-open-snapshots={}",
+            maxOpenSnapshots);
+        try {
+          trackedSnapshot.close();
+        } catch (final IOException e) {
+          throw new StorageException(e);
+        }
+      }
+      trackedSnapshot =
+          new RocksDBColumnarKeyValueSnapshot(
+              db, configuration.isReadCacheEnabledForSnapshots(), this::safeColumnHandle, metrics);
+      return trackedSnapshot;
+    }
+  }
+
+  /** Schedules Bonsai state column family compaction on a background thread (used after FCU). */
+  public void scheduleCompactBonsaiStateColumnFamilies() {
+    fcuCompactionExecutor.execute(
+        () -> {
+          try {
+            compactBonsaiStateColumnFamilies();
+          } catch (final Exception e) {
+            LOG.warn("FCU-triggered RocksDB state compaction failed", e);
+          }
+        });
+  }
+
+  @Override
+  public void close() {
+    fcuCompactionExecutor.shutdownNow();
+    super.close();
   }
 }

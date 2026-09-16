@@ -92,4 +92,14 @@ public interface KeyValueStorageFactory extends Closeable {
    *     it does not.
    */
   boolean isSnapshotIsolationSupported();
+
+  /**
+   * Experimental hook after a successful {@code engine_forkchoiceUpdated}. Default no-op.
+   */
+  default void afterForkchoiceUpdated() {}
+
+  /** Returns whether {@link #afterForkchoiceUpdated()} performs work. */
+  default boolean isCompactStateColumnFamiliesAfterFcuEnabled() {
+    return false;
+  }
 }

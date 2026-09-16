@@ -30,22 +30,11 @@ public class RocksDBConfiguration {
   private final boolean isBlockchainGarbageCollectionEnabled;
   private final Optional<Double> blobGarbageCollectionAgeCutoff;
   private final Optional<Double> blobGarbageCollectionForceThreshold;
+  private final Optional<Integer> numLevels;
+  private final int maxOpenRocksDbSnapshots;
+  private final boolean compactStateColumnFamiliesAfterFcu;
+  private final boolean stateLsmExperimentEnabled;
 
-  /**
-   * Instantiates a new RocksDb configuration.
-   *
-   * @param databaseDir the database dir
-   * @param maxOpenFiles the max open files
-   * @param backgroundThreadCount the background thread count
-   * @param cacheCapacity the cache capacity
-   * @param label the label
-   * @param isHighSpec the is high spec
-   * @param enableReadCacheForSnapshots whether read caching is enabled for snapshots
-   * @param isBlockchainGarbageCollectionEnabled the garbage collection enabled for the BLOCKCHAIN
-   *     column family
-   * @param blobGarbageCollectionAgeCutoff the blob garbage collection age cutoff
-   * @param blobGarbageCollectionForceThreshold the blob garbage collection force threshold
-   */
   public RocksDBConfiguration(
       final Path databaseDir,
       final int maxOpenFiles,
@@ -56,7 +45,11 @@ public class RocksDBConfiguration {
       final boolean enableReadCacheForSnapshots,
       final boolean isBlockchainGarbageCollectionEnabled,
       final Optional<Double> blobGarbageCollectionAgeCutoff,
-      final Optional<Double> blobGarbageCollectionForceThreshold) {
+      final Optional<Double> blobGarbageCollectionForceThreshold,
+      final Optional<Integer> numLevels,
+      final int maxOpenRocksDbSnapshots,
+      final boolean compactStateColumnFamiliesAfterFcu,
+      final boolean stateLsmExperimentEnabled) {
     this.backgroundThreadCount = backgroundThreadCount;
     this.databaseDir = databaseDir;
     this.maxOpenFiles = maxOpenFiles;
@@ -67,95 +60,65 @@ public class RocksDBConfiguration {
     this.isBlockchainGarbageCollectionEnabled = isBlockchainGarbageCollectionEnabled;
     this.blobGarbageCollectionAgeCutoff = blobGarbageCollectionAgeCutoff;
     this.blobGarbageCollectionForceThreshold = blobGarbageCollectionForceThreshold;
+    this.numLevels = numLevels;
+    this.maxOpenRocksDbSnapshots = maxOpenRocksDbSnapshots;
+    this.compactStateColumnFamiliesAfterFcu = compactStateColumnFamiliesAfterFcu;
+    this.stateLsmExperimentEnabled = stateLsmExperimentEnabled;
   }
 
-  /**
-   * Gets database dir.
-   *
-   * @return the database dir
-   */
   public Path getDatabaseDir() {
     return databaseDir;
   }
 
-  /**
-   * Gets max open files.
-   *
-   * @return the max open files
-   */
   public int getMaxOpenFiles() {
     return maxOpenFiles;
   }
 
-  /**
-   * Gets background thread count.
-   *
-   * @return the background thread count
-   */
   public int getBackgroundThreadCount() {
     return backgroundThreadCount;
   }
 
-  /**
-   * Gets cache capacity.
-   *
-   * @return the cache capacity
-   */
   public long getCacheCapacity() {
     return cacheCapacity;
   }
 
-  /**
-   * Gets label.
-   *
-   * @return the label
-   */
   public String getLabel() {
     return label;
   }
 
-  /**
-   * Is high spec.
-   *
-   * @return the boolean
-   */
   public boolean isHighSpec() {
     return isHighSpec;
   }
 
-  /**
-   * Indicates whether read caching is enabled for snapshot access.
-   *
-   * @return {@code true} if read cache is used during snapshot reads; {@code false} otherwise.
-   */
   public boolean isReadCacheEnabledForSnapshots() {
     return enableReadCacheForSnapshots;
   }
 
-  /**
-   * Is blockchain garbage collection enabled.
-   *
-   * @return the boolean
-   */
   public boolean isBlockchainGarbageCollectionEnabled() {
     return isBlockchainGarbageCollectionEnabled;
   }
 
-  /**
-   * Gets blob garbage collection age cutoff.
-   *
-   * @return the blob garbage collection age cutoff
-   */
   public Optional<Double> getBlobGarbageCollectionAgeCutoff() {
     return blobGarbageCollectionAgeCutoff;
   }
 
-  /**
-   * Gets blob garbage collection force threshold.
-   *
-   * @return the blob garbage collection force threshold
-   */
   public Optional<Double> getBlobGarbageCollectionForceThreshold() {
     return blobGarbageCollectionForceThreshold;
+  }
+
+  public Optional<Integer> getNumLevels() {
+    return numLevels;
+  }
+
+  public int getMaxOpenRocksDbSnapshots() {
+    return maxOpenRocksDbSnapshots;
+  }
+
+  public boolean isCompactStateColumnFamiliesAfterFcu() {
+    return compactStateColumnFamiliesAfterFcu;
+  }
+
+  public boolean isStateLsmExperimentEnabled() {
+    return stateLsmExperimentEnabled;
   }
 }

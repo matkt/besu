@@ -27,6 +27,10 @@ public class RocksDBFactoryConfiguration {
   private final boolean isBlockchainGarbageCollectionEnabled;
   private final Optional<Double> blobGarbageCollectionAgeCutoff;
   private final Optional<Double> blobGarbageCollectionForceThreshold;
+  private final Optional<Integer> numLevels;
+  private final int maxOpenRocksDbSnapshots;
+  private final boolean compactStateColumnFamiliesAfterFcu;
+  private final boolean stateLsmExperimentEnabled;
 
   /**
    * Instantiates a new RocksDb factory configuration.
@@ -40,6 +44,10 @@ public class RocksDBFactoryConfiguration {
    *     column family
    * @param blobGarbageCollectionAgeCutoff the blob garbage collection age cutoff
    * @param blobGarbageCollectionForceThreshold the blob garbage collection force threshold
+   * @param numLevels optional RocksDB num_levels override for Bonsai state column families
+   * @param maxOpenRocksDbSnapshots max concurrent RocksDB snapshots ({@code 0} = unlimited)
+   * @param compactStateColumnFamiliesAfterFcu compact state CFs after successful FCU
+   * @param stateLsmExperimentEnabled whether the experimental state LSM bundle is enabled
    */
   public RocksDBFactoryConfiguration(
       final int maxOpenFiles,
@@ -49,7 +57,11 @@ public class RocksDBFactoryConfiguration {
       final boolean enableReadCacheForSnapshots,
       final boolean isBlockchainGarbageCollectionEnabled,
       final Optional<Double> blobGarbageCollectionAgeCutoff,
-      final Optional<Double> blobGarbageCollectionForceThreshold) {
+      final Optional<Double> blobGarbageCollectionForceThreshold,
+      final Optional<Integer> numLevels,
+      final int maxOpenRocksDbSnapshots,
+      final boolean compactStateColumnFamiliesAfterFcu,
+      final boolean stateLsmExperimentEnabled) {
     this.backgroundThreadCount = backgroundThreadCount;
     this.maxOpenFiles = maxOpenFiles;
     this.cacheCapacity = cacheCapacity;
@@ -58,77 +70,57 @@ public class RocksDBFactoryConfiguration {
     this.isBlockchainGarbageCollectionEnabled = isBlockchainGarbageCollectionEnabled;
     this.blobGarbageCollectionAgeCutoff = blobGarbageCollectionAgeCutoff;
     this.blobGarbageCollectionForceThreshold = blobGarbageCollectionForceThreshold;
+    this.numLevels = numLevels;
+    this.maxOpenRocksDbSnapshots = maxOpenRocksDbSnapshots;
+    this.compactStateColumnFamiliesAfterFcu = compactStateColumnFamiliesAfterFcu;
+    this.stateLsmExperimentEnabled = stateLsmExperimentEnabled;
   }
 
-  /**
-   * Gets max open files.
-   *
-   * @return the max open files
-   */
   public int getMaxOpenFiles() {
     return maxOpenFiles;
   }
 
-  /**
-   * Gets background thread count.
-   *
-   * @return the background thread count
-   */
   public int getBackgroundThreadCount() {
     return backgroundThreadCount;
   }
 
-  /**
-   * Gets cache capacity.
-   *
-   * @return the cache capacity
-   */
   public long getCacheCapacity() {
     return cacheCapacity;
   }
 
-  /**
-   * Is high spec.
-   *
-   * @return the boolean
-   */
   public boolean isHighSpec() {
     return isHighSpec;
   }
 
-  /**
-   * Indicates whether read caching is enabled for snapshot access.
-   *
-   * @return {@code true} if read cache is enabled for snapshots; {@code false} otherwise.
-   */
   public boolean isReadCacheEnabledForSnapshots() {
     return enableReadCacheForSnapshots;
   }
 
-  /**
-   * Is garbage collection enabled for the BLOCKCHAIN column family.
-   *
-   * @return the boolean
-   */
   public boolean isBlockchainGarbageCollectionEnabled() {
     return isBlockchainGarbageCollectionEnabled;
   }
 
-  /**
-   * Gets blob garbage collection age cutoff.
-   *
-   * @return the blob garbage collection age cutoff, if set
-   */
   public Optional<Double> getBlobGarbageCollectionAgeCutoff() {
     return blobGarbageCollectionAgeCutoff;
   }
 
-  /**
-   * Gets blob garbage collection force threshold.
-   *
-   * @return the blob garbage collection force threshold, if set
-   */
   public Optional<Double> getBlobGarbageCollectionForceThreshold() {
     return blobGarbageCollectionForceThreshold;
+  }
+
+  public Optional<Integer> getNumLevels() {
+    return numLevels;
+  }
+
+  public int getMaxOpenRocksDbSnapshots() {
+    return maxOpenRocksDbSnapshots;
+  }
+
+  public boolean isCompactStateColumnFamiliesAfterFcu() {
+    return compactStateColumnFamiliesAfterFcu;
+  }
+
+  public boolean isStateLsmExperimentEnabled() {
+    return stateLsmExperimentEnabled;
   }
 }

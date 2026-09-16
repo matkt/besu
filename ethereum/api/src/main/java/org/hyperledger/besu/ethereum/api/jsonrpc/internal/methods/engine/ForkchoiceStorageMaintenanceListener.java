@@ -14,11 +14,22 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine;
 
-public interface EngineCallListener {
-  void executionEngineCalled();
+/** Runs storage maintenance after a successful forkchoice update. */
+public final class ForkchoiceStorageMaintenanceListener implements EngineCallListener {
 
-  /** Invoked after {@code engine_forkchoiceUpdated} successfully updates forkchoice state. */
-  default void forkchoiceApplied() {}
+  private final Runnable afterForkchoiceApplied;
 
-  default void stop() {}
+  public ForkchoiceStorageMaintenanceListener(final Runnable afterForkchoiceApplied) {
+    this.afterForkchoiceApplied = afterForkchoiceApplied;
+  }
+
+  @Override
+  public void executionEngineCalled() {
+    // no-op
+  }
+
+  @Override
+  public void forkchoiceApplied() {
+    afterForkchoiceApplied.run();
+  }
 }

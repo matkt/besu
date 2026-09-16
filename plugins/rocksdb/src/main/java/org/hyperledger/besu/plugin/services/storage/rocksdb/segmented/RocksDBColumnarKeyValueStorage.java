@@ -15,7 +15,10 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.segmented;
 
 import static java.util.stream.Collectors.toUnmodifiableSet;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BLOCKCHAIN;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -172,6 +175,19 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
               .map(segment -> createColumnDescriptor(segment, configuration))
               .collect(Collectors.toList());
 
+      configuration
+          .getNumLevels()
+          .filter(
+              ignored ->
+                  trimmedSegments.stream().anyMatch(RocksDBColumnarKeyValueStorage::isStateNumLevelsSegment))
+          .ifPresent(
+              numLevels ->
+                  LOG.warn(
+                      "EXPERIMENTAL rocksdb num_levels={} for ACCOUNT_INFO (0x06), "
+                          + "ACCOUNT_STORAGE (0x08), TRIE_BRANCH (0x09) only. "
+                          + "Run scripts/rocksdb-reduce-levels-state-cfs.sh on a DB copy first.",
+                      numLevels));
+
       setGlobalOptions(configuration, stats);
 
       txOptions = new TransactionDBOptions();
@@ -234,6 +250,10 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
+    configuration
+        .getNumLevels()
+        .filter(ignored -> isStateNumLevelsSegment(segment))
+        .ifPresent(cfOptions::setNumLevels);
     columnFamilyOptionsList.add(cfOptions);
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, cfOptions);
@@ -266,6 +286,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       options.setBlobGarbageCollectionForceThreshold(
           configuration.getBlobGarbageCollectionForceThreshold().get());
     }
+  }
+
+  private static boolean isStateNumLevelsSegment(final SegmentIdentifier segment) {
+    return segment == ACCOUNT_INFO_STATE
+        || segment == ACCOUNT_STORAGE_STORAGE
+        || segment == TRIE_BRANCH_STORAGE;
   }
 
   private static boolean isStaticDataGarbageCollectionEnabled(
@@ -525,6 +551,28 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   public void clear(final SegmentIdentifier segmentIdentifier) {
     Optional.ofNullable(columnHandlesBySegmentIdentifier.get(segmentIdentifier))
         .ifPresent(RocksDbSegmentIdentifier::reset);
+  }
+
+  /**
+   * Full-range compaction for Bonsai state column families (0x06, 0x08, 0x09).
+   *
+   * @throws StorageException if RocksDB compaction fails
+   */
+  public void compactBonsaiStateColumnFamilies() throws StorageException {
+    throwIfClosed();
+    for (final SegmentIdentifier segment :
+        List.of(ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE)) {
+      final RocksDbSegmentIdentifier handle = columnHandlesBySegmentIdentifier.get(segment);
+      if (handle == null) {
+        continue;
+      }
+      try {
+        LOG.info("Compacting RocksDB column family {}", segment.getName());
+        getDB().compactRange(handle.get(), null, null);
+      } catch (final RocksDBException e) {
+        throw new StorageException(e);
+      }
+    }
   }
 
   @Override
