@@ -159,16 +159,16 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   private static FlatDbCacheManager createCacheManager(
       final DataStorageConfiguration dataStorageConfiguration, final MetricsSystem metricsSystem) {
     if (dataStorageConfiguration
-        .getBonsaiExtraStorageConfiguration()
+        .getExtraStorageConfiguration()
         .getUnstable()
         .getBonsaiCrossBlockCacheEnabled()) {
       return new VersionedFlatDbCacheManager(
           dataStorageConfiguration
-              .getBonsaiExtraStorageConfiguration()
+              .getExtraStorageConfiguration()
               .getUnstable()
               .getBonsaiCrossBlockCacheAccountSize(),
           dataStorageConfiguration
-              .getBonsaiExtraStorageConfiguration()
+              .getExtraStorageConfiguration()
               .getUnstable()
               .getBonsaiCrossBlockCacheStorageSize(),
           metricsSystem);

@@ -39,7 +39,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
@@ -130,7 +130,7 @@ class BonsaiWorldStateProviderTest {
             new BonsaiWorldStateKeyValueStorage(
                 storageProvider, new NoOpMetricsSystem(), DEFAULT_CONFIG),
             blockchain,
-            ImmutableBonsaiExtraStorageConfiguration.builder().maxLayersToLoad(512L).build(),
+            ImmutableExtraStorageConfiguration.builder().maxLayersToLoad(512L).build(),
             new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
             null,
             EvmConfiguration.DEFAULT,
@@ -289,7 +289,7 @@ class BonsaiWorldStateProviderTest {
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage) {
     return new BonsaiWorldStateProvider(
         worldStateCacheManager,
-        DEFAULT_CONFIG.getBonsaiExtraStorageConfiguration(),
+        DEFAULT_CONFIG.getExtraStorageConfiguration(),
         trieLogManager,
         worldStateKeyValueStorage,
         blockchain,

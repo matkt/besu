@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator;
 
 import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
@@ -24,12 +24,11 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.AccountConsumingMap;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -59,8 +58,8 @@ import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("unchecked")
 public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends BonsaiAccount>
-    extends AbstractWorldUpdater<PathBasedWorldView, ACCOUNT>
-    implements PathBasedWorldView, TrieLogAccumulator {
+    extends AbstractWorldUpdater<BonsaiWorldView, ACCOUNT>
+    implements BonsaiWorldView, TrieLogAccumulator {
   private static final Logger LOG =
       LoggerFactory.getLogger(PathBasedWorldStateUpdateAccumulator.class);
   protected final Consumer<BonsaiValue<ACCOUNT>> accountPreloader;
@@ -81,7 +80,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   protected boolean isAccumulatorStateChanged;
 
   public PathBasedWorldStateUpdateAccumulator(
-      final PathBasedWorldView world,
+      final BonsaiWorldView world,
       final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
@@ -1038,16 +1037,16 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   protected abstract ACCOUNT copyAccount(final ACCOUNT account);
 
   protected abstract ACCOUNT copyAccount(
-      final ACCOUNT toCopy, final PathBasedWorldView context, final boolean mutable);
+      final ACCOUNT toCopy, final BonsaiWorldView context, final boolean mutable);
 
   protected abstract ACCOUNT createAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final AccountValue stateTrieAccount,
       final boolean mutable);
 
   protected abstract ACCOUNT createAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final Hash addressHash,
       final long nonce,
@@ -1057,7 +1056,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       final boolean mutable);
 
   protected abstract ACCOUNT createAccount(
-      final PathBasedWorldView context, final UpdateTrackingAccount<ACCOUNT> tracked);
+      final BonsaiWorldView context, final UpdateTrackingAccount<ACCOUNT> tracked);
 
   protected abstract void assertCloseEnoughForDiffing(
       final ACCOUNT source, final AccountValue account, final String context);

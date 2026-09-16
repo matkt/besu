@@ -28,7 +28,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldS
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -209,7 +209,7 @@ public class EngineTestCaseSpec {
                 inMemoryKeyValueStorageProvider.createWorldStateStorage(
                     DataStorageConfiguration.DEFAULT_BONSAI_CONFIG),
             blockchain,
-            ImmutableBonsaiExtraStorageConfiguration.builder()
+            ImmutableExtraStorageConfiguration.builder()
                 .maxLayersToLoad(engineNewPayloads != null ? (long) engineNewPayloads.length : 0L)
                 .build(),
             SHARED_TRIE_LOADER,

@@ -39,7 +39,7 @@ public class BonsaiFlatDbStrategyProvider extends FlatDbStrategyProvider {
   protected FlatDbMode getRequestedFlatDbMode(
       final DataStorageConfiguration dataStorageConfiguration) {
     return dataStorageConfiguration
-            .getBonsaiExtraStorageConfiguration()
+            .getExtraStorageConfiguration()
             .getUnstable()
             .getFullFlatDbEnabled()
         ? FlatDbMode.FULL

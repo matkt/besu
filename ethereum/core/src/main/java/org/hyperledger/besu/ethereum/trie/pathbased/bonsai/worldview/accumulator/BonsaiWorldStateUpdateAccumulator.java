@@ -21,9 +21,8 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
@@ -45,7 +44,7 @@ public class BonsaiWorldStateUpdateAccumulator
   private CommittedTransactionListener committedTransactionListener = NO_OP_LISTENER;
 
   public BonsaiWorldStateUpdateAccumulator(
-      final PathBasedWorldView world,
+      final BonsaiWorldView world,
       final Consumer<BonsaiValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
@@ -77,13 +76,13 @@ public class BonsaiWorldStateUpdateAccumulator
 
   @Override
   protected BonsaiAccount copyAccount(
-      final BonsaiAccount toCopy, final PathBasedWorldView context, final boolean mutable) {
+      final BonsaiAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
     return new BonsaiAccount(toCopy, context, mutable);
   }
 
   @Override
   protected BonsaiAccount createAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final AccountValue stateTrieAccount,
       final boolean mutable) {
@@ -92,7 +91,7 @@ public class BonsaiWorldStateUpdateAccumulator
 
   @Override
   protected BonsaiAccount createAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final Hash addressHash,
       final long nonce,
@@ -106,7 +105,7 @@ public class BonsaiWorldStateUpdateAccumulator
 
   @Override
   protected BonsaiAccount createAccount(
-      final PathBasedWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
+      final BonsaiWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
     return new BonsaiAccount(context, tracked, codeCache);
   }
 

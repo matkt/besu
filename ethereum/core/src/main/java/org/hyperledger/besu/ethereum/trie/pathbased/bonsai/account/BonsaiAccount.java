@@ -23,7 +23,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
@@ -42,7 +42,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 public class BonsaiAccount implements MutableAccount, AccountValue {
-  protected final PathBasedWorldView context;
+  protected final BonsaiWorldView context;
   protected boolean immutable;
   protected final Address address;
   protected final Hash addressHash;
@@ -57,7 +57,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   private Hash storageRoot;
 
   public BonsaiAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final Hash addressHash,
       final long nonce,
@@ -82,7 +82,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   }
 
   public BonsaiAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final AccountValue stateTrieAccount,
       final boolean mutable,
@@ -104,7 +104,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   }
 
   public BonsaiAccount(
-      final BonsaiAccount toCopy, final PathBasedWorldView context, final boolean mutable) {
+      final BonsaiAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
     this.context = context;
     this.address = toCopy.address;
     this.addressHash = toCopy.addressHash;
@@ -126,7 +126,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   }
 
   public BonsaiAccount(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final UpdateTrackingAccount<BonsaiAccount> tracked,
       final CodeCache codeCache) {
     this.context = context;
@@ -143,7 +143,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   }
 
   public static BonsaiAccount fromRLP(
-      final PathBasedWorldView context,
+      final BonsaiWorldView context,
       final Address address,
       final Bytes encoded,
       final boolean mutable,

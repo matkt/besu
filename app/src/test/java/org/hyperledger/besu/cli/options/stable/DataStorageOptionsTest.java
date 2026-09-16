@@ -15,13 +15,13 @@
 package org.hyperledger.besu.cli.options.stable;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
 
 import org.hyperledger.besu.cli.options.AbstractCLIOptionsTest;
 import org.hyperledger.besu.cli.options.storage.DataStorageOptions;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import org.junit.jupiter.api.Test;
@@ -35,7 +35,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getTrieLogPruningWindowSize())
                 .isEqualTo(600),
         "--bonsai-limit-trie-logs-enabled",
@@ -49,7 +49,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getLimitTrieLogsEnabled())
                 .isEqualTo(false),
         "--bonsai-limit-trie-logs-enabled=false");
@@ -77,10 +77,7 @@ public class DataStorageOptionsTest
   public void bonsaiTrieLogRetentionLimitOption() {
     internalTestSuccess(
         dataStorageConfiguration ->
-            assertThat(
-                    dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
-                        .getMaxLayersToLoad())
+            assertThat(dataStorageConfiguration.getExtraStorageConfiguration().getMaxLayersToLoad())
                 .isEqualTo(MINIMUM_TRIE_LOG_RETENTION_LIMIT + 1),
         "--bonsai-limit-trie-logs-enabled",
         "--bonsai-historical-block-limit",
@@ -91,10 +88,7 @@ public class DataStorageOptionsTest
   public void bonsaiTrieLogRetentionLimitOption_boundaryTest() {
     internalTestSuccess(
         dataStorageConfiguration ->
-            assertThat(
-                    dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
-                        .getMaxLayersToLoad())
+            assertThat(dataStorageConfiguration.getExtraStorageConfiguration().getMaxLayersToLoad())
                 .isEqualTo(MINIMUM_TRIE_LOG_RETENTION_LIMIT),
         "--bonsai-limit-trie-logs-enabled",
         "--bonsai-historical-block-limit",
@@ -116,7 +110,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getUnstable()
                         .getCodeStoredByCodeHashEnabled())
                 .isEqualTo(true),
@@ -130,7 +124,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getUnstable()
                         .getCodeStoredByCodeHashEnabled())
                 .isEqualTo(false),
@@ -144,7 +138,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelTxProcessingEnabled())
                 .isEqualTo(true));
   }
@@ -155,7 +149,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelTxProcessingEnabled())
                 .isEqualTo(true),
         "--bonsai-parallel-tx-processing-enabled=true");
@@ -167,7 +161,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelTxProcessingEnabled())
                 .isEqualTo(false),
         "--bonsai-parallel-tx-processing-enabled=false");
@@ -179,7 +173,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelStateRootComputationEnabled())
                 .isEqualTo(true));
   }
@@ -190,7 +184,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelStateRootComputationEnabled())
                 .isEqualTo(true),
         "--bonsai-parallel-state-root-computation-enabled=true");
@@ -202,7 +196,7 @@ public class DataStorageOptionsTest
         dataStorageConfiguration ->
             assertThat(
                     dataStorageConfiguration
-                        .getBonsaiExtraStorageConfiguration()
+                        .getExtraStorageConfiguration()
                         .getParallelStateRootComputationEnabled())
                 .isEqualTo(false),
         "--bonsai-parallel-state-root-computation-enabled=false");
@@ -257,8 +251,8 @@ public class DataStorageOptionsTest
   protected DataStorageConfiguration createCustomizedDomainObject() {
     return ImmutableDataStorageConfiguration.builder()
         .dataStorageFormat(DataStorageFormat.BONSAI)
-        .bonsaiExtraStorageConfiguration(
-            ImmutableBonsaiExtraStorageConfiguration.builder()
+        .extraStorageConfiguration(
+            ImmutableExtraStorageConfiguration.builder()
                 .maxLayersToLoad(513L)
                 .limitTrieLogsEnabled(true)
                 .trieLogPruningWindowSize(514)

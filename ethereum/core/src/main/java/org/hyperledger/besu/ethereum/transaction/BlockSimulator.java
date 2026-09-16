@@ -56,8 +56,8 @@ import org.hyperledger.besu.ethereum.mainnet.requests.RequestProcessorCoordinato
 import org.hyperledger.besu.ethereum.mainnet.systemcall.BlockProcessingContext;
 import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallError;
 import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallException;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;

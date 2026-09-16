@@ -28,8 +28,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -197,10 +197,8 @@ public class BonsaiArchiveWorldStateProviderTest {
     final var config =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
-                    .maxLayersToLoad(MAX_LAYERS)
-                    .build())
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder().maxLayersToLoad(MAX_LAYERS).build())
             .build();
     final BonsaiWorldStateKeyValueStorage worldStateStorage =
         new BonsaiWorldStateKeyValueStorage(

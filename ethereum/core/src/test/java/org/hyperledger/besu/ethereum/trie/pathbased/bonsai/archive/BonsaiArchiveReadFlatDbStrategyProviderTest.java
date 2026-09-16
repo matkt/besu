@@ -24,8 +24,8 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.F
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
@@ -39,8 +39,7 @@ public class BonsaiArchiveReadFlatDbStrategyProviderTest {
   private static final DataStorageConfiguration CONFIG =
       ImmutableDataStorageConfiguration.builder()
           .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-          .bonsaiExtraStorageConfiguration(
-              ImmutableBonsaiExtraStorageConfiguration.builder().build())
+          .extraStorageConfiguration(ImmutableExtraStorageConfiguration.builder().build())
           .build();
 
   @Test

@@ -647,7 +647,7 @@ class StateRootCommitterIntegrationTest {
           new BonsaiWorldStateProvider(
               bonsaiKv,
               blockchain,
-              DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getBonsaiExtraStorageConfiguration(),
+              DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getExtraStorageConfiguration(),
               new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
               null,
               EvmConfiguration.DEFAULT,
@@ -914,7 +914,7 @@ class StateRootCommitterIntegrationTest {
           new BonsaiWorldStateProvider(
               kvStorage,
               blockchain,
-              DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getBonsaiExtraStorageConfiguration(),
+              DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getExtraStorageConfiguration(),
               new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
               null,
               EvmConfiguration.DEFAULT,

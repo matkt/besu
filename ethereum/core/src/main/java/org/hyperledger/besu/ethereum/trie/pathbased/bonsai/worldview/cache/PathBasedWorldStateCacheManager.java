@@ -12,20 +12,19 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
 import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateLayerStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiCachedWorldStateView;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 

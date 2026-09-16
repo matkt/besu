@@ -19,11 +19,10 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.BonsaiWorldStateCacheManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -41,7 +40,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
   public BonsaiWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
-      final BonsaiExtraStorageConfiguration bonsaiExtraStorageConfiguration,
+      final ExtraStorageConfiguration extraStorageConfiguration,
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ServiceManager pluginContext,
       final EvmConfiguration evmConfiguration,
@@ -49,7 +48,7 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
     this(
         worldStateKeyValueStorage,
         blockchain,
-        bonsaiExtraStorageConfiguration,
+        extraStorageConfiguration,
         bonsaiCachedMerkleTrieLoader,
         pluginContext,
         evmConfiguration,
@@ -60,13 +59,13 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
   public BonsaiWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
-      final BonsaiExtraStorageConfiguration bonsaiExtraStorageConfiguration,
+      final ExtraStorageConfiguration extraStorageConfiguration,
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ServiceManager pluginContext,
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache,
       final Optional<Long> amsterdamMilestone) {
-    super(worldStateKeyValueStorage, blockchain, bonsaiExtraStorageConfiguration, pluginContext);
+    super(worldStateKeyValueStorage, blockchain, extraStorageConfiguration, pluginContext);
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.amsterdamMilestone = amsterdamMilestone;
     this.evmConfiguration = evmConfiguration;
@@ -81,14 +80,14 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
   @VisibleForTesting
   BonsaiWorldStateProvider(
       final BonsaiWorldStateCacheManager bonsaiWorldStateCacheManager,
-      final BonsaiExtraStorageConfiguration bonsaiExtraStorageConfiguration,
+      final ExtraStorageConfiguration extraStorageConfiguration,
       final TrieLogManager trieLogManager,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache) {
-    super(worldStateKeyValueStorage, blockchain, bonsaiExtraStorageConfiguration, trieLogManager);
+    super(worldStateKeyValueStorage, blockchain, extraStorageConfiguration, trieLogManager);
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.amsterdamMilestone = Optional.empty();
     this.evmConfiguration = evmConfiguration;

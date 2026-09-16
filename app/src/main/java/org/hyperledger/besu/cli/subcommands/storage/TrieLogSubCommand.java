@@ -28,8 +28,8 @@ import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogPruner;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -90,9 +90,8 @@ public class TrieLogSubCommand implements Runnable {
         .setupControllerBuilder()
         .dataStorageConfiguration(
             ImmutableDataStorageConfiguration.copyOf(config)
-                .withBonsaiExtraStorageConfiguration(
-                    ImmutableBonsaiExtraStorageConfiguration.copyOf(
-                            config.getBonsaiExtraStorageConfiguration())
+                .withExtraStorageConfiguration(
+                    ImmutableExtraStorageConfiguration.copyOf(config.getExtraStorageConfiguration())
                         .withLimitTrieLogsEnabled(false)))
         .build();
   }

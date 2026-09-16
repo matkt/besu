@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.provider;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider;
 
 import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
 
@@ -25,11 +25,11 @@ import org.hyperledger.besu.ethereum.proof.WorldStateProofProvider;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.PathBasedWorldStateCacheManager;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
@@ -68,23 +68,23 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
   public PathBasedWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
-      final BonsaiExtraStorageConfiguration bonsaiExtraStorageConfiguration,
+      final ExtraStorageConfiguration extraStorageConfiguration,
       final ServiceManager pluginContext) {
     this(
         worldStateKeyValueStorage,
         blockchain,
-        bonsaiExtraStorageConfiguration,
+        extraStorageConfiguration,
         new TrieLogManager(
             blockchain,
             worldStateKeyValueStorage,
-            bonsaiExtraStorageConfiguration.getMaxLayersToLoad(),
+            extraStorageConfiguration.getMaxLayersToLoad(),
             pluginContext));
   }
 
   public PathBasedWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
-      final BonsaiExtraStorageConfiguration bonsaiExtraStorageConfiguration,
+      final ExtraStorageConfiguration extraStorageConfiguration,
       final TrieLogManager trieLogManager) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.trieLogManager = trieLogManager;
@@ -92,7 +92,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
     this.worldStateConfig =
         WorldStateConfig.newBuilder()
             .parallelStateRootComputationEnabled(
-                bonsaiExtraStorageConfiguration.getParallelStateRootComputationEnabled())
+                extraStorageConfiguration.getParallelStateRootComputationEnabled())
             .build();
   }
 

@@ -21,11 +21,11 @@ import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.code.AccountHashCodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.code.CodeHashCodeStorageStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.code.CodeStorageStrategy;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
@@ -106,11 +106,11 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
-                    .maxLayersToLoad(BonsaiExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(ExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())
@@ -134,12 +134,12 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
                     .maxLayersToLoad(3L)
                     .limitTrieLogsEnabled(true)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())
@@ -163,11 +163,11 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
-                    .maxLayersToLoad(BonsaiExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(ExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())
@@ -197,12 +197,12 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
                     .maxLayersToLoad(3L)
                     .limitTrieLogsEnabled(true)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())
@@ -233,11 +233,11 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
-                    .maxLayersToLoad(BonsaiExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
+                    .maxLayersToLoad(ExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())
@@ -266,12 +266,12 @@ class FlatDbStrategyProviderTest {
     final DataStorageConfiguration dataStorageConfiguration =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.X_BONSAI_ARCHIVE)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
                     .maxLayersToLoad(3L)
                     .limitTrieLogsEnabled(true)
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .codeStoredByCodeHashEnabled(codeByHashEnabled)
                             .build())
                     .build())

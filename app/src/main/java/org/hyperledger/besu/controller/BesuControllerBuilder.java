@@ -101,8 +101,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.Bons
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogPruner;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
@@ -730,7 +730,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     final AtomicReference<SyncState> archiveSyncStateRef = new AtomicReference<>();
     if (DataStorageFormat.X_BONSAI_ARCHIVE.equals(dataStorageConfiguration.getDataStorageFormat())
         && dataStorageConfiguration
-            .getBonsaiExtraStorageConfiguration()
+            .getExtraStorageConfiguration()
             .getUnstable()
             .getBonsaiArchiveStateProofsEnabled()) {
       final BonsaiWorldStateKeyValueStorage keyValueStorage =
@@ -747,7 +747,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
                 final SyncState archiveSyncState = archiveSyncStateRef.get();
                 return !archiveSyncState.isInSync(
                         dataStorageConfiguration
-                            .getBonsaiExtraStorageConfiguration()
+                            .getExtraStorageConfiguration()
                             .getMaxLayersToLoad())
                     || archiveSyncState.getBestPeerChainHead().isEmpty();
               });
@@ -951,8 +951,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             protocolContext, protocolSchedule, miningConfiguration);
 
     if (DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())) {
-      final BonsaiExtraStorageConfiguration subStorageConfiguration =
-          dataStorageConfiguration.getBonsaiExtraStorageConfiguration();
+      final ExtraStorageConfiguration subStorageConfiguration =
+          dataStorageConfiguration.getExtraStorageConfiguration();
       if (subStorageConfiguration.getLimitTrieLogsEnabled()) {
         final TrieLogManager trieLogManager =
             ((BonsaiWorldStateProvider) worldStateArchive).getTrieLogManager();
@@ -1083,8 +1083,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final Blockchain blockchain,
       final EthScheduler scheduler) {
     final boolean isProofOfStake = genesisConfigOptions.getTerminalTotalDifficulty().isPresent();
-    final BonsaiExtraStorageConfiguration subStorageConfiguration =
-        dataStorageConfiguration.getBonsaiExtraStorageConfiguration();
+    final ExtraStorageConfiguration subStorageConfiguration =
+        dataStorageConfiguration.getExtraStorageConfiguration();
     final TrieLogPruner trieLogPruner =
         new TrieLogPruner(
             (BonsaiWorldStateKeyValueStorage) worldStateStorage,
@@ -1450,7 +1450,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         yield new BonsaiWorldStateProvider(
             worldStateKeyValueStorage,
             blockchain,
-            dataStorageConfiguration.getBonsaiExtraStorageConfiguration(),
+            dataStorageConfiguration.getExtraStorageConfiguration(),
             bonsaiCachedMerkleTrieLoader,
             besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
             evmConfiguration,

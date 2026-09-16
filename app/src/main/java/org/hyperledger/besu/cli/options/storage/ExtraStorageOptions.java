@@ -14,23 +14,23 @@
  */
 package org.hyperledger.besu.cli.options.storage;
 
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ENABLED;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.BonsaiUnstable.DEFAULT_FULL_FLAT_DB_ENABLED;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_LIMIT_TRIE_LOGS_ENABLED;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_PARALLEL_TX_PROCESSING;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.DEFAULT_TRIE_LOG_PRUNING_WINDOW_SIZE;
-import static org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.DEFAULT_LIMIT_TRIE_LOGS_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.DEFAULT_MAX_LAYERS_TO_LOAD;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.DEFAULT_PARALLEL_TX_PROCESSING;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.DEFAULT_TRIE_LOG_PRUNING_WINDOW_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_FULL_FLAT_DB_ENABLED;
 
 import org.hyperledger.besu.cli.options.CLIOptions;
 import org.hyperledger.besu.cli.util.CommandLineUtils;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.util.List;
@@ -39,7 +39,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.Option;
 
 /** The Data storage CLI options. */
-public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageConfiguration> {
+public class ExtraStorageOptions implements CLIOptions<ExtraStorageConfiguration> {
 
   /** The maximum number of historical layers to load. */
   public static final String MAX_LAYERS_TO_LOAD = "--bonsai-historical-block-limit";
@@ -97,10 +97,10 @@ public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageC
   private Boolean isParallelStateRootComputationEnabled = DEFAULT_PARALLEL_STATE_ROOT_COMPUTATION;
 
   @CommandLine.ArgGroup(validate = false)
-  private final BonsaiExtraStorageOptions.Unstable unstableOptions = new Unstable();
+  private final ExtraStorageOptions.Unstable unstableOptions = new Unstable();
 
   /** Default Constructor. */
-  BonsaiExtraStorageOptions() {}
+  ExtraStorageOptions() {}
 
   /** The unstable options for data storage. */
   public static class Unstable {
@@ -160,8 +160,8 @@ public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageC
    *
    * @return the data storage options
    */
-  public static BonsaiExtraStorageOptions create() {
-    return new BonsaiExtraStorageOptions();
+  public static ExtraStorageOptions create() {
+    return new ExtraStorageOptions();
   }
 
   /**
@@ -208,9 +208,8 @@ public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageC
    * @param domainObject to be reversed
    * @return the options that correspond to the configuration
    */
-  public static BonsaiExtraStorageOptions fromConfig(
-      final BonsaiExtraStorageConfiguration domainObject) {
-    final BonsaiExtraStorageOptions dataStorageOptions = BonsaiExtraStorageOptions.create();
+  public static ExtraStorageOptions fromConfig(final ExtraStorageConfiguration domainObject) {
+    final ExtraStorageOptions dataStorageOptions = ExtraStorageOptions.create();
     dataStorageOptions.maxLayersToLoad = domainObject.getMaxLayersToLoad();
     dataStorageOptions.limitTrieLogsEnabled = domainObject.getLimitTrieLogsEnabled();
     dataStorageOptions.trieLogPruningWindowSize = domainObject.getTrieLogPruningWindowSize();
@@ -235,15 +234,15 @@ public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageC
   }
 
   @Override
-  public final BonsaiExtraStorageConfiguration toDomainObject() {
-    return ImmutableBonsaiExtraStorageConfiguration.builder()
+  public final ExtraStorageConfiguration toDomainObject() {
+    return ImmutableExtraStorageConfiguration.builder()
         .maxLayersToLoad(maxLayersToLoad)
         .limitTrieLogsEnabled(limitTrieLogsEnabled)
         .trieLogPruningWindowSize(trieLogPruningWindowSize)
         .parallelTxProcessingEnabled(isParallelTxProcessingEnabled)
         .parallelStateRootComputationEnabled(isParallelStateRootComputationEnabled)
         .unstable(
-            ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+            ImmutableExtraStorageConfiguration.Unstable.builder()
                 .fullFlatDbEnabled(unstableOptions.fullFlatDbEnabled)
                 .codeStoredByCodeHashEnabled(unstableOptions.codeUsingCodeHashEnabled)
                 .bonsaiCrossBlockCacheEnabled(unstableOptions.bonsaiCrossBlockCacheEnabled)
@@ -256,6 +255,6 @@ public class BonsaiExtraStorageOptions implements CLIOptions<BonsaiExtraStorageC
 
   @Override
   public List<String> getCLIOptions() {
-    return CommandLineUtils.getCLIOptions(this, new BonsaiExtraStorageOptions());
+    return CommandLineUtils.getCLIOptions(this, new ExtraStorageOptions());
   }
 }

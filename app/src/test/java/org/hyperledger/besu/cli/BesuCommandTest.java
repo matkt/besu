@@ -1468,8 +1468,7 @@ public class BesuCommandTest extends CommandTestAbstract {
     final DataStorageConfiguration dataStorageConfiguration =
         dataStorageConfigurationArgumentCaptor.getValue();
     assertThat(dataStorageConfiguration.getDataStorageFormat()).isEqualTo(BONSAI);
-    assertThat(
-            dataStorageConfiguration.getBonsaiExtraStorageConfiguration().getLimitTrieLogsEnabled())
+    assertThat(dataStorageConfiguration.getExtraStorageConfiguration().getLimitTrieLogsEnabled())
         .isTrue();
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
@@ -1485,8 +1484,7 @@ public class BesuCommandTest extends CommandTestAbstract {
     final DataStorageConfiguration dataStorageConfiguration =
         dataStorageConfigurationArgumentCaptor.getValue();
     assertThat(dataStorageConfiguration.getDataStorageFormat()).isEqualTo(BONSAI);
-    assertThat(
-            dataStorageConfiguration.getBonsaiExtraStorageConfiguration().getLimitTrieLogsEnabled())
+    assertThat(dataStorageConfiguration.getExtraStorageConfiguration().getLimitTrieLogsEnabled())
         .isFalse();
     verify(mockLogger)
         .warn(
@@ -1522,7 +1520,7 @@ public class BesuCommandTest extends CommandTestAbstract {
     final DataStorageConfiguration dataStorageConfiguration =
         dataStorageConfigurationArgumentCaptor.getValue();
     assertThat(dataStorageConfiguration.getDataStorageFormat()).isEqualTo(BONSAI);
-    assertThat(dataStorageConfiguration.getBonsaiExtraStorageConfiguration().getMaxLayersToLoad())
+    assertThat(dataStorageConfiguration.getExtraStorageConfiguration().getMaxLayersToLoad())
         .isEqualTo(11);
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
@@ -2723,7 +2721,7 @@ public class BesuCommandTest extends CommandTestAbstract {
             besuCommand
                 .getDataStorageOptions()
                 .toDomainObject()
-                .getBonsaiExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getFullFlatDbEnabled())
         .isTrue();
@@ -2736,7 +2734,7 @@ public class BesuCommandTest extends CommandTestAbstract {
             besuCommand
                 .dataStorageOptions
                 .toDomainObject()
-                .getBonsaiExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getFullFlatDbEnabled())
         .isFalse();
@@ -2770,7 +2768,7 @@ public class BesuCommandTest extends CommandTestAbstract {
             besuCommand
                 .dataStorageOptions
                 .toDomainObject()
-                .getBonsaiExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getBonsaiArchiveStateProofsEnabled())
         .isFalse();
@@ -2783,7 +2781,7 @@ public class BesuCommandTest extends CommandTestAbstract {
             besuCommand
                 .dataStorageOptions
                 .toDomainObject()
-                .getBonsaiExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getBonsaiArchiveStateProofsEnabled())
         .isTrue();
@@ -2797,7 +2795,7 @@ public class BesuCommandTest extends CommandTestAbstract {
             besuCommand
                 .dataStorageOptions
                 .toDomainObject()
-                .getBonsaiExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getBonsaiArchiveStateProofsEnabled())
         .isTrue();

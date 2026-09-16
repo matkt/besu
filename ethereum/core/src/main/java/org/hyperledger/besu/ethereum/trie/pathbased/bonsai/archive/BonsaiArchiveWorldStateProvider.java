@@ -26,9 +26,9 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.Arch
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
@@ -95,7 +95,7 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
     super(
         worldStateKeyValueStorage,
         blockchain,
-        dataStorageConfiguration.getBonsaiExtraStorageConfiguration(),
+        dataStorageConfiguration.getExtraStorageConfiguration(),
         bonsaiCachedMerkleTrieLoader,
         pluginContext,
         evmConfiguration,

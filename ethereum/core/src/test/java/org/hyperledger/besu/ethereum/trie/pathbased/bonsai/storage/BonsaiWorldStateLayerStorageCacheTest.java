@@ -23,8 +23,8 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.FlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.VersionedFlatDbCacheManager;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
@@ -69,10 +69,10 @@ public class BonsaiWorldStateLayerStorageCacheTest {
             new NoOpMetricsSystem(),
             ImmutableDataStorageConfiguration.builder()
                 .dataStorageFormat(DataStorageFormat.BONSAI)
-                .bonsaiExtraStorageConfiguration(
-                    ImmutableBonsaiExtraStorageConfiguration.builder()
+                .extraStorageConfiguration(
+                    ImmutableExtraStorageConfiguration.builder()
                         .unstable(
-                            ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                            ImmutableExtraStorageConfiguration.Unstable.builder()
                                 .bonsaiCrossBlockCacheEnabled(true)
                                 .build())
                         .build())

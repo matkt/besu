@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
@@ -31,9 +31,8 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateLayerStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -56,7 +55,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public abstract class PathBasedWorldState
-    implements MutableWorldState, PathBasedWorldView, StorageSubscriber {
+    implements MutableWorldState, BonsaiWorldView, StorageSubscriber {
 
   private static final Logger LOG = LoggerFactory.getLogger(PathBasedWorldState.class);
 

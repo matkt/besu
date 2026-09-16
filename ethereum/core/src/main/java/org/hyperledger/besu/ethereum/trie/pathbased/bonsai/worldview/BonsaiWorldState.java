@@ -32,11 +32,10 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.bal.BonsaiBalWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.frontier.CachingFrontierStorageRootTracker;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.frontier.FrontierRootHashTracker;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.frontier.FrontierStorageRootTracker;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.cache.PathBasedWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.trie.patricia.ParallelStoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.evm.account.Account;

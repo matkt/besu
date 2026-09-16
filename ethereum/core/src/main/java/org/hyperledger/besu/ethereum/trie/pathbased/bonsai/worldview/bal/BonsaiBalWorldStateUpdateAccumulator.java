@@ -21,10 +21,10 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -40,7 +40,7 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
   private final BlockAccessListOverlay blockAccessListOverlay;
 
   public BonsaiBalWorldStateUpdateAccumulator(
-      final PathBasedWorldView world,
+      final BonsaiWorldView world,
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache,
       final BlockAccessListOverlay blockAccessListOverlay) {

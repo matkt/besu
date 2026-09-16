@@ -64,10 +64,10 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
-import org.hyperledger.besu.ethereum.worldstate.BonsaiExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.StubMetricsSystem;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -157,10 +157,10 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
     final DataStorageConfiguration dataStorageConfig =
         ImmutableDataStorageConfiguration.builder()
             .dataStorageFormat(DataStorageFormat.BONSAI)
-            .bonsaiExtraStorageConfiguration(
-                ImmutableBonsaiExtraStorageConfiguration.builder()
+            .extraStorageConfiguration(
+                ImmutableExtraStorageConfiguration.builder()
                     .unstable(
-                        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+                        ImmutableExtraStorageConfiguration.Unstable.builder()
                             .bonsaiCrossBlockCacheEnabled(true)
                             .build())
                     .build())
@@ -178,7 +178,7 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
         new BonsaiWorldStateProvider(
             worldStateKeyValueStorage,
             blockchain,
-            BonsaiExtraStorageConfiguration.DEFAULT,
+            ExtraStorageConfiguration.DEFAULT,
             cachedMerkleTrieLoader,
             pluginContext,
             EvmConfiguration.DEFAULT,

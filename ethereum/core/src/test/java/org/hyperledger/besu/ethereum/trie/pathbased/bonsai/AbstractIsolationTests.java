@@ -71,7 +71,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldS
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.ethereum.worldstate.ImmutableBonsaiExtraStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
@@ -162,7 +162,7 @@ public abstract class AbstractIsolationTests {
         new BonsaiWorldStateProvider(
             (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage,
             blockchain,
-            ImmutableBonsaiExtraStorageConfiguration.builder().maxLayersToLoad(16L).build(),
+            ImmutableExtraStorageConfiguration.builder().maxLayersToLoad(16L).build(),
             new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
             null,
             EvmConfiguration.DEFAULT,

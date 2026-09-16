@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.common.worldview;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -30,7 +30,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
-public interface PathBasedWorldView extends WorldView {
+public interface BonsaiWorldView extends WorldView {
 
   Optional<Bytes> getCode(Address address, final Hash codeHash);
 

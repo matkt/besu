@@ -18,15 +18,14 @@ import org.immutables.value.Value;
 
 @Value.Immutable
 @Value.Enclosing
-public interface BonsaiExtraStorageConfiguration {
+public interface ExtraStorageConfiguration {
 
-  BonsaiExtraStorageConfiguration DEFAULT =
-      ImmutableBonsaiExtraStorageConfiguration.builder().build();
+  ExtraStorageConfiguration DEFAULT = ImmutableExtraStorageConfiguration.builder().build();
 
-  BonsaiExtraStorageConfiguration DISABLED =
-      ImmutableBonsaiExtraStorageConfiguration.builder()
+  ExtraStorageConfiguration DISABLED =
+      ImmutableExtraStorageConfiguration.builder()
           .limitTrieLogsEnabled(false)
-          .unstable(BonsaiUnstable.DISABLED)
+          .unstable(Unstable.DISABLED)
           .parallelTxProcessingEnabled(false)
           .parallelStateRootComputationEnabled(false)
           .build();
@@ -64,23 +63,21 @@ public interface BonsaiExtraStorageConfiguration {
   }
 
   @Value.Default
-  default BonsaiUnstable getUnstable() {
-    return BonsaiUnstable.DEFAULT;
+  default Unstable getUnstable() {
+    return Unstable.DEFAULT;
   }
 
   @Value.Immutable
-  interface BonsaiUnstable {
+  interface Unstable {
 
-    BonsaiExtraStorageConfiguration.BonsaiUnstable DEFAULT =
-        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder().build();
+    ExtraStorageConfiguration.Unstable DEFAULT =
+        ImmutableExtraStorageConfiguration.Unstable.builder().build();
 
-    BonsaiExtraStorageConfiguration.BonsaiUnstable PARTIAL_MODE =
-        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
-            .fullFlatDbEnabled(false)
-            .build();
+    ExtraStorageConfiguration.Unstable PARTIAL_MODE =
+        ImmutableExtraStorageConfiguration.Unstable.builder().fullFlatDbEnabled(false).build();
 
-    BonsaiExtraStorageConfiguration.BonsaiUnstable DISABLED =
-        ImmutableBonsaiExtraStorageConfiguration.BonsaiUnstable.builder()
+    ExtraStorageConfiguration.Unstable DISABLED =
+        ImmutableExtraStorageConfiguration.Unstable.builder()
             .fullFlatDbEnabled(false)
             .codeStoredByCodeHashEnabled(false)
             .build();

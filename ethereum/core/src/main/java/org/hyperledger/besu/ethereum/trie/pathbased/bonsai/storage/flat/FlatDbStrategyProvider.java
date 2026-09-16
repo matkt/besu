@@ -74,7 +74,7 @@ public abstract class FlatDbStrategyProvider {
       final SegmentedKeyValueStorage composedWorldStateStorage) {
     final boolean configCodeUsingHash =
         dataStorageConfiguration
-            .getBonsaiExtraStorageConfiguration()
+            .getExtraStorageConfiguration()
             .getUnstable()
             .getCodeStoredByCodeHashEnabled();
     boolean codeUsingCodeByHash =

@@ -20,11 +20,11 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiPreImageProxy;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.worldview.PathBasedWorldView;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,7 +35,7 @@ public class BonsaiReferenceTestUpdateAccumulator extends BonsaiWorldStateUpdate
   private final BonsaiPreImageProxy preImageProxy;
 
   public BonsaiReferenceTestUpdateAccumulator(
-      final PathBasedWorldView world,
+      final BonsaiWorldView world,
       final Consumer<BonsaiValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final BonsaiPreImageProxy preImageProxy,
