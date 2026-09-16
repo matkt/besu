@@ -15,6 +15,8 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.configuration;
 
 import java.lang.management.ManagementFactory;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -55,6 +57,12 @@ public class RocksDBCLIOptions {
   /** The default value indicating whether read caching is enabled for snapshot access. */
   public static final boolean DEFAULT_ENABLE_READ_CACHE_FOR_SNAPSHOTS = false;
 
+  /**
+   * Default for RocksDB {@code prefetch_index_and_filter_in_cache} on this branch ({@code false} =
+   * disable open prefetch).
+   */
+  public static final boolean DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE = false;
+
   /** The constant MAX_OPEN_FILES_FLAG. */
   public static final String MAX_OPEN_FILES_FLAG = "--Xplugin-rocksdb-max-open-files";
 
@@ -83,6 +91,14 @@ public class RocksDBCLIOptions {
   /** Key name for configuring blob_garbage_collection_force_threshold */
   public static final String BLOB_GARBAGE_COLLECTION_FORCE_THRESHOLD =
       "--Xplugin-rocksdb-blob-garbage-collection-force-threshold";
+
+  /** RocksDB {@code block_based_table_factory.prefetch_index_and_filter_in_cache}. */
+  public static final String PREFETCH_INDEX_AND_FILTER_IN_CACHE_FLAG =
+      "--Xplugin-rocksdb-prefetch-index-and-filter-in-cache";
+
+  /** Extra RocksDB column-family custom properties ({@code key=value}). */
+  public static final String COLUMN_FAMILY_CUSTOM_PROPERTY_FLAG =
+      "--Xplugin-rocksdb-column-family-custom-property";
 
   /** The Max open files. */
   @CommandLine.Option(
@@ -162,6 +178,25 @@ public class RocksDBCLIOptions {
       description = "Blob garbage collection force threshold (default: ${DEFAULT-VALUE})")
   Optional<Double> blobGarbageCollectionForceThreshold = Optional.empty();
 
+  @CommandLine.Option(
+      names = {PREFETCH_INDEX_AND_FILTER_IN_CACHE_FLAG},
+      hidden = true,
+      defaultValue = "false",
+      paramLabel = "<BOOLEAN>",
+      description =
+          "RocksDB block_based_table_factory.prefetch_index_and_filter_in_cache "
+              + "(default: ${DEFAULT-VALUE} on this branch)")
+  boolean prefetchIndexAndFilterInCache = DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE;
+
+  @CommandLine.Option(
+      names = {COLUMN_FAMILY_CUSTOM_PROPERTY_FLAG},
+      hidden = true,
+      paramLabel = "<KEY=VALUE>",
+      description =
+          "Additional RocksDB column-family custom properties; repeat the flag. "
+              + "Optional segment prefix: 0x09:key=value or CF_NAME:key=value")
+  List<String> columnFamilyCustomProperties = new ArrayList<>();
+
   private final Supplier<Integer> resolvedMaxOpenFilesSupplier =
       Suppliers.memoize(
           () -> maxOpenFiles.orElseGet(RocksDBCLIOptions::deriveMaxOpenFilesFromAvailableMemory));
@@ -193,6 +228,8 @@ public class RocksDBCLIOptions {
     options.isBlockchainGarbageCollectionEnabled = config.isBlockchainGarbageCollectionEnabled();
     options.blobGarbageCollectionAgeCutoff = config.getBlobGarbageCollectionAgeCutoff();
     options.blobGarbageCollectionForceThreshold = config.getBlobGarbageCollectionForceThreshold();
+    options.prefetchIndexAndFilterInCache = config.isPrefetchIndexAndFilterInCache();
+    options.columnFamilyCustomProperties = new ArrayList<>(config.getColumnFamilyCustomProperties());
     return options;
   }
 
@@ -210,7 +247,9 @@ public class RocksDBCLIOptions {
         enableReadCacheForSnapshots,
         isBlockchainGarbageCollectionEnabled,
         blobGarbageCollectionAgeCutoff,
-        blobGarbageCollectionForceThreshold);
+        blobGarbageCollectionForceThreshold,
+        prefetchIndexAndFilterInCache,
+        columnFamilyCustomProperties);
   }
 
   private int resolveMaxOpenFiles() {

@@ -27,6 +27,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactor
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbIterator;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbSegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbUtil;
+import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBColumnFamilyCustomPropertyApplier;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -234,6 +235,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
             .setCompressionType(CompressionType.LZ4_COMPRESSION)
             .setTableFormatConfig(basedTableConfig)
             .setLevelCompactionDynamicLevelBytes(dynamicLevelBytes);
+    RocksDBColumnFamilyCustomPropertyApplier.apply(
+        segment,
+        basedTableConfig,
+        cfOptions,
+        configuration.isPrefetchIndexAndFilterInCache(),
+        configuration.getColumnFamilyCustomProperties());
     columnFamilyOptionsList.add(cfOptions);
     if (segment.containsStaticData()) {
       configureBlobDBForSegment(segment, configuration, cfOptions);

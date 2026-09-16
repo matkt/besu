@@ -71,6 +71,7 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.metrics.prometheus.MetricsConfiguration;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBKeyValueStorageFactory;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
+import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBFactoryConfiguration;
 import org.hyperledger.besu.services.BesuConfigurationImpl;
 import org.hyperledger.besu.services.BesuPluginContextImpl;
@@ -412,7 +413,9 @@ public final class RunnerTest {
                         DEFAULT_ENABLE_READ_CACHE_FOR_SNAPSHOTS,
                         false,
                         Optional.empty(),
-                        Optional.empty()),
+                        Optional.empty(),
+                        RocksDBCLIOptions.DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE,
+                        List.of()),
                 Arrays.asList(KeyValueSegmentIdentifier.values()),
                 RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS))
         .withCommonConfiguration(besuConfiguration)

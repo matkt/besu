@@ -21,6 +21,8 @@ import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.DEFAULT_MAX_OPEN_FILES;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /** The RocksDb configuration builder. */
@@ -36,6 +38,9 @@ public class RocksDBConfigurationBuilder {
   private boolean isBlockchainGarbageCollectionEnabled = false;
   private Optional<Double> blobGarbageCollectionAgeCutoff = Optional.empty();
   private Optional<Double> blobGarbageCollectionForceThreshold = Optional.empty();
+  private boolean prefetchIndexAndFilterInCache =
+      RocksDBCLIOptions.DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE;
+  private List<String> columnFamilyCustomProperties = new ArrayList<>();
 
   /** Instantiates a new Rocks db configuration builder. */
   public RocksDBConfigurationBuilder() {}
@@ -170,7 +175,21 @@ public class RocksDBConfigurationBuilder {
         .isBlockchainGarbageCollectionEnabled(configuration.isBlockchainGarbageCollectionEnabled())
         .blobGarbageCollectionAgeCutoff(configuration.getBlobGarbageCollectionAgeCutoff())
         .blobGarbageCollectionForceThreshold(
-            configuration.getBlobGarbageCollectionForceThreshold());
+            configuration.getBlobGarbageCollectionForceThreshold())
+        .prefetchIndexAndFilterInCache(configuration.isPrefetchIndexAndFilterInCache())
+        .columnFamilyCustomProperties(configuration.getColumnFamilyCustomProperties());
+  }
+
+  public RocksDBConfigurationBuilder prefetchIndexAndFilterInCache(
+      final boolean prefetchIndexAndFilterInCache) {
+    this.prefetchIndexAndFilterInCache = prefetchIndexAndFilterInCache;
+    return this;
+  }
+
+  public RocksDBConfigurationBuilder columnFamilyCustomProperties(
+      final List<String> columnFamilyCustomProperties) {
+    this.columnFamilyCustomProperties = new ArrayList<>(columnFamilyCustomProperties);
+    return this;
   }
 
   /**
@@ -189,6 +208,8 @@ public class RocksDBConfigurationBuilder {
         enableReadCacheForSnapshots,
         isBlockchainGarbageCollectionEnabled,
         blobGarbageCollectionAgeCutoff,
-        blobGarbageCollectionForceThreshold);
+        blobGarbageCollectionForceThreshold,
+        prefetchIndexAndFilterInCache,
+        columnFamilyCustomProperties);
   }
 }

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.plugin.services.storage.rocksdb.configuration;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /** The Rocks db configuration. */
@@ -30,6 +31,8 @@ public class RocksDBConfiguration {
   private final boolean isBlockchainGarbageCollectionEnabled;
   private final Optional<Double> blobGarbageCollectionAgeCutoff;
   private final Optional<Double> blobGarbageCollectionForceThreshold;
+  private final boolean prefetchIndexAndFilterInCache;
+  private final List<String> columnFamilyCustomProperties;
 
   /**
    * Instantiates a new RocksDb configuration.
@@ -45,6 +48,8 @@ public class RocksDBConfiguration {
    *     column family
    * @param blobGarbageCollectionAgeCutoff the blob garbage collection age cutoff
    * @param blobGarbageCollectionForceThreshold the blob garbage collection force threshold
+   * @param prefetchIndexAndFilterInCache RocksDB {@code prefetch_index_and_filter_in_cache}
+   * @param columnFamilyCustomProperties additional column-family custom properties ({@code key=value})
    */
   public RocksDBConfiguration(
       final Path databaseDir,
@@ -56,7 +61,9 @@ public class RocksDBConfiguration {
       final boolean enableReadCacheForSnapshots,
       final boolean isBlockchainGarbageCollectionEnabled,
       final Optional<Double> blobGarbageCollectionAgeCutoff,
-      final Optional<Double> blobGarbageCollectionForceThreshold) {
+      final Optional<Double> blobGarbageCollectionForceThreshold,
+      final boolean prefetchIndexAndFilterInCache,
+      final List<String> columnFamilyCustomProperties) {
     this.backgroundThreadCount = backgroundThreadCount;
     this.databaseDir = databaseDir;
     this.maxOpenFiles = maxOpenFiles;
@@ -67,6 +74,8 @@ public class RocksDBConfiguration {
     this.isBlockchainGarbageCollectionEnabled = isBlockchainGarbageCollectionEnabled;
     this.blobGarbageCollectionAgeCutoff = blobGarbageCollectionAgeCutoff;
     this.blobGarbageCollectionForceThreshold = blobGarbageCollectionForceThreshold;
+    this.prefetchIndexAndFilterInCache = prefetchIndexAndFilterInCache;
+    this.columnFamilyCustomProperties = List.copyOf(columnFamilyCustomProperties);
   }
 
   /**
@@ -157,5 +166,23 @@ public class RocksDBConfiguration {
    */
   public Optional<Double> getBlobGarbageCollectionForceThreshold() {
     return blobGarbageCollectionForceThreshold;
+  }
+
+  /**
+   * Returns RocksDB {@code prefetch_index_and_filter_in_cache} (via Besu custom properties).
+   *
+   * @return whether index and filter blocks are prefetched into the block cache on table open
+   */
+  public boolean isPrefetchIndexAndFilterInCache() {
+    return prefetchIndexAndFilterInCache;
+  }
+
+  /**
+   * Returns extra column-family custom properties ({@code key=value}).
+   *
+   * @return the custom property entries
+   */
+  public List<String> getColumnFamilyCustomProperties() {
+    return columnFamilyCustomProperties;
   }
 }

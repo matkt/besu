@@ -21,6 +21,7 @@ import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.DEFAULT_ENABLE_READ_CACHE_FOR_SNAPSHOTS;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.DEFAULT_IS_HIGH_SPEC;
 import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.DEFAULT_MAX_OPEN_FILES;
+import static org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions.DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -71,9 +72,11 @@ public class NearestKeyValueStorageTest {
                     DEFAULT_CACHE_CAPACITY,
                     DEFAULT_IS_HIGH_SPEC,
                     DEFAULT_ENABLE_READ_CACHE_FOR_SNAPSHOTS,
-                    false,
-                    Optional.empty(),
-                    Optional.empty()),
+                        false,
+                        Optional.empty(),
+                        Optional.empty(),
+                        DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE,
+                        List.of()),
             Arrays.asList(KeyValueSegmentIdentifier.values()),
             RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS);
 

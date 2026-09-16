@@ -219,7 +219,10 @@ public abstract class AbstractIsolationTests {
                         false,
                         false,
                         Optional.empty(),
-                        Optional.empty()),
+                        Optional.empty(),
+                        org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBCLIOptions
+                            .DEFAULT_PREFETCH_INDEX_AND_FILTER_IN_CACHE,
+                        List.of()),
                 Arrays.asList(KeyValueSegmentIdentifier.values()),
                 RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS))
         .withCommonConfiguration(
