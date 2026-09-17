@@ -29,6 +29,8 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.io.Closeable;
+import java.util.List;
+import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -373,6 +375,97 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
               assertThat(cv.getValue()).isEqualTo(Bytes.of(3));
               assertThat(cv.isRemoval()).isFalse();
             });
+  }
+
+  @Test
+  void getMultipleKeysPreservesOrderWarmsCacheAndHandlesMissing() throws Exception {
+    newHead(true);
+    final Hash present = Hash.hash(Bytes.of(1));
+    final Hash missing = Hash.hash(Bytes.of(2));
+    final Bytes value = Bytes.of(9, 9, 9);
+    commitAccount(present, value);
+    head.getCacheManager().clear(ACCOUNT_INFO_STATE);
+
+    final List<Optional<Bytes>> values =
+        head.getMultipleKeys(
+            ACCOUNT_INFO_STATE,
+            List.of(
+                present.getBytes().toArray(),
+                missing.getBytes().toArray(),
+                present.getBytes().toArray()));
+
+    assertThat(values).hasSize(3);
+    assertThat(values.get(0)).contains(value);
+    assertThat(values.get(1)).isEmpty();
+    assertThat(values.get(2)).contains(value);
+
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, present.getBytes())).isTrue();
+    assertThat(head.getCachedValue(ACCOUNT_INFO_STATE, present.getBytes()))
+        .hasValueSatisfying(
+            cv -> {
+              assertThat(cv.getValue()).isEqualTo(value);
+              assertThat(cv.isRemoval()).isFalse();
+            });
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, missing.getBytes())).isTrue();
+    assertThat(head.getCachedValue(ACCOUNT_INFO_STATE, missing.getBytes()))
+        .hasValueSatisfying(cv -> assertThat(cv.isRemoval()).isTrue());
+  }
+
+  @Test
+  void getMultipleKeysMixesCacheHitsAndStorageMisses() throws Exception {
+    newHead(true);
+    final Hash cached = Hash.hash(Bytes.of(1));
+    final Hash fromStorage = Hash.hash(Bytes.of(2));
+    commitAccount(cached, Bytes.of(1));
+    commitAccount(fromStorage, Bytes.of(2));
+    head.getCacheManager().clear(ACCOUNT_INFO_STATE);
+
+    assertThat(head.getMultipleKeys(ACCOUNT_INFO_STATE, List.of(cached.getBytes().toArray())))
+        .containsExactly(Optional.of(Bytes.of(1)));
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, cached.getBytes())).isTrue();
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, fromStorage.getBytes())).isFalse();
+
+    final List<Optional<Bytes>> mixed =
+        head.getMultipleKeys(
+            ACCOUNT_INFO_STATE,
+            List.of(fromStorage.getBytes().toArray(), cached.getBytes().toArray()));
+    assertThat(mixed).containsExactly(Optional.of(Bytes.of(2)), Optional.of(Bytes.of(1)));
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, fromStorage.getBytes())).isTrue();
+  }
+
+  @Test
+  void getMultipleKeysOnPinnedSnapshotDoesNotWarmWhenVersionBehindGlobal() throws Exception {
+    newHead(true);
+    final Hash account = Hash.hash(Bytes.of(1));
+    commitAccount(account, Bytes.of(1));
+    head.getCacheManager().clear(ACCOUNT_INFO_STATE);
+
+    try (BonsaiSnapshotWorldStateKeyValueStorage snapshot =
+        new BonsaiSnapshotWorldStateKeyValueStorage(head)) {
+      commitAccount(Hash.hash(Bytes.of(99)), Bytes.of(99));
+      head.getCacheManager().clear(ACCOUNT_INFO_STATE);
+
+      assertThat(snapshot.getCurrentVersion())
+          .isLessThan(head.getCacheManager().getCurrentVersion());
+
+      final List<Optional<Bytes>> values =
+          snapshot.getMultipleKeys(ACCOUNT_INFO_STATE, List.of(account.getBytes().toArray()));
+      assertThat(values).containsExactly(Optional.of(Bytes.of(1)));
+      assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
+    }
+  }
+
+  @Test
+  void getMultipleKeysWithNoOpCacheReturnsStorageWithoutWarming() throws Exception {
+    newHead(false);
+    final Hash account = Hash.hash(Bytes.of(1));
+    commitAccount(account, Bytes.of(1, 2, 3));
+
+    final List<Optional<Bytes>> values =
+        head.getMultipleKeys(ACCOUNT_INFO_STATE, List.of(account.getBytes().toArray()));
+    assertThat(values).containsExactly(Optional.of(Bytes.of(1, 2, 3)));
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
+    assertThat(head.getCacheManager()).isSameAs(FlatDbCacheManager.NO_OP_CACHE);
   }
 
   private void commitAccount(final Hash accountHash, final Bytes value) {
