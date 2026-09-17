@@ -2367,6 +2367,27 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
       dataStorageConfiguration = dataStorageOptions.toDomainObject();
     }
 
+    // BAL prefetch warms VersionedFlatDbCacheManager; enable the cross-block cache when prefetch is
+    // on so those reads are not discarded by the no-op cache.
+    if (balConfigurationOptions.toDomainObject().isBalPreFetchReadingEnabled()
+        && !dataStorageConfiguration
+            .getPathBasedExtraStorageConfiguration()
+            .getUnstable()
+            .getBonsaiCrossBlockCacheEnabled()) {
+      dataStorageConfiguration =
+          ImmutableDataStorageConfiguration.copyOf(dataStorageConfiguration)
+              .withPathBasedExtraStorageConfiguration(
+                  ImmutablePathBasedExtraStorageConfiguration.copyOf(
+                          dataStorageConfiguration.getPathBasedExtraStorageConfiguration())
+                      .withUnstable(
+                          ImmutablePathBasedExtraStorageConfiguration.PathBasedUnstable.copyOf(
+                                  dataStorageConfiguration
+                                      .getPathBasedExtraStorageConfiguration()
+                                      .getUnstable())
+                              .withBonsaiCrossBlockCacheEnabled(true)));
+      logger.info("Bonsai cross-block cache enabled for BAL prefetch reading");
+    }
+
     if (SyncMode.FULL.equals(getDefaultSyncModeIfNotSet())
         && DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())) {
       final PathBasedExtraStorageConfiguration pathBasedExtraStorageConfiguration =

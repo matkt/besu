@@ -43,6 +43,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,6 +183,39 @@ public class BonsaiWorldStateKeyValueStorage extends PathBasedWorldStateKeyValue
                     accountHash,
                     storageSlotKey,
                     composedWorldStateStorage));
+  }
+
+  /**
+   * Multi-get that goes through {@link FlatDbCacheManager} so callers (e.g. BAL prefetcher) warm
+   * the versioned cross-block cache instead of reading the composed storage directly.
+   *
+   * @param segmentIdentifier the flat-db segment to read
+   * @param keys raw segment keys
+   * @return values in the same order as {@code keys}
+   */
+  public List<Optional<Bytes>> getMultipleKeys(
+      final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
+    final List<Bytes> bytesKeys = new ArrayList<>(keys.size());
+    for (final byte[] key : keys) {
+      bytesKeys.add(Bytes.wrap(key));
+    }
+    return cacheManager.getMultipleFromCacheOrStorage(
+        segmentIdentifier,
+        bytesKeys,
+        getCurrentVersion(),
+        keysToFetch -> {
+          final List<byte[]> rawKeys = new ArrayList<>(keysToFetch.size());
+          for (final Bytes key : keysToFetch) {
+            rawKeys.add(key.toArrayUnsafe());
+          }
+          final List<Optional<byte[]>> fetched =
+              composedWorldStateStorage.multiget(segmentIdentifier, rawKeys);
+          final List<Optional<Bytes>> values = new ArrayList<>(fetched.size());
+          for (final Optional<byte[]> value : fetched) {
+            values.add(value.map(Bytes::wrap));
+          }
+          return values;
+        });
   }
 
   public Optional<Bytes> getCode(final Hash codeHash, final Hash accountHash) {
