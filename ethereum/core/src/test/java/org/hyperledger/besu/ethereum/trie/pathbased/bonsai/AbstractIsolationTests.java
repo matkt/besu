@@ -215,7 +215,6 @@ public abstract class AbstractIsolationTests {
                         8388608 /*CACHE_CAPACITY*/,
                         false,
                         false,
-                        false,
                         Optional.empty(),
                         Optional.empty()),
                 Arrays.asList(KeyValueSegmentIdentifier.values()),
