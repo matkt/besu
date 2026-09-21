@@ -402,10 +402,11 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   /**
    * Unsafe raw read by fully-qualified live key (already accountHash-prefixed for storage nodes),
-   * with no node-hash verification.
+   * with no node-hash verification. Reads the live {@code TRIE_BRANCH_STORAGE} segment directly and
+   * does not go through {@link TrieNodeStrategy}, so archive/read strategies are not applied.
    */
-  public Optional<Bytes> getTrieNode(final Bytes key) {
-    return trieNodeStrategy.getTrieNode(Optional.empty(), key, null, composedWorldStateStorage);
+  public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
+    return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
   }
 
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(

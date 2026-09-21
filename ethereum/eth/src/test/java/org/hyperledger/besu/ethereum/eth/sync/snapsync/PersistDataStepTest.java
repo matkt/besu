@@ -115,7 +115,7 @@ public class PersistDataStepTest {
     assertThat(
             worldStateStorageCoordinator
                 .getStrategy(BonsaiWorldStateKeyValueStorage.class)
-                .getTrieNode(tasks.get(0).getData().getRootHash().getBytes()))
+                .getTrieNodeUnsafe(tasks.get(0).getData().getRootHash().getBytes()))
         .isEmpty();
   }
 
@@ -174,7 +174,7 @@ public class PersistDataStepTest {
             assertThat(
                     worldStateStorageCoordinator
                         .getStrategy(BonsaiWorldStateKeyValueStorage.class)
-                        .getTrieNode(data.getLocation()))
+                        .getTrieNodeUnsafe(data.getLocation()))
                 .isPresent();
           } else {
             fail("not expected message");
