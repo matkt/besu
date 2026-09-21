@@ -519,12 +519,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
               final ACCOUNT updatedAccount;
               final PathBasedValue<ACCOUNT> updatedAccountValue =
                   accountsToUpdate.get(updatedAddress);
-              final Map<StorageSlotKey, PathBasedValue<UInt256>> pendingStorageUpdates =
-                  storageToUpdate.computeIfAbsent(
-                      updatedAddress,
-                      k ->
-                          new StorageConsumingMap<>(
-                              updatedAddress, new ConcurrentHashMap<>(), storagePreloader));
 
               if (tracked.getWrappedAccount() == null) {
                 updatedAccount = createAccount(this, tracked);
@@ -567,44 +561,65 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
                 pendingCode.setUpdated(updatedAccount.getCode());
               }
 
-              if (tracked.getStorageWasCleared()) {
-                storageToClear.add(updatedAddress);
-                pendingStorageUpdates.clear();
-              }
-
-              // parallel stream here may cause database corruption
-              updatedAccount
-                  .getUpdatedStorage()
-                  .entrySet()
-                  .forEach(
-                      storageUpdate -> {
-                        final UInt256 keyUInt = storageUpdate.getKey();
-                        final StorageSlotKey slotKey =
-                            new StorageSlotKey(
-                                hashAndSaveSlotPreImage(keyUInt), Optional.of(keyUInt));
-                        final UInt256 value = storageUpdate.getValue();
-                        final PathBasedValue<UInt256> pendingValue =
-                            pendingStorageUpdates.get(slotKey);
-                        if (pendingValue == null) {
-                          pendingStorageUpdates.put(
-                              slotKey,
-                              new PathBasedValue<>(
-                                  updatedAccount.getOriginalStorageValue(keyUInt), value));
-                        } else {
-                          pendingValue.setUpdated(value);
-                        }
-                      });
-
-              updatedAccount.getUpdatedStorage().clear();
-
-              if (pendingStorageUpdates.isEmpty()) {
-                storageToUpdate.remove(updatedAddress);
-              }
-
-              if (tracked.getStorageWasCleared()) {
-                tracked.setStorageWasCleared(false); // storage already cleared for this transaction
-              }
+              commitAccountStorage(tracked, updatedAccount);
             });
+  }
+
+  /**
+   * Applies storage clear / slot updates for one account during {@link #commit()}. Allocates a
+   * pending storage map only when there is actual storage work.
+   */
+  private void commitAccountStorage(
+      final UpdateTrackingAccount<ACCOUNT> tracked, final ACCOUNT updatedAccount) {
+    final Address address = tracked.getAddress();
+    final boolean storageCleared = tracked.getStorageWasCleared();
+    final Map<UInt256, UInt256> accountStorageUpdates = updatedAccount.getUpdatedStorage();
+
+    if (!storageCleared && accountStorageUpdates.isEmpty()) {
+      return;
+    }
+
+    StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> pendingStorageUpdates =
+        storageToUpdate.get(address);
+
+    if (storageCleared) {
+      storageToClear.add(address);
+      if (pendingStorageUpdates != null) {
+        pendingStorageUpdates.clear();
+      }
+    }
+
+    // parallel stream here may cause database corruption
+    if (!accountStorageUpdates.isEmpty()) {
+      if (pendingStorageUpdates == null) {
+        pendingStorageUpdates =
+            new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader);
+        storageToUpdate.put(address, pendingStorageUpdates);
+      }
+      for (final Map.Entry<UInt256, UInt256> storageUpdate : accountStorageUpdates.entrySet()) {
+        final UInt256 keyUInt = storageUpdate.getKey();
+        final StorageSlotKey slotKey =
+            new StorageSlotKey(hashAndSaveSlotPreImage(keyUInt), Optional.of(keyUInt));
+        final UInt256 value = storageUpdate.getValue();
+        final PathBasedValue<UInt256> pendingValue = pendingStorageUpdates.get(slotKey);
+        if (pendingValue == null) {
+          pendingStorageUpdates.put(
+              slotKey,
+              new PathBasedValue<>(updatedAccount.getOriginalStorageValue(keyUInt), value));
+        } else {
+          pendingValue.setUpdated(value);
+        }
+      }
+      accountStorageUpdates.clear();
+    }
+
+    if (pendingStorageUpdates != null && pendingStorageUpdates.isEmpty()) {
+      storageToUpdate.remove(address);
+    }
+
+    if (storageCleared) {
+      tracked.setStorageWasCleared(false); // storage already cleared for this transaction
+    }
   }
 
   @Override
