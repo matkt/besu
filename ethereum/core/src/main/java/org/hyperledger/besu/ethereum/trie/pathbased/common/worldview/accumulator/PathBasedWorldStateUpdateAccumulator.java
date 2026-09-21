@@ -447,135 +447,129 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
   @Override
   public void commit() {
     this.isAccumulatorStateChanged = true;
-
     for (final Address deletedAddress : getDeletedAccounts()) {
-      final PathBasedValue<ACCOUNT> accountValue =
-          accountsToUpdate.computeIfAbsent(
-              deletedAddress,
-              __ -> loadAccountFromParent(deletedAddress, new PathBasedValue<>(null, null, true)));
-      storageToClear.add(deletedAddress);
+      commitDeletedAccount(deletedAddress);
+    }
+    getUpdatedAccounts().parallelStream().forEach(this::commitUpdatedAccount);
+  }
 
-      final ACCOUNT priorAccount = accountValue.getPrior();
+  private void commitDeletedAccount(final Address deletedAddress) {
+    final PathBasedValue<ACCOUNT> accountValue =
+        accountsToUpdate.computeIfAbsent(
+            deletedAddress,
+            __ -> loadAccountFromParent(deletedAddress, new PathBasedValue<>(null, null, true)));
+    storageToClear.add(deletedAddress);
 
-      final PathBasedValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
-      if (codeValue != null) {
-        codeValue.setUpdated(null).setCleared();
-      } else {
-        wrappedWorldView()
-            .getCode(
-                deletedAddress, priorAccount != null ? priorAccount.getCodeHash() : Hash.EMPTY)
-            .ifPresent(
-                deletedCode ->
-                    codeToUpdate.put(
-                        deletedAddress, new PathBasedValue<>(deletedCode, null, true)));
-      }
+    final ACCOUNT priorAccount = accountValue.getPrior();
 
-      // mark all updated storage as to be cleared — allocate only when needed
-      StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> deletedStorageUpdates =
-          storageToUpdate.get(deletedAddress);
-      if (deletedStorageUpdates != null) {
-        final Iterator<Map.Entry<StorageSlotKey, PathBasedValue<UInt256>>> iter =
-            deletedStorageUpdates.entrySet().iterator();
-        while (iter.hasNext()) {
-          final PathBasedValue<UInt256> updatedSlot = iter.next().getValue();
-          final UInt256 priorSlot = updatedSlot.getPrior();
-          if (priorSlot == null || priorSlot.isZero()) {
-            iter.remove();
-          } else {
-            updatedSlot.setUpdated(null).setCleared();
-          }
-        }
-      }
-
-      if (priorAccount != null) {
-        final Hash storageRoot = priorAccount.getStorageRoot();
-        if (!Hash.EMPTY_TRIE_HASH.equals(storageRoot)) {
-          if (deletedStorageUpdates == null) {
-            deletedStorageUpdates =
-                new StorageConsumingMap<>(
-                    deletedAddress, new ConcurrentHashMap<>(), storagePreloader);
-            storageToUpdate.put(deletedAddress, deletedStorageUpdates);
-          }
-          // Enumerate and delete slots not already updated
-          final Map<StorageSlotKey, PathBasedValue<UInt256>> storageUpdates =
-              deletedStorageUpdates;
-          wrappedWorldView()
-              .getAllAccountStorage(deletedAddress, storageRoot)
-              .forEach(
-                  (keyHash, entryValue) -> {
-                    final StorageSlotKey storageSlotKey =
-                        new StorageSlotKey(Hash.wrap(keyHash), Optional.empty());
-                    if (!storageUpdates.containsKey(storageSlotKey)) {
-                      final UInt256 value = UInt256.fromBytes(RLP.decodeOne(entryValue));
-                      storageUpdates.put(
-                          storageSlotKey, new PathBasedValue<>(value, null, true));
-                    }
-                  });
-        }
-      }
-      if (deletedStorageUpdates != null && deletedStorageUpdates.isEmpty()) {
-        storageToUpdate.remove(deletedAddress);
-      }
-      accountValue.setUpdated(null);
+    final PathBasedValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
+    if (codeValue != null) {
+      codeValue.setUpdated(null).setCleared();
+    } else {
+      wrappedWorldView()
+          .getCode(
+              deletedAddress, priorAccount != null ? priorAccount.getCodeHash() : Hash.EMPTY)
+          .ifPresent(
+              deletedCode ->
+                  codeToUpdate.put(deletedAddress, new PathBasedValue<>(deletedCode, null, true)));
     }
 
-    getUpdatedAccounts().parallelStream()
-        .forEach(
-            tracked -> {
-              final Address updatedAddress = tracked.getAddress();
-              final ACCOUNT wrappedAccount = tracked.getWrappedAccount();
-              final boolean codeWasUpdated = tracked.codeWasUpdated();
-              final ACCOUNT updatedAccount;
-              PathBasedValue<ACCOUNT> updatedAccountValue = null;
+    StorageConsumingMap<StorageSlotKey, PathBasedValue<UInt256>> storageUpdates =
+        storageToUpdate.get(deletedAddress);
+    if (storageUpdates != null) {
+      final Iterator<Map.Entry<StorageSlotKey, PathBasedValue<UInt256>>> iter =
+          storageUpdates.entrySet().iterator();
+      while (iter.hasNext()) {
+        final PathBasedValue<UInt256> slot = iter.next().getValue();
+        final UInt256 priorSlot = slot.getPrior();
+        if (priorSlot == null || priorSlot.isZero()) {
+          iter.remove();
+        } else {
+          slot.setUpdated(null).setCleared();
+        }
+      }
+    }
 
-              if (wrappedAccount == null) {
-                updatedAccountValue = accountsToUpdate.get(updatedAddress);
-                updatedAccount = createAccount(this, tracked);
-                tracked.setWrappedAccount(updatedAccount);
-                if (updatedAccountValue == null) {
-                  accountsToUpdate.put(updatedAddress, new PathBasedValue<>(null, updatedAccount));
-                  codeToUpdate.put(
-                      updatedAddress, new PathBasedValue<>(null, updatedAccount.getCode()));
-                } else {
-                  updatedAccountValue.setUpdated(updatedAccount);
-                }
-              } else {
-                updatedAccount = wrappedAccount;
-                updatedAccount.setBalance(tracked.getBalance());
-                updatedAccount.setNonce(tracked.getNonce());
-                if (codeWasUpdated) {
-                  updatedAccount.setCode(tracked.getCode());
-                }
-                if (tracked.getStorageWasCleared()) {
-                  updatedAccount.clearStorage();
-                }
-                tracked.getUpdatedStorage().forEach(updatedAccount::setStorageValue);
-              }
+    if (priorAccount != null) {
+      final Hash storageRoot = priorAccount.getStorageRoot();
+      if (!Hash.EMPTY_TRIE_HASH.equals(storageRoot)) {
+        if (storageUpdates == null) {
+          storageUpdates =
+              new StorageConsumingMap<>(
+                  deletedAddress, new ConcurrentHashMap<>(), storagePreloader);
+          storageToUpdate.put(deletedAddress, storageUpdates);
+        }
+        final Map<StorageSlotKey, PathBasedValue<UInt256>> pendingSlots = storageUpdates;
+        wrappedWorldView()
+            .getAllAccountStorage(deletedAddress, storageRoot)
+            .forEach(
+                (keyHash, entryValue) -> {
+                  final StorageSlotKey slotKey =
+                      new StorageSlotKey(Hash.wrap(keyHash), Optional.empty());
+                  if (!pendingSlots.containsKey(slotKey)) {
+                    pendingSlots.put(
+                        slotKey,
+                        new PathBasedValue<>(
+                            UInt256.fromBytes(RLP.decodeOne(entryValue)), null, true));
+                  }
+                });
+      }
+    }
 
-              if (codeWasUpdated) {
-                final PathBasedValue<ACCOUNT> knownAccountValue = updatedAccountValue;
-                final PathBasedValue<Bytes> pendingCode =
-                    codeToUpdate.computeIfAbsent(
-                        updatedAddress,
-                        addr -> {
-                          final PathBasedValue<ACCOUNT> accountValue =
-                              knownAccountValue != null
-                                  ? knownAccountValue
-                                  : accountsToUpdate.get(addr);
-                          final ACCOUNT prior =
-                              accountValue != null ? accountValue.getPrior() : null;
-                          return new PathBasedValue<>(
-                              wrappedWorldView()
-                                  .getCode(
-                                      addr, prior != null ? prior.getCodeHash() : Hash.EMPTY)
-                                  .orElse(null),
-                              null);
-                        });
-                pendingCode.setUpdated(updatedAccount.getCode());
-              }
+    if (storageUpdates != null && storageUpdates.isEmpty()) {
+      storageToUpdate.remove(deletedAddress);
+    }
+    accountValue.setUpdated(null);
+  }
 
-              commitAccountStorage(tracked, updatedAccount);
-            });
+  private void commitUpdatedAccount(final UpdateTrackingAccount<ACCOUNT> tracked) {
+    final Address address = tracked.getAddress();
+    final boolean codeWasUpdated = tracked.codeWasUpdated();
+    final PathBasedValue<ACCOUNT> knownAccountValue;
+    final ACCOUNT updatedAccount;
+
+    if (tracked.getWrappedAccount() == null) {
+      knownAccountValue = accountsToUpdate.get(address);
+      updatedAccount = createAccount(this, tracked);
+      tracked.setWrappedAccount(updatedAccount);
+      if (knownAccountValue == null) {
+        accountsToUpdate.put(address, new PathBasedValue<>(null, updatedAccount));
+        codeToUpdate.put(address, new PathBasedValue<>(null, updatedAccount.getCode()));
+      } else {
+        knownAccountValue.setUpdated(updatedAccount);
+      }
+    } else {
+      knownAccountValue = null;
+      updatedAccount = tracked.getWrappedAccount();
+      updatedAccount.setBalance(tracked.getBalance());
+      updatedAccount.setNonce(tracked.getNonce());
+      if (codeWasUpdated) {
+        updatedAccount.setCode(tracked.getCode());
+      }
+      if (tracked.getStorageWasCleared()) {
+        updatedAccount.clearStorage();
+      }
+      tracked.getUpdatedStorage().forEach(updatedAccount::setStorageValue);
+    }
+
+    if (codeWasUpdated) {
+      final PathBasedValue<Bytes> pendingCode =
+          codeToUpdate.computeIfAbsent(
+              address,
+              addr -> {
+                final PathBasedValue<ACCOUNT> accountValue =
+                    knownAccountValue != null ? knownAccountValue : accountsToUpdate.get(addr);
+                final ACCOUNT prior = accountValue != null ? accountValue.getPrior() : null;
+                return new PathBasedValue<>(
+                    wrappedWorldView()
+                        .getCode(addr, prior != null ? prior.getCodeHash() : Hash.EMPTY)
+                        .orElse(null),
+                    null);
+              });
+      pendingCode.setUpdated(updatedAccount.getCode());
+    }
+
+    commitAccountStorage(tracked, updatedAccount);
   }
 
   /**
