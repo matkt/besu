@@ -523,13 +523,13 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
         .forEach(
             tracked -> {
               final Address updatedAddress = tracked.getAddress();
-              final PathBasedValue<ACCOUNT> updatedAccountValue =
-                  accountsToUpdate.get(updatedAddress);
               final ACCOUNT wrappedAccount = tracked.getWrappedAccount();
               final boolean codeWasUpdated = tracked.codeWasUpdated();
               final ACCOUNT updatedAccount;
+              PathBasedValue<ACCOUNT> updatedAccountValue = null;
 
               if (wrappedAccount == null) {
+                updatedAccountValue = accountsToUpdate.get(updatedAddress);
                 updatedAccount = createAccount(this, tracked);
                 tracked.setWrappedAccount(updatedAccount);
                 if (updatedAccountValue == null) {
@@ -553,12 +553,17 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends PathB
               }
 
               if (codeWasUpdated) {
+                final PathBasedValue<ACCOUNT> knownAccountValue = updatedAccountValue;
                 final PathBasedValue<Bytes> pendingCode =
                     codeToUpdate.computeIfAbsent(
                         updatedAddress,
                         addr -> {
+                          final PathBasedValue<ACCOUNT> accountValue =
+                              knownAccountValue != null
+                                  ? knownAccountValue
+                                  : accountsToUpdate.get(addr);
                           final ACCOUNT prior =
-                              updatedAccountValue != null ? updatedAccountValue.getPrior() : null;
+                              accountValue != null ? accountValue.getPrior() : null;
                           return new PathBasedValue<>(
                               wrappedWorldView()
                                   .getCode(
