@@ -117,7 +117,8 @@ public class TrieLogPrunerShutdownScenarioTest extends AbstractIsolationTests {
     final BonsaiWorldState frozen =
         (BonsaiWorldState)
             archive
-                .getWorldState(withBlockHeaderAndNoUpdateNodeHead(genesisState.getBlock().getHeader()))
+                .getWorldState(
+                    withBlockHeaderAndNoUpdateNodeHead(genesisState.getBlock().getHeader()))
                 .orElseThrow();
 
     final Block block = forTransactions(List.of(burnTransaction(sender1, 0L, testAddress)));
@@ -129,8 +130,7 @@ public class TrieLogPrunerShutdownScenarioTest extends AbstractIsolationTests {
 
     // Parent composed head still not advanced by frozen persist
     assertThat(
-            ((BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage)
-                .getWorldStateBlockHash())
+            ((BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage).getWorldStateBlockHash())
         .contains(genesisState.getBlock().getHash());
 
     // Trie log for the payload was still saved (newPayload's real side effect)
@@ -140,7 +140,8 @@ public class TrieLogPrunerShutdownScenarioTest extends AbstractIsolationTests {
         .isPresent();
   }
 
-  private BlockProcessingResult processBlockOnly(final MutableWorldState worldState, final Block block) {
+  private BlockProcessingResult processBlockOnly(
+      final MutableWorldState worldState, final Block block) {
     return protocolSchedule
         .getByBlockHeader(block.getHeader())
         .getBlockProcessor()
