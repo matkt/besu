@@ -40,6 +40,8 @@
 - An EIP-7702 transaction with an empty `authorization_list` is now rejected by transaction validation rather than by RLP decoding. Over the Engine API such a transaction made the whole payload report `Failed to decode transactions from block parameter`, hiding both the rule that was broken and any other defect the transaction had. [#11193](https://github.com/besu-eth/besu/pull/11193)
 - `engine_newPayloadV4`+ now returns `-32602` for an `executionRequests` element consisting only of a type byte, as execution-apis requires, including when that type byte is one Besu does not recognize. Such an element was previously answered with an `INVALID` payload status. [#11194](https://github.com/besu-eth/besu/pull/11194)
 - A block carrying a transaction whose gas limit exceeds the block's is now rejected for that, rather than reported as an EIP-7928 block access list failure. The access list item budget is checked before the block runs, so it pre-empted the gas error. [#11195](https://github.com/besu-eth/besu/pull/11195)
+- `engine_forkchoiceUpdated` now returns an internal error instead of `INVALID` with `latestValidHash` set to the head when a valid head cannot be applied locally. [#11317](https://github.com/besu-eth/besu/pull/11317)
+- `engine_newPayload` and `engine_forkchoiceUpdated` now return `INVALID` instead of `SYNCING` for a block whose parent is a known bad block. [#11313](https://github.com/besu-eth/besu/pull/11313)
 
 ### Additions and Improvements
 - Implement native `callTracer` execution tracing, reducing memory use for `debug_trace*`. [#11077](https://github.com/besu-eth/besu/pull/11077)
@@ -49,6 +51,7 @@
 - Upgrade the stable reference tests to `tests@v20.0.2`, now published from the `ethereum/execution-specs` repository. [#11175](https://github.com/besu-eth/besu/pull/11175)
 - `eth_simulate` now returns EIP-7708 transfer logs for Amsterdam [#11154](https://github.com/besu-eth/besu/pull/11154)
 - Tune layered txpool for upcoming Amsterdam 200M gas limit [#11335](https://github.com/besu-eth/besu/pull/11335)
+- Schedule the Amsterdam fork on Sepolia at timestamp `1791294816` (Tue, 06 Oct 2026, 13:53:36 UTC). [#11333](https://github.com/besu-eth/besu/pull/11333)
 
 ## 26.8.1
 
