@@ -376,8 +376,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
    * Multi-get that goes through {@link FlatDbCacheManager} so callers (e.g. BAL prefetcher) warm
    * the versioned cross-block cache instead of reading the composed storage directly.
    *
-   * <p>Misses are resolved through {@link FlatDbStrategy} so partial/archive modes still apply
-   * trie/historical fallbacks before a value (or absence) is cached.
+   * <p>Best-effort flat-db reads only: no partial/archive strategy fallback. A raw miss is cached
+   * as empty.
    *
    * @param segmentIdentifier the flat-db segment to read
    * @param keys raw segment keys
@@ -393,73 +393,22 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         segmentIdentifier,
         bytesKeys,
         getCurrentVersion(),
-        keysToFetch ->
-            fetchFlatDbValues(segmentIdentifier, keysToFetch, composedWorldStateStorage));
-  }
-
-  /**
-   * Resolve flat-db values for cache misses. Uses a batched multiget first, then falls back to
-   * {@link FlatDbStrategy} on empty results when the flat DB is not in FULL mode (partial trie
-   * fallback / archive historical resolution).
-   */
-  protected List<Optional<Bytes>> fetchFlatDbValues(
-      final SegmentIdentifier segmentIdentifier,
-      final List<Bytes> keys,
-      final SegmentedKeyValueStorage storage) {
-    if (keys.isEmpty()) {
-      return List.of();
-    }
-
-    final List<byte[]> rawKeys = new ArrayList<>(keys.size());
-    for (final Bytes key : keys) {
-      rawKeys.add(key.toArrayUnsafe());
-    }
-    final List<Optional<byte[]>> fetched = storage.multiget(segmentIdentifier, rawKeys);
-    final List<Optional<Bytes>> values = new ArrayList<>(fetched.size());
-    final boolean needsStrategyFallback = getFlatDbMode() != FlatDbMode.FULL;
-
-    for (int i = 0; i < fetched.size(); i++) {
-      Optional<Bytes> value = fetched.get(i).map(Bytes::wrap);
-      if (value.isEmpty() && needsStrategyFallback) {
-        value = resolveViaFlatDbStrategy(segmentIdentifier, keys.get(i), storage);
-      }
-      values.add(value);
-    }
-    return values;
-  }
-
-  private Optional<Bytes> resolveViaFlatDbStrategy(
-      final SegmentIdentifier segmentIdentifier,
-      final Bytes key,
-      final SegmentedKeyValueStorage storage) {
-    if (segmentIdentifier.equals(ACCOUNT_INFO_STATE)) {
-      return getFlatDbStrategy()
-          .getFlatAccount(
-              this::getWorldStateRootHash,
-              this::getAccountStateTrieNode,
-              Hash.wrap(Bytes32.wrap(key)),
-              storage);
-    }
-    if (segmentIdentifier.equals(ACCOUNT_STORAGE_STORAGE) && key.size() >= 64) {
-      final Hash accountHash = Hash.wrap(Bytes32.wrap(key.slice(0, 32)));
-      final Hash slotHash = Hash.wrap(Bytes32.wrap(key.slice(32, 32)));
-      final StorageSlotKey storageSlotKey = new StorageSlotKey(slotHash, Optional.empty());
-      return getFlatDbStrategy()
-          .getFlatStorageValueByStorageSlotKey(
-              this::getWorldStateRootHash,
-              () ->
-                  getAccount(accountHash)
-                      .map(
-                          b ->
-                              PmtStateTrieAccountValue.readFrom(
-                                      org.hyperledger.besu.ethereum.rlp.RLP.input(b))
-                                  .getStorageRoot()),
-              (location, hash) -> getAccountStorageTrieNode(accountHash, location, hash),
-              accountHash,
-              storageSlotKey,
-              storage);
-    }
-    return Optional.empty();
+        keysToFetch -> {
+          if (keysToFetch.isEmpty()) {
+            return List.of();
+          }
+          final List<byte[]> rawKeys = new ArrayList<>(keysToFetch.size());
+          for (final Bytes key : keysToFetch) {
+            rawKeys.add(key.toArrayUnsafe());
+          }
+          final List<Optional<byte[]>> fetched =
+              composedWorldStateStorage.multiget(segmentIdentifier, rawKeys);
+          final List<Optional<Bytes>> values = new ArrayList<>(fetched.size());
+          for (final Optional<byte[]> value : fetched) {
+            values.add(value.map(Bytes::wrap));
+          }
+          return values;
+        });
   }
 
   public Optional<Bytes> getCode(final Hash codeHash, final Hash accountHash) {
