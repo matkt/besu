@@ -106,6 +106,35 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
     }
   }
 
+  /**
+   * Layer-local lookup that does not consult the parent.
+   *
+   * @param segmentId the segment identifier
+   * @param key the key
+   * @return empty if the key is absent on this layer; otherwise present with the layer value (an
+   *     empty inner Optional means a deletion tombstone)
+   */
+  public Optional<Optional<byte[]>> peekThisLayer(
+      final SegmentIdentifier segmentId, final byte[] key) {
+    throwIfClosed();
+
+    final Lock lock = rwLock.readLock();
+    lock.lock();
+    try {
+      final NavigableMap<Bytes, Optional<byte[]>> segmentMap = hashValueStore.get(segmentId);
+      if (segmentMap == null) {
+        return Optional.empty();
+      }
+      final Bytes wrapKey = Bytes.wrap(key);
+      if (!segmentMap.containsKey(wrapKey)) {
+        return Optional.empty();
+      }
+      return Optional.of(segmentMap.get(wrapKey));
+    } finally {
+      lock.unlock();
+    }
+  }
+
   @Override
   public List<Optional<byte[]>> multiget(final SegmentIdentifier segment, final List<byte[]> keys)
       throws StorageException {

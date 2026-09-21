@@ -1484,7 +1484,7 @@ public class BesuCommandTest extends CommandTestAbstract {
         dataStorageConfigurationArgumentCaptor.getValue();
     assertThat(
             dataStorageConfiguration
-                .getPathBasedExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getBonsaiCrossBlockCacheEnabled())
         .isTrue();
@@ -1502,7 +1502,7 @@ public class BesuCommandTest extends CommandTestAbstract {
         dataStorageConfigurationArgumentCaptor.getValue();
     assertThat(
             dataStorageConfiguration
-                .getPathBasedExtraStorageConfiguration()
+                .getExtraStorageConfiguration()
                 .getUnstable()
                 .getBonsaiCrossBlockCacheEnabled())
         .isFalse();
