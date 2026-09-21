@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.backwardsync;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.config.StubGenesisConfigOptions;
@@ -156,7 +157,7 @@ public class ForwardSyncStepTest {
 
     when(context
             .getBlockValidatorForBlock(any())
-            .validateAndProcessBlock(any(), any(), any(), any()))
+            .validateAndProcessBlock(any(), any(), any(), any(), any(), anyBoolean()))
         .thenAnswer(
             invocation -> {
               final Object[] arguments = invocation.getArguments();
