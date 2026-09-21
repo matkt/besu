@@ -85,7 +85,7 @@ public class BalPrefetcher {
               final List<BlockAccessList.AccountChanges> accounts =
                   isSortingEnabled
                       ? blockAccessList.accountChanges().stream()
-                          .sorted(Comparator.comparing(ac -> ac.address().addressHash()))
+                          .sorted(Comparator.comparing(ac -> ac.address().addressHash().getBytes()))
                           .toList()
                       : new ArrayList<>(blockAccessList.accountChanges());
 
