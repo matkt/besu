@@ -372,20 +372,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                     composedWorldStateStorage));
   }
 
-  /**
-   * Multi-get that goes through {@link FlatDbCacheManager} so callers (e.g. BAL prefetcher) warm
-   * the versioned cross-block cache instead of reading the composed storage directly.
-   *
-   * <p>Delegates the storage fetch to {@link BonsaiFlatDbStrategy#getMultipleFlat}. Full mode
-   * returns one value per key; partial/archive return an empty list (no-op). Unresolved misses are
-   * left as {@code null} in the result list (not {@link Optional#empty()}, which means absent) and
-   * are not written into the cache.
-   *
-   * @param segmentIdentifier the flat-db segment to read
-   * @param keys raw segment keys
-   * @return values in the same order as {@code keys}
-   */
-  public List<Optional<Bytes>> getMultipleKeys(
+  public List<Optional<Bytes>> getMultipleFlat(
       final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
     final List<Bytes> bytesKeys = new ArrayList<>(keys.size());
     for (final byte[] key : keys) {

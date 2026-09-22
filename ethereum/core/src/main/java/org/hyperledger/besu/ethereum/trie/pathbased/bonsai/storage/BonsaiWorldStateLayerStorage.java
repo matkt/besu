@@ -28,7 +28,6 @@ import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -132,10 +131,11 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
    * org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.FlatDbCacheManager}.
    */
   @Override
-  public List<Optional<Bytes>> getMultipleKeys(
+  public List<Optional<Bytes>> getMultipleFlat(
       final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
     if (isClosedGet()) {
-      return Collections.nCopies(keys.size(), Optional.empty());
+      // Empty list = no-op / closed; alignment handled by callers / cache manager
+      return List.of();
     }
     if (keys.isEmpty()) {
       return List.of();
@@ -160,7 +160,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
 
     if (!missKeys.isEmpty()) {
       final List<Optional<Bytes>> parentValues =
-          parentWorldStateStorage.getMultipleKeys(segmentIdentifier, missKeys);
+          parentWorldStateStorage.getMultipleFlat(segmentIdentifier, missKeys);
       for (int j = 0; j < missIndices.size(); j++) {
         results.set(missIndices.get(j), parentValues.get(j));
       }

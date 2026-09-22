@@ -22,7 +22,6 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SnappableKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -157,12 +156,13 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   }
 
   @Override
-  public List<Optional<Bytes>> getMultipleKeys(
+  public List<Optional<Bytes>> getMultipleFlat(
       final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
     if (isClosedGet()) {
-      return Collections.nCopies(keys.size(), Optional.empty());
+      // Empty list = no-op / closed; alignment handled by callers / cache manager
+      return List.of();
     }
-    return super.getMultipleKeys(segmentIdentifier, keys);
+    return super.getMultipleFlat(segmentIdentifier, keys);
   }
 
   @Override

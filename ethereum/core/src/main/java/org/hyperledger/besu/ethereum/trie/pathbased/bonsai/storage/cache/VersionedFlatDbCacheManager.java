@@ -335,8 +335,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     if (!keysToFetch.isEmpty()) {
       final List<Optional<Bytes>> fetchedValues = batchFetcher.apply(keysToFetch);
-      // Empty list = strategy no-op (partial/archive): leave misses as null (unresolved), do not
-      // cache. Optional.empty() would mean "key absent" and must not be used here.
+      // Empty list = strategy no-op: leave misses as null (unresolved), do not cache.
+      // Optional.empty() would mean "key absent" and must not be used here.
       if (fetchedValues.isEmpty()) {
         return results;
       }

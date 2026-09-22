@@ -55,7 +55,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 /**
  * Ensures {@link BalPrefetcher} warms {@link
  * org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.VersionedFlatDbCacheManager}
- * via {@link BonsaiWorldStateKeyValueStorage#getMultipleKeys} rather than bypassing the cache.
+ * via {@link BonsaiWorldStateKeyValueStorage#getMultipleFlat} rather than bypassing the cache.
  */
 public class BalPrefetcherTest {
 
