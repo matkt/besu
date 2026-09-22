@@ -44,7 +44,9 @@ public interface SegmentedKeyValueStorage extends Closeable {
    * Get the values from the associated segment and keys.
    *
    * <p>Default implementation loops {@link #get(SegmentIdentifier, byte[])}. Storage backends that
-   * support batched reads (e.g. RocksDB {@code multiGet}) should override this.
+   * support batched reads must override this — {@code RocksDBColumnarKeyValueStorage} uses RocksDB
+   * {@code multiGetAsList}, and layered / in-memory stores provide their own batch paths. Callers
+   * always go through this method; they never need to special-case RocksDB.
    *
    * @param segment the segment
    * @param keys indexes into the persistent data repository

@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache;
 
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -62,8 +63,16 @@ public interface FlatDbCacheManager {
       final List<Bytes> keys,
       final long version,
       final Function<List<Bytes>, List<Optional<Bytes>>> batchFetcher) {
-    // Always bypass cache and go directly to storage
-    return batchFetcher.apply(keys);
+    final List<Optional<Bytes>> fetched = batchFetcher.apply(keys);
+    // Empty list = strategy no-op (partial/archive): null = unresolved, not "key absent"
+    if (fetched.isEmpty() && !keys.isEmpty()) {
+      final List<Optional<Bytes>> unresolved = new ArrayList<>(keys.size());
+      for (int i = 0; i < keys.size(); i++) {
+        unresolved.add(null);
+      }
+      return unresolved;
+    }
+    return fetched;
   }
 
   default void putInCache(

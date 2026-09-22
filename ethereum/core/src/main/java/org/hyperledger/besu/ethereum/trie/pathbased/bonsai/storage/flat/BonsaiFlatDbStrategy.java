@@ -23,9 +23,11 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.code.CodeStorageStrategy;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -67,6 +69,27 @@ public abstract class BonsaiFlatDbStrategy extends FlatDbStrategy {
       Hash accountHash,
       StorageSlotKey storageSlotKey,
       SegmentedKeyValueStorage storageStorage);
+
+  /**
+   * Batch flat-db read used by BAL prefetch / cache warming.
+   *
+   * <p>Default is a no-op that returns an empty list (partial / witness). An empty list means batch
+   * prefetch is unsupported: the cache manager must not insert entries and leaves those slots as
+   * {@code null} (unresolved), not {@link Optional#empty()} (key absent). {@link
+   * BonsaiFullFlatDbStrategy} overrides with {@link SegmentedKeyValueStorage#multiget}. Archive
+   * also returns an empty list.
+   *
+   * @param segmentIdentifier flat-db segment
+   * @param keys segment keys in caller order
+   * @param storage storage to read
+   * @return one value per key, or an empty list when batch prefetch is a no-op
+   */
+  public List<Optional<Bytes>> getMultipleFlat(
+      final SegmentIdentifier segmentIdentifier,
+      final List<Bytes> keys,
+      final SegmentedKeyValueStorage storage) {
+    return List.of();
+  }
 
   @Override
   public void putFlatAccount(

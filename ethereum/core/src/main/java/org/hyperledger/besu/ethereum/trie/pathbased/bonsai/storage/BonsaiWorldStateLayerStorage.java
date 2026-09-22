@@ -28,6 +28,7 @@ import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -134,7 +135,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
   public List<Optional<Bytes>> getMultipleKeys(
       final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
     if (isClosedGet()) {
-      return java.util.Collections.nCopies(keys.size(), Optional.empty());
+      return Collections.nCopies(keys.size(), Optional.empty());
     }
     if (keys.isEmpty()) {
       return List.of();
