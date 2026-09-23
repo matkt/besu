@@ -37,15 +37,17 @@ public interface FlatDbCacheManager extends CodeCache {
   FlatDbCacheManager NO_OP_CACHE = new FlatDbCacheManager() {};
 
   /**
-   * Steady-state maximum entries per versioned segment (account, storage) and for analyzed code
-   * after {@link #scheduleAsyncMaintenance()}.
+   * Steady-state maximum entries for versioned account and storage caches after {@link
+   * #scheduleAsyncMaintenance()}.
    */
   long CACHE_STEADY_SIZE = 256L;
 
   /**
-   * @deprecated use {@link #CACHE_STEADY_SIZE}
+   * Steady-state maximum entries for the analyzed-code cache after maintenance (~production
+   * BonsaiCodeCache occupancy). Peak during a block remains the configured code peak (default
+   * 100_000).
    */
-  @Deprecated long CODE_CACHE_STEADY_SIZE = CACHE_STEADY_SIZE;
+  long CODE_CACHE_STEADY_SIZE = 25_000L;
 
   default long getCurrentVersion() {
     return 0;

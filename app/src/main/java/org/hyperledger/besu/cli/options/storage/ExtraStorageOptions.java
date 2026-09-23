@@ -150,7 +150,7 @@ public class ExtraStorageOptions implements CLIOptions<ExtraStorageConfiguration
         paramLabel = "<LONG>",
         description =
             "Peak analyzed-code entries during a block when the cross-block cache is enabled"
-                + " (default: ${DEFAULT-VALUE}). Shrinks to 256 on cache maintenance.")
+                + " (default: ${DEFAULT-VALUE}). Shrinks to 25_000 on cache maintenance.")
     private Long bonsaiCrossBlockCacheCodeSize = DEFAULT_BONSAI_CROSS_BLOCK_CACHE_CODE_SIZE;
 
     @Option(

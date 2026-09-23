@@ -170,12 +170,13 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     LOG.info(
         "Cache maintenance will trigger asynchronously after {} pending tasks"
-            + " (peaks account={}, storage={}, code={}; steady={})",
+            + " (peaks account={}, storage={}, code={}; steady account/storage={}, code={})",
         drainThreshold,
         accountCachePeakSize,
         storageCachePeakSize,
         codeCachePeakSize,
-        CACHE_STEADY_SIZE);
+        CACHE_STEADY_SIZE,
+        CODE_CACHE_STEADY_SIZE);
   }
 
   private Cache<CacheKey, VersionedValue> createCache(final long maxSize) {
@@ -292,7 +293,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     try {
       setCacheMaximum(accountCache, CACHE_STEADY_SIZE);
       setCacheMaximum(storageCache, CACHE_STEADY_SIZE);
-      setCacheMaximum(analyzedCodeCache, CACHE_STEADY_SIZE);
+      setCacheMaximum(analyzedCodeCache, CODE_CACHE_STEADY_SIZE);
       final int drained = drainExecutor.drain();
       accountCache.cleanUp();
       storageCache.cleanUp();

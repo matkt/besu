@@ -128,13 +128,14 @@ Other segments (e.g. trie branches) are not covered by this versioned cache.
 
 ### Peak vs steady size (account, storage, code)
 
-During BAL prefetch / block execution account, storage, and analyzed-code caches are expanded to their configured peaks via
-`expandCachesForBlock()` (defaults: account **100_000**, storage **500_000**, code **100_000**) so
-entries warmed for the block can be retained.
+During BAL prefetch / block execution account, storage, and analyzed-code caches are expanded to
+their configured peaks via `expandCachesForBlock()` (defaults: account **100_000**, storage
+**500_000**, code **100_000** entries).
 
-When `scheduleAsyncMaintenance()` runs after commit, each cache maximum is reduced to the steady
-size (**256**) and Caffeine `cleanUp()` evicts down to that limit. The next prefetch / block expands
-them again.
+When `scheduleAsyncMaintenance()` runs after commit, account and storage maxima are reduced to
+**256** entries, and analyzed code to **25_000** entries (aligned with typical BonsaiCodeCache
+occupancy). Caffeine `cleanUp()` evicts down to those limits. The next prefetch / block expands
+them again to their peaks.
 
 ---
 
@@ -153,6 +154,7 @@ them again.
 
 ## Operational note
 
-Cache maintenance (Caffeine cleanup and shrink to steady size 256 for account/storage/code) is
-triggered asynchronously via `ThresholdDrainExecutor` and `scheduleAsyncMaintenance()` to reduce
-work on the hot path; see `VersionedFlatDbCacheManager` for details.
+Cache maintenance (Caffeine cleanup; shrink account/storage to 256 entries and analyzed code to
+25_000 entries) is triggered asynchronously via `ThresholdDrainExecutor` and
+`scheduleAsyncMaintenance()` to reduce work on the hot path; see `VersionedFlatDbCacheManager` for
+details.
