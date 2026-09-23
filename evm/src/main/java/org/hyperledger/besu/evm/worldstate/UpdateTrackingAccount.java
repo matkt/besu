@@ -78,10 +78,22 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
    * @param address the address
    */
   UpdateTrackingAccount(final Address address) {
+    this(address, null);
+  }
+
+  /**
+   * Instantiates a new Update tracking account for a newly created address, optionally wiring the
+   * shared analyzed-code cache so jump-dest results are retained across txs.
+   *
+   * @param address the address
+   * @param codeCache shared code cache, or {@code null}
+   */
+  UpdateTrackingAccount(final Address address, final CodeCache codeCache) {
     checkNotNull(address);
     this.address = address;
     this.addressHash = this.address.addressHash();
     this.account = null;
+    this.codeCache = codeCache;
 
     this.nonce = 0;
     this.balance = Wei.ZERO;
@@ -245,6 +257,9 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
 
   @Override
   public Code getOrCreateCachedCode() {
+    if (codeCache == null && account != null) {
+      codeCache = account.getCodeCache();
+    }
     if (codeCache == null) {
       final Code code = getCode();
       final boolean analyzedBefore = code.getJumpDestBitMask() != null;

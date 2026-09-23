@@ -19,6 +19,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
+import org.hyperledger.besu.evm.internal.CodeCache;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,6 +49,24 @@ public interface WorldUpdater extends MutableWorldView {
    *     balance} and empty code and storage.
    */
   MutableAccount createAccount(Address address, long nonce, Wei balance);
+
+  /**
+   * Same as {@link #createAccount(Address, long, Wei)}, and wires {@code codeCache} so jump-dest
+   * analysis on this account is stored in the shared analyzed-code cache.
+   *
+   * <p>Default implementation ignores {@code codeCache} and delegates to {@link
+   * #createAccount(Address, long, Wei)}.
+   *
+   * @param address the address of the account to create (or reset).
+   * @param nonce the nonce for created/reset account.
+   * @param balance the balance for created/reset account.
+   * @param codeCache shared analyzed-code cache, or {@code null}
+   * @return the created/reset account
+   */
+  default MutableAccount createAccount(
+      final Address address, final long nonce, final Wei balance, final CodeCache codeCache) {
+    return createAccount(address, nonce, balance);
+  }
 
   /**
    * Creates a new account, or reset it (that is, act as if it was deleted and created anew) if it

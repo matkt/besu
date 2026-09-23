@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
+import org.hyperledger.besu.evm.internal.CodeCache;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.util.Collection;
@@ -83,10 +84,26 @@ public abstract class AbstractWorldUpdater<W extends WorldView, A extends Accoun
 
   @Override
   public MutableAccount createAccount(final Address address, final long nonce, final Wei balance) {
-    final UpdateTrackingAccount<A> account = new UpdateTrackingAccount<>(address);
+    return createAccount(address, nonce, balance, getCodeCache());
+  }
+
+  @Override
+  public MutableAccount createAccount(
+      final Address address, final long nonce, final Wei balance, final CodeCache codeCache) {
+    final UpdateTrackingAccount<A> account = new UpdateTrackingAccount<>(address, codeCache);
     account.setNonce(nonce);
     account.setBalance(balance);
     return track(account);
+  }
+
+  /**
+   * Shared analyzed-code cache used when {@link #createAccount(Address, long, Wei)} does not
+   * receive an explicit cache. Bonsai overrides this; stacked updaters inherit via parent.
+   *
+   * @return the code cache, or {@code null} if none is available
+   */
+  protected CodeCache getCodeCache() {
+    return null;
   }
 
   @Override

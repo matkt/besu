@@ -15,7 +15,9 @@
 package org.hyperledger.besu.evm.worldstate;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.util.ArrayList;
@@ -40,6 +42,11 @@ public class StackedUpdater<W extends WorldView, A extends Account>
   public StackedUpdater(
       final AbstractWorldUpdater<W, A> world, final EvmConfiguration evmConfiguration) {
     super(world, evmConfiguration);
+  }
+
+  @Override
+  public MutableAccount createAccount(final Address address, final long nonce, final Wei balance) {
+    return createAccount(address, nonce, balance, wrappedWorldView().getCodeCache());
   }
 
   @Override
