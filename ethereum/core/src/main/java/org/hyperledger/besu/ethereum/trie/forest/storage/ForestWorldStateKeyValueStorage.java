@@ -66,9 +66,7 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
               if (bytes.isEmpty()) {
                 return Code.EMPTY_CODE;
               }
-              final Code code = new Code(bytes, codeHash);
-              code.ensureJumpDestAnalyzed();
-              return code;
+              return new Code(bytes, codeHash);
             });
   }
 

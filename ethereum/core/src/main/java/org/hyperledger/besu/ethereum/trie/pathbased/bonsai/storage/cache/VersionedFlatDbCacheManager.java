@@ -249,8 +249,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   }
 
   /**
-   * Analyzed-code load path used by world-state {@code getCode} (account warm-up / tx execution).
-   * Prefetch jump-dest uses {@link #put} directly and does not go through this method.
+   * Code load path used by world-state {@code getCode}. Does not force jump-dest analysis —
+   * prefetch does that ahead of time; otherwise {@link Code#isJumpDestInvalid} analyzes lazily. The
+   * {@link Code} instance is cached so lazy analysis is retained.
    */
   @Override
   public Optional<Code> getCodeFromCacheOrStorage(
@@ -260,10 +261,6 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
     final Code cached = getIfPresent(codeHash);
     if (cached != null) {
-      LOG.debug(
-          "Code cache HIT (getCode): thread={} cacheSize={}",
-          Thread.currentThread().getName(),
-          analyzedCodeCache.estimatedSize());
       return Optional.of(cached);
     }
     final Optional<Bytes> flat = flatCodeLoader.get();
@@ -274,15 +271,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       return Optional.of(Code.EMPTY_CODE);
     }
     final Code code = new Code(flat.get(), codeHash);
-    final long t0 = System.nanoTime();
-    code.ensureJumpDestAnalyzed();
-    final long jumpDestNs = System.nanoTime() - t0;
     put(codeHash, code);
-    LOG.info(
-        "Code cache MISS+jumpDest (getCode/tx): thread={} jumpDestUs={} cacheSize={}",
-        Thread.currentThread().getName(),
-        jumpDestNs / 1_000,
-        analyzedCodeCache.estimatedSize());
     return Optional.of(code);
   }
 

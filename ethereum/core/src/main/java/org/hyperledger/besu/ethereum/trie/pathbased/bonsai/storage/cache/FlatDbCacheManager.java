@@ -97,8 +97,9 @@ public interface FlatDbCacheManager extends CodeCache {
   }
 
   /**
-   * Analyzed-{@link Code} analogue of {@link #getFromCacheOrStorage}: hit by {@code codeHash}, else
-   * load flat bytes, build + jump-dest-analyze {@link Code}, put, and return.
+   * Code load path: hit by {@code codeHash}, else load flat bytes, {@code put} the {@link Code}
+   * instance (without forcing jump-dest analysis — that is done by BAL prefetch or lazily on
+   * JUMPDEST checks), and return.
    */
   default Optional<Code> getCodeFromCacheOrStorage(
       final Hash codeHash, final Supplier<Optional<Bytes>> flatCodeLoader) {
@@ -117,7 +118,6 @@ public interface FlatDbCacheManager extends CodeCache {
       return Optional.of(Code.EMPTY_CODE);
     }
     final Code code = new Code(flat.get(), codeHash);
-    code.ensureJumpDestAnalyzed();
     put(codeHash, code);
     return Optional.of(code);
   }

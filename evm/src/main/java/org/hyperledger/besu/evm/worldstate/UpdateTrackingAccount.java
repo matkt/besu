@@ -33,8 +33,6 @@ import java.util.TreeMap;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * An implementation of {@link MutableAccount} that tracks updates made to the account since the
@@ -48,8 +46,6 @@ import org.slf4j.LoggerFactory;
  * @param <A> the type parameter
  */
 public class UpdateTrackingAccount<A extends Account> implements MutableAccount {
-  private static final Logger LOG = LoggerFactory.getLogger(UpdateTrackingAccount.class);
-
   private final Address address;
   private final Hash addressHash;
 
@@ -261,45 +257,18 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
       codeCache = account.getCodeCache();
     }
     if (codeCache == null) {
-      final Code code = getCode();
-      final boolean analyzedBefore = code.getJumpDestBitMask() != null;
-      final long t0 = System.nanoTime();
-      code.ensureJumpDestAnalyzed();
-      final long jumpDestNs = System.nanoTime() - t0;
-      if (!analyzedBefore && code.getSize() > 0) {
-        LOG.info(
-            "Code jumpDest (tx, no CodeCache): thread={} jumpDestUs={} codeHash={}",
-            Thread.currentThread().getName(),
-            jumpDestNs / 1_000,
-            getCodeHash());
-      }
-      return code;
+      return getCode();
     }
 
-    // if the code already exists in the cache, return it
     final Code cachedCode = codeCache.getIfPresent(getCodeHash());
     if (cachedCode != null) {
-      LOG.debug(
-          "Code cache HIT (tx): thread={} codeHash={}",
-          Thread.currentThread().getName(),
-          getCodeHash());
       return cachedCode;
     }
 
-    // if the code is not in the cache, put the current Code instance into the cache
     final Code newCode = getCode();
-    final boolean analyzedBefore = newCode.getJumpDestBitMask() != null;
-    final long t0 = System.nanoTime();
-    newCode.ensureJumpDestAnalyzed();
-    final long jumpDestNs = System.nanoTime() - t0;
-    codeCache.put(getCodeHash(), newCode);
-    LOG.info(
-        "Code cache MISS (tx): thread={} jumpDestUs={} analyzedBeforePut={} codeHash={}",
-        Thread.currentThread().getName(),
-        jumpDestNs / 1_000,
-        analyzedBefore,
-        getCodeHash());
-
+    if (newCode.getSize() > 0 && !Hash.EMPTY.equals(getCodeHash())) {
+      codeCache.put(getCodeHash(), newCode);
+    }
     return newCode;
   }
 

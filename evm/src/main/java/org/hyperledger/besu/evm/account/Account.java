@@ -15,7 +15,9 @@
 package org.hyperledger.besu.evm.account;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.internal.CodeCache;
 
 /**
@@ -50,5 +52,35 @@ public interface Account extends AccountState {
    */
   default CodeCache getCodeCache() {
     return null;
+  }
+
+  /**
+   * Returns code for execution, preferring {@link #getCodeCache()} when present. Jump-dest analysis
+   * is not forced here: it runs on demand during execution ({@link Code#isJumpDestInvalid}) or
+   * ahead of time via BAL prefetch. The code instance is stored in the cache so a later lazy
+   * analysis is retained.
+   *
+   * @return the account code
+   */
+  default Code getOrCreateCachedCode() {
+    final Hash codeHash = getCodeHash();
+    if (Hash.EMPTY.equals(codeHash)) {
+      return Code.EMPTY_CODE;
+    }
+    final CodeCache cache = getCodeCache();
+    if (cache != null) {
+      final Code cached = cache.getIfPresent(codeHash);
+      if (cached != null) {
+        return cached;
+      }
+    }
+    final Code code = getCode();
+    if (code.getSize() == 0) {
+      return Code.EMPTY_CODE;
+    }
+    if (cache != null) {
+      cache.put(codeHash, code);
+    }
+    return code;
   }
 }

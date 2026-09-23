@@ -95,11 +95,7 @@ public class BalPrefetcher {
             () -> {
               worldState.disableCacheMerkleTrieLoader();
               // Always NO_OP (never null) when cross-block cache is disabled.
-              final FlatDbCacheManager cacheManager =
-                  worldState.getWorldStateStorage().getCacheManager();
-              cacheManager.expandCachesForBlock();
-              LOG.info(
-                  "Prefetch code: cacheSizeBefore={}", cacheManager.getCodeCacheSize());
+              worldState.getWorldStateStorage().getCacheManager().expandCachesForBlock();
 
               // Collect and optionally sort account changes
               final List<BlockAccessList.AccountChanges> accounts =
@@ -276,8 +272,6 @@ public class BalPrefetcher {
           final List<Hash> codeHashes = new ArrayList<>();
           final List<Hash> accountHashesForCode = new ArrayList<>();
           final List<byte[]> flatKeys = new ArrayList<>();
-          int contracts = 0;
-          int alreadyCached = 0;
 
           for (int i = 0; i < keys.accountHashes.size(); i++) {
             final Hash accountHash = keys.accountHashes.get(i);
@@ -296,23 +290,14 @@ public class BalPrefetcher {
             if (codeHash.equals(Hash.EMPTY)) {
               continue;
             }
-            contracts++;
             // Skip if already warmed in analyzed-code cache (NO_OP returns null → proceed).
             if (cacheManager.getIfPresent(codeHash) != null) {
-              alreadyCached++;
               continue;
             }
             codeHashes.add(codeHash);
             accountHashesForCode.add(accountHash);
             flatKeys.add((codeByHash ? codeHash : accountHash).getBytes().toArrayUnsafe());
           }
-
-          LOG.info(
-              "Prefetch code: contracts={}, alreadyCached={}, toLoad={}, cacheSize={}",
-              contracts,
-              alreadyCached,
-              flatKeys.size(),
-              cacheManager.getCodeCacheSize());
 
           if (flatKeys.isEmpty()) {
             LOG.debug("Prefetch: no contract code bytes to load");
@@ -354,28 +339,17 @@ public class BalPrefetcher {
         () -> {
           final FlatDbCacheManager cacheManager =
               worldState.getWorldStateStorage().getCacheManager();
-          int addedToCache = 0;
-          int skippedAlreadyCached = 0;
-          long jumpDestNs = 0L;
+          int warmed = 0;
           for (final PendingCode entry : pending) {
             if (cacheManager.getIfPresent(entry.codeHash()) != null) {
-              skippedAlreadyCached++;
               continue;
             }
             final Code code = new Code(entry.bytecode(), entry.codeHash());
-            final long t0 = System.nanoTime();
             code.ensureJumpDestAnalyzed();
-            jumpDestNs += System.nanoTime() - t0;
             cacheManager.put(entry.codeHash(), code);
-            addedToCache++;
+            warmed++;
           }
-          LOG.info(
-              "Prefetch code: addedToCache={} skippedAlreadyCached={} jumpDestUs={} thread={}",
-              addedToCache,
-              skippedAlreadyCached,
-              jumpDestNs / 1_000,
-              Thread.currentThread().getName());
-          LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", addedToCache);
+          LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", warmed);
         },
         cpuExecutor);
   }

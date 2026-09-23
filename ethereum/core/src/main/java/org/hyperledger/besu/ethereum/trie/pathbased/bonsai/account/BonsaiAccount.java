@@ -233,9 +233,6 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
       return;
     }
     this.code = byteCode;
-    if (cache != null) {
-      cache.put(codeHash, this.code);
-    }
   }
 
   /**

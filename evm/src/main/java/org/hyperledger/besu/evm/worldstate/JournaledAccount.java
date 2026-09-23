@@ -26,6 +26,7 @@ import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.account.MutableAccount;
+import org.hyperledger.besu.evm.internal.CodeCache;
 
 import java.util.Map;
 import java.util.NavigableMap;
@@ -49,6 +50,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
   private final Hash addressHash;
 
   @Nullable private MutableAccount account;
+  @Nullable private CodeCache codeCache;
 
   private long transactionBoundaryMark;
   private final UndoScalar<Long> nonce;
@@ -67,27 +69,6 @@ public class JournaledAccount implements MutableAccount, Undoable {
   /**
    * Instantiates a new Update tracking account.
    *
-   * @param address the address
-   */
-  JournaledAccount(final Address address) {
-    checkNotNull(address);
-    this.address = address;
-    this.addressHash = this.address.addressHash();
-    this.account = null;
-
-    this.nonce = UndoScalar.of(0L);
-    this.balance = UndoScalar.of(Wei.ZERO);
-
-    this.code = UndoScalar.of(Code.EMPTY_CODE);
-    this.codeHash = UndoScalar.of(Hash.EMPTY);
-    this.deleted = UndoScalar.of(Boolean.FALSE);
-    this.updatedStorage = UndoNavigableMap.of(new TreeMap<>());
-    this.transactionBoundaryMark = mark();
-  }
-
-  /**
-   * Instantiates a new Update tracking account.
-   *
    * @param account the account
    */
   public JournaledAccount(final MutableAccount account) {
@@ -99,6 +80,10 @@ public class JournaledAccount implements MutableAccount, Undoable {
             ? journaledAccount.addressHash
             : this.address.addressHash();
     this.account = account;
+    this.codeCache =
+        account instanceof JournaledAccount journaledAccount
+            ? journaledAccount.codeCache
+            : account.getCodeCache();
 
     if (account instanceof JournaledAccount that) {
       this.nonce = that.nonce;
@@ -124,28 +109,9 @@ public class JournaledAccount implements MutableAccount, Undoable {
     transactionBoundaryMark = mark();
   }
 
-  /**
-   * The original account over which this tracks updates.
-   *
-   * @return The original account over which this tracks updates, or {@code null} if this is a newly
-   *     created account.
-   */
-  public MutableAccount getWrappedAccount() {
-    return account;
-  }
-
-  /**
-   * Sets wrapped account.
-   *
-   * @param account the account
-   */
-  public void setWrappedAccount(final MutableAccount account) {
-    if (this.account == null) {
-      this.account = account;
-      storageWasCleared = false;
-    } else {
-      throw new IllegalStateException("Already tracking a wrapped account");
-    }
+  @Override
+  public CodeCache getCodeCache() {
+    return codeCache;
   }
 
   /**

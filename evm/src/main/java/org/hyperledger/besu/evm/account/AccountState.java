@@ -75,20 +75,6 @@ public interface AccountState {
   Code getCode();
 
   /**
-   * The EVM bytecode associated with this account, optionally served from an analyzed-code cache.
-   *
-   * <p>Default implementation returns {@link #getCode()} after ensuring jump-dest analysis.
-   * Overrides may consult a storage-backed cache (e.g. Bonsai KV analyzed-code cache).
-   *
-   * @return the account code wrapped in a {@link Code} object.
-   */
-  default Code getOrCreateCachedCode() {
-    final Code code = getCode();
-    code.ensureJumpDestAnalyzed();
-    return code;
-  }
-
-  /**
    * The hash of the EVM bytecode associated with this account.
    *
    * @return the hash of the account code (which may be {@link Hash#EMPTY}).

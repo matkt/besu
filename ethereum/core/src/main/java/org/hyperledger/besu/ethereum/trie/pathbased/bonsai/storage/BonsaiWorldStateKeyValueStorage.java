@@ -792,9 +792,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
             if (bytecode == null) {
               cacheManager.invalidateCode(codeHash);
             } else {
-              final Code analyzed = new Code(bytecode, codeHash);
-              analyzed.ensureJumpDestAnalyzed();
-              cacheManager.put(codeHash, analyzed);
+              cacheManager.put(codeHash, new Code(bytecode, codeHash));
             }
           });
       clearStaged();
