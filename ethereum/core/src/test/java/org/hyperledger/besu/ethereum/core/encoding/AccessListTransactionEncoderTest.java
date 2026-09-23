@@ -50,7 +50,7 @@ public class AccessListTransactionEncoderTest {
     final SlotRead slotRead = new SlotRead(slotKey);
 
     final BalanceChange balanceChange = new BalanceChange(0, Wei.fromEth(3));
-    final CodeChange codeChange = new CodeChange(1, Bytes.fromHexString("0x6001600101"));
+    final CodeChange codeChange = CodeChange.fromBytes(1, Bytes.fromHexString("0x6001600101"));
     final NonceChange nonceChange = new NonceChange(2, 42L);
 
     final AccountChanges accountChanges =
@@ -185,7 +185,7 @@ public class AccessListTransactionEncoderTest {
             List.of(),
             List.of(new BalanceChange(UINT32_MAX, Wei.ONE)),
             List.of(new NonceChange(UINT32_MAX, 1L)),
-            List.of(new CodeChange(UINT32_MAX, Bytes.EMPTY)));
+            List.of(CodeChange.fromBytes(UINT32_MAX, Bytes.EMPTY)));
 
     final BlockAccessList original = new BlockAccessList(List.of(accountChanges));
     final BytesValueRLPOutput output = new BytesValueRLPOutput();

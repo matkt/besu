@@ -28,14 +28,12 @@ import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.account.MutableAccount;
-import org.hyperledger.besu.evm.internal.CodeCache;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -50,7 +48,6 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   protected long nonce;
   protected Wei balance;
   protected Code code;
-  protected final CodeCache codeCache;
 
   protected final Map<UInt256, UInt256> updatedStorage = new HashMap<>();
 
@@ -64,15 +61,13 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
       final Wei balance,
       final Hash storageRoot,
       final Hash codeHash,
-      final boolean mutable,
-      final CodeCache codeCache) {
+      final boolean mutable) {
     this.context = context;
     this.address = address;
     this.addressHash = addressHash;
     this.nonce = nonce;
     this.balance = balance;
     this.codeHash = codeHash;
-    this.codeCache = codeCache;
     this.immutable = !mutable;
     this.storageRoot = storageRoot;
 
@@ -85,8 +80,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
       final BonsaiWorldView context,
       final Address address,
       final AccountValue stateTrieAccount,
-      final boolean mutable,
-      final CodeCache codeCache) {
+      final boolean mutable) {
     this(
         context,
         address,
@@ -95,8 +89,7 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
         stateTrieAccount.getBalance(),
         stateTrieAccount.getStorageRoot(),
         stateTrieAccount.getCodeHash(),
-        mutable,
-        codeCache);
+        mutable);
   }
 
   public BonsaiAccount(final BonsaiAccount toCopy) {
@@ -112,23 +105,18 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
     this.balance = toCopy.balance;
     this.codeHash = toCopy.codeHash;
     this.immutable = !mutable;
-    this.codeCache = toCopy.codeCache;
     this.storageRoot = toCopy.storageRoot;
     this.updatedStorage.putAll(toCopy.updatedStorage);
 
     if (toCopy.code == null && toCopy.codeHash.equals(Hash.EMPTY)) {
       this.code = Code.EMPTY_CODE;
     } else {
-      // as this constructor is only used for copying accounts, we assume the code must have
-      // originated from the cache, so we don't need to put it in the cache again
       this.code = toCopy.code;
     }
   }
 
   public BonsaiAccount(
-      final BonsaiWorldView context,
-      final UpdateTrackingAccount<BonsaiAccount> tracked,
-      final CodeCache codeCache) {
+      final BonsaiWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
     this.context = context;
     this.address = tracked.getAddress();
     this.addressHash = tracked.getAddressHash();
@@ -136,18 +124,17 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
     this.balance = tracked.getBalance();
     this.codeHash = tracked.getCodeHash();
     this.immutable = false;
-    this.codeCache = codeCache;
-    this.code = new Code(tracked.getCode());
     this.storageRoot = Hash.EMPTY_TRIE_HASH;
     this.updatedStorage.putAll(tracked.getUpdatedStorage());
+    final Code trackedCode = tracked.getCode();
+    this.code = trackedCode == null || trackedCode.getSize() == 0 ? Code.EMPTY_CODE : trackedCode;
   }
 
   public static BonsaiAccount fromRLP(
       final BonsaiWorldView context,
       final Address address,
       final Bytes encoded,
-      final boolean mutable,
-      final CodeCache codeCache)
+      final boolean mutable)
       throws RLPException {
     final RLPInput in = RLP.input(encoded);
     in.enterList();
@@ -160,20 +147,16 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
     in.leaveList();
 
     return new BonsaiAccount(
-        context,
-        address,
-        address.addressHash(),
-        nonce,
-        balance,
-        storageRoot,
-        codeHash,
-        mutable,
-        codeCache);
+        context, address, address.addressHash(), nonce, balance, storageRoot, codeHash, mutable);
   }
 
   @Override
   public org.hyperledger.besu.evm.internal.CodeCache getCodeCache() {
-    return codeCache;
+    // Expose the KV analyzed-code cache (not a separate account-level cache).
+    if (context == null || context.getWorldStateStorage() == null) {
+      return null;
+    }
+    return context.getWorldStateStorage().getCacheManager();
   }
 
   @Override
@@ -213,65 +196,46 @@ public class BonsaiAccount implements MutableAccount, AccountValue {
   }
 
   @Override
-  public Bytes getCode() {
-    // always prefer the local copy to avoid unnecessary cache lookups
-    if (code != null) {
-      return code.getBytes();
-    }
-
-    return getOrCreateCachedCode().getBytes();
+  public Code getCode() {
+    return getOrCreateCachedCode();
   }
 
+  /**
+   * Returns analyzed {@link Code} for this account. Loads via world-view/storage {@code getCode},
+   * which serves the KV analyzed-code cache (no separate account-level {@code CodeCache}).
+   */
   @Override
   public Code getOrCreateCachedCode() {
-    // always prefer the local copy to avoid unnecessary cache lookups
     if (code != null) {
       return code;
     }
-
-    // check if we have a cached version of the code
-    final Code cachedCode =
-        Optional.ofNullable(codeCache).map(c -> c.getIfPresent(codeHash)).orElse(null);
-
-    // cache hit, overwrite code and return it
-    if (cachedCode != null) {
-      code = cachedCode;
-      return code;
-    }
-
-    // cache miss get the code from the disk, set it and put it in the cache
-    final Bytes byteCode = context.getCode(address, codeHash).orElse(Bytes.EMPTY);
-    code = new Code(byteCode, codeHash);
-    Optional.ofNullable(codeCache).ifPresent(c -> c.put(codeHash, code));
-
+    code = context.getCode(address, codeHash).orElse(Code.EMPTY_CODE);
     return code;
   }
 
   @Override
-  public void setCode(final Bytes byteCode) {
+  public void setCode(final Code byteCode) {
     if (immutable) {
       throw new ModificationNotAllowedException();
     }
 
-    if (byteCode == null || byteCode.isEmpty()) {
+    if (byteCode == null || byteCode.getSize() == 0) {
       this.code = Code.EMPTY_CODE;
       this.codeHash = Hash.EMPTY;
       return;
     }
 
-    this.codeHash = Hash.hash(byteCode);
-
-    // check if we have a cached version of the code
-    final Code cachedCode =
-        Optional.ofNullable(codeCache).map(c -> c.getIfPresent(codeHash)).orElse(null);
-
-    if (cachedCode != null) {
-      this.code = cachedCode;
+    this.codeHash = byteCode.getCodeHash();
+    final var cache = getCodeCache();
+    final Code cached = cache != null ? cache.getIfPresent(codeHash) : null;
+    if (cached != null) {
+      this.code = cached;
       return;
     }
-
-    this.code = new Code(byteCode, codeHash);
-    Optional.ofNullable(codeCache).ifPresent(c -> c.put(codeHash, this.code));
+    this.code = byteCode;
+    if (cache != null) {
+      cache.put(codeHash, this.code);
+    }
   }
 
   /**

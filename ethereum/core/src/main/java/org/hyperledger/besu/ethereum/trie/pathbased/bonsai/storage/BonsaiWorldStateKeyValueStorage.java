@@ -34,6 +34,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.Bons
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeStrategy;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -172,6 +173,10 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
               .getExtraStorageConfiguration()
               .getUnstable()
               .getBonsaiCrossBlockCacheStorageSize(),
+          dataStorageConfiguration
+              .getExtraStorageConfiguration()
+              .getUnstable()
+              .getBonsaiCrossBlockCacheCodeSize(),
           metricsSystem);
     } else {
       return FlatDbCacheManager.NO_OP_CACHE;
@@ -411,11 +416,13 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         });
   }
 
-  public Optional<Bytes> getCode(final Hash codeHash, final Hash accountHash) {
-    if (codeHash.equals(Hash.EMPTY)) {
-      return Optional.of(Bytes.EMPTY);
-    }
-    return getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage);
+  public Optional<Code> getCode(final Hash codeHash, final Hash accountHash) {
+    // Analyzed code is content-addressed by codeHash (not the flat CODE_STORAGE key, which may be
+    // codeHash or accountHash depending on strategy). Same hit → load → analyze → put path as
+    // account/storage via getFromCacheOrStorage.
+    return cacheManager.getCodeFromCacheOrStorage(
+        codeHash,
+        () -> getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage));
   }
 
   public Optional<Bytes> getAccountStateTrieNode(final Bytes location, final Bytes32 nodeHash) {
@@ -514,6 +521,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   public FlatDbCacheManager getCacheManager() {
+    // Always non-null: NO_OP when cross-block cache is disabled (see createCacheManager).
     return cacheManager;
   }
 
@@ -681,6 +689,12 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     /** Single map per segment. Value {@code null} encodes a staged removal (last-write-wins). */
     private final Map<SegmentIdentifier, Map<Bytes, Bytes>> pending = new HashMap<>();
 
+    /**
+     * Staged analyzed-code updates keyed by code hash. Value {@code null} means invalidate after
+     * commit.
+     */
+    private final Map<Hash, Bytes> pendingAnalyzedCode = new HashMap<>();
+
     public CachedUpdater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
         final KeyValueStorageTransaction trieLogStorageTransaction,
@@ -707,6 +721,20 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     public Updater removeAccountInfoState(final Hash accountHash) {
       stageRemoval(ACCOUNT_INFO_STATE, accountHash.getBytes());
       return super.removeAccountInfoState(accountHash);
+    }
+
+    @Override
+    public Updater putCode(final Hash accountHash, final Hash codeHash, final Bytes code) {
+      if (!code.isEmpty()) {
+        pendingAnalyzedCode.put(codeHash, code);
+      }
+      return super.putCode(accountHash, codeHash, code);
+    }
+
+    @Override
+    public Updater removeCode(final Hash accountHash, final Hash codeHash) {
+      pendingAnalyzedCode.put(codeHash, null);
+      return super.removeCode(accountHash, codeHash);
     }
 
     @Override
@@ -741,6 +769,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
     private void clearStaged() {
       pending.clear();
+      pendingAnalyzedCode.clear();
     }
 
     protected void incrementCacheVersion() {
@@ -758,6 +787,16 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                       cacheManager.putInCache(segment, key, value, cacheVersion);
                     }
                   }));
+      pendingAnalyzedCode.forEach(
+          (codeHash, bytecode) -> {
+            if (bytecode == null) {
+              cacheManager.invalidateCode(codeHash);
+            } else {
+              final Code analyzed = new Code(bytecode, codeHash);
+              analyzed.ensureJumpDestAnalyzed();
+              cacheManager.put(codeHash, analyzed);
+            }
+          });
       clearStaged();
       cacheManager.scheduleAsyncMaintenance();
     }

@@ -65,8 +65,6 @@ public class MainnetBlockContextProcessorTest {
     mockMessageCallProcessor = mock(MessageCallProcessor.class);
     mockBlockHashLookup = mock(BlockHashLookup.class);
     when(mockTransactionProcessor.getMessageProcessor(any())).thenReturn(mockMessageCallProcessor);
-    when(mockMessageCallProcessor.getOrCreateCachedJumpDest(any(), any()))
-        .thenReturn(Code.EMPTY_CODE);
     final GasCalculator mockGasCalculator = mock(GasCalculator.class);
     when(mockGasCalculator.stateGasCostCalculator()).thenReturn(StateGasCostCalculator.NONE);
     when(mockTransactionProcessor.getGasCalculator()).thenReturn(mockGasCalculator);
@@ -215,7 +213,7 @@ public class MainnetBlockContextProcessorTest {
     final MutableWorldState worldState = InMemoryKeyValueStorageProvider.createInMemoryWorldState();
     final WorldUpdater updater = worldState.updater();
     MutableAccount account = updater.getOrCreate(address);
-    account.setCode(code);
+    account.setCode(new Code(code));
     updater.commit();
     return worldState;
   }

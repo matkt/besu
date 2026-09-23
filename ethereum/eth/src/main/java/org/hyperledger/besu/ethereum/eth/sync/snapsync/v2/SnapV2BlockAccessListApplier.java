@@ -34,6 +34,7 @@ import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 
 import java.util.HashMap;
@@ -434,7 +435,7 @@ public class SnapV2BlockAccessListApplier {
   private boolean hasCodeLocally(final Hash codeHash, final Hash accountHash) {
     return worldStateStorageCoordinator
         .getCode(codeHash, accountHash)
-        .map(code -> !code.isEmpty())
+        .map(code -> code.getSize() > 0)
         .orElse(false);
   }
 
@@ -597,10 +598,10 @@ public class SnapV2BlockAccessListApplier {
     }
 
     final Hash codeHash =
-        perAccount.latestCode.isEmpty() ? Hash.EMPTY : Hash.hash(perAccount.latestCode);
+        perAccount.latestCode.getSize() == 0 ? Hash.EMPTY : perAccount.latestCode.getCodeHash();
     applyForStrategy(
         updater,
-        onBonsai -> onBonsai.putCode(accountHash, codeHash, perAccount.latestCode),
+        onBonsai -> onBonsai.putCode(accountHash, codeHash, perAccount.latestCode.getBytes()),
         onForest -> {});
     return codeHash;
   }
@@ -754,7 +755,7 @@ public class SnapV2BlockAccessListApplier {
   private static class PerAccountChanges {
     Long latestNonce;
     Wei latestBalance;
-    Bytes latestCode;
+    Code latestCode;
     final Map<Hash, StorageSlotUpdate> storageChanges = new LinkedHashMap<>();
 
     void mergeFinal(final BlockAccessListChanges.AccountFinalChanges afc) {

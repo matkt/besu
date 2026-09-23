@@ -20,7 +20,6 @@ import org.hyperledger.besu.evm.Code;
 
 import java.util.NavigableMap;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -73,18 +72,20 @@ public interface AccountState {
    *
    * @return the account code (which can be empty).
    */
-  Bytes getCode();
+  Code getCode();
 
   /**
-   * The EVM bytecode associated with this account, wrapped in a {@link Code} object.
+   * The EVM bytecode associated with this account, optionally served from an analyzed-code cache.
    *
-   * <p>This is the default implementation that returns a {@link Code} object wrapping the {@link
-   * #getCode()} result. It can be overridden to provide a different implementation of {@link Code}.
+   * <p>Default implementation returns {@link #getCode()} after ensuring jump-dest analysis.
+   * Overrides may consult a storage-backed cache (e.g. Bonsai KV analyzed-code cache).
    *
    * @return the account code wrapped in a {@link Code} object.
    */
   default Code getOrCreateCachedCode() {
-    return new Code(this.getCode());
+    final Code code = getCode();
+    code.ensureJumpDestAnalyzed();
+    return code;
   }
 
   /**
@@ -97,13 +98,13 @@ public interface AccountState {
   /**
    * Whether the account has (non empty) EVM bytecode associated to it.
    *
-   * <p>This is functionally equivalent to {@code !code().isEmpty()}, though could be implemented
-   * more efficiently.
+   * <p>This is functionally equivalent to {@code getCode().getSize() > 0}, though could be
+   * implemented more efficiently.
    *
    * @return Whether the account has EVM bytecode associated to it.
    */
   default boolean hasCode() {
-    return !getCode().isEmpty();
+    return getCode().getSize() > 0;
   }
 
   /**

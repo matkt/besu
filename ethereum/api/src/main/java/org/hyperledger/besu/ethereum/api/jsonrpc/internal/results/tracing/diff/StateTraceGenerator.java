@@ -171,7 +171,7 @@ public class StateTraceGenerator {
   }
 
   private static String codeAsHex(final Account account) {
-    return account.getCode().toHexString();
+    return account.getCode().getBytes().toHexString();
   }
 
   private static String nonceAsHex(final Account account) {

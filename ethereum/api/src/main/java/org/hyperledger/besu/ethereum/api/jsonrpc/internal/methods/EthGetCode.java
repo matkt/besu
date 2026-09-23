@@ -26,8 +26,6 @@ import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 
 import java.util.function.Supplier;
 
-import org.apache.tuweni.bytes.Bytes;
-
 public class EthGetCode extends AbstractBlockParameterOrBlockHashMethod {
 
   public EthGetCode(final BlockchainQueries blockchainQueries) {
@@ -58,6 +56,9 @@ public class EthGetCode extends AbstractBlockParameterOrBlockHashMethod {
       throw new InvalidJsonRpcParameters(
           "Invalid address parameter (index 0)", RpcErrorType.INVALID_ADDRESS_PARAMS, e);
     }
-    return getBlockchainQueries().getCode(address, blockHash).map(Bytes::toString).orElse(null);
+    return getBlockchainQueries()
+        .getCode(address, blockHash)
+        .map(code -> code.getBytes().toString())
+        .orElse(null);
   }
 }

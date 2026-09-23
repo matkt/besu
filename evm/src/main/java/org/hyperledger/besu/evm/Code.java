@@ -186,6 +186,16 @@ public class Code {
   }
 
   /**
+   * Ensures jump-destination analysis has been computed and cached on this instance. Safe to call
+   * repeatedly; analysis runs at most once.
+   */
+  public void ensureJumpDestAnalyzed() {
+    if (jumpDestBitMask == null && getSize() > 0) {
+      jumpDestBitMask = calculateJumpDestBitMask();
+    }
+  }
+
+  /**
    * Computes a bitmask where each bit set to 1 indicates a valid `JUMPDEST` opcode in the EVM
    * bytecode. The bitmap is organized in 64-byte chunks, each represented as a `long` (64 bits).
    * This is used for efficiently validating dynamic jumps (`JUMP`, `JUMPI`) at runtime.

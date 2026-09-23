@@ -17,6 +17,7 @@ package org.hyperledger.besu.evm.operation;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -146,7 +147,7 @@ class ExtCodeCopyOperationTest {
       final Bytes expected,
       final long gasCost) {
     final MutableAccount account = worldStateUpdater.getOrCreate(REQUESTED_ADDRESS);
-    account.setCode(code);
+    account.setCode(new Code(code));
 
     ExtCodeCopyOperation subject = new ExtCodeCopyOperation(new PragueGasCalculator());
     MessageFrame frame =
@@ -169,7 +170,7 @@ class ExtCodeCopyOperationTest {
   void testExtCodeCopyCold() {
     final MutableAccount account = worldStateUpdater.getOrCreate(REQUESTED_ADDRESS);
     Bytes code = Bytes.fromHexString("0xEFF09f918bf09f9fa9");
-    account.setCode(code);
+    account.setCode(new Code(code));
 
     ExtCodeCopyOperation subject = new ExtCodeCopyOperation(new PragueGasCalculator());
     MessageFrame frame =

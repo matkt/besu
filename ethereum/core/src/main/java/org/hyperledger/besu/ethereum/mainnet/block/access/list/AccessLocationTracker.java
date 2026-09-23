@@ -19,6 +19,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.AccountChangesBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.PartialBlockAccessViewBuilder;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.Eip7928AccessList;
 import org.hyperledger.besu.evm.worldstate.StackedUpdater;
@@ -32,7 +33,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 public class AccessLocationTracker implements Eip7928AccessList {
@@ -137,7 +137,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
       final Account wrappedAccount = account.getWrappedAccount();
       final Wei newBalance = account.getBalance();
       final long newNonce = account.getNonce();
-      final Bytes newCode = account.getCode();
+      final Code newCode = account.getCode();
 
       if (wrappedAccount != null) {
         if (!newBalance.equals(wrappedAccount.getBalance())) {
@@ -156,7 +156,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
         if (newNonce != 0L) {
           accountBuilder.withNonceChange(newNonce);
         }
-        if (!newCode.isEmpty()) {
+        if (newCode.getSize() > 0) {
           accountBuilder.withNewCode(newCode);
         }
       }

@@ -72,7 +72,6 @@ import org.hyperledger.besu.ethereum.p2p.permissions.PeerPermissions;
 import org.hyperledger.besu.ethereum.p2p.rlpx.connections.PeerConnection;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -140,8 +139,7 @@ public class TestNode implements Closeable {
             BalConfiguration.DEFAULT,
             new NoOpMetricsSystem());
 
-    final GenesisState genesisState =
-        GenesisState.fromConfig(genesisConfig, protocolSchedule, new BonsaiCodeCache());
+    final GenesisState genesisState = GenesisState.fromConfig(genesisConfig, protocolSchedule);
     final BlockHeaderFunctions blockHeaderFunctions =
         ScheduleBasedBlockHeaderFunctions.create(protocolSchedule);
     final MutableBlockchain blockchain =

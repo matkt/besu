@@ -43,6 +43,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.BaseFeeMarket;
 import org.hyperledger.besu.ethereum.mainnet.feemarket.FeeMarket;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.util.OrderStatistics;
@@ -311,27 +312,30 @@ public class BlockchainQueries {
   }
 
   /**
-   * Retrieves the code associated with the given account at a particular block number.
+   * Analyzed contract {@link Code} for an account at a block height. JSON-RPC / GraphQL clients
+   * should unwrap {@link Code#getBytes()} only at the wire serialization boundary ({@code
+   * eth_getCode}).
    *
    * @param address The account address being queried.
    * @param blockNumber The height of the block to be checked.
    * @return The code associated with this address.
    */
-  public Optional<Bytes> getCode(final Address address, final long blockNumber) {
+  public Optional<Code> getCode(final Address address, final long blockNumber) {
     final Hash blockHash = getBlockHashByNumber(blockNumber).orElse(Hash.EMPTY);
 
     return getCode(address, blockHash);
   }
 
   /**
-   * Retrieves the code associated with the given account at a particular block hash.
+   * Analyzed contract {@link Code} for an account at a block hash. See {@link #getCode(Address,
+   * long)}.
    *
    * @param address The account address being queried.
    * @param blockHash The hash of the block to be checked.
    * @return The code associated with this address.
    */
-  public Optional<Bytes> getCode(final Address address, final Hash blockHash) {
-    return fromAccount(address, blockHash, Account::getCode, Bytes.EMPTY);
+  public Optional<Code> getCode(final Address address, final Hash blockHash) {
+    return fromAccount(address, blockHash, Account::getCode, Code.EMPTY_CODE);
   }
 
   /**

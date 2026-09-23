@@ -22,7 +22,6 @@ import java.util.OptionalInt;
 /**
  * The type Evm configuration.
  *
- * @param jumpDestCacheWeightKB the jump destination cache weight in kb
  * @param worldUpdaterMode the world updater mode
  * @param enableOptimizedOpcodes enable optimized implementation of certain opcodes in the EVM
  * @param enableEvmV2 enable experimental EVM v2 with long[] stack representation
@@ -32,7 +31,6 @@ import java.util.OptionalInt;
  *     fork
  */
 public record EvmConfiguration(
-    long jumpDestCacheWeightKB,
     WorldUpdaterMode worldUpdaterMode,
     boolean enableOptimizedOpcodes,
     boolean enableEvmV2,
@@ -52,21 +50,17 @@ public record EvmConfiguration(
 
   /** The constant DEFAULT. */
   public static final EvmConfiguration DEFAULT =
-      new EvmConfiguration(32_000L, WorldUpdaterMode.STACKED, true, false);
+      new EvmConfiguration(WorldUpdaterMode.STACKED, true, false);
 
   /**
    * Create an EVM Configuration without any overrides
    *
-   * @param jumpDestCacheWeightKilobytes the jump dest cache weight (in kibibytes)
    * @param worldstateUpdateMode the world update mode
    * @param enableOptimizedOpcodes enabled opcode optimizations
    */
   public EvmConfiguration(
-      final Long jumpDestCacheWeightKilobytes,
-      final WorldUpdaterMode worldstateUpdateMode,
-      final boolean enableOptimizedOpcodes) {
+      final WorldUpdaterMode worldstateUpdateMode, final boolean enableOptimizedOpcodes) {
     this(
-        jumpDestCacheWeightKilobytes,
         worldstateUpdateMode,
         enableOptimizedOpcodes,
         false,
@@ -78,33 +72,21 @@ public record EvmConfiguration(
   /**
    * Create an EVM Configuration without any overrides, with explicit EVM v2 flag
    *
-   * @param jumpDestCacheWeightKilobytes the jump dest cache weight (in kibibytes)
    * @param worldstateUpdateMode the world update mode
    * @param enableOptimizedOpcodes enabled opcode optimizations
    * @param enableEvmV2 enable experimental EVM v2 with long[] stack representation
    */
   public EvmConfiguration(
-      final Long jumpDestCacheWeightKilobytes,
       final WorldUpdaterMode worldstateUpdateMode,
       final boolean enableOptimizedOpcodes,
       final boolean enableEvmV2) {
     this(
-        jumpDestCacheWeightKilobytes,
         worldstateUpdateMode,
         enableOptimizedOpcodes,
         enableEvmV2,
         MessageFrame.DEFAULT_MAX_STACK_SIZE,
         Optional.empty(),
         Optional.empty());
-  }
-
-  /**
-   * Gets jump dest cache weight bytes.
-   *
-   * @return the jump dest cache weight bytes
-   */
-  public long getJumpDestCacheWeightBytes() {
-    return jumpDestCacheWeightKB * 1024L;
   }
 
   /**
@@ -121,7 +103,6 @@ public record EvmConfiguration(
       final OptionalInt newMaxInitcodeSize,
       final OptionalInt newEvmStackSize) {
     return new EvmConfiguration(
-        jumpDestCacheWeightKB,
         worldUpdaterMode,
         enableOptimizedOpcodes,
         enableEvmV2,

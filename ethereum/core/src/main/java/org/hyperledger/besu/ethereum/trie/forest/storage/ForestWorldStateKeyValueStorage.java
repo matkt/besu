@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.trie.forest.storage;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
@@ -49,12 +50,26 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     return DataStorageFormat.FOREST;
   }
 
-  public Optional<Bytes> getCode(final Hash codeHash) {
+  /**
+   * Loads account bytecode as analyzed {@link Code}. Raw bytes are only used when writing via
+   * {@link Updater#putCode}.
+   */
+  public Optional<Code> getCode(final Hash codeHash) {
     if (codeHash.equals(Hash.EMPTY)) {
-      return Optional.of(Bytes.EMPTY);
-    } else {
-      return keyValueStorage.get(codeHash.getBytes().toArrayUnsafe()).map(Bytes::wrap);
+      return Optional.of(Code.EMPTY_CODE);
     }
+    return keyValueStorage
+        .get(codeHash.getBytes().toArrayUnsafe())
+        .map(Bytes::wrap)
+        .map(
+            bytes -> {
+              if (bytes.isEmpty()) {
+                return Code.EMPTY_CODE;
+              }
+              final Code code = new Code(bytes, codeHash);
+              code.ensureJumpDestAnalyzed();
+              return code;
+            });
   }
 
   public Optional<Bytes> getAccountStateTrieNode(final Bytes32 nodeHash) {

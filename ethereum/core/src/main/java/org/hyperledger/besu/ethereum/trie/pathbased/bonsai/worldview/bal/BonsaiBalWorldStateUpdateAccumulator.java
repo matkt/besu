@@ -20,14 +20,13 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
@@ -42,9 +41,8 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
   public BonsaiBalWorldStateUpdateAccumulator(
       final BonsaiWorldView world,
       final EvmConfiguration evmConfiguration,
-      final BonsaiCodeCache codeCache,
       final BlockAccessListOverlay blockAccessListOverlay) {
-    super(world, (address, value) -> {}, (address, slot) -> {}, evmConfiguration, codeCache);
+    super(world, (address, value) -> {}, (address, slot) -> {}, evmConfiguration);
     this.blockAccessListOverlay = blockAccessListOverlay;
   }
 
@@ -56,7 +54,7 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
   public PathBasedWorldStateUpdateAccumulator<BonsaiAccount> copy() {
     final BonsaiBalWorldStateUpdateAccumulator copy =
         new BonsaiBalWorldStateUpdateAccumulator(
-            wrappedWorldView(), getEvmConfiguration(), codeCache(), blockAccessListOverlay);
+            wrappedWorldView(), getEvmConfiguration(), blockAccessListOverlay);
     copy.cloneFromUpdater(this);
     return copy;
   }
@@ -84,7 +82,7 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
   }
 
   @Override
-  protected void onCodeValueLoaded(final Address address, final BonsaiValue<Bytes> codeValue) {
+  protected void onCodeValueLoaded(final Address address, final BonsaiValue<Code> codeValue) {
     blockAccessListOverlay.applyToCode(address, codeValue::setUpdated);
   }
 

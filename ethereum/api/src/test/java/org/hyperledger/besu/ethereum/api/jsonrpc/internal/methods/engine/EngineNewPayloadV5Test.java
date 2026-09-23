@@ -340,6 +340,6 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
                 List.of(new BlockAccessList.SlotRead(slotKey)),
                 List.of(new BlockAccessList.BalanceChange(0, Wei.ONE)),
                 List.of(new BlockAccessList.NonceChange(0, 1L)),
-                List.of(new BlockAccessList.CodeChange(0, Bytes.of(1))))));
+                List.of(BlockAccessList.CodeChange.fromBytes(0, Bytes.of(1))))));
   }
 }

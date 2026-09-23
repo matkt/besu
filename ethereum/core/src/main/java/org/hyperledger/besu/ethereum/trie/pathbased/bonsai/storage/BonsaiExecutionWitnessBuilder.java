@@ -22,7 +22,6 @@ import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -132,17 +131,14 @@ public class BonsaiExecutionWitnessBuilder {
     final BonsaiWorldStateWitnessStorage witnessStorage =
         new BonsaiWorldStateWitnessStorage(
             new NoOpMetricsSystem(), worldView.getWorldStateStorage());
-    final BonsaiCodeCache codeCache = new BonsaiCodeCache();
     try (final BonsaiWorldState witnessWorldState =
         new BonsaiWorldState(
             witnessStorage,
             new NoOpBonsaiCachedMerkleTrieLoader(),
-            new NoOpBonsaiWorldStateCacheManager(
-                witnessStorage, EvmConfiguration.DEFAULT, codeCache),
+            new NoOpBonsaiWorldStateCacheManager(witnessStorage, EvmConfiguration.DEFAULT),
             new NoOpTrieLogManager(),
             EvmConfiguration.DEFAULT,
-            worldStateProvider.getWorldStateSharedSpec(),
-            codeCache)) {
+            worldStateProvider.getWorldStateSharedSpec())) {
 
       final BonsaiWorldStateUpdateAccumulator updater =
           (BonsaiWorldStateUpdateAccumulator) witnessWorldState.updater();
@@ -188,7 +184,7 @@ public class BonsaiExecutionWitnessBuilder {
       if (account != null && !account.getCodeHash().equals(Hash.EMPTY)) {
         worldView
             .getCode(address, account.getCodeHash())
-            .ifPresent(bytes -> resultSet.add(bytes.toHexString()));
+            .ifPresent(code -> resultSet.add(code.getBytes().toHexString()));
       }
     }
     return resultSet.stream().sorted().toList();

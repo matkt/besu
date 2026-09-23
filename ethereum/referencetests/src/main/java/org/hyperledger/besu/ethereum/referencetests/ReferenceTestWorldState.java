@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.referencetests;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -70,6 +71,7 @@ public interface ReferenceTestWorldState extends MutableWorldState {
       return balance;
     }
 
+    /** Hex bytecode from reference-test JSON; not the EVM {@code Account#getCode()} API. */
     public Bytes getCode() {
       return code;
     }
@@ -84,7 +86,10 @@ public interface ReferenceTestWorldState extends MutableWorldState {
     final MutableAccount account = updater.getOrCreate(address);
     account.setNonce(toCopy.getNonce());
     account.setBalance(toCopy.getBalance());
-    account.setCode(toCopy.getCode());
+    account.setCode(
+        toCopy.getCode() == null || toCopy.getCode().isEmpty()
+            ? Code.EMPTY_CODE
+            : new Code(toCopy.getCode()));
     for (final Map.Entry<UInt256, UInt256> entry : toCopy.getStorage().entrySet()) {
       account.setStorageValue(entry.getKey(), entry.getValue());
     }

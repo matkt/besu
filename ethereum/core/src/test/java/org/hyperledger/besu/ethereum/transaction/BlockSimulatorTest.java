@@ -54,6 +54,7 @@ import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallError;
 import org.hyperledger.besu.ethereum.transaction.exceptions.BlockStateCallException;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.log.EIP7708TransferLogEmitter;
 import org.hyperledger.besu.evm.log.TransferLogEmitter;
@@ -256,7 +257,7 @@ public class BlockSimulatorTest {
 
     verify(mutableAccount).setNonce(anyLong());
     verify(mutableAccount).setBalance(any(Wei.class));
-    verify(mutableAccount).setCode(any(Bytes.class));
+    verify(mutableAccount).setCode(any(Code.class));
     verify(mutableAccount).setStorageValue(any(UInt256.class), any(UInt256.class));
   }
 

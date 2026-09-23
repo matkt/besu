@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage.Updater;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -31,7 +32,7 @@ public class ForestKeyValueStorageWorldStateStorageTest {
   @Test
   public void getCode_returnsEmpty() {
     final ForestWorldStateKeyValueStorage storage = emptyStorage();
-    assertThat(storage.getCode(Hash.EMPTY)).contains(Bytes.EMPTY);
+    assertThat(storage.getCode(Hash.EMPTY)).contains(Code.EMPTY_CODE);
   }
 
   @Test
@@ -53,9 +54,10 @@ public class ForestKeyValueStorageWorldStateStorageTest {
     final ForestWorldStateKeyValueStorage storage = emptyStorage();
     storage.updater().putCode(MerkleTrie.EMPTY_TRIE_NODE).putCode(Bytes.EMPTY).commit();
 
-    assertThat(storage.getCode(Hash.EMPTY_TRIE_HASH)).contains(MerkleTrie.EMPTY_TRIE_NODE);
+    assertThat(storage.getCode(Hash.EMPTY_TRIE_HASH).map(Code::getBytes))
+        .contains(MerkleTrie.EMPTY_TRIE_NODE);
 
-    assertThat(storage.getCode(Hash.EMPTY)).contains(Bytes.EMPTY);
+    assertThat(storage.getCode(Hash.EMPTY)).contains(Code.EMPTY_CODE);
   }
 
   @Test
@@ -64,7 +66,7 @@ public class ForestKeyValueStorageWorldStateStorageTest {
     final ForestWorldStateKeyValueStorage storage = emptyStorage();
     storage.updater().putCode(bytes).commit();
 
-    assertThat(storage.getCode(Hash.hash(bytes))).contains(bytes);
+    assertThat(storage.getCode(Hash.hash(bytes)).map(Code::getBytes)).contains(bytes);
   }
 
   @Test
@@ -145,9 +147,9 @@ public class ForestKeyValueStorageWorldStateStorageTest {
     updaterA.commit();
     updaterB.commit();
 
-    assertThat(storage.getCode(Hash.hash(bytesA))).contains(bytesA);
-    assertThat(storage.getCode(Hash.hash(bytesB))).contains(bytesB);
-    assertThat(storage.getCode(Hash.hash(bytesC))).contains(bytesC);
+    assertThat(storage.getCode(Hash.hash(bytesA)).map(Code::getBytes)).contains(bytesA);
+    assertThat(storage.getCode(Hash.hash(bytesB)).map(Code::getBytes)).contains(bytesB);
+    assertThat(storage.getCode(Hash.hash(bytesC)).map(Code::getBytes)).contains(bytesC);
   }
 
   @Test

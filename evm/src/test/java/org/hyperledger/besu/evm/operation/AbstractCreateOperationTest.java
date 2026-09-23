@@ -171,7 +171,7 @@ class AbstractCreateOperationTest {
     when(worldUpdater.get(any())).thenReturn(account);
     when(worldUpdater.getSenderAccount(any())).thenReturn(account);
     when(worldUpdater.getOrCreate(any())).thenReturn(newAccount);
-    when(newAccount.getCode()).thenReturn(Bytes.EMPTY);
+    when(newAccount.getCode()).thenReturn(Code.EMPTY_CODE);
     when(worldUpdater.updater()).thenReturn(worldUpdater);
 
     operation.execute(messageFrame, evm);
@@ -258,7 +258,7 @@ class AbstractCreateOperationTest {
     when(worldUpdater.get(any())).thenReturn(account);
     when(worldUpdater.getSenderAccount(any())).thenReturn(account);
     when(worldUpdater.getOrCreate(any())).thenReturn(newAccount);
-    when(newAccount.getCode()).thenReturn(Bytes.EMPTY);
+    when(newAccount.getCode()).thenReturn(Code.EMPTY_CODE);
     // EIP-8037: the target has to read as empty, or no NEW_ACCOUNT is charged and the
     // spill-below-cost scenario under test never arises.
     when(account.isEmpty()).thenReturn(true);
@@ -331,7 +331,7 @@ class AbstractCreateOperationTest {
     when(worldUpdater.get(any())).thenReturn(account);
     when(worldUpdater.getSenderAccount(any())).thenReturn(account);
     when(worldUpdater.getOrCreate(any())).thenReturn(newAccount);
-    when(newAccount.getCode()).thenReturn(Bytes.EMPTY);
+    when(newAccount.getCode()).thenReturn(Code.EMPTY_CODE);
     when(worldUpdater.updater()).thenReturn(worldUpdater);
 
     final long stateGasBefore = frame.getStateGasReservoir();

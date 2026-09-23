@@ -443,7 +443,7 @@ public class EvmToolCommand implements Runnable {
 
       final EVM evm = protocolSpec.getEvm();
       if (codeBytes.isEmpty() && !createTransaction) {
-        codeBytes = component.getWorldState().get(receiver).getCode();
+        codeBytes = component.getWorldState().get(receiver).getCode().getBytes();
       }
       Code code = new Code(codeBytes);
 
@@ -472,7 +472,7 @@ public class EvmToolCommand implements Runnable {
           updater.getOrCreate(receiver);
         }
         var contractAccount = updater.getOrCreate(contract);
-        contractAccount.setCode(codeBytes);
+        contractAccount.setCode(code);
 
         final Set<Address> addressList = new HashSet<>(Address.SIZE);
         addressList.add(sender);
@@ -607,8 +607,8 @@ public class EvmToolCommand implements Runnable {
             a -> {
               var account = worldState.get(a.getAddress().get());
               out.println(" \"" + account.getAddress().getBytes().toHexString() + "\": {");
-              if (account.getCode() != null && !account.getCode().isEmpty()) {
-                out.println("  \"code\": \"" + account.getCode().toHexString() + "\",");
+              if (account.getCode() != null && account.getCode().getSize() > 0) {
+                out.println("  \"code\": \"" + account.getCode().getBytes().toHexString() + "\",");
               }
               var storageEntries =
                   account.storageEntriesFrom(Bytes32.ZERO, Integer.MAX_VALUE).values().stream()

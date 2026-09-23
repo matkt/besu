@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
+import org.hyperledger.besu.evm.Code;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -53,8 +54,9 @@ class BonsaiWorldStateTest {
   @Mock BonsaiWorldStateKeyValueStorage.Updater bonsaiUpdater;
   @Mock MerkleTrie<Bytes, Bytes> accountTrie;
 
-  private static final Bytes CODE = Bytes.of(10);
-  private static final Hash CODE_HASH = Hash.hash(CODE);
+  private static final Bytes CODE_BYTES = Bytes.of(10);
+  private static final Code CODE = new Code(CODE_BYTES, Hash.hash(CODE_BYTES));
+  private static final Hash CODE_HASH = CODE.getCodeHash();
   private static final Hash ACCOUNT_HASH = Address.ZERO.addressHash();
   private static final Address ACCOUNT = Address.ZERO;
 
@@ -76,8 +78,8 @@ class BonsaiWorldStateTest {
   @MethodSource("priorAndUpdatedEmptyAndNullBytes")
   void codeUpdateDoesNothingWhenMarkedAsDeletedButAlreadyDeleted(
       final Bytes prior, final Bytes updated) {
-    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
-        Map.of(Address.ZERO, new BonsaiValue<>(prior, updated));
+    final Map<Address, BonsaiValue<Code>> codeToUpdate =
+        Map.of(Address.ZERO, new BonsaiValue<>(toCode(prior), toCode(updated)));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
@@ -86,7 +88,7 @@ class BonsaiWorldStateTest {
 
   @Test
   void codeUpdateDoesNothingWhenAddingSameAsExistingValue() {
-    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
+    final Map<Address, BonsaiValue<Code>> codeToUpdate =
         Map.of(Address.ZERO, new BonsaiValue<>(CODE, CODE));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
@@ -97,12 +99,12 @@ class BonsaiWorldStateTest {
   @ParameterizedTest
   @MethodSource("emptyAndNullBytes")
   void removesCodeWhenMarkedAsDeleted(final Bytes updated) {
-    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
+    final Map<Address, BonsaiValue<Code>> codeToUpdate =
         Map.of(
             Address.ZERO,
             updated == null
                 ? new BonsaiValue<>(CODE, null, true)
-                : new BonsaiValue<>(CODE, updated));
+                : new BonsaiValue<>(CODE, toCode(updated)));
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
@@ -112,28 +114,40 @@ class BonsaiWorldStateTest {
   @ParameterizedTest
   @MethodSource("codeValueAndEmptyAndNullBytes")
   void addsCodeForNewCodeValue(final Bytes prior) {
-    final Map<Address, BonsaiValue<Bytes>> codeToUpdate =
-        Map.of(ACCOUNT, new BonsaiValue<>(prior, CODE));
+    final Map<Address, BonsaiValue<Code>> codeToUpdate =
+        Map.of(ACCOUNT, new BonsaiValue<>(toCode(prior), CODE));
 
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
-    verify(bonsaiUpdater).putCode(ACCOUNT_HASH, CODE_HASH, CODE);
+    verify(bonsaiUpdater).putCode(ACCOUNT_HASH, CODE_HASH, CODE_BYTES);
   }
 
   @Test
   void updateCodeForMultipleValues() {
-    final Map<Address, BonsaiValue<Bytes>> codeToUpdate = new HashMap<>();
+    final Map<Address, BonsaiValue<Code>> codeToUpdate = new HashMap<>();
     codeToUpdate.put(Address.fromHexString("0x1"), new BonsaiValue<>(null, CODE));
     codeToUpdate.put(Address.fromHexString("0x2"), new BonsaiValue<>(CODE, null, true));
-    codeToUpdate.put(Address.fromHexString("0x3"), new BonsaiValue<>(Bytes.of(9), CODE));
+    codeToUpdate.put(Address.fromHexString("0x3"), new BonsaiValue<>(toCode(Bytes.of(9)), CODE));
 
     when(bonsaiWorldStateUpdateAccumulator.getCodeToUpdate()).thenReturn(codeToUpdate);
     applyCodeUpdate(bonsaiWorldStateUpdateAccumulator);
 
-    verify(bonsaiUpdater).putCode(Address.fromHexString("0x1").addressHash(), CODE_HASH, CODE);
+    verify(bonsaiUpdater)
+        .putCode(Address.fromHexString("0x1").addressHash(), CODE_HASH, CODE_BYTES);
     verify(bonsaiUpdater).removeCode(Address.fromHexString("0x2").addressHash(), CODE_HASH);
-    verify(bonsaiUpdater).putCode(Address.fromHexString("0x3").addressHash(), CODE_HASH, CODE);
+    verify(bonsaiUpdater)
+        .putCode(Address.fromHexString("0x3").addressHash(), CODE_HASH, CODE_BYTES);
+  }
+
+  private static Code toCode(final Bytes bytes) {
+    if (bytes == null) {
+      return null;
+    }
+    if (bytes.isEmpty()) {
+      return Code.EMPTY_CODE;
+    }
+    return new Code(bytes, Hash.hash(bytes));
   }
 
   private static Stream<Bytes> emptyAndNullBytes() {

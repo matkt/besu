@@ -17,8 +17,6 @@ package org.hyperledger.besu.components;
 import org.hyperledger.besu.cli.BesuCommand;
 import org.hyperledger.besu.ethereum.eth.transactions.BlobCache;
 import org.hyperledger.besu.ethereum.eth.transactions.BlobCacheModule;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCacheModule;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoaderModule;
 import org.hyperledger.besu.metrics.MetricsSystemModule;
@@ -39,8 +37,7 @@ import org.slf4j.Logger;
       MetricsSystemModule.class,
       BonsaiCachedMerkleTrieLoaderModule.class,
       BesuPluginContextModule.class,
-      BlobCacheModule.class,
-      BonsaiCodeCacheModule.class
+      BlobCacheModule.class
     })
 public interface BesuComponent {
 
@@ -86,11 +83,4 @@ public interface BesuComponent {
    * @return BlobCache
    */
   BlobCache getBlobCache();
-
-  /**
-   * Code cache for storing EVM code.
-   *
-   * @return BonsaiCodeCache
-   */
-  BonsaiCodeCache getCodeCache();
 }

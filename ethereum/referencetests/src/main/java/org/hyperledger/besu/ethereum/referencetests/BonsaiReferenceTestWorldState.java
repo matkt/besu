@@ -19,7 +19,6 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.Worl
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiPreImageProxy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogAddedEvent;
@@ -78,8 +77,7 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
         worldStateCacheManager,
         trieLogManager,
         evmConfiguration,
-        createStatefulConfigWithTrie(),
-        new BonsaiCodeCache());
+        createStatefulConfigWithTrie());
     this.refTestStorage = worldStateKeyValueStorage;
     this.preImageProxy = preImageProxy;
     this.evmConfiguration = evmConfiguration;
@@ -250,7 +248,7 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
 
     final NoOpBonsaiWorldStateCacheManager noOpCachedWorldStorageManager =
         new NoOpBonsaiWorldStateCacheManager(
-            bonsaiWorldStateKeyValueStorage, EvmConfiguration.DEFAULT, new BonsaiCodeCache());
+            bonsaiWorldStateKeyValueStorage, EvmConfiguration.DEFAULT);
 
     final BonsaiReferenceTestWorldState worldState =
         new BonsaiReferenceTestWorldState(

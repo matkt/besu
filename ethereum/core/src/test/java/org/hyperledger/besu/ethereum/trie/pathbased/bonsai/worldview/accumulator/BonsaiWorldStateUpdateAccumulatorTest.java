@@ -24,7 +24,6 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
@@ -97,11 +96,9 @@ class BonsaiWorldStateUpdateAccumulatorTest {
     return new BonsaiWorldState(
         storage,
         new NoOpBonsaiCachedMerkleTrieLoader(),
-        new NoOpBonsaiWorldStateCacheManager(
-            storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
+        new NoOpBonsaiWorldStateCacheManager(storage, EvmConfiguration.DEFAULT),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
-        createStatefulConfigWithTrie(),
-        new BonsaiCodeCache());
+        createStatefulConfigWithTrie());
   }
 }

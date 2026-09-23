@@ -42,7 +42,6 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.StorageEntriesCollector;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFullFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -113,7 +112,8 @@ public class BonsaiWorldStateKeyValueStorageTest {
   @MethodSource("flatDbMode")
   void getCode_returnsEmpty(final FlatDbMode flatDbMode) {
     setUp(flatDbMode);
-    assertThat(storage.getCode(Hash.EMPTY, Hash.EMPTY)).contains(Bytes.EMPTY);
+    assertThat(storage.getCode(Hash.EMPTY, Hash.EMPTY))
+        .hasValueSatisfying(c -> assertThat(c.getBytes()).isEqualTo(Bytes.EMPTY));
   }
 
   @ParameterizedTest
@@ -146,7 +146,7 @@ public class BonsaiWorldStateKeyValueStorageTest {
         .commit();
 
     assertThat(storage.getCode(Hash.hash(MerkleTrie.EMPTY_TRIE_NODE), Hash.EMPTY))
-        .contains(MerkleTrie.EMPTY_TRIE_NODE);
+        .hasValueSatisfying(c -> assertThat(c.getBytes()).isEqualTo(MerkleTrie.EMPTY_TRIE_NODE));
   }
 
   @ParameterizedTest
@@ -157,7 +157,8 @@ public class BonsaiWorldStateKeyValueStorageTest {
     final Bytes bytes = Bytes.fromHexString("0x123456");
     storage.updater().putCode(Hash.EMPTY, bytes).commit();
 
-    assertThat(storage.getCode(Hash.hash(bytes), Hash.EMPTY)).contains(bytes);
+    assertThat(storage.getCode(Hash.hash(bytes), Hash.EMPTY))
+        .hasValueSatisfying(c -> assertThat(c.getBytes()).isEqualTo(bytes));
   }
 
   @ParameterizedTest
@@ -270,6 +271,8 @@ public class BonsaiWorldStateKeyValueStorageTest {
     // segments directly to simulate a post-sync state where only trie branches remain.
     storage.getComposedWorldStateStorage().clear(ACCOUNT_INFO_STATE);
     storage.getComposedWorldStateStorage().clear(ACCOUNT_STORAGE_STORAGE);
+    storage.getCacheManager().clear(ACCOUNT_INFO_STATE);
+    storage.getCacheManager().clear(ACCOUNT_STORAGE_STORAGE);
 
     Mockito.reset(storage);
 
@@ -443,11 +446,7 @@ public class BonsaiWorldStateKeyValueStorageTest {
 
     BonsaiAccount retrievedAccount =
         BonsaiAccount.fromRLP(
-            null,
-            account,
-            storage.getAccount(account.addressHash()).get(),
-            false,
-            new BonsaiCodeCache());
+            null, account, storage.getAccount(account.addressHash()).get(), false);
     assertThat(retrievedAccount.getBalance())
         .isEqualTo(
             Wei.fromHexString(
@@ -853,8 +852,10 @@ public class BonsaiWorldStateKeyValueStorageTest {
     updaterA.commit();
     updaterB.commit();
 
-    assertThat(storage.getCode(Hash.hash(bytesB), accountHashB)).contains(bytesB);
-    assertThat(storage.getCode(Hash.hash(bytesC), accountHashD)).contains(bytesC);
+    assertThat(storage.getCode(Hash.hash(bytesB), accountHashB))
+        .hasValueSatisfying(c -> assertThat(c.getBytes()).isEqualTo(bytesB));
+    assertThat(storage.getCode(Hash.hash(bytesC), accountHashD))
+        .hasValueSatisfying(c -> assertThat(c.getBytes()).isEqualTo(bytesC));
   }
 
   @ParameterizedTest

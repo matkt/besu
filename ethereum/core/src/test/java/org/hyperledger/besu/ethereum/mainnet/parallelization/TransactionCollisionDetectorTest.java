@@ -23,11 +23,11 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
 import java.math.BigInteger;
@@ -54,18 +54,10 @@ class TransactionCollisionDetectorTest {
     collisionDetector = new TransactionCollisionDetector();
     bonsaiUpdater =
         new BonsaiWorldStateUpdateAccumulator(
-            worldState,
-            (__, ___) -> {},
-            (__, ___) -> {},
-            EvmConfiguration.DEFAULT,
-            new BonsaiCodeCache());
+            worldState, (__, ___) -> {}, (__, ___) -> {}, EvmConfiguration.DEFAULT);
     trxUpdater =
         new BonsaiWorldStateUpdateAccumulator(
-            worldState,
-            (__, ___) -> {},
-            (__, ___) -> {},
-            EvmConfiguration.DEFAULT,
-            new BonsaiCodeCache());
+            worldState, (__, ___) -> {}, (__, ___) -> {}, EvmConfiguration.DEFAULT);
   }
 
   private Transaction createTransaction(final Address sender, final Address to) {
@@ -90,8 +82,7 @@ class TransactionCollisionDetectorTest {
         Wei.ONE,
         Hash.EMPTY_TRIE_HASH,
         Hash.EMPTY,
-        false,
-        new BonsaiCodeCache());
+        false);
   }
 
   @Test
@@ -157,7 +148,7 @@ class TransactionCollisionDetectorTest {
     final Address address = Address.fromHexString("0x1");
     final BonsaiAccount priorAccountValue = createAccount(address);
     final BonsaiAccount nextAccountValue = new BonsaiAccount(priorAccountValue, worldState, true);
-    nextAccountValue.setCode(Bytes.repeat((byte) 0x01, 10));
+    nextAccountValue.setCode(new Code(Bytes.repeat((byte) 0x01, 10)));
 
     // Simulate that the address was already modified in the block
     bonsaiUpdater

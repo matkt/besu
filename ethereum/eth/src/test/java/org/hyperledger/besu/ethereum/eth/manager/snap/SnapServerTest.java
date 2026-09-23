@@ -146,6 +146,7 @@ public class SnapServerTest {
             new VersionedFlatDbCacheManager(
                 100, // accountCacheSize
                 100, // storageCacheSize
+                100, // codeCachePeakSize
                 noopMetrics),
             0);
 

@@ -173,7 +173,7 @@ public class EnvironmentInformation {
   }
 
   /**
-   * Returns code to be executed.
+   * Returns bytecode bytes from the reference-test env (not {@code Account#getCode()}).
    *
    * @return code to be executed.
    */

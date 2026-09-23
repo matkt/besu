@@ -1,5 +1,5 @@
 /*
- * Copyright contributors to Hyperledger Besu.
+ * Copyright contributors to Besu.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -23,9 +23,6 @@ import picocli.CommandLine;
 /** The Evm CLI options. */
 public class EvmOptions implements CLIOptions<EvmConfiguration> {
 
-  /** The constant JUMPDEST_CACHE_WEIGHT. */
-  public static final String JUMPDEST_CACHE_WEIGHT = "--Xevm-jumpdest-cache-weight-kb";
-
   /** The constant WORLDSTATE_UPDATE_MODE. */
   public static final String WORLDSTATE_UPDATE_MODE = "--Xevm-worldstate-update-mode";
 
@@ -46,17 +43,6 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
   public static EvmOptions create() {
     return new EvmOptions();
   }
-
-  @SuppressWarnings({"FieldCanBeFinal", "FieldMayBeFinal"})
-  @CommandLine.Option(
-      names = {JUMPDEST_CACHE_WEIGHT},
-      description =
-          "size in kilobytes to allow the cache "
-              + "of valid jump destinations to grow to before evicting the least recently used entry",
-      fallbackValue = "32000",
-      hidden = true)
-  private Long jumpDestCacheWeightKilobytes =
-      32_000L; // 10k contracts, (25k max contract size / 8 bit) + 32byte hash
 
   @CommandLine.Option(
       names = {WORLDSTATE_UPDATE_MODE},
@@ -85,12 +71,11 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
 
   @Override
   public EvmConfiguration toDomainObject() {
-    return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+    return new EvmConfiguration(worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
   }
 
   @Override
   public List<String> getCLIOptions() {
-    return List.of(JUMPDEST_CACHE_WEIGHT, WORLDSTATE_UPDATE_MODE);
+    return List.of(WORLDSTATE_UPDATE_MODE);
   }
 }

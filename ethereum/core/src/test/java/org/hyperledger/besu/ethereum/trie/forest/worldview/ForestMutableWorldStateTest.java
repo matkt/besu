@@ -23,6 +23,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -586,10 +587,10 @@ class ForestMutableWorldStateTest {
     final WorldUpdater updater = worldState.updater();
     final MutableAccount account = updater.createAccount(ADDRESS);
     account.setBalance(Wei.of(100000));
-    account.setCode(Bytes.of(1, 2, 3));
-    account.setCode(Bytes.of(3, 2, 1));
+    account.setCode(new Code(Bytes.of(1, 2, 3)));
+    account.setCode(new Code(Bytes.of(3, 2, 1)));
     updater.commit();
-    assertThat(worldState.get(ADDRESS).getCode()).isEqualTo(Bytes.of(3, 2, 1));
+    assertThat(worldState.get(ADDRESS).getCode().getBytes()).isEqualTo(Bytes.of(3, 2, 1));
     assertThat(worldState.rootHash())
         .isEqualTo(
             Hash.fromHexString(

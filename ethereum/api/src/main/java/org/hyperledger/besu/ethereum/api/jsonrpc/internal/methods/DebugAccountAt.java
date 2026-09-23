@@ -158,7 +158,7 @@ public class DebugAccountAt extends AbstractBlockParameterOrBlockHashMethod {
 
               return Optional.of(
                   debugAccountAtResult(
-                      account.get().getCode(),
+                      account.get().getCode().getBytes(),
                       Quantity.create(account.get().getNonce()),
                       Quantity.create(account.get().getBalance()),
                       Quantity.create(account.get().getCodeHash().getBytes())));

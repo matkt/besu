@@ -176,7 +176,7 @@ public class AccountChangesJson {
     }
 
     public CodeChange toCodeChange() {
-      return new CodeChange(
+      return CodeChange.fromBytes(
           decodeIndex(blockAccessIndex),
           newCode != null ? Bytes.fromHexString(newCode) : Bytes.EMPTY);
     }

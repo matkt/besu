@@ -977,7 +977,7 @@ public class MainnetTransactionProcessor {
             final MutableAccount account = worldState.getAccount(address);
             if (account != null) {
               account.setNonce(0L);
-              account.setCode(Bytes.EMPTY);
+              account.setCode(Code.EMPTY_CODE);
               account.clearStorage();
             }
           });
@@ -1014,14 +1014,7 @@ public class MainnetTransactionProcessor {
       return delegationTargetCode(worldUpdater, warmAddressList, contract, accessLocationTracker);
     }
 
-    // Bonsai accounts may have a fully cached code, so we use that one
-    if (contract.getCodeCache() != null) {
-      return contract.getOrCreateCachedCode();
-    }
-
-    // Any other account can only use the cached jump dest analysis if available
-    return messageCallProcessor.getOrCreateCachedJumpDest(
-        contract.getCodeHash(), contract.getCode());
+    return contract.getOrCreateCachedCode();
   }
 
   private Code delegationTargetCode(

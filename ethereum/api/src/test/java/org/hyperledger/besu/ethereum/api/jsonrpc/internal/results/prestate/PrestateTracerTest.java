@@ -29,6 +29,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.debug.TraceOptions;
 import org.hyperledger.besu.ethereum.debug.TracerType;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.EvmSpecVersion;
 import org.hyperledger.besu.evm.account.Account;
@@ -105,7 +106,7 @@ class PrestateTracerTest {
     when(account.getAddress()).thenReturn(address);
     when(account.getBalance()).thenReturn(balance);
     when(account.getNonce()).thenReturn(nonce);
-    when(account.getCode()).thenReturn(code);
+    when(account.getCode()).thenReturn(code.isEmpty() ? Code.EMPTY_CODE : new Code(code));
     when(account.getCodeHash()).thenReturn(code.isEmpty() ? Hash.EMPTY : Hash.hash(code));
     return account;
   }

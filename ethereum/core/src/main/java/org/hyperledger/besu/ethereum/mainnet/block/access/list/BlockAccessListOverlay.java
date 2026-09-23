@@ -15,10 +15,10 @@
 package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 
 import java.util.List;
@@ -27,7 +27,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
@@ -80,7 +79,8 @@ public final class BlockAccessListOverlay {
                     .map(BlockAccessList.NonceChange::newNonce));
   }
 
-  public Optional<Bytes> getCode(final Address address) {
+  /** Returns prior-tx bytecode from the BAL as analyzed {@link Code}. */
+  public Optional<Code> getCode(final Address address) {
     return accountLookup
         .getAccountChanges(address)
         .flatMap(
@@ -134,15 +134,15 @@ public final class BlockAccessListOverlay {
 
   private static void applyCodeChange(
       final MutableAccount account, final BlockAccessList.CodeChange change) {
-    final Bytes code = change.newCode() != null ? change.newCode() : Bytes.EMPTY;
+    final Code code = change.newCode();
     if (account instanceof BonsaiAccount pathBasedAccount) {
-      pathBasedAccount.setCodeHash(code.isEmpty() ? Hash.EMPTY : Hash.hash(code));
+      pathBasedAccount.setCodeHash(code.getCodeHash());
       return;
     }
     account.setCode(code);
   }
 
-  public void applyToCode(final Address address, final Consumer<Bytes> codeApplier) {
+  public void applyToCode(final Address address, final Consumer<Code> codeApplier) {
     accountLookup
         .getAccountChanges(address)
         .flatMap(

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.evm.processor;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.EVM;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.Account;
@@ -120,7 +121,7 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
 
   private static boolean accountExists(final Account account) {
     // EIP-684: a sent transaction or deployed code blocks creation; storage alone does not
-    return account.getNonce() != 0 || !account.getCode().isEmpty();
+    return account.getNonce() != 0 || account.getCode().getSize() > 0;
   }
 
   @Override
@@ -229,7 +230,7 @@ public class ContractCreationProcessor extends AbstractMessageProcessor {
     }
 
     final MutableAccount contract = frame.getWorldUpdater().getOrCreate(frame.getContractAddress());
-    contract.setCode(contractCode);
+    contract.setCode(new Code(contractCode));
     LOG.atTrace()
         .setMessage("EIP-8037 REC_CODE_DEPOSIT depth={} addr={} len={}")
         .addArgument(frame.getDepth())

@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLogAccumulator;
@@ -111,11 +112,11 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
         writeRlp(accountChange, output, (o, sta) -> sta.writeTo(o));
       }
 
-      final TrieLog.LogTuple<Bytes> codeChange = layer.getCodeChanges().get(address);
+      final TrieLog.LogTuple<Code> codeChange = layer.getCodeChanges().get(address);
       if (codeChange == null || codeChange.isUnchanged()) {
         output.writeNull();
       } else {
-        writeRlp(codeChange, output, RLPOutput::writeBytes);
+        writeRlp(codeChange, output, (o, c) -> o.writeBytes(c.getBytes()));
       }
 
       final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges =
@@ -172,11 +173,13 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
         input.skipNext();
       } else {
         input.enterList();
-        final Bytes oldCode = nullOrValue(input, RLPInput::readBytes);
-        final Bytes newCode = nullOrValue(input, RLPInput::readBytes);
+        final Bytes oldCodeBytes = nullOrValue(input, RLPInput::readBytes);
+        final Bytes newCodeBytes = nullOrValue(input, RLPInput::readBytes);
         final boolean isCleared = getOptionalIsCleared(input);
         input.leaveList();
-        newLayer.getCodeChanges().put(address, new BonsaiValue<>(oldCode, newCode, isCleared));
+        newLayer
+            .getCodeChanges()
+            .put(address, new BonsaiValue<>(toCode(oldCodeBytes), toCode(newCodeBytes), isCleared));
       }
 
       if (input.nextIsNull()) {
@@ -207,6 +210,17 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     newLayer.freeze();
 
     return newLayer;
+  }
+
+  /** Wire RLP bytecode → {@link Code} at the deserialize boundary only. */
+  private static Code toCode(final Bytes bytecode) {
+    if (bytecode == null) {
+      return null;
+    }
+    if (bytecode.isEmpty()) {
+      return Code.EMPTY_CODE;
+    }
+    return new Code(bytecode, Hash.hash(bytecode));
   }
 
   protected static <T> T nullOrValue(final RLPInput input, final Function<RLPInput, T> reader) {

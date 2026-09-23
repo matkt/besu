@@ -317,16 +317,16 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         newCodeHash = priorAccount != null ? priorAccount.getCodeHash() : Hash.EMPTY;
       } else {
         final BlockAccessList.CodeChange codeChange = changes.codeChanges().getLast();
-        newCodeHash = Hash.hash(codeChange.newCode());
+        newCodeHash = codeChange.newCode().getCodeHash();
         if (!sink.isFrozen()) {
-          if (codeChange.newCode().isEmpty()) {
+          if (codeChange.newCode().getSize() == 0) {
             // Code was cleared: load the parent account to find the prior code hash.
             if (priorAccount != null && !Hash.EMPTY.equals(priorAccount.getCodeHash())) {
               final Hash priorCodeHash = priorAccount.getCodeHash();
               sink.removeCode(accountHash, priorCodeHash);
             }
           } else {
-            sink.putCode(accountHash, newCodeHash, codeChange.newCode());
+            sink.putCode(accountHash, newCodeHash, codeChange.newCode().getBytes());
           }
         }
       }

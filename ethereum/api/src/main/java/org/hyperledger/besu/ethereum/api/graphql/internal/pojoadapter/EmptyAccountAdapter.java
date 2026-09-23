@@ -59,6 +59,7 @@ public class EmptyAccountAdapter extends AccountAdapter {
 
   @Override
   public Bytes getCode(final DataFetchingEnvironment environment) {
+    // GraphQL Account.code scalar is Bytes (see AccountAdapter#getCode).
     return Bytes.EMPTY;
   }
 

@@ -48,7 +48,6 @@ import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.WorldStatePreimageKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.forest.worldview.ForestMutableWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
@@ -58,6 +57,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -343,7 +343,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
         assertThat(worldState.get(CONTRACT)).isNotNull();
         assertThat(worldState.get(EOA)).isNotNull();
-        assertThat(worldState.get(CONTRACT).getCode()).isEqualTo(CONTRACT_CODE);
+        assertThat(worldState.get(CONTRACT).getCode().getBytes()).isEqualTo(CONTRACT_CODE);
         assertThat(worldState.get(CONTRACT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
             .isEqualTo(SLOT_VALUE);
       }
@@ -375,7 +375,7 @@ class StateRootCommitterIntegrationTest {
       try (BonsaiWorldState worldState = harness.newWritableWorldState()) {
         assertThat(worldState.get(CONTRACT)).isNotNull();
         assertThat(worldState.get(EOA)).isNotNull();
-        assertThat(worldState.get(CONTRACT).getCode()).isEqualTo(CONTRACT_CODE);
+        assertThat(worldState.get(CONTRACT).getCode().getBytes()).isEqualTo(CONTRACT_CODE);
         assertThat(worldState.get(CONTRACT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
             .isEqualTo(SLOT_VALUE);
       }
@@ -573,7 +573,7 @@ class StateRootCommitterIntegrationTest {
       final WorldUpdater updater = worldState.updater();
       final MutableAccount account = updater.createAccount(CONTRACT);
       account.setBalance(Wei.of(1_000));
-      account.setCode(CONTRACT_CODE);
+      account.setCode(new Code(CONTRACT_CODE));
       account.setStorageValue(SLOT.getSlotKey().orElseThrow(), SLOT_VALUE);
       updater.commit();
 
@@ -588,7 +588,7 @@ class StateRootCommitterIntegrationTest {
 
       assertThat(keysAfter).isGreaterThan(keysBefore);
       assertThat(worldState.get(CONTRACT)).isNotNull();
-      assertThat(worldState.get(CONTRACT).getCode()).isEqualTo(CONTRACT_CODE);
+      assertThat(worldState.get(CONTRACT).getCode().getBytes()).isEqualTo(CONTRACT_CODE);
       assertThat(worldState.get(CONTRACT).getStorageValue(SLOT.getSlotKey().orElseThrow()))
           .isEqualTo(SLOT_VALUE);
       assertThat(worldState.rootHash()).isEqualTo(rootBeforePersist);
@@ -632,8 +632,7 @@ class StateRootCommitterIntegrationTest {
                       false,
                       ImmutableBalConfiguration.builder().build(),
                       new NoOpMetricsSystem())
-                  .createProtocolSchedule(),
-              new BonsaiCodeCache());
+                  .createProtocolSchedule());
       final MutableBlockchain blockchain =
           InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesisState.getBlock());
 
@@ -650,17 +649,12 @@ class StateRootCommitterIntegrationTest {
               DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getExtraStorageConfiguration(),
               new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
               null,
-              EvmConfiguration.DEFAULT,
-              new BonsaiCodeCache());
+              EvmConfiguration.DEFAULT);
       genesisState.writeStateTo(bonsaiArchive.getWorldState());
 
       final BonsaiWorldState bonsaiWorldState =
           new BonsaiWorldState(
-              bonsaiArchive,
-              bonsaiKv,
-              EvmConfiguration.DEFAULT,
-              createStatefulConfigWithTrie(),
-              new BonsaiCodeCache());
+              bonsaiArchive, bonsaiKv, EvmConfiguration.DEFAULT, createStatefulConfigWithTrie());
 
       final InMemoryKeyValueStorageProvider forestProvider = new InMemoryKeyValueStorageProvider();
       final ForestMutableWorldState forestWorldState =
@@ -781,7 +775,7 @@ class StateRootCommitterIntegrationTest {
               u -> {
                 final MutableAccount contract = u.getOrCreate(CONTRACT);
                 contract.setBalance(Wei.of(5_000_000));
-                contract.setCode(CONTRACT_CODE);
+                contract.setCode(new Code(CONTRACT_CODE));
                 contract.setStorageValue(SLOT.getSlotKey().orElseThrow(), SLOT_VALUE);
               },
               u -> {
@@ -796,7 +790,7 @@ class StateRootCommitterIntegrationTest {
                   List.of(),
                   List.of(new BalanceChange(0, Wei.of(5_000_000))),
                   List.of(),
-                  List.of(new CodeChange(0, CONTRACT_CODE))),
+                  List.of(CodeChange.fromBytes(0, CONTRACT_CODE))),
               new AccountChanges(
                   EOA,
                   List.of(),
@@ -830,7 +824,7 @@ class StateRootCommitterIntegrationTest {
           List.of(
               u -> {
                 final MutableAccount account = u.getOrCreate(address);
-                account.setCode(code);
+                account.setCode(new Code(code));
                 account.setStorageValue(slot.getSlotKey().orElseThrow(), value);
               }),
           List.of(
@@ -840,7 +834,7 @@ class StateRootCommitterIntegrationTest {
                   List.of(),
                   List.of(),
                   List.of(),
-                  List.of(new CodeChange(0, code)))));
+                  List.of(CodeChange.fromBytes(0, code)))));
     }
 
     static BlockChange deleteAccount(final Address address) {
@@ -853,7 +847,7 @@ class StateRootCommitterIntegrationTest {
                   List.of(),
                   List.of(new BalanceChange(0, Wei.ZERO)),
                   List.of(new NonceChange(0, 0L)),
-                  List.of(new CodeChange(0, Bytes.EMPTY)))));
+                  List.of(CodeChange.fromBytes(0, Bytes.EMPTY)))));
     }
   }
 
@@ -904,7 +898,7 @@ class StateRootCommitterIntegrationTest {
                   new NoOpMetricsSystem())
               .createProtocolSchedule();
       final GenesisState genesisState =
-          GenesisState.fromConfig(GenesisConfig.mainnet(), protocolSchedule, new BonsaiCodeCache());
+          GenesisState.fromConfig(GenesisConfig.mainnet(), protocolSchedule);
       final MutableBlockchain blockchain =
           InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesisState.getBlock());
       final BonsaiWorldStateKeyValueStorage kvStorage =
@@ -917,8 +911,7 @@ class StateRootCommitterIntegrationTest {
               DataStorageConfiguration.DEFAULT_BONSAI_CONFIG.getExtraStorageConfiguration(),
               new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
               null,
-              EvmConfiguration.DEFAULT,
-              new BonsaiCodeCache());
+              EvmConfiguration.DEFAULT);
       genesisState.writeStateTo(archive.getWorldState());
       final ProtocolContext protocolContext =
           new ProtocolContext.Builder()

@@ -40,7 +40,6 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
-import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
@@ -288,45 +287,6 @@ public class BlockDataGenerator {
         worldState,
         Collections.emptyList(),
         Collections.emptyList());
-  }
-
-  public List<Account> createRandomAccounts(final MutableWorldState worldState, final int count) {
-    return createRandomAccounts(worldState, count, .5f, .75f);
-  }
-
-  public List<Account> createRandomContractAccountsWithNonEmptyStorage(
-      final MutableWorldState worldState, final int count) {
-    return createRandomAccounts(worldState, count, 1f, 1f);
-  }
-
-  private List<Account> createRandomAccounts(
-      final MutableWorldState worldState,
-      final int count,
-      final float percentContractAccounts,
-      final float percentContractAccountsWithNonEmptyStorage) {
-    final WorldUpdater updater = worldState.updater();
-    final List<Account> accounts = new ArrayList<>(count);
-    for (int i = 0; i < count; i++) {
-      final MutableAccount account = updater.getOrCreate(address());
-      if (random.nextFloat() < percentContractAccounts) {
-        // Some percentage of accounts are contract accounts
-        account.setCode(bytesValue(5, 50));
-        if (random.nextFloat() < percentContractAccountsWithNonEmptyStorage) {
-          // Add some storage for contract accounts
-          final int storageValues = random.nextInt(20) + 10;
-          for (int j = 0; j < storageValues; j++) {
-            account.setStorageValue(uint256(), uint256());
-          }
-        }
-      }
-      account.setNonce(random.nextLong());
-      account.setBalance(Wei.of(positiveLong()));
-
-      accounts.add(account);
-    }
-    updater.commit();
-    worldState.persist(null);
-    return accounts;
   }
 
   public List<Block> blockSequence(final int count) {
@@ -812,7 +772,8 @@ public class BlockDataGenerator {
                     List.of(),
                     List.of(),
                     List.of(),
-                    List.of(new BlockAccessList.CodeChange(0, Bytes.wrap(new byte[codeSize]))))));
+                    List.of(
+                        BlockAccessList.CodeChange.fromBytes(0, Bytes.wrap(new byte[codeSize]))))));
 
     final BytesValueRLPOutput balOutput = new BytesValueRLPOutput();
     BlockAccessListEncoder.encode(blockAccessList, balOutput);
@@ -863,7 +824,7 @@ public class BlockDataGenerator {
 
     final List<BlockAccessList.CodeChange> codeChanges = new ArrayList<>();
     for (int i = 0; i < codeChangeCount; i++) {
-      codeChanges.add(new BlockAccessList.CodeChange(i, bytesValue(10, 100)));
+      codeChanges.add(BlockAccessList.CodeChange.fromBytes(i, bytesValue(10, 100)));
     }
 
     return new BlockAccessList.AccountChanges(

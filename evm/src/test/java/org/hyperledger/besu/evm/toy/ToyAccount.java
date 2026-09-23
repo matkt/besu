@@ -17,6 +17,7 @@ package org.hyperledger.besu.evm.toy;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
@@ -28,7 +29,6 @@ import java.util.NavigableMap;
 import java.util.function.Supplier;
 
 import com.google.common.base.Suppliers;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -43,9 +43,9 @@ public class ToyAccount implements MutableAccount {
       Suppliers.memoize(() -> address == null ? Hash.ZERO : address.addressHash());
   private long nonce;
   private Wei balance;
-  private Bytes code;
+  private Code code;
   private Supplier<Hash> codeHash =
-      Suppliers.memoize(() -> code == null ? Hash.EMPTY : Hash.hash(code));
+      Suppliers.memoize(() -> code == null ? Hash.EMPTY : code.getCodeHash());
   private final Map<UInt256, UInt256> storage = new HashMap<>();
 
   public ToyAccount(
@@ -53,7 +53,7 @@ public class ToyAccount implements MutableAccount {
       final Address address,
       final long nonce,
       final Wei balance,
-      final Bytes code) {
+      final Code code) {
     this.parent = parent;
     this.address = address;
     this.nonce = nonce;
@@ -82,7 +82,7 @@ public class ToyAccount implements MutableAccount {
   }
 
   @Override
-  public Bytes getCode() {
+  public Code getCode() {
     return code;
   }
 
@@ -134,12 +134,12 @@ public class ToyAccount implements MutableAccount {
   }
 
   @Override
-  public void setCode(final Bytes code) {
+  public void setCode(final Code code) {
     if (immutable) {
       throw new ModificationNotAllowedException();
     }
-    this.code = code;
-    codeHash = Suppliers.memoize(() -> this.code == null ? Hash.EMPTY : Hash.hash(this.code));
+    this.code = code == null ? Code.EMPTY_CODE : code;
+    codeHash = Suppliers.memoize(() -> this.code == null ? Hash.EMPTY : this.code.getCodeHash());
   }
 
   @Override

@@ -85,7 +85,7 @@ public class SystemCallProcessor {
     // system contract still belongs in the access list.
     accessLocationTracker.ifPresent(tracker -> tracker.addTouchedAccount(callAddress));
     final Account maybeContract = systemCallUpdater.get(callAddress);
-    if (maybeContract == null || maybeContract.getCode().isEmpty()) {
+    if (maybeContract == null || maybeContract.getCode().getSize() == 0) {
       // Throwing skips the flush at the end of a successful call, so flush here instead.
       applyAccessLocationTracker(accessLocationTracker, context, systemCallUpdater);
       throw new SystemCallNoCodeAtAddressException(
@@ -159,9 +159,6 @@ public class SystemCallProcessor {
       final Bytes inputData,
       final Optional<AccessLocationTracker> maybeAccessLocationTracker) {
 
-    final AbstractMessageProcessor processor =
-        mainnetTransactionProcessor.getMessageProcessor(MessageFrame.Type.MESSAGE_CALL);
-
     MessageFrame.Builder builder =
         MessageFrame.builder()
             .maxStackSize(DEFAULT_MAX_STACK_SIZE)
@@ -187,7 +184,7 @@ public class SystemCallProcessor {
             // Pre-Amsterdam storageSetStateGas() is 0, so this seeds an empty reservoir (no
             // effect).
             .initialStateGasReservoir(systemCallStateGasReservoir())
-            .code(getCode(worldUpdater.get(callAddress), processor));
+            .code(getCode(worldUpdater.get(callAddress)));
 
     maybeAccessLocationTracker.ifPresent(
         tracker -> {
@@ -204,17 +201,11 @@ public class SystemCallProcessor {
     return stateGasCalc.storageSetStateGas() * SYSTEM_MAX_SSTORES_PER_CALL;
   }
 
-  private Code getCode(final Account contract, final AbstractMessageProcessor processor) {
+  private Code getCode(final Account contract) {
     if (contract == null) {
       return Code.EMPTY_CODE;
     }
 
-    // Bonsai accounts may have a fully cached code, so we use that one
-    if (contract.getCodeCache() != null) {
-      return contract.getOrCreateCachedCode();
-    }
-
-    // Any other account can only use the cached jump dest analysis if available
-    return processor.getOrCreateCachedJumpDest(contract.getCodeHash(), contract.getCode());
+    return contract.getOrCreateCachedCode();
   }
 }

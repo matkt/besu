@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -286,22 +287,22 @@ public class ForestMutableWorldState implements MutableWorldState {
     }
 
     @Override
-    public Bytes getCode() {
+    public Code getCode() {
       final Bytes updatedCode = updatedAccountCode.get(address);
       if (updatedCode != null) {
-        return updatedCode;
+        return updatedCode.isEmpty() ? Code.EMPTY_CODE : new Code(updatedCode);
       }
       // No code is common, save the KV-store lookup.
       final Hash codeHash = getCodeHash();
       if (codeHash.equals(Hash.EMPTY)) {
-        return Bytes.EMPTY;
+        return Code.EMPTY_CODE;
       }
-      return worldStateKeyValueStorage.getCode(codeHash).orElse(Bytes.EMPTY);
+      return worldStateKeyValueStorage.getCode(codeHash).orElse(Code.EMPTY_CODE);
     }
 
     @Override
     public boolean hasCode() {
-      return !getCode().isEmpty();
+      return getCode().getSize() > 0;
     }
 
     @Override
@@ -407,8 +408,8 @@ public class ForestMutableWorldState implements MutableWorldState {
         // Save the code in key-value storage ...
         Hash codeHash = origin == null ? Hash.EMPTY : origin.getCodeHash();
         if (updated.codeWasUpdated()) {
-          codeHash = Hash.hash(updated.getCode());
-          wrapped.updatedAccountCode.put(updated.getAddress(), updated.getCode());
+          codeHash = updated.getCode().getCodeHash();
+          wrapped.updatedAccountCode.put(updated.getAddress(), updated.getCode().getBytes());
         }
         // ...and storage in the account trie first.
         final boolean freshState = origin == null || updated.getStorageWasCleared();

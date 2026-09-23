@@ -14,17 +14,14 @@
  */
 package org.hyperledger.besu.evm;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static org.hyperledger.besu.evm.operation.PushOperation.PUSH_BASE;
 import static org.hyperledger.besu.evm.operation.SwapOperation.SWAP_BASE;
 
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.frame.MessageFrame.State;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
-import org.hyperledger.besu.evm.internal.JumpDestOnlyCodeCache;
 import org.hyperledger.besu.evm.internal.OverflowException;
 import org.hyperledger.besu.evm.internal.UnderflowException;
 import org.hyperledger.besu.evm.operation.AddModOperation;
@@ -132,8 +129,6 @@ public class EVM {
   private final boolean enableAmsterdam;
   private final boolean enableOsaka;
 
-  private final JumpDestOnlyCodeCache jumpDestOnlyCodeCache;
-
   /**
    * Instantiates a new Evm.
    *
@@ -152,7 +147,6 @@ public class EVM {
     this.endOfScriptStop = new VirtualOperation(new StopOperation(gasCalculator));
     this.evmConfiguration = evmConfiguration;
     this.evmSpecVersion = evmSpecVersion;
-    this.jumpDestOnlyCodeCache = new JumpDestOnlyCodeCache(evmConfiguration);
 
     enableConstantinople = EvmSpecVersion.CONSTANTINOPLE.ordinal() <= evmSpecVersion.ordinal();
     enableShanghai = EvmSpecVersion.SHANGHAI.ordinal() <= evmSpecVersion.ordinal();
@@ -559,24 +553,5 @@ public class EVM {
     return evmConfiguration.enableOptimizedOpcodes()
         ? optimized.apply(frame)
         : standard.apply(frame);
-  }
-
-  /**
-   * Gets or creates code instance with a cached jump destination.
-   *
-   * @param codeHash the code hash
-   * @param codeBytes the code bytes
-   * @return the code instance with the cached jump destination
-   */
-  public Code getOrCreateCachedJumpDest(final Hash codeHash, final Bytes codeBytes) {
-    checkNotNull(codeHash);
-
-    Code result = jumpDestOnlyCodeCache.getIfPresent(codeHash);
-    if (result == null) {
-      result = new Code(codeBytes);
-      jumpDestOnlyCodeCache.put(codeHash, result);
-    }
-
-    return result;
   }
 }

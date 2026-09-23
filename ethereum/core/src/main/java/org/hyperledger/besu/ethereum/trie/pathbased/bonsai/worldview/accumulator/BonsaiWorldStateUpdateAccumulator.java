@@ -20,7 +20,6 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -40,18 +39,14 @@ public class BonsaiWorldStateUpdateAccumulator
         public void onReset() {}
       };
 
-  private final BonsaiCodeCache codeCache;
   private CommittedTransactionListener committedTransactionListener = NO_OP_LISTENER;
 
   public BonsaiWorldStateUpdateAccumulator(
       final BonsaiWorldView world,
       final Consumer<BonsaiValue<BonsaiAccount>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
-      final EvmConfiguration evmConfiguration,
-      final BonsaiCodeCache codeCache) {
+      final EvmConfiguration evmConfiguration) {
     super(world, accountPreloader, storagePreloader, evmConfiguration);
-
-    this.codeCache = codeCache;
   }
 
   @Override
@@ -61,8 +56,7 @@ public class BonsaiWorldStateUpdateAccumulator
             wrappedWorldView(),
             getAccountPreloader(),
             getStoragePreloader(),
-            getEvmConfiguration(),
-            codeCache);
+            getEvmConfiguration());
     copy.cloneFromUpdater(this);
     // The copy is born with a detached (no-op) listener: copies serve as per-tx workers
     // (parallel-tx, simulation) and must not re-emit committed-transaction events.
@@ -86,7 +80,7 @@ public class BonsaiWorldStateUpdateAccumulator
       final Address address,
       final AccountValue stateTrieAccount,
       final boolean mutable) {
-    return new BonsaiAccount(context, address, stateTrieAccount, mutable, codeCache);
+    return new BonsaiAccount(context, address, stateTrieAccount, mutable);
   }
 
   @Override
@@ -100,13 +94,13 @@ public class BonsaiWorldStateUpdateAccumulator
       final Hash codeHash,
       final boolean mutable) {
     return new BonsaiAccount(
-        context, address, addressHash, nonce, balance, storageRoot, codeHash, mutable, codeCache);
+        context, address, addressHash, nonce, balance, storageRoot, codeHash, mutable);
   }
 
   @Override
   protected BonsaiAccount createAccount(
       final BonsaiWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
-    return new BonsaiAccount(context, tracked, codeCache);
+    return new BonsaiAccount(context, tracked);
   }
 
   @Override
@@ -150,10 +144,5 @@ public class BonsaiWorldStateUpdateAccumulator
     // (it bypasses to AbstractWorldUpdater.reset()), which is the intended behavior — listeners
     // tracking committed deltas should survive a per-tx revert.
     committedTransactionListener.onReset();
-  }
-
-  @Override
-  public BonsaiCodeCache codeCache() {
-    return codeCache;
   }
 }

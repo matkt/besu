@@ -18,6 +18,7 @@ import static org.hyperledger.besu.evm.worldstate.CodeDelegationHelper.CODE_DELE
 import static org.hyperledger.besu.evm.worldstate.CodeDelegationHelper.hasCodeDelegation;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 
@@ -41,11 +42,12 @@ public class CodeDelegationService {
       final MutableAccount account, final Address codeDelegationAddress) {
     // code delegation to zero address removes any delegated code
     if (codeDelegationAddress.equals(Address.ZERO)) {
-      account.setCode(Bytes.EMPTY);
+      account.setCode(Code.EMPTY_CODE);
       return;
     }
 
-    account.setCode(Bytes.concatenate(CODE_DELEGATION_PREFIX, codeDelegationAddress.getBytes()));
+    account.setCode(
+        new Code(Bytes.concatenate(CODE_DELEGATION_PREFIX, codeDelegationAddress.getBytes())));
   }
 
   /**
@@ -55,6 +57,7 @@ public class CodeDelegationService {
    * @return {@code true} if the account can set delegated code, {@code false} otherwise.
    */
   public boolean canSetCodeDelegation(final Account account) {
-    return account != null && (account.getCode().isEmpty() || hasCodeDelegation(account.getCode()));
+    return account != null
+        && (account.getCode().getSize() == 0 || hasCodeDelegation(account.getCode()));
   }
 }

@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
@@ -236,9 +237,7 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
             bonsai
                 .getWorldStateStorage()
                 .getAccount(address.addressHash())
-                .map(
-                    bytes ->
-                        BonsaiAccount.fromRLP(bonsai, address, bytes, true, bonsai.codeCache()))
+                .map(bytes -> BonsaiAccount.fromRLP(bonsai, address, bytes, true))
                 .orElse(null);
         if (oldAccount == null) {
           continue;
@@ -296,11 +295,13 @@ public class DefaultStateRootCommitter implements StateRootCommitter {
     }
 
     private void collectCodeWrites() {
-      for (final Map.Entry<Address, BonsaiValue<Bytes>> codeUpdate :
+      for (final Map.Entry<Address, BonsaiValue<Code>> codeUpdate :
           worldStateUpdater.getCodeToUpdate().entrySet()) {
-        final Bytes updatedCode = codeUpdate.getValue().getUpdated();
+        final Code updated = codeUpdate.getValue().getUpdated();
         final Hash accountHash = codeUpdate.getKey().addressHash();
-        final Bytes priorCode = codeUpdate.getValue().getPrior();
+        final Code prior = codeUpdate.getValue().getPrior();
+        final Bytes updatedCode = updated == null ? null : updated.getBytes();
+        final Bytes priorCode = prior == null ? null : prior.getBytes();
 
         if (Objects.equals(priorCode, updatedCode)
             || (codeIsEmpty(priorCode) && codeIsEmpty(updatedCode))) {

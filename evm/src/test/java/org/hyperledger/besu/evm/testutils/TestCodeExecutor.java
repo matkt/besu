@@ -86,7 +86,7 @@ public class TestCodeExecutor {
 
     contract.setNonce(0);
     contract.clearStorage();
-    contract.setCode(Bytes.fromHexStringLenient(codeHexString));
+    contract.setCode(new Code(Bytes.fromHexStringLenient(codeHexString)));
     updater.commit();
   }
 

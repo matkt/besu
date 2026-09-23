@@ -49,20 +49,20 @@ class CodeDelegationHelperTest {
 
   @Test
   void hasCodeDelegationReturnsFalseForWrongSize() {
-    Bytes wrongSizeCode = Bytes.fromHexString("ef010001020304"); // arbitrary extra bytes
+    Code wrongSizeCode = new Code(Bytes.fromHexString("ef010001020304")); // arbitrary extra bytes
     assertThat(CodeDelegationHelper.hasCodeDelegation(wrongSizeCode)).isFalse();
   }
 
   @Test
   void hasCodeDelegationReturnsFalseForWrongPrefix() {
-    Bytes wrongPrefix = Bytes.concatenate(Bytes.fromHexString("abcd00"), Bytes.random(20));
+    Code wrongPrefix = new Code(Bytes.concatenate(Bytes.fromHexString("abcd00"), Bytes.random(20)));
     assertThat(CodeDelegationHelper.hasCodeDelegation(wrongPrefix)).isFalse();
   }
 
   @Test
   void hasCodeDelegationReturnsTrueForValidDelegationCode() {
-    Bytes validCode = Bytes.concatenate(CODE_PREFIX, Bytes.random(20));
-    assertThat(validCode.size()).isEqualTo(DELEGATED_SIZE);
+    Code validCode = new Code(Bytes.concatenate(CODE_PREFIX, Bytes.random(20)));
+    assertThat(validCode.getSize()).isEqualTo(DELEGATED_SIZE);
     assertThat(CodeDelegationHelper.hasCodeDelegation(validCode)).isTrue();
   }
 
@@ -79,7 +79,7 @@ class CodeDelegationHelperTest {
   @Test
   void getTargetReturnsEmptyIfNoDelegation() {
     Bytes code = Bytes.fromHexString("600035"); // random code, not delegated
-    when(account.getCode()).thenReturn(code);
+    when(account.getCode()).thenReturn(new Code(code));
 
     assertThatThrownBy(
             () ->
@@ -92,7 +92,7 @@ class CodeDelegationHelperTest {
   @Test
   void getTargetAccountReturnsEmptyIfTargetCodeIsNull() {
     Bytes validCode = Bytes.concatenate(CODE_PREFIX, Bytes.random(20));
-    when(account.getCode()).thenReturn(validCode);
+    when(account.getCode()).thenReturn(new Code(validCode));
 
     Address targetAddress = Address.wrap(validCode.slice(CODE_PREFIX.size()));
     when(worldUpdater.get(targetAddress)).thenReturn(null);
@@ -108,7 +108,7 @@ class CodeDelegationHelperTest {
   @Test
   void getTargetAccountReturnsEmptyCodeIfTargetIsPrecompile() {
     Bytes validCode = Bytes.concatenate(CODE_PREFIX, Bytes.random(20));
-    when(account.getCode()).thenReturn(validCode);
+    when(account.getCode()).thenReturn(new Code(validCode));
 
     Address targetAddress = Address.wrap(validCode.slice(CODE_PREFIX.size()));
     Account targetAccount = mock(Account.class);
@@ -127,7 +127,7 @@ class CodeDelegationHelperTest {
   @Test
   void getTargetAccountReturnsTargetCodeIfValid() {
     Bytes validCode = Bytes.concatenate(CODE_PREFIX, Bytes.random(20));
-    when(account.getCode()).thenReturn(validCode);
+    when(account.getCode()).thenReturn(new Code(validCode));
 
     Address targetAddress = Address.wrap(validCode.slice(CODE_PREFIX.size()));
     Account targetAccount = mock(Account.class);

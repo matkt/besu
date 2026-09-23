@@ -352,7 +352,7 @@ class ReorgBlockchainBuilder {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of(new BlockAccessList.CodeChange(0, newCode)))));
+                List.of(BlockAccessList.CodeChange.fromBytes(0, newCode)))));
   }
 
   BlockAccessList merge(final BlockAccessList... bals) {

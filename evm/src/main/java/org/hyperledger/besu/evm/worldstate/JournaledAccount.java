@@ -22,6 +22,7 @@ import org.hyperledger.besu.collections.undo.Undoable;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.ModificationNotAllowedException;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.evm.account.MutableAccount;
@@ -30,7 +31,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.jspecify.annotations.Nullable;
@@ -53,7 +53,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
   private long transactionBoundaryMark;
   private final UndoScalar<Long> nonce;
   private final UndoScalar<Wei> balance;
-  private final UndoScalar<Bytes> code;
+  private final UndoScalar<Code> code;
   private final UndoScalar<Hash> codeHash;
   private final UndoScalar<Boolean> deleted;
 
@@ -78,7 +78,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
     this.nonce = UndoScalar.of(0L);
     this.balance = UndoScalar.of(Wei.ZERO);
 
-    this.code = UndoScalar.of(Bytes.EMPTY);
+    this.code = UndoScalar.of(Code.EMPTY_CODE);
     this.codeHash = UndoScalar.of(Hash.EMPTY);
     this.deleted = UndoScalar.of(Boolean.FALSE);
     this.updatedStorage = UndoNavigableMap.of(new TreeMap<>());
@@ -210,7 +210,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
   }
 
   @Override
-  public Bytes getCode() {
+  public Code getCode() {
     return code.get();
   }
 
@@ -221,7 +221,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
 
   @Override
   public boolean hasCode() {
-    return !code.get().isEmpty();
+    return code.get().getSize() > 0;
   }
 
   /**
@@ -246,12 +246,12 @@ public class JournaledAccount implements MutableAccount, Undoable {
   }
 
   @Override
-  public void setCode(final Bytes code) {
+  public void setCode(final Code code) {
     if (immutable) {
       throw new ModificationNotAllowedException();
     }
-    this.code.set(code == null ? Bytes.EMPTY : code);
-    this.codeHash.set(code == null ? Hash.EMPTY : Hash.hash(code));
+    this.code.set(code == null ? Code.EMPTY_CODE : code);
+    this.codeHash.set(code == null ? Hash.EMPTY : code.getCodeHash());
   }
 
   /** Mark transaction boundary. */
@@ -385,7 +385,7 @@ public class JournaledAccount implements MutableAccount, Undoable {
         account.setBalance(balance.get());
       }
       if (code.updated()) {
-        account.setCode(code.get() == null ? Bytes.EMPTY : code.get());
+        account.setCode(code.get() == null ? Code.EMPTY_CODE : code.get());
       }
       if (updatedStorage.updated()) {
         updatedStorage.forEach(account::setStorageValue);

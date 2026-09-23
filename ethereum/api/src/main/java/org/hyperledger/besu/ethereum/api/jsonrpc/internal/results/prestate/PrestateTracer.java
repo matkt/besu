@@ -330,9 +330,9 @@ public class PrestateTracer implements OperationTracer {
       // Geth and would not get a codeHash diff there, but does here.
       final boolean nonexistent =
           now == null
-              || (now.getNonce() == 0 && now.getCode().isEmpty() && now.getBalance().isZero());
+              || (now.getNonce() == 0 && now.getCode().getSize() == 0 && now.getBalance().isZero());
       final Hash newCodeHash = nonexistent ? Hash.ZERO : now.getCodeHash();
-      final Bytes newCode = now == null ? Bytes.EMPTY : now.getCode();
+      final Bytes newCode = now == null ? Bytes.EMPTY : now.getCode().getBytes();
 
       boolean modified = false;
       final AccountState postState = new AccountState();
@@ -410,7 +410,7 @@ public class PrestateTracer implements OperationTracer {
     final AccountState state = new AccountState();
     state.balance = account == null ? Wei.ZERO : account.getBalance();
     state.nonce = account == null ? 0L : account.getNonce();
-    final Bytes rawCode = account == null ? Bytes.EMPTY : account.getCode();
+    final Bytes rawCode = account == null ? Bytes.EMPTY : account.getCode().getBytes();
     state.code = rawCode.isEmpty() ? null : rawCode;
     final Hash rawCodeHash = account == null ? Hash.EMPTY : account.getCodeHash();
     state.codeHash =

@@ -43,6 +43,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldS
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.BesuEvents;
 
 import java.util.ArrayList;
@@ -606,7 +607,8 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
         if (Hash.EMPTY.getBytes().equals(codeHash)) {
           maybeCode = Optional.of(Bytes.EMPTY);
         } else {
-          maybeCode = worldStateStorageCoordinator.getCode(Hash.wrap(codeHash), null);
+          maybeCode =
+              worldStateStorageCoordinator.getCode(Hash.wrap(codeHash), null).map(Code::getBytes);
         }
 
         if (maybeCode.isPresent()

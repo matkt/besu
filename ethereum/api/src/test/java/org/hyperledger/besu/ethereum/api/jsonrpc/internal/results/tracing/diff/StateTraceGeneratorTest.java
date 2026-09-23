@@ -23,6 +23,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.processor.TransactionTrace;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.tracing.TraceFrame;
@@ -32,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -154,7 +154,7 @@ public class StateTraceGeneratorTest {
     when(a.getAddress()).thenReturn(addr);
     when(a.getBalance()).thenReturn(Wei.of(balance));
     when(a.getNonce()).thenReturn(nonce);
-    when(a.getCode()).thenReturn(Bytes.EMPTY);
+    when(a.getCode()).thenReturn(Code.EMPTY_CODE);
     when(a.getCodeHash()).thenReturn(Hash.ZERO);
     when(a.getUpdatedStorage()).thenReturn(updatedStorage);
     updatedStorage.forEach((k, v) -> when(a.getStorageValue(k)).thenReturn(v));

@@ -31,7 +31,6 @@ import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
@@ -133,8 +132,7 @@ class BonsaiWorldStateProviderTest {
             ImmutableExtraStorageConfiguration.builder().maxLayersToLoad(512L).build(),
             new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
             null,
-            EvmConfiguration.DEFAULT,
-            new BonsaiCodeCache());
+            EvmConfiguration.DEFAULT);
 
     final BlockHeader genesis = blockBuilder.number(0).buildHeader();
     final BlockHeader blockHeader512 =
@@ -294,8 +292,7 @@ class BonsaiWorldStateProviderTest {
         worldStateKeyValueStorage,
         blockchain,
         new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
-        EvmConfiguration.DEFAULT,
-        new BonsaiCodeCache());
+        EvmConfiguration.DEFAULT);
   }
 
   private BonsaiWorldState createMockWorldState(final Hash blockHash) {

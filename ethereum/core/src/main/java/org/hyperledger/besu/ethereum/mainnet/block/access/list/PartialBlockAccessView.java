@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,7 +27,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
@@ -98,7 +98,7 @@ public final class PartialBlockAccessView {
     private final Address address;
     private Optional<Wei> postBalance;
     private final Optional<Long> nonceChange;
-    private final Optional<Bytes> newCode;
+    private final Optional<Code> newCode;
     private final List<StorageSlotKey> storageReads;
     private final List<SlotChange> storageChanges;
 
@@ -106,7 +106,7 @@ public final class PartialBlockAccessView {
         final Address address,
         final Optional<Wei> postBalance,
         final Optional<Long> nonceChange,
-        final Optional<Bytes> newCode,
+        final Optional<Code> newCode,
         final List<StorageSlotKey> storageReads,
         final List<SlotChange> storageChanges) {
       this.address = address;
@@ -133,7 +133,7 @@ public final class PartialBlockAccessView {
       return nonceChange;
     }
 
-    public Optional<Bytes> getNewCode() {
+    public Optional<Code> getNewCode() {
       return newCode;
     }
 
@@ -196,7 +196,7 @@ public final class PartialBlockAccessView {
     private final Address address;
     private Optional<Wei> postBalance = Optional.empty();
     private Optional<Long> nonceChange = Optional.empty();
-    private Optional<Bytes> newCode = Optional.empty();
+    private Optional<Code> newCode = Optional.empty();
     private final List<StorageSlotKey> storageReads = new ArrayList<>();
     private final List<SlotChange> storageChanges = new ArrayList<>();
 
@@ -214,7 +214,7 @@ public final class PartialBlockAccessView {
       return this;
     }
 
-    public AccountChangesBuilder withNewCode(final Bytes newCode) {
+    public AccountChangesBuilder withNewCode(final Code newCode) {
       this.newCode = Optional.ofNullable(newCode);
       return this;
     }

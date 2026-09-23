@@ -281,7 +281,7 @@ public class EthGetBlockAccessListTest {
             List.of(new SlotRead(slot1)),
             Collections.emptyList(),
             Collections.emptyList(),
-            List.of(new CodeChange(1, Bytes.fromHexString("0x60806040"))));
+            List.of(CodeChange.fromBytes(1, Bytes.fromHexString("0x60806040"))));
 
     return new BlockAccessList(List.of(accountChanges1, accountChanges2));
   }

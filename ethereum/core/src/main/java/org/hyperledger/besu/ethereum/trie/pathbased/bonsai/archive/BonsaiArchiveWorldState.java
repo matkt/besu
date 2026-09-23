@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive;
 
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -35,9 +34,8 @@ public class BonsaiArchiveWorldState extends BonsaiWorldState {
       final BonsaiWorldStateProvider archive,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final EvmConfiguration evmConfiguration,
-      final WorldStateConfig worldStateConfig,
-      final BonsaiCodeCache codeCache) {
-    super(archive, worldStateKeyValueStorage, evmConfiguration, worldStateConfig, codeCache);
+      final WorldStateConfig worldStateConfig) {
+    super(archive, worldStateKeyValueStorage, evmConfiguration, worldStateConfig);
   }
 
   @Override

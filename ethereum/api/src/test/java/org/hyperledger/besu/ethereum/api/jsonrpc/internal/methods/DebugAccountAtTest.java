@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.api.query.TransactionWithMetadata;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.tracing.TraceFrame;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -246,7 +247,7 @@ class DebugAccountAtTest {
     setupMockAccount();
     setupMockBlock();
 
-    Mockito.when(account.getCode()).thenReturn(code);
+    Mockito.when(account.getCode()).thenReturn(new Code(code));
     Mockito.when(account.getNonce()).thenReturn(nonce);
     Mockito.when(account.getBalance()).thenReturn(balance);
     Mockito.when(account.getCodeHash()).thenReturn(codeHash);

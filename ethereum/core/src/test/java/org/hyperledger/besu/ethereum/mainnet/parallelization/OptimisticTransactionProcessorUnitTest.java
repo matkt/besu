@@ -41,7 +41,6 @@ import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -130,12 +129,10 @@ class OptimisticTransactionProcessorUnitTest {
     return new BonsaiWorldState(
         storage,
         new NoOpBonsaiCachedMerkleTrieLoader(),
-        new NoOpBonsaiWorldStateCacheManager(
-            storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
+        new NoOpBonsaiWorldStateCacheManager(storage, EvmConfiguration.DEFAULT),
         new NoOpTrieLogManager(),
         EvmConfiguration.DEFAULT,
-        createStatefulConfigWithTrie(),
-        new BonsaiCodeCache());
+        createStatefulConfigWithTrie());
   }
 
   private TestEnvironment createTestEnvironment() {

@@ -17,12 +17,12 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 public final class BlockAccessListChanges {
@@ -64,7 +64,7 @@ public final class BlockAccessListChanges {
       Address address,
       Optional<Wei> balance,
       Optional<Long> nonce,
-      Optional<Bytes> code,
+      Optional<Code> code,
       List<StorageFinalChange> storageChanges) {
     public boolean hasAnyChange() {
       return !balance.isEmpty() || !nonce.isEmpty() || !code.isEmpty() || !storageChanges.isEmpty();

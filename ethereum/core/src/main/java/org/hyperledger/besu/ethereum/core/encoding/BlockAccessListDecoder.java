@@ -99,7 +99,7 @@ public final class BlockAccessListDecoder {
                 long txIndex = ccIn.readUnsignedIntScalar();
                 Bytes newCode = ccIn.readBytes();
                 ccIn.leaveList();
-                return new CodeChange(txIndex, newCode);
+                return CodeChange.fromBytes(txIndex, newCode);
               });
 
       acctIn.leaveList();

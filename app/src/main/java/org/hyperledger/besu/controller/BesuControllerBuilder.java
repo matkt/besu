@@ -93,7 +93,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiFlatDbT
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveCoverageTracker;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveNodeHistoryStore;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveTrieNodeStrategy;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.code.CodeHashCodeStorageStrategy;
@@ -241,9 +240,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
    * is active on the chain.
    */
   protected boolean isLegacyBftProtocolEncodingEnabled = false;
-
-  /** The global code cache */
-  protected BonsaiCodeCache codeCache;
 
   /** The effective checkpoint to sync to (CLI override or genesis). */
   protected Optional<Checkpoint> checkpoint = Optional.empty();
@@ -665,9 +661,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     checkNotNull(dataStorageConfiguration, "Missing data storage configuration");
     checkNotNull(besuComponent, "Must supply a BesuComponent");
 
-    this.codeCache = besuComponent.map(BesuComponent::getCodeCache).orElse(new BonsaiCodeCache());
-    this.codeCache.setupMetricsSystem(metricsSystem);
-
     prepForBuild();
 
     final ProtocolSchedule protocolSchedule = createProtocolSchedule();
@@ -686,8 +679,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     final var genesisState =
         getGenesisState(
             maybeStoredGenesisBlockHash.flatMap(blockchainStorage::getBlockHeader),
-            protocolSchedule,
-            codeCache);
+            protocolSchedule);
 
     final EthScheduler scheduler =
         new EthScheduler(
@@ -1061,8 +1053,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
 
   private GenesisState getGenesisState(
       final Optional<BlockHeader> maybeGenesisBlockHeader,
-      final ProtocolSchedule protocolSchedule,
-      final BonsaiCodeCache codeCache) {
+      final ProtocolSchedule protocolSchedule) {
     final Optional<Hash> maybeGenesisStateRoot =
         genesisStateHashCacheEnabled
             ? maybeGenesisBlockHeader.map(BlockHeader::getStateRoot)
@@ -1074,8 +1065,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
                 GenesisState.fromStorage(genesisStateRoot, genesisConfig, protocolSchedule))
         .orElseGet(
             () ->
-                GenesisState.fromConfig(
-                    dataStorageConfiguration, genesisConfig, protocolSchedule, codeCache));
+                GenesisState.fromConfig(dataStorageConfiguration, genesisConfig, protocolSchedule));
   }
 
   private TrieLogPruner createTrieLogPruner(
@@ -1454,7 +1444,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             bonsaiCachedMerkleTrieLoader,
             besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
             evmConfiguration,
-            codeCache,
             amsterdamMilestone);
       }
       case X_BONSAI_ARCHIVE -> {
@@ -1468,7 +1457,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             bonsaiCachedMerkleTrieLoader,
             besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
             evmConfiguration,
-            codeCache,
             metricsSystem,
             amsterdamMilestone);
       }

@@ -60,7 +60,6 @@ import org.hyperledger.besu.ethereum.eth.transactions.TransactionPoolMetrics;
 import org.hyperledger.besu.ethereum.eth.transactions.sorter.BaseFeePendingTransactionsSorter;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
@@ -124,7 +123,7 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
 
   private final ProtocolSchedule protocolSchedule = spy(getMergeProtocolSchedule());
   private final GenesisState genesisState =
-      GenesisState.fromConfig(getPosGenesisConfig(), protocolSchedule, new BonsaiCodeCache());
+      GenesisState.fromConfig(getPosGenesisConfig(), protocolSchedule);
 
   private final Address coinbase = genesisAllocations(getPosGenesisConfig()).findFirst().get();
   private final MutableBlockchain blockchain =
@@ -181,8 +180,7 @@ public class MergeCoordinatorCacheReorgTest implements MergeGenesisConfigHelper 
             ExtraStorageConfiguration.DEFAULT,
             cachedMerkleTrieLoader,
             pluginContext,
-            EvmConfiguration.DEFAULT,
-            new BonsaiCodeCache());
+            EvmConfiguration.DEFAULT);
 
     protocolContext =
         new ProtocolContext.Builder()

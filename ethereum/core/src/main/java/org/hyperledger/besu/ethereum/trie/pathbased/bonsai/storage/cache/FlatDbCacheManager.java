@@ -14,6 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache;
 
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.evm.Code;
+import org.hyperledger.besu.evm.internal.CodeCache;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 
 import java.util.Arrays;
@@ -25,12 +28,24 @@ import java.util.function.Supplier;
 import org.apache.tuweni.bytes.Bytes;
 
 /**
- * No-op implementation of FlatDbCacheManager that bypasses caching entirely. Used when caching is
- * disabled in configuration.
+ * Flat-db cache manager for versioned account/storage entries and content-addressed analyzed
+ * contract {@link Code}. Implements {@link CodeCache} so EVM account tracking can use the same KV
+ * analyzed-code cache (not a separate layer). The no-op implementation bypasses caching.
  */
-public interface FlatDbCacheManager {
+public interface FlatDbCacheManager extends CodeCache {
 
   FlatDbCacheManager NO_OP_CACHE = new FlatDbCacheManager() {};
+
+  /**
+   * Steady-state maximum entries per versioned segment (account, storage) and for analyzed code
+   * after {@link #scheduleAsyncMaintenance()}.
+   */
+  long CACHE_STEADY_SIZE = 256L;
+
+  /**
+   * @deprecated use {@link #CACHE_STEADY_SIZE}
+   */
+  @Deprecated long CODE_CACHE_STEADY_SIZE = CACHE_STEADY_SIZE;
 
   default long getCurrentVersion() {
     return 0;
@@ -45,6 +60,71 @@ public interface FlatDbCacheManager {
   }
 
   default void scheduleAsyncMaintenance() {
+    // No-op
+  }
+
+  /**
+   * Raises account, storage, and analyzed-code cache maxima to their configured peaks so a block
+   * (and BAL prefetch) can retain all warmed entries until maintenance shrinks them again.
+   */
+  default void expandCachesForBlock() {
+    // No-op
+  }
+
+  /**
+   * @deprecated use {@link #expandCachesForBlock()}
+   */
+  @Deprecated
+  default void expandCodeCacheForBlock() {
+    expandCachesForBlock();
+  }
+
+  /** Estimated number of analyzed {@link Code} entries in the code cache. */
+  default long getCodeCacheSize() {
+    return 0;
+  }
+
+  @Override
+  default Code getIfPresent(final Hash codeHash) {
+    return null;
+  }
+
+  @Override
+  default void put(final Hash codeHash, final Code code) {
+    // No-op
+  }
+
+  /**
+   * Analyzed-{@link Code} analogue of {@link #getFromCacheOrStorage}: hit by {@code codeHash}, else
+   * load flat bytes, build + jump-dest-analyze {@link Code}, put, and return.
+   */
+  default Optional<Code> getCodeFromCacheOrStorage(
+      final Hash codeHash, final Supplier<Optional<Bytes>> flatCodeLoader) {
+    if (codeHash.equals(Hash.EMPTY)) {
+      return Optional.of(Code.EMPTY_CODE);
+    }
+    final Code cached = getIfPresent(codeHash);
+    if (cached != null) {
+      return Optional.of(cached);
+    }
+    final Optional<Bytes> flat = flatCodeLoader.get();
+    if (flat.isEmpty()) {
+      return Optional.empty();
+    }
+    if (flat.get().isEmpty()) {
+      return Optional.of(Code.EMPTY_CODE);
+    }
+    final Code code = new Code(flat.get(), codeHash);
+    code.ensureJumpDestAnalyzed();
+    put(codeHash, code);
+    return Optional.of(code);
+  }
+
+  /**
+   * Drops an analyzed {@link Code} entry. Used when flat code is removed (e.g. account-hash code
+   * strategy). Analyzed code is otherwise content-addressed and immutable for a given hash.
+   */
+  default void invalidateCode(final Hash codeHash) {
     // No-op
   }
 

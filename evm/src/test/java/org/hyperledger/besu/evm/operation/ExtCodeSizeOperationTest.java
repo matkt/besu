@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.frame.BlockValues;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -93,7 +94,7 @@ class ExtCodeSizeOperationTest {
   void shouldGetSizeOfAccountCodeWhenCodeIsPresent() {
     final Bytes code = Bytes.fromHexString("0xabcdef");
     final MutableAccount account = worldStateUpdater.getOrCreate(REQUESTED_ADDRESS);
-    account.setCode(code);
+    account.setCode(new Code(code));
     assertThat(executeOperation(REQUESTED_ADDRESS).toInt()).isEqualTo(3);
   }
 
@@ -102,7 +103,7 @@ class ExtCodeSizeOperationTest {
     // If EXTCODESIZE of A is X, then EXTCODESIZE of A + 2**160 is X.
     final Bytes code = Bytes.fromHexString("0xabcdef");
     final MutableAccount account = worldStateUpdater.getOrCreate(REQUESTED_ADDRESS);
-    account.setCode(code);
+    account.setCode(new Code(code));
     final UInt256 value =
         UInt256.fromBytes(Words.fromAddress(REQUESTED_ADDRESS))
             .add(UInt256.valueOf(2).pow(UInt256.valueOf(160)));
@@ -115,7 +116,7 @@ class ExtCodeSizeOperationTest {
   void shouldGetSize() {
     final Bytes code = Bytes.fromHexString("0xEFF09f918bf09f9fa9");
     final MutableAccount account = worldStateUpdater.getOrCreate(REQUESTED_ADDRESS);
-    account.setCode(code);
+    account.setCode(new Code(code));
     final UInt256 value =
         UInt256.fromBytes(Words.fromAddress(REQUESTED_ADDRESS))
             .add(UInt256.valueOf(2).pow(UInt256.valueOf(160)));

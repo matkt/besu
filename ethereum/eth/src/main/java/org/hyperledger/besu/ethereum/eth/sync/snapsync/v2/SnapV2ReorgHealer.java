@@ -309,7 +309,7 @@ public class SnapV2ReorgHealer {
   private boolean hasCodeLocally(final Hash codeHash, final Hash accountHash) {
     return worldStateStorageCoordinator
         .getCode(codeHash, accountHash)
-        .map(code -> !code.isEmpty())
+        .map(code -> code.getSize() > 0)
         .orElse(false);
   }
 

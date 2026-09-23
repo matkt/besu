@@ -53,21 +53,21 @@ public class CodeDelegationHelper {
    * @param code the code to check.
    * @return {@code true} if the code is delegated code, {@code false} otherwise.
    */
-  public static boolean hasCodeDelegation(final Bytes code) {
+  public static boolean hasCodeDelegation(final Code code) {
     return code != null
-        && code.size() == DELEGATED_CODE_SIZE
-        && code.slice(0, CODE_DELEGATION_PREFIX.size()).equals(CODE_DELEGATION_PREFIX);
+        && code.getSize() == DELEGATED_CODE_SIZE
+        && code.getBytes().slice(0, CODE_DELEGATION_PREFIX.size()).equals(CODE_DELEGATION_PREFIX);
   }
 
   /**
-   * return the target address from the byte code. The method assumes that the byte code is a valid
-   * according to EIP-7702
+   * return the target address from the code. The method assumes that the code is valid according to
+   * EIP-7702
    *
-   * @param code the 7702 byte code in the form CODE_DELEGATION_PREFIX + target address
+   * @param code the 7702 code in the form CODE_DELEGATION_PREFIX + target address
    * @return the address of the target
    */
-  public static Address getTargetAddress(final Bytes code) {
-    return Address.wrap(code.slice(CODE_DELEGATION_PREFIX.size()));
+  public static Address getTargetAddress(final Code code) {
+    return Address.wrap(code.getBytes().slice(CODE_DELEGATION_PREFIX.size()));
   }
 
   /**
@@ -94,8 +94,7 @@ public class CodeDelegationHelper {
       throw new IllegalArgumentException("Account does not have code delegation.");
     }
 
-    final Address targetAddress =
-        Address.wrap(account.getCode().slice(CODE_DELEGATION_PREFIX.size()));
+    final Address targetAddress = getTargetAddress(account.getCode());
 
     return new Target(
         targetAddress,
@@ -116,11 +115,6 @@ public class CodeDelegationHelper {
 
     if (targetAccount == null || isPrecompile.test(targetAddress)) {
       return EMPTY_CODE;
-    }
-
-    // Bonsai accounts may have a fully cached code, so we use that one
-    if (targetAccount.getCodeCache() != null) {
-      return targetAccount.getOrCreateCachedCode();
     }
 
     return targetAccount.getOrCreateCachedCode();

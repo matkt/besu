@@ -16,7 +16,6 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,6 +30,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.N
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 
 import java.util.List;
@@ -63,8 +63,8 @@ class BlockAccessListOverlayTest {
                 new BalanceChange(3, Wei.of(999))),
             List.of(new NonceChange(0, 1L), new NonceChange(2, 5L)),
             List.of(
-                new CodeChange(0, Bytes.fromHexString("0xAA")),
-                new CodeChange(1, Bytes.fromHexString("0xBB"))));
+                CodeChange.fromBytes(0, Bytes.fromHexString("0xAA")),
+                CodeChange.fromBytes(1, Bytes.fromHexString("0xBB"))));
 
     final BlockAccessListOverlay overlay =
         new BlockAccessListOverlay(
@@ -75,15 +75,15 @@ class BlockAccessListOverlayTest {
     overlay.applyToStorage(ADDRESS, SLOT, storageValue::setUpdated);
     assertThat(storageValue.getUpdated()).isEqualTo(UInt256.valueOf(1));
 
-    final BonsaiValue<Bytes> codeValue = new BonsaiValue<>(Bytes.EMPTY, Bytes.EMPTY);
+    final BonsaiValue<Code> codeValue = new BonsaiValue<>(Code.EMPTY_CODE, Code.EMPTY_CODE);
     overlay.applyToCode(ADDRESS, codeValue::setUpdated);
-    assertThat(codeValue.getUpdated()).isEqualTo(Bytes.fromHexString("0xBB"));
+    assertThat(codeValue.getUpdated().getBytes()).isEqualTo(Bytes.fromHexString("0xBB"));
 
     final MutableAccount account = mock(MutableAccount.class);
     assertThat(overlay.applyToAccountState(ADDRESS, () -> account)).contains(account);
     verify(account).setBalance(Wei.of(200));
     verify(account).setNonce(1L);
-    verify(account).setCode(eq(Bytes.fromHexString("0xBB")));
+    verify(account).setCode(new Code(Bytes.fromHexString("0xBB")));
   }
 
   @Test
@@ -95,7 +95,7 @@ class BlockAccessListOverlayTest {
             List.of(),
             List.of(new BalanceChange(2, Wei.of(300))),
             List.of(new NonceChange(2, 9L)),
-            List.of(new CodeChange(2, Bytes.fromHexString("0xCC"))));
+            List.of(CodeChange.fromBytes(2, Bytes.fromHexString("0xCC"))));
 
     final BlockAccessListOverlay overlay =
         new BlockAccessListOverlay(
@@ -106,14 +106,14 @@ class BlockAccessListOverlayTest {
     overlay.applyToStorage(ADDRESS, SLOT, storageValue::setUpdated);
     assertThat(storageValue.getUpdated()).isEqualTo(UInt256.valueOf(42));
 
-    final BonsaiValue<Bytes> codeValue = new BonsaiValue<>(Bytes.EMPTY, Bytes.EMPTY);
+    final BonsaiValue<Code> codeValue = new BonsaiValue<>(Code.EMPTY_CODE, Code.EMPTY_CODE);
     overlay.applyToCode(ADDRESS, codeValue::setUpdated);
-    assertThat(codeValue.getUpdated()).isEqualTo(Bytes.EMPTY);
+    assertThat(codeValue.getUpdated()).isEqualTo(Code.EMPTY_CODE);
 
     final MutableAccount account = mock(MutableAccount.class);
     assertThat(overlay.applyToAccountState(ADDRESS, () -> account)).isEmpty();
     verify(account, never()).setBalance(any());
-    verify(account, never()).setCode(any(Bytes.class));
+    verify(account, never()).setCode(any(Code.class));
   }
 
   @Test

@@ -62,7 +62,8 @@ public class ExtCodeSizeOperation extends AbstractOperation {
       } else {
         final Account account = getAccount(address, frame);
 
-        Bytes codeSize = (account == null) ? Bytes.EMPTY : Words.intBytes(account.getCode().size());
+        Bytes codeSize =
+            (account == null) ? Bytes.EMPTY : Words.intBytes(account.getCode().getSize());
         frame.pushStackItem(codeSize);
 
         return new OperationResult(cost, null);

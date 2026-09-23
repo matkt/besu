@@ -169,9 +169,9 @@ class BlockAccessListSortingTest {
     ab.addNonceChange(1L, 11L);
     ab.addNonceChange(4L, 44L);
 
-    ab.addCodeChange(8L, Bytes.fromHexString("0x08"));
-    ab.addCodeChange(3L, Bytes.fromHexString("0x03"));
-    ab.addCodeChange(6L, Bytes.fromHexString("0x06"));
+    ab.addCodeChange(8L, BlockAccessList.CodeChange.codeFromBytes(Bytes.fromHexString("0x08")));
+    ab.addCodeChange(3L, BlockAccessList.CodeChange.codeFromBytes(Bytes.fromHexString("0x03")));
+    ab.addCodeChange(6L, BlockAccessList.CodeChange.codeFromBytes(Bytes.fromHexString("0x06")));
 
     final BlockAccessList.AccountChanges out = builder.build().accountChanges().getFirst();
 

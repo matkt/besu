@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootComm
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
@@ -116,14 +117,14 @@ class BalStateRootCalculatorTest {
                     List.of(),
                     List.of(),
                     List.of(),
-                    List.of(new CodeChange(0, newCode)))));
+                    List.of(CodeChange.fromBytes(0, newCode)))));
 
     final Hash accumulatorRoot =
         computeRootFromAccumulator(
             accumulator -> {
               final MutableAccount account = accumulator.getOrCreate(address);
               account.setStorageValue(slotKey.getSlotKey().orElseThrow(), newValue);
-              account.setCode(newCode);
+              account.setCode(new Code(newCode));
             });
 
     final Hash balRoot = computeRootFromBal(bal);
@@ -156,7 +157,7 @@ class BalStateRootCalculatorTest {
                     List.of(),
                     List.of(),
                     List.of(),
-                    List.of(new CodeChange(0, newCode)))));
+                    List.of(CodeChange.fromBytes(0, newCode)))));
 
     final Hash accumulatorRoot =
         computeRootFromAccumulator(
@@ -166,7 +167,7 @@ class BalStateRootCalculatorTest {
               first.setNonce(3L);
 
               final MutableAccount second = accumulator.getOrCreate(addressTwo);
-              second.setCode(newCode);
+              second.setCode(new Code(newCode));
               second.setStorageValue(slotKey.getSlotKey().orElseThrow(), UInt256.valueOf(99));
             });
 

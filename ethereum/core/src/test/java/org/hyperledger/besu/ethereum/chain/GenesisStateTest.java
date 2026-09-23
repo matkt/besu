@@ -123,7 +123,7 @@ final class GenesisStateTest {
     genesisState.writeStateTo(worldState);
     final Account contract =
         worldState.get(Address.fromHexString("0x3850000000000000000000000000000000000000"));
-    assertThat(contract.getCode()).isEqualTo(Bytes.fromHexString(EXPECTED_CODE));
+    assertThat(contract.getCode().getBytes()).isEqualTo(Bytes.fromHexString(EXPECTED_CODE));
     assertStorageValue(
         contract,
         "c2575a0e9e593c00f959f8c92f12db2869c3395a3b0502d05e2516446f71f85d",
@@ -220,7 +220,7 @@ final class GenesisStateTest {
         worldState.get(Address.fromHexString("fb289e2b2b65fb63299a682d000744671c50417b"));
     assertThat(first).isNotNull();
     assertThat(first.getBalance().toLong()).isZero();
-    assertThat(first.getCode())
+    assertThat(first.getCode().getBytes())
         .isEqualTo(Bytes.fromHexString("0x5f804955600180495560028049556003804955"));
     assertThat(last).isNotNull();
     Wei lastBalance = last.getBalance();
@@ -269,7 +269,7 @@ final class GenesisStateTest {
         worldState.get(Address.fromHexString("fb289e2b2b65fb63299a682d000744671c50417b"));
     assertThat(first).isNotNull();
     assertThat(first.getBalance().toLong()).isZero();
-    assertThat(first.getCode())
+    assertThat(first.getCode().getBytes())
         .isEqualTo(Bytes.fromHexString("0x5f804955600180495560028049556003804955"));
     assertThat(last).isNotNull();
     Wei lastBalance = last.getBalance();
@@ -319,7 +319,7 @@ final class GenesisStateTest {
         worldState.get(Address.fromHexString("fb289e2b2b65fb63299a682d000744671c50417b"));
     assertThat(first).isNotNull();
     assertThat(first.getBalance().toLong()).isZero();
-    assertThat(first.getCode())
+    assertThat(first.getCode().getBytes())
         .isEqualTo(Bytes.fromHexString("0x5f804955600180495560028049556003804955"));
     assertThat(last).isNotNull();
     Wei lastBalance = last.getBalance();

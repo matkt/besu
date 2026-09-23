@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+import org.hyperledger.besu.evm.Code;
 
 import java.util.Optional;
 
@@ -79,13 +80,13 @@ public class TrieLogLayerTests {
   @Test
   public void testAddCodeChange() {
     Address address = Address.fromHexString("0xdeadbeef");
-    Bytes oldValue = Bytes.fromHexString("0x00");
-    Bytes newValue = Bytes.fromHexString("0x01030307");
+    Code oldValue = new Code(Bytes.fromHexString("0x00"));
+    Code newValue = new Code(Bytes.fromHexString("0x01030307"));
     Hash blockHash = Hash.fromHexStringLenient("0xfeedbeef02dead");
 
     Address otherAddress = Address.fromHexString("0x0000deadbeef");
-    Bytes otherOldValue = Bytes.fromHexString("0x00");
-    Bytes otherNewValue = Bytes.fromHexString("0x01030307");
+    Code otherOldValue = new Code(Bytes.fromHexString("0x00"));
+    Code otherNewValue = new Code(Bytes.fromHexString("0x01030307"));
     Hash otherBlockHash = Hash.fromHexStringLenient("0x00feedbeef02dead");
 
     trieLogLayer.addCodeChange(address, oldValue, newValue, blockHash);
@@ -93,11 +94,11 @@ public class TrieLogLayerTests {
 
     Assertions.assertThat(trieLogLayer).isEqualTo(otherTrieLogLayer);
 
-    Optional<Bytes> priorCode = trieLogLayer.getPriorCode(address);
+    Optional<Code> priorCode = trieLogLayer.getPriorCode(address);
     Assertions.assertThat(priorCode).isPresent();
     Assertions.assertThat(priorCode.get()).isEqualTo(oldValue);
 
-    Optional<Bytes> updatedCode = trieLogLayer.getCode(address);
+    Optional<Code> updatedCode = trieLogLayer.getCode(address);
     Assertions.assertThat(updatedCode).isPresent();
     Assertions.assertThat(updatedCode.get()).isEqualTo(newValue);
   }

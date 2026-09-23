@@ -1475,7 +1475,7 @@ public class BesuCommandTest extends CommandTestAbstract {
   }
 
   @Test
-  public void balPrefetchReadingEnabledAutoEnablesBonsaiCrossBlockCache() {
+  public void bonsaiCrossBlockCacheEnabledByDefault() {
     parseCommand();
     verify(mockControllerBuilder)
         .dataStorageConfiguration(dataStorageConfigurationArgumentCaptor.capture());
@@ -1493,8 +1493,10 @@ public class BesuCommandTest extends CommandTestAbstract {
   }
 
   @Test
-  public void balPrefetchReadingDisabledDoesNotForceBonsaiCrossBlockCache() {
-    parseCommand("--Xbal-prefetch-reading-enabled=false");
+  public void bonsaiCrossBlockCacheCanBeDisabledExplicitly() {
+    // Prefetch auto-enables the cross-block cache; disable prefetch to observe an explicit off.
+    parseCommand(
+        "--Xbonsai-cross-block-cache-enabled=false", "--Xbal-prefetch-reading-enabled=false");
     verify(mockControllerBuilder)
         .dataStorageConfiguration(dataStorageConfigurationArgumentCaptor.capture());
 
@@ -1506,6 +1508,26 @@ public class BesuCommandTest extends CommandTestAbstract {
                 .getUnstable()
                 .getBonsaiCrossBlockCacheEnabled())
         .isFalse();
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void bonsaiCrossBlockCacheEnabledWhenBalPrefetchReadingEnabled() {
+    parseCommand(
+        "--Xbonsai-cross-block-cache-enabled=false", "--Xbal-prefetch-reading-enabled=true");
+    verify(mockControllerBuilder)
+        .dataStorageConfiguration(dataStorageConfigurationArgumentCaptor.capture());
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        dataStorageConfigurationArgumentCaptor.getValue();
+    assertThat(
+            dataStorageConfiguration
+                .getExtraStorageConfiguration()
+                .getUnstable()
+                .getBonsaiCrossBlockCacheEnabled())
+        .isTrue();
+    verify(mockLogger).info("Bonsai cross-block cache enabled for BAL prefetch reading");
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
   }

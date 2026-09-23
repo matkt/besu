@@ -29,6 +29,7 @@ import org.hyperledger.besu.datatypes.CodeDelegation;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.CodeDelegationResult.AuthorityAccess;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
@@ -342,7 +343,8 @@ class CodeDelegationProcessorTest {
     when(authority.getNonce()).thenReturn(1L);
     when(authority.getCode())
         .thenReturn(
-            Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, Bytes.random(20)));
+            new Code(
+                Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, Bytes.random(20))));
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act
@@ -364,7 +366,7 @@ class CodeDelegationProcessorTest {
     when(worldUpdater.get(any())).thenReturn(authority);
     when(worldUpdater.getAccount(any())).thenReturn(authority);
     when(authority.getNonce()).thenReturn(1L);
-    when(authority.getCode()).thenReturn(Bytes.EMPTY);
+    when(authority.getCode()).thenReturn(Code.EMPTY_CODE);
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act
@@ -386,7 +388,7 @@ class CodeDelegationProcessorTest {
     when(worldUpdater.get(any())).thenReturn(authority);
     when(worldUpdater.getAccount(any())).thenReturn(authority);
     when(authority.getNonce()).thenReturn(0L);
-    when(authority.getCode()).thenReturn(Bytes.EMPTY);
+    when(authority.getCode()).thenReturn(Code.EMPTY_CODE);
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act
@@ -465,7 +467,7 @@ class CodeDelegationProcessorTest {
     when(worldUpdater.createAccount(any())).thenReturn(authority);
     when(worldUpdater.getAccount(any())).thenReturn(authority);
     when(authority.getNonce()).thenReturn(0L);
-    when(authority.getCode()).thenReturn(delegationCode());
+    when(authority.getCode()).thenReturn(new Code(delegationCode()));
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act
@@ -491,7 +493,7 @@ class CodeDelegationProcessorTest {
     when(worldUpdater.createAccount(any())).thenReturn(authority);
     when(worldUpdater.getAccount(any())).thenReturn(authority);
     when(authority.getNonce()).thenReturn(0L);
-    when(authority.getCode()).thenReturn(delegationCode());
+    when(authority.getCode()).thenReturn(new Code(delegationCode()));
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act
@@ -514,7 +516,7 @@ class CodeDelegationProcessorTest {
     when(worldUpdater.get(any())).thenReturn(authority);
     when(worldUpdater.getAccount(any())).thenReturn(authority);
     when(authority.getNonce()).thenReturn(0L);
-    when(authority.getCode()).thenReturn(delegationCode());
+    when(authority.getCode()).thenReturn(new Code(delegationCode()));
     when(codeDelegationService.canSetCodeDelegation(any())).thenReturn(true);
 
     // Act

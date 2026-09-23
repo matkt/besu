@@ -108,7 +108,7 @@ public class EngineGetPayloadV6Test extends EngineGetPayloadV5Test {
                 List.of(new SlotRead(slotKey)),
                 List.of(new BalanceChange(0, Wei.ONE)),
                 List.of(new NonceChange(0, 1L)),
-                List.of(new CodeChange(0, Bytes.of(1))))));
+                List.of(CodeChange.fromBytes(0, Bytes.of(1))))));
   }
 
   private static String encodeBlockAccessList(final BlockAccessList blockAccessList) {

@@ -234,7 +234,7 @@ public class GeneralStateReferenceTestTools {
               ObjectNode accountJson = mapper.createObjectNode();
               accountJson.put("nonce", Bytes.ofUnsignedLong(account.getNonce()).toShortHexString());
               accountJson.put("balance", account.getBalance().toShortHexString());
-              accountJson.put("code", account.getCode().toHexString());
+              accountJson.put("code", account.getCode().getBytes().toHexString());
               ObjectNode storageJson = mapper.createObjectNode();
               var storageEntries = account.storageEntriesFrom(Bytes32.ZERO, Integer.MAX_VALUE);
               storageEntries.values().stream()

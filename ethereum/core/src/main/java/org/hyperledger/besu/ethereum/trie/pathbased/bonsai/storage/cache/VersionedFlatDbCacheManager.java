@@ -16,7 +16,10 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
 
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
@@ -39,11 +42,16 @@ import java.util.function.Supplier;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Versioned cache implementation using Caffeine. */
+/**
+ * Versioned cache for account/storage flat DB entries, plus a content-addressed analyzed {@link
+ * Code} cache (bytecode + jump-dest). Code is not versioned: a given code hash always maps to the
+ * same immutable bytecode.
+ */
 public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeable {
 
   private static final Logger LOG = LoggerFactory.getLogger(VersionedFlatDbCacheManager.class);
@@ -57,6 +65,10 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private final AtomicLong globalVersion = new AtomicLong(0);
   private final Cache<CacheKey, VersionedValue> accountCache;
   private final Cache<CacheKey, VersionedValue> storageCache;
+  private final Cache<Hash, Code> analyzedCodeCache;
+  private final long accountCachePeakSize;
+  private final long storageCachePeakSize;
+  private final long codeCachePeakSize;
   private final ThresholdDrainExecutor drainExecutor;
   private final ExecutorService maintenanceWorker;
   private final AtomicBoolean maintenanceScheduled = new AtomicBoolean(false);
@@ -72,11 +84,20 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
    *
    * @param accountCacheSize maximum number of entries in the account cache
    * @param storageCacheSize maximum number of entries in the storage cache
+   * @param codeCachePeakSize peak number of analyzed code entries retained during a block
    * @param metricsSystem the metrics system for instrumentation
    */
   public VersionedFlatDbCacheManager(
-      final long accountCacheSize, final long storageCacheSize, final MetricsSystem metricsSystem) {
-    this(accountCacheSize, storageCacheSize, metricsSystem, DEFAULT_DRAIN_THRESHOLD);
+      final long accountCacheSize,
+      final long storageCacheSize,
+      final long codeCachePeakSize,
+      final MetricsSystem metricsSystem) {
+    this(
+        accountCacheSize,
+        storageCacheSize,
+        codeCachePeakSize,
+        metricsSystem,
+        DEFAULT_DRAIN_THRESHOLD);
   }
 
   /**
@@ -84,17 +105,24 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
    *
    * @param accountCacheSize maximum number of entries in the account cache
    * @param storageCacheSize maximum number of entries in the storage cache
+   * @param codeCachePeakSize peak number of analyzed code entries retained during a block
    * @param metricsSystem the metrics system for instrumentation
    * @param drainThreshold number of pending maintenance tasks before automatic drain is triggered
    */
   public VersionedFlatDbCacheManager(
       final long accountCacheSize,
       final long storageCacheSize,
+      final long codeCachePeakSize,
       final MetricsSystem metricsSystem,
       final int drainThreshold) {
 
     requirePositiveCacheMaxSize("accountCacheSize", accountCacheSize);
     requirePositiveCacheMaxSize("storageCacheSize", storageCacheSize);
+    requirePositiveCacheMaxSize("codeCachePeakSize", codeCachePeakSize);
+
+    this.accountCachePeakSize = accountCacheSize;
+    this.storageCachePeakSize = storageCacheSize;
+    this.codeCachePeakSize = codeCachePeakSize;
 
     this.maintenanceWorker =
         Executors.newSingleThreadExecutor(
@@ -106,8 +134,11 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
     this.drainExecutor = new ThresholdDrainExecutor(drainThreshold, this::scheduleAsyncMaintenance);
 
+    // Start at peak so the first block can retain warmed entries before the first maintenance
+    // shrink.
     this.accountCache = createCache(accountCacheSize);
     this.storageCache = createCache(storageCacheSize);
+    this.analyzedCodeCache = createAnalyzedCodeCache(codeCachePeakSize);
 
     this.cacheRequestCounter =
         metricsSystem.createCounter(
@@ -138,10 +169,24 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
             "Total number of cache removals");
 
     LOG.info(
-        "Cache maintenance will trigger asynchronously after {} pending tasks", drainThreshold);
+        "Cache maintenance will trigger asynchronously after {} pending tasks"
+            + " (peaks account={}, storage={}, code={}; steady={})",
+        drainThreshold,
+        accountCachePeakSize,
+        storageCachePeakSize,
+        codeCachePeakSize,
+        CACHE_STEADY_SIZE);
   }
 
   private Cache<CacheKey, VersionedValue> createCache(final long maxSize) {
+    return Caffeine.newBuilder()
+        .initialCapacity(initialCapacityFor(maxSize))
+        .maximumSize(maxSize)
+        .executor(drainExecutor)
+        .build();
+  }
+
+  private Cache<Hash, Code> createAnalyzedCodeCache(final long maxSize) {
     return Caffeine.newBuilder()
         .initialCapacity(initialCapacityFor(maxSize))
         .maximumSize(maxSize)
@@ -172,7 +217,39 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     if (segment == ACCOUNT_STORAGE_STORAGE) {
       return storageCache;
     }
+    // CODE_STORAGE is not version-cached; bytecode is served via analyzedCodeCache (by code hash).
     return null;
+  }
+
+  private static void setCacheMaximum(final Cache<?, ?> cache, final long maxSize) {
+    cache.policy().eviction().ifPresent(policy -> policy.setMaximum(maxSize));
+  }
+
+  @Override
+  public void expandCachesForBlock() {
+    setCacheMaximum(accountCache, accountCachePeakSize);
+    setCacheMaximum(storageCache, storageCachePeakSize);
+    setCacheMaximum(analyzedCodeCache, codeCachePeakSize);
+  }
+
+  @Override
+  public long getCodeCacheSize() {
+    return analyzedCodeCache.estimatedSize();
+  }
+
+  @Override
+  public Code getIfPresent(final Hash codeHash) {
+    return analyzedCodeCache.getIfPresent(codeHash);
+  }
+
+  @Override
+  public void put(final Hash codeHash, final Code code) {
+    analyzedCodeCache.put(codeHash, code);
+  }
+
+  @Override
+  public void invalidateCode(final Hash codeHash) {
+    analyzedCodeCache.invalidate(codeHash);
   }
 
   /**
@@ -198,12 +275,28 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     }
   }
 
-  /** Performs the actual maintenance work: drains pending tasks and runs Caffeine's cleanUp. */
+  /**
+   * Runs cache maintenance synchronously (drain, shrink caches to steady size, cleanUp). For tests
+   * only.
+   */
+  @VisibleForTesting
+  public void runMaintenanceSynchronously() {
+    doMaintenance();
+  }
+
+  /**
+   * Performs the actual maintenance work: shrinks all caches to the steady size, drains pending
+   * tasks and runs Caffeine's cleanUp.
+   */
   private void doMaintenance() {
     try {
+      setCacheMaximum(accountCache, CACHE_STEADY_SIZE);
+      setCacheMaximum(storageCache, CACHE_STEADY_SIZE);
+      setCacheMaximum(analyzedCodeCache, CACHE_STEADY_SIZE);
       final int drained = drainExecutor.drain();
       accountCache.cleanUp();
       storageCache.cleanUp();
+      analyzedCodeCache.cleanUp();
       if (drained > 0) {
         LOG.trace("Cache maintenance drained {} tasks", drained);
       }
@@ -243,6 +336,10 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void clear(final SegmentIdentifier segment) {
+    if (segment == CODE_STORAGE) {
+      analyzedCodeCache.invalidateAll();
+      return;
+    }
     final Cache<CacheKey, VersionedValue> cache = cacheForSegment(segment);
     if (cache != null) {
       cache.invalidateAll();

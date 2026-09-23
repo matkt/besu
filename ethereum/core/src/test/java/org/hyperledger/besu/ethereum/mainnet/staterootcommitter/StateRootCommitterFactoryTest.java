@@ -38,6 +38,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.S
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -452,14 +453,14 @@ class StateRootCommitterFactoryTest {
                       List.of(),
                       List.of(new BalanceChange(0, balance)),
                       List.of(),
-                      List.of(new CodeChange(0, code)))));
+                      List.of(CodeChange.fromBytes(0, code)))));
 
       final Hash expectedRoot;
       try (BonsaiWorldState expectedWorldState = getWorldState(false)) {
         final WorldUpdater updater = expectedWorldState.updater();
         final MutableAccount account = updater.getOrCreate(address);
         account.setBalance(balance);
-        account.setCode(code);
+        account.setCode(new Code(code));
         updater.commit();
         expectedRoot = expectedWorldState.rootHash();
       }
@@ -475,7 +476,7 @@ class StateRootCommitterFactoryTest {
         assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
         assertThat(worldState.get(address)).isNotNull();
         assertThat(worldState.get(address).getBalance()).isEqualTo(balance);
-        assertThat(worldState.get(address).getCode()).isEqualTo(code);
+        assertThat(worldState.get(address).getCode().getBytes()).isEqualTo(code);
       }
     }
 
@@ -499,7 +500,7 @@ class StateRootCommitterFactoryTest {
                       List.of(),
                       List.of(new BalanceChange(0, contractBalance)),
                       List.of(),
-                      List.of(new CodeChange(0, contractCode))),
+                      List.of(CodeChange.fromBytes(0, contractCode))),
                   new AccountChanges(
                       eoaAddress,
                       List.of(),
@@ -513,7 +514,7 @@ class StateRootCommitterFactoryTest {
         final WorldUpdater updater = expectedWorldState.updater();
         final MutableAccount contract = updater.getOrCreate(contractAddress);
         contract.setBalance(contractBalance);
-        contract.setCode(contractCode);
+        contract.setCode(new Code(contractCode));
         contract.setStorageValue(slot.getSlotKey().orElseThrow(), slotValue);
         final MutableAccount eoa = updater.getOrCreate(eoaAddress);
         eoa.setBalance(eoaBalance);
@@ -533,7 +534,7 @@ class StateRootCommitterFactoryTest {
         assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
         assertThat(worldState.get(contractAddress)).isNotNull();
         assertThat(worldState.get(contractAddress).getBalance()).isEqualTo(contractBalance);
-        assertThat(worldState.get(contractAddress).getCode()).isEqualTo(contractCode);
+        assertThat(worldState.get(contractAddress).getCode().getBytes()).isEqualTo(contractCode);
         assertThat(worldState.getStorageValue(contractAddress, slot.getSlotKey().orElseThrow()))
             .isEqualTo(slotValue);
         assertThat(worldState.get(eoaAddress)).isNotNull();

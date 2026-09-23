@@ -23,7 +23,6 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveCoverageTracker;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveHistoryReader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveNodeHistoryStore;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
@@ -54,7 +53,6 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiArchiveWorldStateProvider.class);
 
   private final BonsaiWorldStateKeyValueStorage archiveReadStorage;
-  private final BonsaiCodeCache codeCache;
   private final WorldStateConfig archiveWorldStateConfig;
   private volatile LongSupplier archiveMigrationProgressSupplier = () -> -1L;
 
@@ -68,7 +66,6 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ServiceManager pluginContext,
       final EvmConfiguration evmConfiguration,
-      final BonsaiCodeCache codeCache,
       final MetricsSystem metricsSystem) {
     this(
         worldStateKeyValueStorage,
@@ -77,7 +74,6 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
         bonsaiCachedMerkleTrieLoader,
         pluginContext,
         evmConfiguration,
-        codeCache,
         metricsSystem,
         Optional.empty());
   }
@@ -89,7 +85,6 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ServiceManager pluginContext,
       final EvmConfiguration evmConfiguration,
-      final BonsaiCodeCache codeCache,
       final MetricsSystem metricsSystem,
       final Optional<Long> amsterdamMilestone) {
     super(
@@ -99,9 +94,7 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
         bonsaiCachedMerkleTrieLoader,
         pluginContext,
         evmConfiguration,
-        codeCache,
         amsterdamMilestone);
-    this.codeCache = codeCache;
     this.archiveWorldStateConfig =
         WorldStateConfig.newBuilder(worldStateConfig).trieDisabled(true).build();
     final BonsaiArchiveReadFlatDbStrategyProvider archiveProvider =
@@ -129,7 +122,7 @@ public class BonsaiArchiveWorldStateProvider extends BonsaiWorldStateProvider {
           queryParams.getBlockHeader().getNumber());
       final BonsaiArchiveWorldState archiveWorldState =
           new BonsaiArchiveWorldState(
-              this, archiveReadStorage, evmConfiguration, archiveWorldStateConfig, codeCache);
+              this, archiveReadStorage, evmConfiguration, archiveWorldStateConfig);
       // Freeze before persisting: BonsaiArchiveWorldState.freezeStorage() wraps in
       // BonsaiArchiveWorldStateLayerStorage, which passes the LayeredKeyValueStorage (holding the
       // historical WORLD_BLOCK_NUMBER_KEY) to the flat-DB strategy rather than the raw RocksDB

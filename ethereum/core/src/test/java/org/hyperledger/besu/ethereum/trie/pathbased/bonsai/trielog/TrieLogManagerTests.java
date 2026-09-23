@@ -27,7 +27,6 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
@@ -62,11 +61,7 @@ class TrieLogManagerTests {
   BonsaiWorldStateUpdateAccumulator bonsaiUpdater =
       spy(
           new BonsaiWorldStateUpdateAccumulator(
-              worldState,
-              (__, ___) -> {},
-              (__, ___) -> {},
-              EvmConfiguration.DEFAULT,
-              new BonsaiCodeCache()));
+              worldState, (__, ___) -> {}, (__, ___) -> {}, EvmConfiguration.DEFAULT));
 
   TrieLogManager trieLogManager;
 

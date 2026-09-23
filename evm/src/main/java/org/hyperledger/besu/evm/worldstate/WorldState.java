@@ -17,6 +17,7 @@ package org.hyperledger.besu.evm.worldstate;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.AccountState;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 
@@ -24,7 +25,6 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -103,7 +103,7 @@ public interface WorldState extends WorldView, AutoCloseable {
     }
 
     @Override
-    public Bytes getCode() {
+    public Code getCode() {
       return accountState.getCode();
     }
 

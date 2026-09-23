@@ -40,7 +40,6 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.transaction.CallParameter;
 import org.hyperledger.besu.ethereum.transaction.ImmutableCallParameter;
 import org.hyperledger.besu.ethereum.transaction.TransactionSimulator;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
@@ -66,8 +65,7 @@ public class EthSimulateV1TrielogTest {
           new NoOpMetricsSystem());
 
   protected final GenesisState genesisState =
-      GenesisState.fromConfig(
-          GenesisConfig.fromResource("/dev.json"), protocolSchedule, new BonsaiCodeCache());
+      GenesisState.fromConfig(GenesisConfig.fromResource("/dev.json"), protocolSchedule);
 
   protected final MutableBlockchain blockchain = createInMemoryBlockchain(genesisState.getBlock());
 

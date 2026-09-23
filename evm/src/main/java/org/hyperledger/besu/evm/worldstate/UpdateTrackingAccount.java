@@ -30,7 +30,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.jspecify.annotations.Nullable;
@@ -58,8 +57,8 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
   private long nonce;
   private Wei balance;
 
-  @Nullable private Bytes updatedCode; // Null if the underlying code has not been updated.
-  private final Bytes oldCode;
+  @Nullable private Code updatedCode; // Null if the underlying code has not been updated.
+  private final Code oldCode;
   @Nullable private Hash updatedCodeHash;
   private final Hash oldCodeHash;
 
@@ -83,8 +82,8 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
     this.nonce = 0;
     this.balance = Wei.ZERO;
 
-    this.updatedCode = Bytes.EMPTY;
-    this.oldCode = Bytes.EMPTY;
+    this.updatedCode = Code.EMPTY_CODE;
+    this.oldCode = Code.EMPTY_CODE;
     this.oldCodeHash = Hash.EMPTY;
     this.updatedStorage = new TreeMap<>();
   }
@@ -112,10 +111,10 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
 
     this.updatedStorage = new TreeMap<>();
 
-    // if the original account to be tracked is a BonsaiAccount, we can use its code cache.
-    final CodeCache codeCache = account.getCodeCache();
-    if (codeCache != null) {
-      this.codeCache = codeCache;
+    // Prefer the account's CodeCache when present (Bonsai exposes the KV analyzed-code cache).
+    final CodeCache accountCodeCache = account.getCodeCache();
+    if (accountCodeCache != null) {
+      this.codeCache = accountCodeCache;
     }
   }
 
@@ -205,7 +204,7 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
   }
 
   @Override
-  public Bytes getCode() {
+  public Code getCode() {
     // Note that we set code for new account, so it's only null if account isn't.
     return updatedCode == null ? oldCode : updatedCode;
   }
@@ -219,7 +218,7 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
       // Cache the hash of updated code to avoid DOS attacks which repeatedly request hash
       // of updated code and cause us to regenerate it.
       if (updatedCodeHash == null) {
-        updatedCodeHash = Hash.hash(updatedCode);
+        updatedCodeHash = updatedCode.getCodeHash();
       }
       return updatedCodeHash;
     }
@@ -228,24 +227,24 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
   @Override
   public boolean hasCode() {
     // Note that we set code for new account, so it's only null if account isn't.
-    return updatedCode == null ? !oldCode.isEmpty() : !updatedCode.isEmpty();
+    return updatedCode == null ? oldCode.getSize() > 0 : updatedCode.getSize() > 0;
   }
 
   @Override
-  public void setCode(final Bytes code) {
+  public void setCode(final Code code) {
     if (immutable) {
       throw new ModificationNotAllowedException();
     }
-    this.updatedCode = code;
+    this.updatedCode = code == null ? Code.EMPTY_CODE : code;
     this.updatedCodeHash = null;
   }
 
   @Override
   public Code getOrCreateCachedCode() {
-    // if it is not a BonsaiAccount, we don't have access to the code cache
-    // so we just return the code as is.
     if (codeCache == null) {
-      return new Code(getCode(), getCodeHash());
+      final Code code = getCode();
+      code.ensureJumpDestAnalyzed();
+      return code;
     }
 
     // if the code already exists in the cache, return it
@@ -254,8 +253,9 @@ public class UpdateTrackingAccount<A extends Account> implements MutableAccount 
       return cachedCode;
     }
 
-    // if the code is not in the cache, create a new Code instance and put it in the cache
-    final Code newCode = new Code(getCode(), getCodeHash());
+    // if the code is not in the cache, put the current Code instance into the cache
+    final Code newCode = getCode();
+    newCode.ensureJumpDestAnalyzed();
     codeCache.put(getCodeHash(), newCode);
 
     return newCode;

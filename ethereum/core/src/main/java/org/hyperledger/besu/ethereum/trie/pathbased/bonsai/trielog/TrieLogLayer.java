@@ -21,6 +21,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 
 import java.util.HashMap;
@@ -31,7 +32,6 @@ import java.util.TreeMap;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
@@ -51,7 +51,7 @@ public class TrieLogLayer implements TrieLog {
     return accounts;
   }
 
-  Map<Address, BonsaiValue<Bytes>> getCode() {
+  Map<Address, BonsaiValue<Code>> getCode() {
     return code;
   }
 
@@ -60,7 +60,7 @@ public class TrieLogLayer implements TrieLog {
   }
 
   protected final Map<Address, BonsaiValue<AccountValue>> accounts;
-  protected final Map<Address, BonsaiValue<Bytes>> code;
+  protected final Map<Address, BonsaiValue<Code>> code;
   protected final Map<Address, Map<StorageSlotKey, BonsaiValue<UInt256>>> storage;
   protected boolean frozen = false;
 
@@ -107,7 +107,7 @@ public class TrieLogLayer implements TrieLog {
   }
 
   public TrieLogLayer addCodeChange(
-      final Address address, final Bytes oldValue, final Bytes newValue, final Hash blockHash) {
+      final Address address, final Code oldValue, final Code newValue, final Hash blockHash) {
     checkState(!frozen, "Layer is Frozen");
     code.put(address, new BonsaiValue<>(oldValue, newValue, newValue == null));
     return this;
@@ -131,7 +131,7 @@ public class TrieLogLayer implements TrieLog {
   }
 
   @Override
-  public Map<Address, BonsaiValue<Bytes>> getCodeChanges() {
+  public Map<Address, BonsaiValue<Code>> getCodeChanges() {
     return code;
   }
 
@@ -150,12 +150,12 @@ public class TrieLogLayer implements TrieLog {
   }
 
   @Override
-  public Optional<Bytes> getPriorCode(final Address address) {
+  public Optional<Code> getPriorCode(final Address address) {
     return Optional.ofNullable(code.get(address)).map(BonsaiValue::getPrior);
   }
 
   @Override
-  public Optional<Bytes> getCode(final Address address) {
+  public Optional<Code> getCode(final Address address) {
     return Optional.ofNullable(code.get(address)).map(BonsaiValue::getUpdated);
   }
 
@@ -199,7 +199,7 @@ public class TrieLogLayer implements TrieLog {
       }
     }
     sb.append("code").append("\n");
-    for (final Map.Entry<Address, BonsaiValue<Bytes>> code : code.entrySet()) {
+    for (final Map.Entry<Address, BonsaiValue<Code>> code : code.entrySet()) {
       sb.append(" : ").append(code.getKey()).append("\n");
       if (Objects.equals(code.getValue().getPrior(), code.getValue().getUpdated())) {
         sb.append("   = ").append(code.getValue().getPrior()).append("\n");

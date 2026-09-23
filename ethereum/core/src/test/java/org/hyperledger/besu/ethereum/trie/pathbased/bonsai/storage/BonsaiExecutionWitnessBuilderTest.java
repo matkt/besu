@@ -90,7 +90,8 @@ class BonsaiExecutionWitnessBuilderTest {
     final Hash codeHash = code.isEmpty() ? Hash.EMPTY : Hash.hash(code);
     when(account.getCodeHash()).thenReturn(codeHash);
     when(worldView.get(address)).thenReturn(account);
-    when(worldView.getCode(address, codeHash)).thenReturn(Optional.of(code));
+    when(worldView.getCode(address, codeHash))
+        .thenReturn(Optional.of(new org.hyperledger.besu.evm.Code(code, codeHash)));
   }
 
   /** Chains headers 0..count-1, each pointing at the previous, tagged so forks differ by hash. */

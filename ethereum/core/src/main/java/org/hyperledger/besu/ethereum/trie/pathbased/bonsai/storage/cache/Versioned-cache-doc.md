@@ -100,12 +100,41 @@ Because the version counter advances on **every commit** along the actually exec
 
 ## What segments are cached?
 
-`VersionedCacheManager` only caches:
+`VersionedFlatDbCacheManager` caches:
 
-- `ACCOUNT_INFO_STATE`
-- `ACCOUNT_STORAGE_STORAGE`
+- `ACCOUNT_INFO_STATE` (versioned `Bytes`)
+- `ACCOUNT_STORAGE_STORAGE` (versioned `Bytes`)
+- Analyzed contract `Code` (bytecode + jump-dest bitmask), keyed by **code hash** via the `CodeCache` API
 
-Other segments (e.g. code, trie branches) are not covered by this versioned cache.
+Flat `CODE_STORAGE` bytes are **not** dual-cached. Storage `getCode(codeHash, accountHash)` returns
+`Optional<Code>`: looks up analyzed code by `codeHash` first; on miss it loads flat bytecode from the
+DB, builds `Code` with jump-dest analysis, inserts into the analyzed cache, and returns that `Code`.
+
+`codeToUpdate` on the world-state accumulator holds `BonsaiValue<Code>` (not raw `Bytes`). Trie-log
+and flat-DB writers convert with `Code.getBytes()` at the persistence boundary.
+
+### Why analyzed code is not versioned
+
+Account and storage entries use `VersionedValue` so reorgs/snapshots stay coherent. Analyzed code is
+**content-addressed by code hash**: the same hash always denotes the same immutable bytecode, so a
+separate versioned flat-code cache would only duplicate memory. Removals (account-hash code strategy)
+call `invalidateCode(codeHash)`.
+
+`BonsaiAccount.getCodeCache()` exposes the same KV `FlatDbCacheManager` (implements `CodeCache`) so
+`UpdateTrackingAccount.getOrCreateCachedCode()` keeps its original cache-lookup control flow without
+a second in-memory layer.
+
+Other segments (e.g. trie branches) are not covered by this versioned cache.
+
+### Peak vs steady size (account, storage, code)
+
+During BAL prefetch / block execution account, storage, and analyzed-code caches are expanded to their configured peaks via
+`expandCachesForBlock()` (defaults: account **100_000**, storage **500_000**, code **100_000**) so
+entries warmed for the block can be retained.
+
+When `scheduleAsyncMaintenance()` runs after commit, each cache maximum is reduced to the steady
+size (**256**) and Caffeine `cleanUp()` evicts down to that limit. The next prefetch / block expands
+them again.
 
 ---
 
@@ -113,8 +142,10 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 | Piece | Role |
 |--------|------|
-| `VersionedCacheManager` | `globalVersion`, Caffeine caches, hit/miss/insert rules |
-| `BonsaiWorldStateKeyValueStorage.CachedUpdater` | `incrementCacheVersion()` on commit, `updateCache()` writes/removals at new version |
+| `VersionedFlatDbCacheManager` | `globalVersion`, Caffeine caches (account/storage + analyzed code), hit/miss/insert rules, peak/steady expand-shrink |
+| `BalPrefetcher` | Warms account/storage via KV paths; code via `getCode` (analyzed cache + jump-dest) |
+| `BonsaiWorldStateKeyValueStorage` | `getAccount` / `getStorage` go through versioned cache; `getCode` uses analyzed code cache then flat DB; `CachedUpdater` stages account/storage and analyzed-code writes |
+| `BonsaiWorldStateKeyValueStorage.CachedUpdater` | `incrementCacheVersion()` on commit, `updateCache()` writes/removals at new version (analyzed code put/invalidate by hash) |
 | `BonsaiSnapshotWorldStateKeyValueStorage` | Constructor passes parent `getCurrentVersion()` into `super(...)` so snapshot pins version |
 | `BonsaiWorldStateKeyValueStorageCacheTest` | Examples: version progression, overwrite single slot, rollback does not bump version |
 
@@ -122,4 +153,6 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Operational note
 
-Cache maintenance (Caffeine cleanup) is triggered asynchronously via `ThresholdDrainExecutor` and `scheduleAsyncMaintenance()` to reduce work on the hot path; see `VersionedCacheManager` for details.
+Cache maintenance (Caffeine cleanup and shrink to steady size 256 for account/storage/code) is
+triggered asynchronously via `ThresholdDrainExecutor` and `scheduleAsyncMaintenance()` to reduce
+work on the hot path; see `VersionedFlatDbCacheManager` for details.

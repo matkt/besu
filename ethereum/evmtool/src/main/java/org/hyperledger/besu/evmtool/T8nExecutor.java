@@ -628,8 +628,8 @@ public class T8nExecutor {
               Account account = worldState.get(a.getAddress().get());
               ObjectNode accountObject =
                   allocObject.putObject(account.getAddress().getBytes().toHexString());
-              if (account.getCode() != null && !account.getCode().isEmpty()) {
-                accountObject.put("code", account.getCode().toHexString());
+              if (account.getCode() != null && account.getCode().getSize() > 0) {
+                accountObject.put("code", account.getCode().getBytes().toHexString());
               }
               List<Entry<UInt256, UInt256>> storageEntries =
                   account.storageEntriesFrom(Bytes32.ZERO, Integer.MAX_VALUE).values().stream()

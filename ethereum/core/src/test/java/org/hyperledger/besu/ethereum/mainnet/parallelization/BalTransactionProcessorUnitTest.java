@@ -44,7 +44,6 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -54,6 +53,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpB
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 import org.hyperledger.besu.evm.frame.MessageFrame;
@@ -128,12 +128,10 @@ class BalTransactionProcessorUnitTest {
         new BonsaiWorldState(
             storage,
             new NoOpBonsaiCachedMerkleTrieLoader(),
-            new NoOpBonsaiWorldStateCacheManager(
-                storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
+            new NoOpBonsaiWorldStateCacheManager(storage, EvmConfiguration.DEFAULT),
             new NoOpTrieLogManager(),
             EvmConfiguration.DEFAULT,
-            createStatefulConfigWithTrie(),
-            new BonsaiCodeCache());
+            createStatefulConfigWithTrie());
     blockAccessListOverlay.ifPresent(worldState::applyBlockAccessListOverlay);
     return worldState;
   }
@@ -310,7 +308,7 @@ class BalTransactionProcessorUnitTest {
           Address.fromHexString("0x1000000000000000000000000000000000000002");
       final Wei postBalance = Wei.of(123);
       final long nonce = 7L;
-      final Bytes code = Bytes.fromHexString("0xAABB");
+      final Code code = new Code(Bytes.fromHexString("0xAABB"));
       final UInt256 slotOneKey = UInt256.ONE;
       final UInt256 slotTwoKey = UInt256.valueOf(2);
       final StorageSlotKey slotOne = new StorageSlotKey(slotOneKey);
@@ -586,19 +584,19 @@ class BalTransactionProcessorUnitTest {
 
       final Wei tx0Balance = Wei.of(100);
       final long tx0Nonce = 1L;
-      final Bytes tx0Code = Bytes.fromHexString("0xAA");
+      final Code tx0Code = new Code(Bytes.fromHexString("0xAA"));
       final UInt256 tx0Slot1Value = UInt256.valueOf(1);
       final UInt256 tx0Slot2Value = UInt256.valueOf(3);
 
       final Wei tx1Balance = Wei.of(200);
       final long tx1Nonce = 2L;
-      final Bytes tx1Code = Bytes.fromHexString("0xBB");
+      final Code tx1Code = new Code(Bytes.fromHexString("0xBB"));
       final UInt256 tx1Slot1Value = UInt256.valueOf(5);
       final UInt256 tx1Slot2Value = UInt256.ZERO;
 
       final Wei tx2Balance = Wei.of(300);
       final long tx2Nonce = 3L;
-      final Bytes tx2Code = Bytes.fromHexString("0xCC");
+      final Code tx2Code = new Code(Bytes.fromHexString("0xCC"));
       final UInt256 tx2Slot1Value = UInt256.valueOf(7);
 
       final BlockAccessList.BlockAccessListBuilder balBuilder = BlockAccessList.builder();

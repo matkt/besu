@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 
@@ -605,8 +606,10 @@ class SnapV2BlockAccessListApplierReorgTest {
 
   private Optional<Bytes> readCode(final Address address) {
     final PmtStateTrieAccountValue account = readAccount(address);
-    return coordinator.applyForStrategy(
-        bonsai -> bonsai.getCode(account.getCodeHash(), address.addressHash()),
-        forest -> Optional.<Bytes>empty());
+    return coordinator
+        .applyForStrategy(
+            bonsai -> bonsai.getCode(account.getCodeHash(), address.addressHash()),
+            forest -> Optional.<Code>empty())
+        .map(Code::getBytes);
   }
 }

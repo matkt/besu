@@ -250,7 +250,7 @@ public abstract class AbstractCallOperation extends AbstractOperation {
     // depth) — record it here so the BAL stays accurate either way. Touching only after the gas
     // checks ensures OOG calls don't add the delegation target to the BAL.
     if (contract != null) {
-      final Bytes contractCode = contract.getCode();
+      final Code contractCode = contract.getCode();
       if (hasCodeDelegation(contractCode)) {
         frame
             .getEip7928AccessList()
@@ -414,19 +414,9 @@ public abstract class AbstractCallOperation extends AbstractOperation {
       return Code.EMPTY_CODE;
     }
 
-    final boolean accountHasCodeCache = account.getCodeCache() != null;
+    final Code code = account.getOrCreateCachedCode();
 
-    final Code code;
-    // Bonsai accounts may have a fully cached code, so we use that one
-    if (accountHasCodeCache) {
-      code = account.getOrCreateCachedCode();
-    }
-    // Any other account can only use the cached jump dest analysis if available
-    else {
-      code = evm.getOrCreateCachedJumpDest(codeHash, account.getCode());
-    }
-
-    if (!hasCodeDelegation(code.getBytes())) {
+    if (!hasCodeDelegation(code)) {
       return code;
     }
 
@@ -437,13 +427,6 @@ public abstract class AbstractCallOperation extends AbstractOperation {
             account,
             frame.getEip7928AccessList());
 
-    if (accountHasCodeCache) {
-      // If the account has a code cache, we can return the cached code of the target
-      return target.code();
-    }
-
-    // otherwise we can only use the cached jump destination analysis
-    final Code targetCode = target.code();
-    return evm.getOrCreateCachedJumpDest(targetCode.getCodeHash(), targetCode.getBytes());
+    return target.code();
   }
 }

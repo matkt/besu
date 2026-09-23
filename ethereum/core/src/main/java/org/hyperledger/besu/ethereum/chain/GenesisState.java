@@ -31,8 +31,8 @@ import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Withdrawal;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
@@ -67,9 +67,8 @@ public final class GenesisState {
    * @param protocolSchedule A protocol Schedule associated with
    * @return A new {@link GenesisState}.
    */
-  public static GenesisState fromJson(
-      final String json, final ProtocolSchedule protocolSchedule, final BonsaiCodeCache codeCache) {
-    return fromConfig(GenesisConfig.fromConfig(json), protocolSchedule, codeCache);
+  public static GenesisState fromJson(final String json, final ProtocolSchedule protocolSchedule) {
+    return fromConfig(GenesisConfig.fromConfig(json), protocolSchedule);
   }
 
   /**
@@ -87,10 +86,7 @@ public final class GenesisState {
       final URL jsonSource,
       final ProtocolSchedule protocolSchedule) {
     return fromConfig(
-        dataStorageConfiguration,
-        GenesisConfig.fromConfig(jsonSource),
-        protocolSchedule,
-        new BonsaiCodeCache());
+        dataStorageConfiguration, GenesisConfig.fromConfig(jsonSource), protocolSchedule);
   }
 
   /**
@@ -101,10 +97,8 @@ public final class GenesisState {
    * @return A new {@link GenesisState}.
    */
   public static GenesisState fromConfig(
-      final GenesisConfig config,
-      final ProtocolSchedule protocolSchedule,
-      final BonsaiCodeCache codeCache) {
-    return fromConfig(DataStorageConfiguration.DEFAULT_CONFIG, config, protocolSchedule, codeCache);
+      final GenesisConfig config, final ProtocolSchedule protocolSchedule) {
+    return fromConfig(DataStorageConfiguration.DEFAULT_CONFIG, config, protocolSchedule);
   }
 
   /**
@@ -119,10 +113,8 @@ public final class GenesisState {
   public static GenesisState fromConfig(
       final DataStorageConfiguration dataStorageConfiguration,
       final GenesisConfig genesisConfig,
-      final ProtocolSchedule protocolSchedule,
-      final BonsaiCodeCache codeCache) {
-    final var genesisStateRoot =
-        calculateGenesisStateRoot(dataStorageConfiguration, genesisConfig, codeCache);
+      final ProtocolSchedule protocolSchedule) {
+    final var genesisStateRoot = calculateGenesisStateRoot(dataStorageConfiguration, genesisConfig);
     final Block block =
         new Block(
             buildHeader(genesisConfig, genesisStateRoot, protocolSchedule),
@@ -179,7 +171,10 @@ public final class GenesisState {
           final MutableAccount account = updater.createAccount(genesisAccount.address());
           account.setNonce(genesisAccount.nonce());
           account.setBalance(genesisAccount.balance());
-          account.setCode(genesisAccount.code());
+          account.setCode(
+              genesisAccount.code() == null || genesisAccount.code().isEmpty()
+                  ? Code.EMPTY_CODE
+                  : new Code(genesisAccount.code()));
           genesisAccount.storage().forEach(account::setStorageValue);
         });
     updater.commit();
@@ -187,10 +182,8 @@ public final class GenesisState {
   }
 
   private static Hash calculateGenesisStateRoot(
-      final DataStorageConfiguration dataStorageConfiguration,
-      final GenesisConfig genesisConfig,
-      final BonsaiCodeCache codeCache) {
-    try (var worldState = createGenesisWorldState(dataStorageConfiguration, codeCache)) {
+      final DataStorageConfiguration dataStorageConfiguration, final GenesisConfig genesisConfig) {
+    try (var worldState = createGenesisWorldState(dataStorageConfiguration)) {
       writeAccountsTo(worldState, genesisConfig.streamAllocations(), null);
       return worldState.rootHash();
     } catch (Exception e) {

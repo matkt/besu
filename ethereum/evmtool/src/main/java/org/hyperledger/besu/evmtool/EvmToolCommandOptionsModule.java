@@ -114,17 +114,6 @@ public class EvmToolCommandOptionsModule {
 
   @SuppressWarnings({"FieldCanBeFinal", "FieldMayBeFinal"})
   @CommandLine.Option(
-      names = {"--Xevm-jumpdest-cache-weight-kb"},
-      description =
-          "size in kilobytes to allow the cache "
-              + "of valid jump destinations to grow to before evicting the least recently used entry",
-      fallbackValue = "32000",
-      defaultValue = "32000",
-      hidden = true)
-  private Long jumpDestCacheWeightKilobytes =
-      32_000L; // 10k contracts, (25k max contract size / 8 bit) + 32byte hash
-
-  @CommandLine.Option(
       names = {"--Xevm-worldstate-update-mode"},
       description = "How to handle worldstate updates within a transaction",
       fallbackValue = "STACKED",
@@ -154,8 +143,7 @@ public class EvmToolCommandOptionsModule {
   @Provides
   @Singleton
   EvmConfiguration provideEvmConfiguration() {
-    return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+    return new EvmConfiguration(worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
   }
 
   /**

@@ -50,7 +50,7 @@ public class BlockAccessListResultTest {
             Collections.emptyList(),
             List.of(new BalanceChange(1, Wei.of(1000))),
             List.of(new NonceChange(1, 5L)),
-            List.of(new CodeChange(1, Bytes.fromHexString("0x60806040"))));
+            List.of(CodeChange.fromBytes(1, Bytes.fromHexString("0x60806040"))));
 
     final String json =
         objectMapper.writeValueAsString(

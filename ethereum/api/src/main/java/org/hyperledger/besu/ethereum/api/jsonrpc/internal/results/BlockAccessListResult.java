@@ -118,7 +118,7 @@ public final class BlockAccessListResult {
 
     public CodeChangeResult(final CodeChange change) {
       this.index = Quantity.create(change.txIndex());
-      this.code = change.newCode().toHexString();
+      this.code = change.newCode().getBytes().toHexString();
     }
   }
 }

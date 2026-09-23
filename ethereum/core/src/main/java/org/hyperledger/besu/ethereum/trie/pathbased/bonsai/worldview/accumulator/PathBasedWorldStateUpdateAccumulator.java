@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWo
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.AccountConsumingMap;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -66,7 +67,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   protected final Consumer<StorageSlotKey> storagePreloader;
 
   private final AccountConsumingMap<BonsaiValue<ACCOUNT>> accountsToUpdate;
-  private final Map<Address, BonsaiValue<Bytes>> codeToUpdate = new ConcurrentHashMap<>();
+  private final Map<Address, BonsaiValue<Code>> codeToUpdate = new ConcurrentHashMap<>();
   private final Set<Address> storageToClear = Collections.synchronizedSet(new HashSet<>());
   protected final EvmConfiguration evmConfiguration;
 
@@ -174,9 +175,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       }
 
       if (accountChanges.getNewCode().isPresent()) {
-        final Bytes code = accountChanges.getNewCode().get();
+        final Code code = accountChanges.getNewCode().get();
         accountValue.setCode(code);
-        shouldCheckForEmptyAccount |= clearEmptyAccounts && code.isEmpty();
+        shouldCheckForEmptyAccount |= clearEmptyAccounts && code.getSize() == 0;
       }
 
       if (hasStorageChange) {
@@ -252,9 +253,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         .getCodeToUpdate()
         .forEach(
             (address, srcValue) -> {
-              final Bytes prior = srcValue.getPrior();
-              final Bytes updated = priorOnly ? prior : srcValue.getUpdated();
-              final BonsaiValue<Bytes> newValue =
+              final Code prior = srcValue.getPrior();
+              final Code updated = priorOnly ? prior : srcValue.getUpdated();
+              final BonsaiValue<Code> newValue =
                   priorOnly
                       ? new BonsaiValue<>(prior, updated)
                       : new BonsaiValue<>(prior, updated, srcValue.isLastStepCleared());
@@ -358,7 +359,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   }
 
   @Override
-  public Map<Address, BonsaiValue<Bytes>> getCodeToUpdate() {
+  public Map<Address, BonsaiValue<Code>> getCodeToUpdate() {
     return codeToUpdate;
   }
 
@@ -391,7 +392,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   protected void onAccountValueLoaded(
       final Address address, final BonsaiValue<ACCOUNT> accountValue) {}
 
-  protected void onCodeValueLoaded(final Address address, final BonsaiValue<Bytes> codeValue) {}
+  protected void onCodeValueLoaded(final Address address, final BonsaiValue<Code> codeValue) {}
 
   protected void onStorageValueLoaded(
       final Address address,
@@ -454,7 +455,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
               deletedAddress,
               __ -> loadAccountFromParent(deletedAddress, new BonsaiValue<>(null, null, true)));
       storageToClear.add(deletedAddress);
-      final BonsaiValue<Bytes> codeValue = codeToUpdate.get(deletedAddress);
+      final BonsaiValue<Code> codeValue = codeToUpdate.get(deletedAddress);
       if (codeValue != null) {
         codeValue.setUpdated(null).setCleared();
       } else {
@@ -529,7 +530,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                 if (updatedAccountValue == null) {
                   accountsToUpdate.put(updatedAddress, new BonsaiValue<>(null, updatedAccount));
                   codeToUpdate.put(
-                      updatedAddress, new BonsaiValue<>(null, updatedAccount.getCode()));
+                      updatedAddress,
+                      new BonsaiValue<>(null, updatedAccount.getOrCreateCachedCode()));
                 } else {
                   updatedAccountValue.setUpdated(updatedAccount);
                 }
@@ -547,7 +549,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
               }
 
               if (tracked.codeWasUpdated()) {
-                final BonsaiValue<Bytes> pendingCode =
+                final BonsaiValue<Code> pendingCode =
                     codeToUpdate.computeIfAbsent(
                         updatedAddress,
                         addr ->
@@ -561,7 +563,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                                             .orElse(Hash.EMPTY))
                                     .orElse(null),
                                 null));
-                pendingCode.setUpdated(updatedAccount.getCode());
+                pendingCode.setUpdated(updatedAccount.getOrCreateCachedCode());
               }
 
               if (tracked.getStorageWasCleared()) {
@@ -605,12 +607,12 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   }
 
   @Override
-  public Optional<Bytes> getCode(final Address address, final Hash codeHash) {
-    final BonsaiValue<Bytes> localCode = codeToUpdate.get(address);
+  public Optional<Code> getCode(final Address address, final Hash codeHash) {
+    final BonsaiValue<Code> localCode = codeToUpdate.get(address);
     if (localCode == null) {
-      final Supplier<Bytes> loader =
+      final Supplier<Code> loader =
           Suppliers.memoize(() -> wrappedWorldView().getCode(address, codeHash).orElse(null));
-      final BonsaiValue<Bytes> codeValue = BonsaiValue.withLazy(loader, loader);
+      final BonsaiValue<Code> codeValue = BonsaiValue.withLazy(loader, loader);
       onCodeValueLoaded(address, codeValue);
       codeToUpdate.put(address, codeValue);
       return Optional.ofNullable(codeValue.getUpdated());
@@ -842,26 +844,23 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   }
 
   private void rollCodeChange(
-      final Address address, final Bytes expectedCode, final Bytes replacementCode) {
+      final Address address, final Code expectedCode, final Code replacementCode) {
     if (Objects.equals(expectedCode, replacementCode)) {
       // non-change, a cached read.
       return;
     }
-    BonsaiValue<Bytes> codeValue = codeToUpdate.get(address);
+    BonsaiValue<Code> codeValue = codeToUpdate.get(address);
     if (codeValue == null) {
-      final Bytes storedCode =
-          wrappedWorldView()
-              .getCode(
-                  address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
-              .orElse(Bytes.EMPTY);
-      if (!storedCode.isEmpty()) {
-        codeValue = new BonsaiValue<>(storedCode, storedCode);
+      final Hash expectedHash = expectedCode == null ? Hash.EMPTY : expectedCode.getCodeHash();
+      final Optional<Code> stored = wrappedWorldView().getCode(address, expectedHash);
+      if (stored.isPresent() && stored.get().getSize() > 0) {
+        codeValue = new BonsaiValue<>(stored.get(), stored.get());
         codeToUpdate.put(address, codeValue);
       }
     }
 
     if (codeValue == null) {
-      if ((expectedCode == null || expectedCode.isEmpty()) && replacementCode != null) {
+      if (isEmptyCode(expectedCode) && replacementCode != null) {
         codeToUpdate.put(address, new BonsaiValue<>(null, replacementCode));
       } else {
         throw new IllegalStateException(
@@ -869,18 +868,17 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                 "Expected to update code, but the code does not exist.  Address=%s", address));
       }
     } else {
-      final Bytes existingCode = codeValue.getUpdated();
-      if ((expectedCode == null || expectedCode.isEmpty())
-          && existingCode != null
-          && !existingCode.isEmpty()) {
+      final Code existing = codeValue.getUpdated();
+      if (isEmptyCode(expectedCode) && existing != null && existing.getSize() > 0) {
         LOG.warn("At Address={}, expected to create code, but code exists. Overwriting.", address);
-      } else if (!Objects.equals(expectedCode, existingCode)) {
+      } else if (!Objects.equals(expectedCode, existing)
+          && !(isEmptyCode(expectedCode) && isEmptyCode(existing))) {
         throw new IllegalStateException(
             String.format(
                 "Old value of code does not match expected value.  Address=%s ExpectedHash=%s ActualHash=%s",
                 address,
-                expectedCode == null ? "null" : Hash.hash(expectedCode),
-                Hash.hash(codeValue.getUpdated())));
+                expectedCode == null ? "null" : expectedCode.getCodeHash(),
+                existing == null ? "null" : existing.getCodeHash()));
       }
       if (replacementCode == null && codeValue.getPrior() == null) {
         codeToUpdate.remove(address);
@@ -888,6 +886,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         codeValue.setUpdated(replacementCode);
       }
     }
+  }
+
+  private static boolean isEmptyCode(final Code code) {
+    return code == null || code.getSize() == 0;
   }
 
   private Map<StorageSlotKey, BonsaiValue<UInt256>> maybeCreateStorageMap(

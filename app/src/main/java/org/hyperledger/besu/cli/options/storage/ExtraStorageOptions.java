@@ -22,6 +22,7 @@ import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.MINIMUM_TRIE_LOG_RETENTION_LIMIT;
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_ARCHIVE_STATE_PROOFS_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ACCOUNT_SIZE;
+import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_CODE_SIZE;
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_ENABLED;
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_BONSAI_CROSS_BLOCK_CACHE_STORAGE_SIZE;
 import static org.hyperledger.besu.ethereum.worldstate.ExtraStorageConfiguration.Unstable.DEFAULT_CODE_USING_CODE_HASH_ENABLED;
@@ -145,6 +146,15 @@ public class ExtraStorageOptions implements CLIOptions<ExtraStorageConfiguration
 
     @Option(
         hidden = true,
+        names = "--Xbonsai-cross-block-cache-code-max-size",
+        paramLabel = "<LONG>",
+        description =
+            "Peak analyzed-code entries during a block when the cross-block cache is enabled"
+                + " (default: ${DEFAULT-VALUE}). Shrinks to 256 on cache maintenance.")
+    private Long bonsaiCrossBlockCacheCodeSize = DEFAULT_BONSAI_CROSS_BLOCK_CACHE_CODE_SIZE;
+
+    @Option(
+        hidden = true,
         names = {"--Xbonsai-archive-state-proofs-enabled"},
         fallbackValue = "true",
         description =
@@ -223,6 +233,8 @@ public class ExtraStorageOptions implements CLIOptions<ExtraStorageConfiguration
         domainObject.getUnstable().getBonsaiCrossBlockCacheAccountSize();
     dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheStorageSize =
         domainObject.getUnstable().getBonsaiCrossBlockCacheStorageSize();
+    dataStorageOptions.unstableOptions.bonsaiCrossBlockCacheCodeSize =
+        domainObject.getUnstable().getBonsaiCrossBlockCacheCodeSize();
     dataStorageOptions.unstableOptions.bonsaiArchiveStateProofsEnabled =
         domainObject.getUnstable().getBonsaiArchiveStateProofsEnabled();
     dataStorageOptions.isParallelTxProcessingEnabled =
@@ -248,6 +260,7 @@ public class ExtraStorageOptions implements CLIOptions<ExtraStorageConfiguration
                 .bonsaiCrossBlockCacheEnabled(unstableOptions.bonsaiCrossBlockCacheEnabled)
                 .bonsaiCrossBlockCacheAccountSize(unstableOptions.bonsaiCrossBlockCacheAccountSize)
                 .bonsaiCrossBlockCacheStorageSize(unstableOptions.bonsaiCrossBlockCacheStorageSize)
+                .bonsaiCrossBlockCacheCodeSize(unstableOptions.bonsaiCrossBlockCacheCodeSize)
                 .bonsaiArchiveStateProofsEnabled(unstableOptions.bonsaiArchiveStateProofsEnabled)
                 .build())
         .build();

@@ -101,7 +101,7 @@ class MainnetBlockAccessListValidatorTest {
               List.of(new BlockAccessList.SlotRead(SLOT_2)),
               List.of(new BlockAccessList.BalanceChange(0, Wei.ONE)),
               List.of(new BlockAccessList.NonceChange(0, 1L)),
-              List.of(new BlockAccessList.CodeChange(0, Bytes.EMPTY)));
+              List.of(BlockAccessList.CodeChange.fromBytes(0, Bytes.EMPTY)));
       final BlockAccessList.AccountChanges account2 =
           new BlockAccessList.AccountChanges(
               ADDR_2, List.of(), List.of(), List.of(), List.of(), List.of());
@@ -357,8 +357,8 @@ class MainnetBlockAccessListValidatorTest {
               List.of(),
               List.of(),
               List.of(
-                  new BlockAccessList.CodeChange(0, Bytes.of(1)),
-                  new BlockAccessList.CodeChange(0, Bytes.of(2))));
+                  BlockAccessList.CodeChange.fromBytes(0, Bytes.of(1)),
+                  BlockAccessList.CodeChange.fromBytes(0, Bytes.of(2))));
       final BlockAccessList bal = new BlockAccessList(List.of(account));
       Assertions.assertThat(
               validator().validate(Optional.of(bal), headerWithBal(bal, 30_000_000L), 0))

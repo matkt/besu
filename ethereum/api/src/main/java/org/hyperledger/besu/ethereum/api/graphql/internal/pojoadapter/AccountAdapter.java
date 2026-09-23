@@ -110,10 +110,9 @@ public class AccountAdapter extends AdapterBase {
   }
 
   /**
-   * Returns the code of the account.
-   *
-   * @param environment the DataFetchingEnvironment
-   * @return the code of the account
+   * GraphQL {@code Account.code} is schema scalar {@code Bytes}; keep returning hex-ready {@link
+   * Bytes} to the engine. Domain {@link Account#getCode()} returns analyzed {@link
+   * org.hyperledger.besu.evm.Code} — unwrap only for serialization.
    */
   public Bytes getCode(final DataFetchingEnvironment environment) {
 
@@ -122,10 +121,10 @@ public class AccountAdapter extends AdapterBase {
       return query
           .getAndMapWorldState(
               blockNumber.orElse(query.headBlockNumber()),
-              ws -> Optional.of(ws.get(account.get().getAddress()).getCode()))
+              ws -> Optional.of(ws.get(account.get().getAddress()).getCode().getBytes()))
           .get();
     } else {
-      return account.map(AccountState::getCode).orElse(Bytes.EMPTY);
+      return account.map(a -> a.getCode().getBytes()).orElse(Bytes.EMPTY);
     }
   }
 

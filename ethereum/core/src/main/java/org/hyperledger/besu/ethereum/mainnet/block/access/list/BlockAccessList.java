@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.encoding.BlockAccessListDecoder;
@@ -22,6 +23,7 @@ import org.hyperledger.besu.ethereum.core.encoding.BlockAccessListEncoder;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 
 import java.util.ArrayList;
@@ -125,7 +127,19 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
     }
   }
 
-  public record CodeChange(long txIndex, Bytes newCode) {
+  public record CodeChange(long txIndex, Code newCode) {
+    /** Convenience for wire/tests that still have raw bytecode {@link Bytes}. */
+    public static CodeChange fromBytes(final long txIndex, final Bytes bytecode) {
+      return new CodeChange(txIndex, codeFromBytes(bytecode));
+    }
+
+    static Code codeFromBytes(final Bytes bytecode) {
+      if (bytecode == null || bytecode.isEmpty()) {
+        return Code.EMPTY_CODE;
+      }
+      return new Code(bytecode, Hash.hash(bytecode));
+    }
+
     @Override
     public String toString() {
       return "CodeChange{txIndex=" + txIndex + ", newCode=" + newCode + '}';
@@ -348,7 +362,7 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
         }
       }
 
-      Optional<Bytes> getLastCode() {
+      Optional<Code> getLastCode() {
         if (this.codes.isEmpty()) {
           return Optional.empty();
         }
@@ -381,7 +395,7 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
         nonces.add(new NonceChange(txIndex, newNonce));
       }
 
-      void addCodeChange(final long txIndex, final Bytes code) {
+      void addCodeChange(final long txIndex, final Code code) {
         codes.add(new CodeChange(txIndex, code));
       }
 
