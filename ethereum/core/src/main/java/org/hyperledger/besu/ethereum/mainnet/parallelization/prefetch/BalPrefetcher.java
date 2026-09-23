@@ -272,6 +272,8 @@ public class BalPrefetcher {
           final List<Hash> codeHashes = new ArrayList<>();
           final List<Hash> accountHashesForCode = new ArrayList<>();
           final List<byte[]> flatKeys = new ArrayList<>();
+          int contracts = 0;
+          int alreadyCached = 0;
 
           for (int i = 0; i < keys.accountHashes.size(); i++) {
             final Hash accountHash = keys.accountHashes.get(i);
@@ -290,14 +292,22 @@ public class BalPrefetcher {
             if (codeHash.equals(Hash.EMPTY)) {
               continue;
             }
+            contracts++;
             // Skip if already warmed in analyzed-code cache (NO_OP returns null → proceed).
             if (cacheManager.getIfPresent(codeHash) != null) {
+              alreadyCached++;
               continue;
             }
             codeHashes.add(codeHash);
             accountHashesForCode.add(accountHash);
             flatKeys.add((codeByHash ? codeHash : accountHash).getBytes().toArrayUnsafe());
           }
+
+          LOG.info(
+              "Prefetch code: contracts={}, alreadyCached={}, toLoad={}",
+              contracts,
+              alreadyCached,
+              flatKeys.size());
 
           if (flatKeys.isEmpty()) {
             LOG.debug("Prefetch: no contract code bytes to load");
@@ -339,7 +349,7 @@ public class BalPrefetcher {
         () -> {
           final FlatDbCacheManager cacheManager =
               worldState.getWorldStateStorage().getCacheManager();
-          int warmed = 0;
+          int addedToCache = 0;
           for (final PendingCode entry : pending) {
             if (cacheManager.getIfPresent(entry.codeHash()) != null) {
               continue;
@@ -347,9 +357,10 @@ public class BalPrefetcher {
             final Code code = new Code(entry.bytecode(), entry.codeHash());
             code.ensureJumpDestAnalyzed();
             cacheManager.put(entry.codeHash(), code);
-            warmed++;
+            addedToCache++;
           }
-          LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", warmed);
+          LOG.info("Prefetch code: addedToCache={}", addedToCache);
+          LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", addedToCache);
         },
         cpuExecutor);
   }
