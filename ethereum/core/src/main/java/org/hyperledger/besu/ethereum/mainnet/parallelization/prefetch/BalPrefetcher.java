@@ -95,7 +95,11 @@ public class BalPrefetcher {
             () -> {
               worldState.disableCacheMerkleTrieLoader();
               // Always NO_OP (never null) when cross-block cache is disabled.
-              worldState.getWorldStateStorage().getCacheManager().expandCachesForBlock();
+              final FlatDbCacheManager cacheManager =
+                  worldState.getWorldStateStorage().getCacheManager();
+              cacheManager.expandCachesForBlock();
+              LOG.info(
+                  "Prefetch code: cacheSizeBefore={}", cacheManager.getCodeCacheSize());
 
               // Collect and optionally sort account changes
               final List<BlockAccessList.AccountChanges> accounts =
@@ -304,10 +308,11 @@ public class BalPrefetcher {
           }
 
           LOG.info(
-              "Prefetch code: contracts={}, alreadyCached={}, toLoad={}",
+              "Prefetch code: contracts={}, alreadyCached={}, toLoad={}, cacheSize={}",
               contracts,
               alreadyCached,
-              flatKeys.size());
+              flatKeys.size(),
+              cacheManager.getCodeCacheSize());
 
           if (flatKeys.isEmpty()) {
             LOG.debug("Prefetch: no contract code bytes to load");
@@ -350,16 +355,26 @@ public class BalPrefetcher {
           final FlatDbCacheManager cacheManager =
               worldState.getWorldStateStorage().getCacheManager();
           int addedToCache = 0;
+          int skippedAlreadyCached = 0;
+          long jumpDestNs = 0L;
           for (final PendingCode entry : pending) {
             if (cacheManager.getIfPresent(entry.codeHash()) != null) {
+              skippedAlreadyCached++;
               continue;
             }
             final Code code = new Code(entry.bytecode(), entry.codeHash());
+            final long t0 = System.nanoTime();
             code.ensureJumpDestAnalyzed();
+            jumpDestNs += System.nanoTime() - t0;
             cacheManager.put(entry.codeHash(), code);
             addedToCache++;
           }
-          LOG.info("Prefetch code: addedToCache={}", addedToCache);
+          LOG.info(
+              "Prefetch code: addedToCache={} skippedAlreadyCached={} jumpDestUs={} thread={}",
+              addedToCache,
+              skippedAlreadyCached,
+              jumpDestNs / 1_000,
+              Thread.currentThread().getName());
           LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", addedToCache);
         },
         cpuExecutor);

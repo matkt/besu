@@ -248,6 +248,44 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     analyzedCodeCache.put(codeHash, code);
   }
 
+  /**
+   * Analyzed-code load path used by world-state {@code getCode} (account warm-up / tx execution).
+   * Prefetch jump-dest uses {@link #put} directly and does not go through this method.
+   */
+  @Override
+  public Optional<Code> getCodeFromCacheOrStorage(
+      final Hash codeHash, final Supplier<Optional<Bytes>> flatCodeLoader) {
+    if (codeHash.equals(Hash.EMPTY)) {
+      return Optional.of(Code.EMPTY_CODE);
+    }
+    final Code cached = getIfPresent(codeHash);
+    if (cached != null) {
+      LOG.debug(
+          "Code cache HIT (getCode): thread={} cacheSize={}",
+          Thread.currentThread().getName(),
+          analyzedCodeCache.estimatedSize());
+      return Optional.of(cached);
+    }
+    final Optional<Bytes> flat = flatCodeLoader.get();
+    if (flat.isEmpty()) {
+      return Optional.empty();
+    }
+    if (flat.get().isEmpty()) {
+      return Optional.of(Code.EMPTY_CODE);
+    }
+    final Code code = new Code(flat.get(), codeHash);
+    final long t0 = System.nanoTime();
+    code.ensureJumpDestAnalyzed();
+    final long jumpDestNs = System.nanoTime() - t0;
+    put(codeHash, code);
+    LOG.info(
+        "Code cache MISS+jumpDest (getCode/tx): thread={} jumpDestUs={} cacheSize={}",
+        Thread.currentThread().getName(),
+        jumpDestNs / 1_000,
+        analyzedCodeCache.estimatedSize());
+    return Optional.of(code);
+  }
+
   @Override
   public void invalidateCode(final Hash codeHash) {
     analyzedCodeCache.invalidate(codeHash);
