@@ -49,8 +49,8 @@ public class JournaledAccount implements MutableAccount, Undoable {
   private final Address address;
   private final Hash addressHash;
 
-  @Nullable private MutableAccount account;
-  @Nullable private CodeCache codeCache;
+  @Nullable private final MutableAccount account;
+  @Nullable private final CodeCache codeCache;
 
   private long transactionBoundaryMark;
   private final UndoScalar<Long> nonce;
