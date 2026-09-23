@@ -124,8 +124,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
                 .prefetch(
                     maybeWorldState.get(),
                     blockAccessList,
-                    BlockProcessingExecutors.ioExecutor(),
-                    BlockProcessingExecutors.cpuExecutor())
+                    BlockProcessingExecutors.ioExecutor())
                 .exceptionally(
                     ex -> {
                       LOG.error("Prefetch failed", ex);

@@ -47,8 +47,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Mechanism for prefetching world state data based on Block Access List (BAL).
  *
- * <p>Pipeline: (1) account + storage keys on the IO executor, (2) flat contract bytecode load on
- * the IO executor, (3) jump-dest analysis into the analyzed-code cache on the CPU executor. {@link
+ * <p>Pipeline on the IO executor: (1) account + storage keys, (2) flat contract bytecode load +
+ * jump-dest analysis into the analyzed-code cache. {@link
  * BonsaiWorldStateKeyValueStorage#getCacheManager()} is always non-null ({@code NO_OP} when
  * cross-block caching is disabled).
  */
@@ -76,20 +76,18 @@ public class BalPrefetcher {
   /**
    * Prefetch world state data based on the block access list.
    *
-   * <p>Stages: collect keys → fetch accounts/slots (IO) → load flat code (IO) → jump-dest analyze
-   * (CPU).
+   * <p>Stages: collect keys → fetch accounts/slots → load flat code and jump-dest analyze (all on
+   * the IO executor).
    *
    * @param worldState the world state to prefetch data into
    * @param blockAccessList the block access list containing read operations
-   * @param ioExecutor executor for RocksDB / flat-db reads (accounts, slots, code bytes)
-   * @param cpuExecutor executor for jump-dest analysis into the analyzed-code cache
+   * @param ioExecutor executor for RocksDB / flat-db reads and jump-dest analysis
    * @return a completable future that completes when prefetching is done
    */
   public CompletableFuture<Void> prefetch(
       final BonsaiWorldState worldState,
       final BlockAccessList blockAccessList,
-      final Executor ioExecutor,
-      final Executor cpuExecutor) {
+      final Executor ioExecutor) {
 
     return CompletableFuture.supplyAsync(
             () -> {
@@ -117,14 +115,13 @@ public class BalPrefetcher {
             },
             ioExecutor)
         .thenCompose(keys -> fetchAccountAndStorageAsync(worldState, keys, ioExecutor))
-        .thenCompose(keys -> loadCodeBytesAsync(worldState, keys, ioExecutor))
-        .thenCompose(pending -> analyzeJumpDestAsync(worldState, pending, cpuExecutor))
+        .thenCompose(keys -> prefetchCodeAsync(worldState, keys, ioExecutor))
         .whenComplete(
             (result, ex) -> {
               if (ex != null) {
                 LOG.error("Error during prefetch", ex);
               } else {
-                LOG.info("Prefetch completed (accounts/slots → code IO → jump-dest CPU)");
+                LOG.info("Prefetch completed (accounts/slots → code IO + jump-dest)");
               }
             });
   }
@@ -258,12 +255,12 @@ public class BalPrefetcher {
   }
 
   /**
-   * IO stage: parse code hashes from retained account RLPs and batch-load flat {@code CODE_STORAGE}
-   * bytes. Does not run jump-dest analysis.
+   * IO stage: parse code hashes from retained account RLPs, batch-load flat {@code CODE_STORAGE}
+   * bytes, run jump-dest analysis, and put into the shared analyzed-code cache.
    */
-  private CompletableFuture<List<PendingCode>> loadCodeBytesAsync(
+  private CompletableFuture<Void> prefetchCodeAsync(
       final BonsaiWorldState worldState, final PrefetchKeys keys, final Executor ioExecutor) {
-    return CompletableFuture.supplyAsync(
+    return CompletableFuture.runAsync(
         () -> {
           final BonsaiWorldStateKeyValueStorage storage = worldState.getWorldStateStorage();
           final FlatDbCacheManager cacheManager = storage.getCacheManager();
@@ -300,12 +297,12 @@ public class BalPrefetcher {
           }
 
           if (flatKeys.isEmpty()) {
-            LOG.debug("Prefetch: no contract code bytes to load");
-            return List.of();
+            LOG.debug("Prefetch: no contract code to load");
+            return;
           }
 
           final List<Optional<Bytes>> flats = prefetchKeys(worldState, CODE_STORAGE, flatKeys);
-          final List<PendingCode> pending = new ArrayList<>(flats.size());
+          int warmed = 0;
           for (int i = 0; i < flats.size(); i++) {
             final Optional<Bytes> flat = flats.get(i);
             final Hash codeHash = codeHashes.get(i);
@@ -313,45 +310,21 @@ public class BalPrefetcher {
             if (flat.isPresent()
                 && !flat.get().isEmpty()
                 && (codeByHash || Hash.hash(flat.get()).equals(codeHash))) {
-              pending.add(new PendingCode(codeHash, flat.get()));
+              if (cacheManager.getIfPresent(codeHash) != null) {
+                continue;
+              }
+              final Code code = new Code(flat.get(), codeHash);
+              code.ensureJumpDestAnalyzed();
+              cacheManager.put(codeHash, code);
+              warmed++;
             } else if (!codeByHash) {
-              // Account-hash strategy miss / filter mismatch: fall back to getCode (IO + analyze).
+              // Account-hash strategy miss / filter mismatch: fall back to getCode.
               storage.getCode(codeHash, accountHash);
             }
           }
-          LOG.debug("Prefetch: loaded {} flat code entries (IO)", pending.size());
-          return pending;
+          LOG.debug("Prefetch: loaded and jump-dest analyzed {} code entries (IO)", warmed);
         },
         ioExecutor);
-  }
-
-  /**
-   * CPU stage: build {@link Code}, run jump-dest analysis, put into the shared analyzed-code cache.
-   */
-  private CompletableFuture<Void> analyzeJumpDestAsync(
-      final BonsaiWorldState worldState,
-      final List<PendingCode> pending,
-      final Executor cpuExecutor) {
-    if (pending.isEmpty()) {
-      return CompletableFuture.completedFuture(null);
-    }
-    return CompletableFuture.runAsync(
-        () -> {
-          final FlatDbCacheManager cacheManager =
-              worldState.getWorldStateStorage().getCacheManager();
-          int warmed = 0;
-          for (final PendingCode entry : pending) {
-            if (cacheManager.getIfPresent(entry.codeHash()) != null) {
-              continue;
-            }
-            final Code code = new Code(entry.bytecode(), entry.codeHash());
-            code.ensureJumpDestAnalyzed();
-            cacheManager.put(entry.codeHash(), code);
-            warmed++;
-          }
-          LOG.debug("Prefetch: jump-dest analyzed {} contract code entries (CPU)", warmed);
-        },
-        cpuExecutor);
   }
 
   /**
@@ -426,9 +399,6 @@ public class BalPrefetcher {
     final int end = Math.min(start + batchSize, keys.size());
     return keys.subList(start, end);
   }
-
-  /** Flat bytecode loaded on the IO stage, awaiting jump-dest analysis on the CPU stage. */
-  private record PendingCode(Hash codeHash, Bytes bytecode) {}
 
   /**
    * Container for collected prefetch keys. {@code accountRlps} is filled by account {@code

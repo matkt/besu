@@ -137,7 +137,7 @@ public class BalPrefetcherTest {
                 accountChanges(address1, List.of(), List.of())));
 
     new BalPrefetcher(sortingEnabled, batchSize)
-        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR)
+        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR)
         .join();
 
     assertCachedAccount(address1, accountData1);
@@ -172,7 +172,7 @@ public class BalPrefetcherTest {
                     List.of(new BlockAccessList.SlotRead(slot2)))));
 
     new BalPrefetcher(sortingEnabled, batchSize)
-        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR)
+        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR)
         .join();
 
     assertCachedStorage(address, slot1, storageValue1);
@@ -201,7 +201,7 @@ public class BalPrefetcherTest {
         new BlockAccessList(List.of(accountChanges(address, List.of(), List.of())));
 
     new BalPrefetcher(sortingEnabled, batchSize)
-        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR)
+        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR)
         .join();
 
     final FlatDbCacheManager cacheManager = baseStorage.getCacheManager();
@@ -242,7 +242,7 @@ public class BalPrefetcherTest {
                 accountChanges(contract, List.of(), List.of())));
 
     new BalPrefetcher(sortingEnabled, batchSize)
-        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR)
+        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR)
         .join();
 
     assertThat(baseStorage.isCached(ACCOUNT_INFO_STATE, missing.addressHash().getBytes())).isTrue();
@@ -291,7 +291,7 @@ public class BalPrefetcherTest {
                     List.of())));
 
     new BalPrefetcher(false, 0)
-        .prefetch(prefetchWs, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR)
+        .prefetch(prefetchWs, blockAccessList, SYNC_EXECUTOR)
         .join();
     prefetchWs.close();
 
