@@ -95,7 +95,7 @@ public final class Address extends BytesHolder implements Comparable<Address> {
   public static final Address ZERO = Address.wrap(Bytes.fromHexStringLenient("0x0", SIZE));
 
   static final Cache<Address, Hash> hashCache =
-      Caffeine.newBuilder().executor(Runnable::run).maximumSize(4_000).build();
+      Caffeine.newBuilder().executor(Runnable::run).maximumSize(100_000).build();
 
   /**
    * Instantiates a new Address.
