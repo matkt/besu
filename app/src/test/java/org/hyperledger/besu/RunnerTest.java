@@ -409,6 +409,7 @@ public final class RunnerTest {
                         DEFAULT_CACHE_CAPACITY,
                         DEFAULT_IS_HIGH_SPEC,
                         false,
+                        false,
                         Optional.empty(),
                         Optional.empty()),
                 Arrays.asList(KeyValueSegmentIdentifier.values()),

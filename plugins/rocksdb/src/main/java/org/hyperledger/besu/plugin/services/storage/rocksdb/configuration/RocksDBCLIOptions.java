@@ -52,6 +52,9 @@ public class RocksDBCLIOptions {
   /** The constant DEFAULT_IS_HIGH_SPEC. */
   public static final boolean DEFAULT_IS_HIGH_SPEC = false;
 
+  /** The default value indicating whether the startup table cache warm-up is enabled. */
+  public static final boolean DEFAULT_IS_TABLE_CACHE_WARMUP_ENABLED = true;
+
   /** The constant MAX_OPEN_FILES_FLAG. */
   public static final String MAX_OPEN_FILES_FLAG = "--Xplugin-rocksdb-max-open-files";
 
@@ -65,7 +68,11 @@ public class RocksDBCLIOptions {
   /** The constant IS_HIGH_SPEC. */
   public static final String IS_HIGH_SPEC = "--Xplugin-rocksdb-high-spec-enabled";
 
-  /** The constant BLOB_BLOCKCHAIN_GARBAGE_COLLECTION_ENABLED. */
+  /** The constant TABLE_CACHE_WARMUP_ENABLED_FLAG. */
+  public static final String TABLE_CACHE_WARMUP_ENABLED_FLAG =
+      "--Xplugin-rocksdb-table-cache-warmup-enabled";
+
+  /** Key name for configuring blockchain_blob_garbage_collection_enabled */
   public static final String BLOB_BLOCKCHAIN_GARBAGE_COLLECTION_ENABLED =
       "--Xplugin-rocksdb-blockchain-blob-garbage-collection-enabled";
 
@@ -112,6 +119,15 @@ public class RocksDBCLIOptions {
       description =
           "Use this flag to boost Besu performance if you have a 16 GiB RAM hardware or more (default: ${DEFAULT-VALUE})")
   boolean isHighSpec;
+
+  /** Enables the startup table cache warm-up. */
+  @CommandLine.Option(
+      names = {TABLE_CACHE_WARMUP_ENABLED_FLAG},
+      hidden = true,
+      paramLabel = "<BOOLEAN>",
+      description =
+          "At startup, open the table readers of all live SST files to populate the RocksDB table cache with their footers, indexes and filters (default: ${DEFAULT-VALUE})")
+  boolean isTableCacheWarmupEnabled = DEFAULT_IS_TABLE_CACHE_WARMUP_ENABLED;
 
   /** The Blob blockchain garbage collection enabled. */
   @CommandLine.Option(
@@ -173,6 +189,7 @@ public class RocksDBCLIOptions {
     options.cacheCapacity = config.getCacheCapacity();
     options.backgroundThreadCount = config.getBackgroundThreadCount();
     options.isHighSpec = config.isHighSpec();
+    options.isTableCacheWarmupEnabled = config.isTableCacheWarmupEnabled();
     options.isBlockchainGarbageCollectionEnabled = config.isBlockchainGarbageCollectionEnabled();
     options.blobGarbageCollectionAgeCutoff = config.getBlobGarbageCollectionAgeCutoff();
     options.blobGarbageCollectionForceThreshold = config.getBlobGarbageCollectionForceThreshold();
@@ -190,6 +207,7 @@ public class RocksDBCLIOptions {
         backgroundThreadCount,
         cacheCapacity,
         isHighSpec,
+        isTableCacheWarmupEnabled,
         isBlockchainGarbageCollectionEnabled,
         blobGarbageCollectionAgeCutoff,
         blobGarbageCollectionForceThreshold);
@@ -273,6 +291,7 @@ public class RocksDBCLIOptions {
         .add("cacheCapacity", cacheCapacity)
         .add("backgroundThreadCount", backgroundThreadCount)
         .add("isHighSpec", isHighSpec)
+        .add("isTableCacheWarmupEnabled", isTableCacheWarmupEnabled)
         .add("isBlockchainGarbageCollectionEnabled", isBlockchainGarbageCollectionEnabled)
         .add("blobGarbageCollectionAgeCutoff", blobGarbageCollectionAgeCutoff)
         .add("blobGarbageCollectionForceThreshold", blobGarbageCollectionForceThreshold)
