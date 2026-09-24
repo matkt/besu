@@ -65,7 +65,8 @@ public class BalConfigurationOptions {
       names = {"--Xbal-prefetch-sorting-enabled"},
       hidden = true,
       arity = "1",
-      description = "Enable sorting of state data based on BAL (default: ${DEFAULT-VALUE}).")
+      description =
+          "Enable sorting of storage state data based on BAL (default: ${DEFAULT-VALUE}).")
   boolean balPreFetchSortingEnabled = BalConfiguration.DEFAULT.isBalPreFetchSortingEnabled();
 
   /**

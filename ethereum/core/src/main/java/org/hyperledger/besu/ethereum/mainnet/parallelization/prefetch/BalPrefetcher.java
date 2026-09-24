@@ -28,7 +28,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -82,19 +81,8 @@ public class BalPrefetcher {
             () -> {
               worldState.disableCacheMerkleTrieLoader();
 
-              // Collect and optionally sort account changes.
-              // Compute each address hash once, not on every comparison.
-              final List<BlockAccessList.AccountChanges> accounts =
-                  isSortingEnabled
-                      ? blockAccessList.accountChanges().stream()
-                          .map(ac -> Map.entry(ac.address().addressHash().getBytes(), ac))
-                          .sorted(Map.Entry.comparingByKey())
-                          .map(Map.Entry::getValue)
-                          .toList()
-                      : new ArrayList<>(blockAccessList.accountChanges());
-
               // Collect all keys to prefetch
-              final PrefetchKeys keys = collectKeys(accounts);
+              final PrefetchKeys keys = collectKeys(blockAccessList.accountChanges());
 
               LOG.debug(
                   "Prefetch: collected {} account keys and {} storage keys",

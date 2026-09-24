@@ -33,8 +33,6 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
 
