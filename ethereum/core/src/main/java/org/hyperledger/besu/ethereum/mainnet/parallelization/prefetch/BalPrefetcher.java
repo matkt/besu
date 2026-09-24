@@ -52,7 +52,7 @@ import org.slf4j.LoggerFactory;
  * BonsaiWorldStateKeyValueStorage#getCacheManager()} is always non-null ({@code NO_OP} when
  * cross-block caching is disabled).
  */
-@SuppressWarnings("rawtypes")
+@SuppressWarnings({"rawtypes", "unused", "FieldCanBeLocal"})
 public class BalPrefetcher {
 
   private static final Logger LOG = LoggerFactory.getLogger(BalPrefetcher.class);
@@ -97,11 +97,7 @@ public class BalPrefetcher {
 
               // Collect and optionally sort account changes
               final List<BlockAccessList.AccountChanges> accounts =
-                  isSortingEnabled
-                      ? blockAccessList.accountChanges().stream()
-                          .sorted(Comparator.comparing(ac -> ac.address().addressHash().getBytes()))
-                          .toList()
-                      : new ArrayList<>(blockAccessList.accountChanges());
+                      new ArrayList<>(blockAccessList.accountChanges());
 
               // Collect all keys to prefetch
               final PrefetchKeys keys = collectKeys(accounts);
@@ -158,9 +154,6 @@ public class BalPrefetcher {
         System.arraycopy(addressHashBytes, 0, storageKey, 0, addressHashBytes.length);
         System.arraycopy(slotHash, 0, storageKey, addressHashBytes.length, slotHash.length);
         storageKeys.add(storageKey);
-      }
-      if (isSortingEnabled) {
-        storageKeys.subList(rangeStart, storageKeys.size()).sort(STORAGE_KEY_COMPARATOR);
       }
     }
     return new PrefetchKeys(
