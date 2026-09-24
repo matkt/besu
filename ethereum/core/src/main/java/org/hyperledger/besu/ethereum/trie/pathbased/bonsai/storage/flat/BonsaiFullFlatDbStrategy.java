@@ -29,7 +29,6 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -38,8 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
-
-  private static final Logger LOG = LoggerFactory.getLogger(BonsaiFullFlatDbStrategy.class);
 
   protected final Counter getAccountNotFoundInFlatDatabaseCounter;
 
@@ -121,14 +118,6 @@ public class BonsaiFullFlatDbStrategy extends BonsaiFlatDbStrategy {
       rawKeys.add(key.toArrayUnsafe());
     }
     final List<Optional<byte[]>> fetched = storage.multiget(segmentIdentifier, rawKeys);
-    LOG.info(
-        "Fetched {} keys with values not null {} from storage",
-        keys.size(),
-        fetched.stream().filter(Objects::isNull).count());
-    LOG.info(
-        "Fetched {} keys with values not emoty {} from storage",
-        keys.size(),
-        fetched.stream().filter(Optional::isEmpty).count());
     final List<Optional<Bytes>> values = new ArrayList<>(fetched.size());
     for (final Optional<byte[]> value : fetched) {
       values.add(value.map(Bytes::wrap));
