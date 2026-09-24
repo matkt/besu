@@ -234,7 +234,6 @@ public class BalPrefetcher {
 
   private void prefetchKeys(
       final BonsaiWorldState worldState, final SegmentIdentifier segment, final List<byte[]> keys) {
-    // Go through BonsaiWorldStateKeyValueStorage so reads populate VersionedFlatDbCacheManager.
     worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
   }
 

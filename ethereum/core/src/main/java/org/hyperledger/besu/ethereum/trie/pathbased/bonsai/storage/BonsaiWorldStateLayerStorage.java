@@ -161,8 +161,10 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
     if (!missKeys.isEmpty()) {
       final List<Optional<Bytes>> parentValues =
           parentWorldStateStorage.getMultipleFlat(segmentIdentifier, missKeys);
-      for (int j = 0; j < missIndices.size(); j++) {
-        results.set(missIndices.get(j), parentValues.get(j));
+      if (parentValues.size() == missKeys.size()) {
+        for (int j = 0; j < missIndices.size(); j++) {
+          results.set(missIndices.get(j), parentValues.get(j));
+        }
       }
     }
 

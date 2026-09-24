@@ -159,7 +159,6 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
   public List<Optional<Bytes>> getMultipleFlat(
       final SegmentIdentifier segmentIdentifier, final List<byte[]> keys) {
     if (isClosedGet()) {
-      // Empty list = no-op / closed; alignment handled by callers / cache manager
       return List.of();
     }
     return super.getMultipleFlat(segmentIdentifier, keys);

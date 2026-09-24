@@ -64,8 +64,7 @@ public interface FlatDbCacheManager {
       final long version,
       final Function<List<Bytes>, List<Optional<Bytes>>> batchFetcher) {
     final List<Optional<Bytes>> fetched = batchFetcher.apply(keys);
-    // Empty list = strategy no-op (partial / archive safety net): null = unresolved, not absent
-    if (fetched.isEmpty() && !keys.isEmpty()) {
+    if (fetched.size() != keys.size()) {
       return Collections.nCopies(keys.size(), null);
     }
     return fetched;

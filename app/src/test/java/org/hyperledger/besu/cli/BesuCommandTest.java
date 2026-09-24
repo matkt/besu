@@ -1529,6 +1529,45 @@ public class BesuCommandTest extends CommandTestAbstract {
   }
 
   @Test
+  public void balPrefetchReadingDoesNotAutoEnableCrossBlockCacheForForest() {
+    parseCommand("--data-storage-format=FOREST");
+    verify(mockControllerBuilder)
+        .dataStorageConfiguration(dataStorageConfigurationArgumentCaptor.capture());
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        dataStorageConfigurationArgumentCaptor.getValue();
+    assertThat(dataStorageConfiguration.getDataStorageFormat()).isEqualTo(DataStorageFormat.FOREST);
+    assertThat(
+            dataStorageConfiguration
+                .getExtraStorageConfiguration()
+                .getUnstable()
+                .getBonsaiCrossBlockCacheEnabled())
+        .isFalse();
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void balPrefetchReadingDoesNotAutoEnableCrossBlockCacheForArchive() {
+    parseCommand("--data-storage-format=X_BONSAI_ARCHIVE");
+    verify(mockControllerBuilder)
+        .dataStorageConfiguration(dataStorageConfigurationArgumentCaptor.capture());
+
+    final DataStorageConfiguration dataStorageConfiguration =
+        dataStorageConfigurationArgumentCaptor.getValue();
+    assertThat(dataStorageConfiguration.getDataStorageFormat())
+        .isEqualTo(DataStorageFormat.X_BONSAI_ARCHIVE);
+    assertThat(
+            dataStorageConfiguration
+                .getExtraStorageConfiguration()
+                .getUnstable()
+                .getBonsaiCrossBlockCacheEnabled())
+        .isFalse();
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
   public void bonsaiLimitTrieLogsDisabledWhenFullSyncEnabled() {
     parseCommand("--sync-mode=FULL");
 

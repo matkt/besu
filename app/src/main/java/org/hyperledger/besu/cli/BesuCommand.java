@@ -2393,8 +2393,11 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
     }
 
     // BAL prefetch warms VersionedFlatDbCacheManager; enable the cross-block cache when prefetch is
-    // on so those reads are not discarded by the no-op cache.
-    if (balConfigurationOptions.toDomainObject().isBalPreFetchReadingEnabled()
+    // on so those reads are not discarded by the no-op cache. Only Bonsai (non-archive) benefits:
+    // Forest ignores the flag, and archive getMultipleFlat is a no-op, so auto-enabling there would
+    // only change default memory behaviour.
+    if (DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())
+        && balConfigurationOptions.toDomainObject().isBalPreFetchReadingEnabled()
         && !dataStorageConfiguration
             .getExtraStorageConfiguration()
             .getUnstable()

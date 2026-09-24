@@ -95,6 +95,9 @@ class BonsaiGetMultipleFlatMatrixTest {
         caseOf("PARTIAL/HEAD/MIX", Mode.PARTIAL, Shape.HEAD, KeySet.MIX),
         caseOf("PARTIAL/HEAD/ALL_PRESENT", Mode.PARTIAL, Shape.HEAD, KeySet.ALL_PRESENT),
         caseOf("PARTIAL/HEAD/ALL_ABSENT", Mode.PARTIAL, Shape.HEAD, KeySet.ALL_ABSENT),
+        // Layer over a strategy no-op parent: null slots must survive the layer merge
+        caseOf("PARTIAL/LAYER/MIX", Mode.PARTIAL, Shape.LAYER, KeySet.MIX),
+        caseOf("PARTIAL/SNAPSHOT/MIX", Mode.PARTIAL, Shape.SNAPSHOT, KeySet.MIX),
         caseOf("ARCHIVE/HEAD/MIX", Mode.ARCHIVE, Shape.HEAD, KeySet.MIX),
         caseOf("ARCHIVE/HEAD/ALL_PRESENT", Mode.ARCHIVE, Shape.HEAD, KeySet.ALL_PRESENT),
         // Archive layer: whole-op List.of(), even if shared HEAD cache is poisoned
@@ -243,6 +246,112 @@ class BonsaiGetMultipleFlatMatrixTest {
     assertThat(values).containsExactly(Optional.of(Fixture.A_VALUE));
     assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, Fixture.A.getBytes())).isFalse();
     assertThat(fixture.head.getCacheManager()).isSameAs(FlatDbCacheManager.NO_OP_CACHE);
+  }
+
+  @Test
+  void emptyKeys_returnsEmptyList() throws Exception {
+    fixture = Fixture.builder().mode(Mode.FULL).shape(Shape.LAYER).keys(KeySet.MIX).build();
+    assertThat(fixture.subject.getMultipleFlat(ACCOUNT_INFO_STATE, List.of())).isEmpty();
+    assertThat(fixture.head.getMultipleFlat(ACCOUNT_INFO_STATE, List.of())).isEmpty();
+  }
+
+  /**
+   * The no-op cache manager must expand a strategy no-op ({@code List.of()}) into key-aligned null
+   * slots, exactly like {@code VersionedFlatDbCacheManager}. Returning {@code List.of()} here would
+   * signal a whole-op no-op and break callers that index by position.
+   */
+  @Test
+  void noOpCache_strategyNoOp_returnsAlignedNullSlots() throws Exception {
+    fixture =
+        Fixture.builder()
+            .mode(Mode.PARTIAL)
+            .shape(Shape.HEAD)
+            .keys(KeySet.MIX)
+            .crossBlockCache(false)
+            .build();
+    assertThat(fixture.head.getCacheManager()).isSameAs(FlatDbCacheManager.NO_OP_CACHE);
+
+    final List<Optional<Bytes>> values =
+        fixture.subject.getMultipleFlat(ACCOUNT_INFO_STATE, fixture.queryKeys);
+
+    assertThat(values).hasSize(fixture.queryKeys.size());
+    assertThat(values).containsOnlyNulls();
+  }
+
+  /**
+   * {@link BonsaiArchiveWorldStateLayerStorage} is the one parent that answers a whole-op {@code
+   * List.of()} to an open child. The child must leave those slots unresolved instead of indexing
+   * into a shorter list.
+   */
+  @Test
+  void layerOverNoOpParent_leavesMissesUnresolvedInsteadOfThrowing() throws Exception {
+    fixture =
+        Fixture.builder()
+            .mode(Mode.ARCHIVE)
+            .shape(Shape.ARCHIVE_LAYER)
+            .keys(KeySet.MIX)
+            .poisonSharedCache(false)
+            .build();
+
+    try (final BonsaiWorldStateLayerStorage layer =
+        new BonsaiWorldStateLayerStorage(fixture.subject)) {
+      final List<Optional<Bytes>> values =
+          layer.getMultipleFlat(ACCOUNT_INFO_STATE, fixture.queryKeys);
+
+      assertThat(values).hasSize(fixture.queryKeys.size());
+      assertThat(values).containsOnlyNulls();
+      for (final Hash key : fixture.queriedHashes()) {
+        assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, key.getBytes())).isFalse();
+      }
+    }
+  }
+
+  /**
+   * Overlay hits never go through the parent fetch, so they must not warm the shared head cache.
+   * Parent misses in the same call still fetch and cache as usual.
+   */
+  @Test
+  void fullLayer_overlayValueAndTombstone_doNotWarmHeadCache() throws Exception {
+    fixture = Fixture.builder().mode(Mode.FULL).shape(Shape.LAYER).keys(KeySet.MIX).build();
+    final BonsaiWorldStateLayerStorage layer = (BonsaiWorldStateLayerStorage) fixture.subject;
+    final Hash overlayPresent = Hash.hash(Bytes.of(10));
+    final Hash overlayTombstone = Hash.hash(Bytes.of(11));
+    final Bytes overlayValue = Bytes.of(10, 20, 30);
+
+    final var updater = layer.updater();
+    updater.putAccountInfoState(overlayPresent, overlayValue);
+    updater.removeAccountInfoState(overlayTombstone);
+    updater.commit();
+
+    fixture.head.getCacheManager().clear(ACCOUNT_INFO_STATE);
+
+    final List<Optional<Bytes>> values =
+        layer.getMultipleFlat(
+            ACCOUNT_INFO_STATE,
+            List.of(
+                overlayPresent.getBytes().toArray(),
+                overlayTombstone.getBytes().toArray(),
+                Fixture.A.getBytes().toArray(),
+                Fixture.B.getBytes().toArray()));
+
+    assertThat(values)
+        .containsExactly(
+            Optional.of(overlayValue),
+            Optional.empty(),
+            Optional.of(Fixture.A_VALUE),
+            Optional.empty());
+    assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, overlayPresent.getBytes()))
+        .as("overlay value must not warm shared head cache")
+        .isFalse();
+    assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, overlayTombstone.getBytes()))
+        .as("overlay tombstone must not warm shared head cache")
+        .isFalse();
+    assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, Fixture.A.getBytes()))
+        .as("parent hits still warm the head cache")
+        .isTrue();
+    assertThat(fixture.head.isCached(ACCOUNT_INFO_STATE, Fixture.B.getBytes()))
+        .as("parent absences still warm as removals")
+        .isTrue();
   }
 
   private void assertWholeOpEmpty(final List<Optional<Bytes>> values) {
