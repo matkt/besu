@@ -231,8 +231,12 @@ public abstract class PathBasedWorldState
       if (blockHeader != null && !isStorageFrozen) {
         worldStateCacheManager.addCachedLayer(blockHeader, calculatedRootHash, this);
       }
-    } catch (final RuntimeException e) {
-      stateUpdater.rollback();
+    } catch (final RuntimeException | Error e) {
+      try {
+        stateUpdater.rollback();
+      } catch (final IllegalStateException e1) {
+        // no op
+      }
       throw e;
     } finally {
       accumulator.reset();
