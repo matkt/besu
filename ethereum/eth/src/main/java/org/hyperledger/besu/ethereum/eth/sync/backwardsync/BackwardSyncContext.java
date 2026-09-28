@@ -345,6 +345,8 @@ public class BackwardSyncContext {
               optResult.getYield().get().getReceipts(),
               optResult.getYield().get().getBlockAccessList());
       possiblyMoveHead(block);
+      logImportedBlockParallelization(
+          block, optResult.getNbParallelizedTransactions(), blockAccessList.isPresent());
       logBlockImportProgress(block.getHeader().getNumber());
     } else {
       if (optResult.isWorldStateUnavailable()) {
@@ -422,6 +424,30 @@ public class BackwardSyncContext {
 
     badChainListeners.forEach(
         listener -> listener.onBadChain(badBlock, badBlockDescendants, badBlockHeaderDescendants));
+  }
+
+  private void logImportedBlockParallelization(
+      final Block block,
+      final Optional<Integer> nbParallelizedTransactions,
+      final boolean balProvided) {
+    final int nbTransactions = block.getBody().getTransactions().size();
+    final StringBuilder message = new StringBuilder("Backward sync imported #%,d (%s)| %4d tx");
+    final List<Object> messageArgs =
+        new ArrayList<>(
+            List.of(
+                block.getHeader().getNumber(),
+                block.getHash().toShortLogString(),
+                nbTransactions));
+    if (nbParallelizedTransactions.isPresent() && nbTransactions > 0) {
+      final double parallelizedTxPercentage =
+          (double) (nbParallelizedTransactions.get() * 100) / nbTransactions;
+      message.append(" (%5.1f%% parallel)");
+      messageArgs.add(parallelizedTxPercentage);
+    }
+    if (block.getHeader().getBalHash().isPresent()) {
+      message.append(balProvided ? " | BAL provided" : " | BAL reconstructed");
+    }
+    LOG.info(String.format(message.toString(), messageArgs.toArray()));
   }
 
   private void logBlockImportProgress(final long currImportedHeight) {
