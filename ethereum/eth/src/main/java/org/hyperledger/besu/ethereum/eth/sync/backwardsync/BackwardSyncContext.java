@@ -431,23 +431,30 @@ public class BackwardSyncContext {
       final Optional<Integer> nbParallelizedTransactions,
       final boolean balProvided) {
     final int nbTransactions = block.getBody().getTransactions().size();
-    final StringBuilder message = new StringBuilder("Backward sync imported #%,d (%s)| %4d tx");
-    final List<Object> messageArgs =
-        new ArrayList<>(
-            List.of(
-                block.getHeader().getNumber(),
-                block.getHash().toShortLogString(),
-                nbTransactions));
+    final String balSuffix =
+        block.getHeader().getBalHash().isPresent()
+            ? (balProvided ? " | BAL provided" : " | BAL reconstructed")
+            : "";
     if (nbParallelizedTransactions.isPresent() && nbTransactions > 0) {
       final double parallelizedTxPercentage =
           (double) (nbParallelizedTransactions.get() * 100) / nbTransactions;
-      message.append(" (%5.1f%% parallel)");
-      messageArgs.add(parallelizedTxPercentage);
+      LOG.info(
+          String.format(
+              "Backward sync imported #%,d (%s)| %4d tx (%5.1f%% parallel)%s",
+              block.getHeader().getNumber(),
+              block.getHash().toShortLogString(),
+              nbTransactions,
+              parallelizedTxPercentage,
+              balSuffix));
+    } else {
+      LOG.info(
+          String.format(
+              "Backward sync imported #%,d (%s)| %4d tx%s",
+              block.getHeader().getNumber(),
+              block.getHash().toShortLogString(),
+              nbTransactions,
+              balSuffix));
     }
-    if (block.getHeader().getBalHash().isPresent()) {
-      message.append(balProvided ? " | BAL provided" : " | BAL reconstructed");
-    }
-    LOG.info(String.format(message.toString(), messageArgs.toArray()));
   }
 
   private void logBlockImportProgress(final long currImportedHeight) {
