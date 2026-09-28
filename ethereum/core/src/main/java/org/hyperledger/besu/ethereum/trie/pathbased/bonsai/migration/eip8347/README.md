@@ -1,97 +1,117 @@
-# EIP-8347 dual-check verify (Besu)
+# EIP-8347 migration artifacts (Besu)
 
-**Verify-only** check of an EIP-8347 artifact pair (PBT snapshot + preimages) against the MPT `stateRoot` of an anchor block.  
-No Bonsai→PBT conversion, no BAL, no world-state writes — accept/reject only.
+Dual-check **verify** of an EIP-8347 artifact pair (PBT snapshot + preimages) against an MPT `stateRoot`, plus offline **convert** that builds a PBT snapshot from an external preimages file and anchor world state.
+
+No BAL, no world-state writes during verify. Convert writes snapshot (and optionally a genesis-derived preimage file); it then dual-checks the result.
 
 ## Scope
 
 | Does | Does not |
 |------|----------|
-| Internal PBT consistency (leaf stream → root) | Mainnet artifact generation / export |
-| Consensus anchoring (preimages + leaves → MPT `stateRoot`) | Live migration / storage conversion |
-| CLI exit codes 0 / 1 / 2 | BAL, reorg, prune |
+| Dual-check verify (PBT root + MPT anchor) | Live migration / storage rewrite |
+| Offline snapshot generation from preimages file + anchor state | BAL, reorg, prune |
+| CLI `storage pbt verify` / `storage pbt convert` | Stem-grouped / typed snapshot layouts (EIP PR 12379) |
 
-Input: `snapshotPath`, `preimagesPath`, `expectedMptStateRoot` (`Bytes32`).  
-Output: void, or `Eip8347ArtifactVerificationException`.
-
-**Snapshot format:** stay on the current RLP leaf-record layout
+**Snapshot format:** current RLP leaf-record layout
 (`pbtRoot[32] | leafCount[8 BE] | RLP([key, value])*`).
-EIP PR 12379 (stem-grouped / typed layouts) is **out of scope** here and does **not**
-remove the need for a seek index — leaves remain variable-length with no embedded
-offset table.
+Variable-length leaves mean verify still needs a seek index; convert uses an
+external merge-sort spill (convert-only — verify streams already-sorted artifacts).
+
+---
+
+## Package layout
+
+Base: `org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347`
+
+```
+eip8347/
+├── README.md                          (this file)
+├── artifact/                          formats + I/O
+│   ├── Eip8347SnapshotLeaf
+│   ├── Eip8347PreimageRecord
+│   ├── Eip8347SnapshotReader
+│   ├── Eip8347PreimageReader
+│   ├── Eip8347ArtifactWriter
+│   └── Eip8347ArtifactVerificationException
+├── verify/                            dual-check
+│   ├── Eip8347DualCheckVerifier
+│   └── Eip8347SnapshotLeafIndex
+└── convert/                           snapshot generation
+    ├── Eip8347SnapshotGenerator
+    ├── Eip8347LeafSpillSorter         (package-private; convert-only)
+    ├── Eip8347StateSource
+    ├── Eip8347WorldStateSource
+    └── Eip8347PreimageFromGenesis     (genesis alloc → preimage file; Hive/tests / CLI fallback)
+```
+
+Tests mirror the same subpackages under `ethereum/core/src/test/.../eip8347/{verify,convert}/`.
+
+---
+
+## CLI
+
+### Verify
+
+```bash
+besu storage pbt verify \
+  --snapshot /path/to/snapshot.bin \
+  --preimages /path/to/preimages.bin \
+  --anchor 0x…blockHash   # or decimal number
+```
+
+Exit: **0** accept, **1** `Eip8347ArtifactVerificationException`, **2** other failure.
+
+### Convert
+
+```bash
+# Normal path: external preimages file + anchor world state → snapshot
+besu storage pbt convert \
+  --preimages /path/to/preimages.bin \
+  --snapshot /path/to/snapshot.bin \
+  --anchor 0x…blockHash
+
+# Optional: derive preimages from genesis alloc (Bonsai has no keccak preimage store).
+# Used for Hive / small test chains; not the mainnet convert input path.
+besu storage pbt convert \
+  --preimages-out /path/to/preimages.bin \
+  --snapshot /path/to/snapshot.bin \
+  --anchor 0
+```
+
+Convert always dual-checks the written snapshot against the same preimages and anchor `stateRoot` before exit 0.
+
+**Preimages for convert:** the generator reads a preimage **file**. Supply `--preimages`, or omit it and use `--preimages-out` so the CLI writes a file from genesis `alloc` via `Eip8347PreimageFromGenesis` (Hive/tests / local genesis), then feeds that path into the generator.
 
 ---
 
 ## One `verify` call — how the classes link
 
-This section walks a single dual-check from CLI entry to accept/reject. Every class named below exists in the current tree.
-
 ### 1. Entry: CLI → orchestrator
 
-```
-besu storage pbt verify --snapshot … --preimages … --anchor …
-```
-
 1. **`StorageSubCommand`** registers **`PbtSubCommand`** (`storage pbt`).
-2. **`PbtSubCommand.Verify`** builds a `BesuController`, resolves `--anchor` (block hash `0x…` or decimal number) on the local chain, and reads that header’s `stateRoot`.
-3. It calls **`Eip8347DualCheckVerifier.verify(snapshotPath, preimagesPath, stateRoot)`**.
-4. Exit mapping:
-   - **0** — `verify` returns normally (accept).
-   - **1** — `Eip8347ArtifactVerificationException` (artifact reject).
-   - **2** — any other failure (I/O, unknown anchor, controller errors, …).
-
-From here on, everything is inside `verify`.
+2. **`PbtSubCommand.Verify`** resolves `--anchor` on the local chain and reads `stateRoot`.
+3. Calls **`Eip8347DualCheckVerifier.verify(snapshotPath, preimagesPath, stateRoot)`**.
 
 ### 2. Phase A — open resources
 
-`verify` constructs, in a try-with-resources:
+| Object | Package | Role |
+|--------|---------|------|
+| `AscendingCollapseBinaryTrie` | besu-stateless | Live PBT; left-sibling collapse |
+| `Eip8347SnapshotReader` | artifact | Streams snapshot leaves; tracks byte offsets |
+| `Eip8347SnapshotLeafIndex` | verify | Sparse samples + offsets into the **original** snapshot (**no** value spill file) |
+| `Eip8347PreimageReader` | artifact | Streams preimage records (read in Phase C) |
 
-| Object | Who opens it | Role for this call |
-|--------|--------------|--------------------|
-| `AscendingCollapseBinaryTrie` (lib `partitionedbinarytrie`) | verifier | Live PBT; left-sibling collapse → O(depth) heap |
-| `Eip8347SnapshotReader` | verifier | Streams snapshot leaves one at a time; tracks byte offsets |
-| `Eip8347SnapshotLeafIndex` | verifier | Sparse key samples + offsets into the **original** snapshot (no value spill file) |
-| `Eip8347PreimageReader` | verifier | Streams preimage records (opened now; read in Phase C) |
-
-The binary trie is **not** a Besu wrapper — the verifier uses `AscendingCollapseBinaryTrie` from `besu-stateless` directly.
+Verify does **not** use `Eip8347LeafSpillSorter`. Artifacts are assumed already sorted; verify streams them.
 
 ### 3. Phase B — internal PBT consistency
 
-For each leaf from the snapshot:
-
-1. **`Eip8347SnapshotReader`** reads the next RLP `[key, value]`, left-pads `value` to 32 bytes, enforces strictly ascending PBT keys and canonical RLP, and returns an **`Eip8347SnapshotLeaf`** (rejects zero values — EIP-8297 absence).
-2. The verifier inserts `(key, value)` into **`AscendingCollapseBinaryTrie`** via `insertPbt` (maps the trie’s `IllegalArgumentException` on key-order violations to `Eip8347ArtifactVerificationException`).
-3. In parallel, **`Eip8347SnapshotLeafIndex.record(key, offset)`** stores the leaf’s byte offset in the snapshot (`snapshot.lastLeafOffset()`), with a sparse key sample every 1024 leaves.
-
-After the stream:
-
-- `snapshot.ensureExhausted()` — header `leafCount` matches bytes read; no trailing junk.
-- `pbt.insertCount()` must equal `snapshot.leafCount()`.
-- `pbt.rootHash()` must equal `snapshot.claimedRoot()` (header `pbtRoot`).
-
-On success the leaf index is **`seal()`**ed (consumption bitset allocated; snapshot reopened read-only for seeks). The binary trie is no longer needed for Phase C; the sealed index is the lookup surface for anchoring.
+For each leaf: reader → `Eip8347SnapshotLeaf` → insert into PBT + `SnapshotLeafIndex.record(key, offset)`. Then exhaust/count/root checks; index `seal()`.
 
 ### 4. Phase C — consensus anchoring (`anchorToMpt`)
 
-The verifier creates one **`AscendingCollapsePatriciaTrie`** for the **account** trie, then iterates preimages:
+Preimage records drive MPT rebuild via index lookups into the original snapshot (seek+parse). Account + storage `AscendingCollapsePatriciaTrie`; final MPT root ≟ `expectedMptStateRoot`; `ensureAllConsumed()`.
 
-1. **`Eip8347PreimageReader`** yields an **`Eip8347PreimageRecord`** per account (`address`, `slotKeys`). The record constructor caches **`addressHash`** and **`slotKeyHashes`** once so the merge path does not rehash. The reader enforces ascending `keccak(address)` across records and ascending `keccak(slotKey)` within a record.
-2. For each record, **`buildAccountRlp(record, leaves)`** materializes a classic RLP account value via index lookups into the snapshot:
-   - **Basic data** — `leaves.require(TrieKeyDerivation.getTreeKeyForBasicData(…))` → **`BasicDataEncoder.decodeBasicData`** → nonce, balance, `code_size`.
-   - **Code hash vs delegation** — optional `get` of code-hash and delegation tree keys:
-     - Delegation present → must not also have code-hash; `code_size` must be 23; leaf checked with **`DelegationEncoder`** / EIP-7702 designator; account `codeHash` = `keccak(designator ‖ target)`.
-     - Code-hash present → if `code_size > 0`, **`verifyOneCode`** reassembles bytecode from **CODE_ZONE** chunks via the index (using the account’s claimed `code_size` only — **no** heap `code_hash → code_size` / `seenCodeSizes` map). Chunks are re-checked with **`CodeChunkifier.chunkifyCode`**. Shared bytecode may be looked up again; cost is seek+parse, not a retained map.
-     - Neither leaf → reject.
-   - **Storage root** — **`buildStorageRoot`**: if no slots, `EMPTY_TRIE_HASH`; else a fresh **`AscendingCollapsePatriciaTrie`**, one insert per slot (`slotKeyHashes[i]` → RLP storage value from `leaves.get(storage tree key)`).
-3. The account RLP is inserted into the account Patricia trie under `record.addressHash()` (`insertMpt` again maps order failures to verification exceptions). Internally the Patricia trie uses **`AscendingCollapsePutVisitor`**.
-
-After all preimages:
-
-- `preimages.ensureExhausted()`.
-- `accountTrie.rootHash()` must equal the CLI-supplied **`expectedMptStateRoot`**.
-- **`leaves.ensureAllConsumed()`** — every indexed snapshot leaf must have been touched by a lookup during anchoring (no orphan PBT leaves).
-
-### 5. Data flow (summary)
+### 5. Data flow (verify)
 
 ```
 Snapshot file (RLP leaves — single source of truth)
@@ -102,19 +122,14 @@ Snapshot file (RLP leaves — single source of truth)
 Preimage file
   → Eip8347PreimageReader → Eip8347PreimageRecord (cached hashes)
        → buildAccountRlp using SnapshotLeafIndex lookups (seek + parse one RLP)
-            ├ BasicDataEncoder.decodeBasicData
-            ├ DelegationEncoder / CodeChunkifier (as needed)
+            ├ BasicDataEncoder / DelegationEncoder / CodeChunkifier
             └ AscendingCollapsePatriciaTrie (storage, then account)
        → computed MPT root ≟ expectedMptStateRoot
        → SnapshotLeafIndex.ensureAllConsumed()
 ```
 
 Any format/order/root/coverage failure throws **`Eip8347ArtifactVerificationException`**.  
-(`Eip8347ArtifactWriter` is **not** on this path — tests/tooling only.)
-
-There is **no** second leaf spill that rewrites keys/values. Phase-2 `get(key)` opens the
-original snapshot path, binary-searches sparse samples, seeks to the sample offset, and
-scans RLP records until the key matches.
+(`Eip8347ArtifactWriter` is **not** on the verify path — tests/tooling and genesis preimage write only.)
 
 ### 6. Sequence diagram (one `verify`)
 
@@ -170,87 +185,117 @@ sequenceDiagram
 
 ---
 
+## One `convert` call — how the classes link
+
+### Entry
+
+1. **`PbtSubCommand.Convert`** resolves `--anchor` and loads world state.
+2. Resolves preimages path: existing `--preimages`, or writes genesis alloc via **`Eip8347PreimageFromGenesis`** to `--preimages-out`.
+3. **`Eip8347SnapshotGenerator.generate(preimages, new Eip8347WorldStateSource(…), snapshot)`**.
+4. Dual-check: **`Eip8347DualCheckVerifier.verify(snapshot, preimages, stateRoot)`**.
+
+### Generator + spill (convert-only)
+
+Convert does **not** hold the full leaf set in heap:
+
+1. Stream **`Eip8347PreimageReader`** records.
+2. For each account, look up nonce/balance/code/storage via **`Eip8347StateSource`** and emit PBT leaves into **`Eip8347LeafSpillSorter`** (bounded runs on disk).
+3. K-way merge runs into the snapshot while hashing with `AscendingCollapseBinaryTrie` → claimed `pbtRoot` + `leafCount` header.
+
+Spill / external merge-sort is **convert-only**. Verify never spills; it streams sorted artifacts and seeks the original snapshot via the leaf index.
+
+### Call graph (convert)
+
+```
+besu storage pbt convert
+  └─ PbtSubCommand.Convert
+       ├─ [optional] Eip8347PreimageFromGenesis.write  → preimage file (genesis alloc)
+       ├─ Eip8347SnapshotGenerator.generate
+       │    ├─ Eip8347PreimageReader → Eip8347PreimageRecord
+       │    ├─ Eip8347WorldStateSource (anchor world state)
+       │    └─ Eip8347LeafSpillSorter → snapshot file + claimed pbtRoot
+       └─ Eip8347DualCheckVerifier.verify (same as verify CLI)
+```
+
+---
+
 ## Memory model
 
-| Piece | Role | Footprint |
+| Piece | Path | Footprint |
 |-------|------|-----------|
-| Snapshot / preimage readers | Stream, 1 item at a time | O(1) outside current record |
-| `AscendingCollapseBinaryTrie` | PBT inserts, collapse left siblings | O(depth) live |
-| `AscendingCollapsePatriciaTrie` | Account / storage MPT inserts | O(depth) live |
-| `Eip8347SnapshotLeafIndex` | Sparse samples (key+offset+index every 1024) + consumption `BitSet` | Heap ≈ samples + bitset; **no** value-copy spill; values stay in the original snapshot |
-| Code path | Seek+parse via index; re-check if bytecode is shared | No `seenCodeSizes` |
+| Snapshot / preimage readers | verify + convert | O(1) outside current record |
+| `AscendingCollapseBinaryTrie` | verify + convert merge | O(depth) live |
+| `AscendingCollapsePatriciaTrie` | verify only | O(depth) live |
+| `Eip8347SnapshotLeafIndex` | verify only | Sparse samples + consumption `BitSet`; **no** value-copy spill |
+| `Eip8347LeafSpillSorter` | **convert only** | One run of leaves in heap + one record per open run at merge |
+| Code path (verify) | verify | Seek+parse via index; no `seenCodeSizes` map |
 
-**Heap residual after this change:** phase-2 no longer holds a rewritten leaf file or per-leaf values in heap. Residual index heap is ~`(N/1024) × (key + 16 B)` plus `BitSet` of `N` bits (~`N/8` bytes). EIP PR 12379 does not change that need while RLP leaves stay variable-length.
-
-Keys must be **strictly ascending**: violation → reject (mapped from collapse tries' `IllegalArgumentException`).
+Keys must be **strictly ascending** in artifacts: violation → reject (mapped from collapse tries' `IllegalArgumentException`).
 
 ---
 
 ## Class catalog
 
-### Package `...migration.eip8347`
+### Package `...eip8347.artifact`
 
-| Class | Role | During verification |
-|-------|------|---------------------|
-| **`Eip8347DualCheckVerifier`** | Orchestrator: `verify` → PBT check → `anchorToMpt` | **Called by** `PbtSubCommand.Verify`. **Calls** readers, `AscendingCollapseBinaryTrie`, leaf index, `AscendingCollapsePatriciaTrie`; uses lib codecs (`BasicDataEncoder`, `DelegationEncoder`, `CodeChunkifier`, `TrieKeyDerivation`). |
-| **`Eip8347SnapshotReader`** | Snapshot stream: `pbtRoot[32] \| leafCount[8 BE] \| RLP([key,value])*`; exposes `lastLeafOffset()` | **Opened by** verifier. **Produces** `Eip8347SnapshotLeaf`. |
-| **`Eip8347SnapshotLeaf`** | One leaf: zone key + `Bytes32` value | Constructed by snapshot reader; consumed by verifier inserts. |
-| **`Eip8347PreimageReader`** | Preimage stream; keccak-address / keccak-slot order | **Opened by** verifier; iterated in `anchorToMpt`. **Produces** `Eip8347PreimageRecord`. |
-| **`Eip8347PreimageRecord`** | `address`, `slotKeys`, cached `addressHash` / `slotKeyHashes` | Built by preimage reader; used for MPT keys and storage lookups. |
-| **`Eip8347SnapshotLeafIndex`** | Sparse offset index into original snapshot; `seal`, `get`/`require`, consumption bitset | Filled in Phase B; keyed seek+parse + `ensureAllConsumed` in Phase C. |
-| **`Eip8347ArtifactWriter`** | Snapshot / preimage writing (sort included) | **Not called** during verify — tests & tooling only. |
-| **`Eip8347ArtifactVerificationException`** | Dual-check / format reject | Thrown by verifier, readers, leaf, record, leaf index; mapped to CLI exit 1. |
+| Class | Role |
+|-------|------|
+| **`Eip8347SnapshotLeaf`** | One leaf: zone key + `Bytes32` value |
+| **`Eip8347PreimageRecord`** | `address`, `slotKeys`, cached `addressHash` / `slotKeyHashes` |
+| **`Eip8347SnapshotReader`** | Snapshot stream; `lastLeafOffset()`, exhaust checks |
+| **`Eip8347PreimageReader`** | Preimage stream; keccak-address / keccak-slot order |
+| **`Eip8347ArtifactWriter`** | Snapshot / preimage writing (sort included); tests & genesis write |
+| **`Eip8347ArtifactVerificationException`** | Format / dual-check reject → CLI exit 1 |
 
-### Patricia (module `ethereum/trie`)
+### Package `...eip8347.verify`
 
-| Class | Role | During verification |
-|-------|------|---------------------|
-| **`AscendingCollapsePatriciaTrie`** | Streaming MPT: `insert` / `insertCount` / `rootHash` | One instance for accounts; one per non-empty storage trie. **Called by** verifier only. |
-| **`AscendingCollapsePutVisitor`** | Collapses left siblings to `StoredNode` stubs | Used **internally** by the Patricia wrapper (not referenced by the eip8347 package). |
+| Class | Role |
+|-------|------|
+| **`Eip8347DualCheckVerifier`** | Orchestrator: PBT check → `anchorToMpt` |
+| **`Eip8347SnapshotLeafIndex`** | Sparse offset index into original snapshot; consumption bitset |
 
-### External lib `besu-stateless` (`partitionedbinarytrie`)
+### Package `...eip8347.convert`
 
-| Class | Role | During verification |
-|-------|------|---------------------|
-| **`AscendingCollapseBinaryTrie`** (+ its internal collapse visitor) | Ascending PBT inserts | **Constructed and driven directly** by the verifier (no Besu wrapper). |
-| **`BasicDataEncoder`**, **`DelegationEncoder`**, **`CodeChunkifier`**, **`TrieKeyDerivation`**, **`EmbeddingParameters`** | Codecs / key derivation | Used inside `buildAccountRlp` / `verifyOneCode` / leaf key validation. |
+| Class | Role |
+|-------|------|
+| **`Eip8347SnapshotGenerator`** | Preimages file + `StateSource` → PBT snapshot |
+| **`Eip8347LeafSpillSorter`** | Bounded-memory external sort of leaves (**convert-only**) |
+| **`Eip8347StateSource`** | Read-only account/storage/code view at anchor (test stubs) |
+| **`Eip8347WorldStateSource`** | `StateSource` backed by Besu `WorldState` (CLI convert) |
+| **`Eip8347PreimageFromGenesis`** | Genesis `alloc` → preimage file (Hive/tests / CLI when `--preimages` omitted) |
+
+### Patricia (module `ethereum/trie`) / besu-stateless
+
+| Class | Role |
+|-------|------|
+| **`AscendingCollapsePatriciaTrie`** | Streaming MPT (verify anchoring) |
+| **`AscendingCollapseBinaryTrie`** | Ascending PBT inserts (verify + convert merge) |
+| **`BasicDataEncoder`**, **`DelegationEncoder`**, **`CodeChunkifier`**, **`TrieKeyDerivation`** | Codecs / key derivation |
 
 ### CLI
 
-| Class | Role | During verification |
-|-------|------|---------------------|
-| **`PbtSubCommand`** | Picocli parent (`storage pbt`) | Dispatches to `Verify`. |
-| **`PbtSubCommand.Verify`** | Resolves anchor, calls `verify`, exit codes | **Entry point** for a dual-check run. |
-| **`StorageSubCommand`** | Registers `pbt` | Wiring only. |
+| Class | Role |
+|-------|------|
+| **`PbtSubCommand`** | Picocli parent (`storage pbt`) |
+| **`PbtSubCommand.Verify`** | Dual-check entry |
+| **`PbtSubCommand.Convert`** | Snapshot generation + dual-check |
+| **`StorageSubCommand`** | Registers `pbt` |
 
-### Call graph (who calls whom)
+### Call graph (verify)
 
 ```
 besu storage pbt verify
   └─ PbtSubCommand.Verify
        └─ Eip8347DualCheckVerifier.verify
             ├─ Eip8347SnapshotReader → Eip8347SnapshotLeaf
-            ├─ AscendingCollapseBinaryTrie          (besu-stateless)
-            ├─ Eip8347SnapshotLeafIndex             (seek into snapshot)
+            ├─ AscendingCollapseBinaryTrie
+            ├─ Eip8347SnapshotLeafIndex
             └─ Eip8347PreimageReader → Eip8347PreimageRecord
-                 ├─ BasicDataEncoder.decodeBasicData / DelegationEncoder / CodeChunkifier
-                 └─ AscendingCollapsePatriciaTrie   (ethereum/trie)
-                      └─ AscendingCollapsePutVisitor
+                 ├─ BasicDataEncoder / DelegationEncoder / CodeChunkifier
+                 └─ AscendingCollapsePatriciaTrie
 ```
 
 ---
-
-## CLI
-
-```bash
-besu storage pbt verify \
-  --snapshot /path/to/snapshot.bin \
-  --preimages /path/to/preimages.bin \
-  --anchor 0x…blockHash   # or decimal number
-```
-
-Required options: `--snapshot`, `--preimages`, `--anchor`.  
-The node must be able to open the data dir and resolve the anchor header.
 
 ## Artifact formats (recap)
 
@@ -260,4 +305,8 @@ The node must be able to open the data dir and resolve the anchor header.
 
 ## Tests
 
-`ethereum/core/src/test/.../eip8347/Eip8347DualCheckVerifierTest.java` — fixtures via `Eip8347ArtifactWriter`, accept/reject cases (order, roots, code, delegation, unconsumed leaves).
+| Test | Package |
+|------|---------|
+| `Eip8347DualCheckVerifierTest` | `...eip8347.verify` — fixtures via `Eip8347ArtifactWriter`, accept/reject |
+| `Eip8347SnapshotGeneratorTest` | `...eip8347.convert` — generate + dual-check; spill capacity |
+| `Eip8347PreimageFromGenesisTest` | `...eip8347.convert` — genesis alloc ordering / zero-slot skip |

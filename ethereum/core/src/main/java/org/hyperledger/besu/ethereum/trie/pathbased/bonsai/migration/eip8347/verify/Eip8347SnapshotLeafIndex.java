@@ -12,10 +12,11 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify;
 
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -87,10 +88,6 @@ public final class Eip8347SnapshotLeafIndex implements Closeable {
     }
     consumed = new BitSet((int) leafCount);
     file = new RandomAccessFile(snapshotPath.toFile(), "r");
-  }
-
-  public long size() {
-    return leafCount;
   }
 
   public int stemCount() {

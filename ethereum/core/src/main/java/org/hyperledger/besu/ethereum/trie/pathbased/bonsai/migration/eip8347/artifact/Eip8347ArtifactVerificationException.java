@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact;
 
 /** Thrown when an EIP-8347 snapshot or preimage artifact fails dual-check verification. */
 public class Eip8347ArtifactVerificationException extends RuntimeException {

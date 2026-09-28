@@ -12,9 +12,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact;
 
-import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 
 import java.io.IOException;
@@ -79,9 +78,5 @@ public final class Eip8347ArtifactWriter {
         }
       }
     }
-  }
-
-  public static Eip8347PreimageRecord preimage(final Address address, final Bytes32... slots) {
-    return new Eip8347PreimageRecord(address, List.of(slots));
   }
 }

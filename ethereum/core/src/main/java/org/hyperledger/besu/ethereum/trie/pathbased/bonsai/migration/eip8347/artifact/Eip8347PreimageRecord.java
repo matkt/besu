@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.units.bigints.UInt256;
 
 /**
  * One preimage record: {@code address[20] | slotCount[4, BE] | slotKey[32] * slotCount}.
@@ -70,9 +69,5 @@ public final class Eip8347PreimageRecord {
   /** Cached {@code keccak256(slotKey)} values in the same order as {@link #slotKeys()}. */
   public List<Hash> slotKeyHashes() {
     return slotKeyHashes;
-  }
-
-  public List<UInt256> slotNumbers() {
-    return slotKeys.stream().map(UInt256::fromBytes).toList();
   }
 }

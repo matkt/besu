@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact;
 
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 
@@ -52,19 +52,6 @@ public final class Eip8347SnapshotLeaf {
 
   public Bytes32 value() {
     return value;
-  }
-
-  public int zone() {
-    return key.get(0) & 0xFF;
-  }
-
-  /** Stem bytes excluding the trailing sub-index. */
-  public Bytes stem() {
-    return key.slice(0, key.size() - 1);
-  }
-
-  public int subIndex() {
-    return key.get(key.size() - 1) & 0xFF;
   }
 
   static void validateKeyLength(final Bytes key) {

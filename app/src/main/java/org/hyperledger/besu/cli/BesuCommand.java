@@ -3135,4 +3135,14 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
   Supplier<GenesisConfig> getGenesisConfigSupplier() {
     return genesisConfigSupplier;
   }
+
+  /**
+   * Effective genesis configuration (custom {@code --genesis-file} or the selected network
+   * default).
+   *
+   * @return genesis config including allocations
+   */
+  public GenesisConfig getGenesisConfig() {
+    return genesisConfigSupplier.get();
+  }
 }
