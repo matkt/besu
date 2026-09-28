@@ -1,0 +1,153 @@
+/*
+ * Copyright contributors to Hyperledger Besu.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package org.hyperledger.besu.cli.subcommands.storage;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import org.hyperledger.besu.cli.util.VersionProvider;
+import org.hyperledger.besu.controller.BesuController;
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347ArtifactVerificationException;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347DualCheckVerifier;
+
+import java.io.PrintWriter;
+import java.nio.file.Path;
+import java.util.Optional;
+
+import org.apache.tuweni.bytes.Bytes32;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.ParentCommand;
+
+/**
+ * Storage subcommands for EIP-8347 partitioned-binary-trie (PBT) migration artifacts.
+ *
+ * <p>Currently exposes verify-only dual-check consumption of a snapshot + preimage pair.
+ */
+@Command(
+    name = PbtSubCommand.COMMAND_NAME,
+    description = "EIP-8347 PBT migration artifact commands.",
+    mixinStandardHelpOptions = true,
+    versionProvider = VersionProvider.class,
+    subcommands = {PbtSubCommand.Verify.class})
+public class PbtSubCommand implements Runnable {
+
+  /** Command name. */
+  public static final String COMMAND_NAME = "pbt";
+
+  private static final Logger LOG = LoggerFactory.getLogger(PbtSubCommand.class);
+
+  @ParentCommand private StorageSubCommand parentCommand;
+
+  @CommandLine.Spec private CommandLine.Model.CommandSpec spec;
+
+  /** Default constructor for picocli. */
+  public PbtSubCommand() {}
+
+  @Override
+  public void run() {
+    final PrintWriter out = spec.commandLine().getOut();
+    spec.commandLine().usage(out);
+  }
+
+  /** Dual-check verify of an EIP-8347 snapshot + preimage against an anchor block. */
+  @Command(
+      name = "verify",
+      description =
+          "Verify an EIP-8347 PBT snapshot and preimage pair (dual-check) against the local chain's anchor block stateRoot. Exit 0 on accept, 1 on reject.",
+      mixinStandardHelpOptions = true,
+      versionProvider = VersionProvider.class)
+  public static class Verify implements Runnable {
+
+    @ParentCommand private PbtSubCommand parentCommand;
+
+    @Option(
+        names = {"--snapshot"},
+        description = "Path to the EIP-8347 PBT snapshot artifact",
+        required = true)
+    private Path snapshotPath;
+
+    @Option(
+        names = {"--preimages"},
+        description = "Path to the EIP-8347 preimage artifact",
+        required = true)
+    private Path preimagesPath;
+
+    @Option(
+        names = {"--anchor", "--anchor-block"},
+        description = "Anchor block hash (0x...) or block number",
+        required = true)
+    private String anchor;
+
+    @Override
+    public void run() {
+      checkNotNull(parentCommand);
+      checkNotNull(parentCommand.parentCommand);
+      final int code = verifyAndExitCode();
+      if (code != 0) {
+        System.exit(code);
+      }
+    }
+
+    int verifyAndExitCode() {
+      try (final BesuController controller =
+          parentCommand.parentCommand.besuCommand.buildController()) {
+        final Blockchain blockchain = controller.getProtocolContext().getBlockchain();
+        final BlockHeader header = resolveAnchor(blockchain, anchor);
+        final Bytes32 stateRoot = Bytes32.wrap(header.getStateRoot().getBytes());
+        LOG.info(
+            "EIP-8347 verify: snapshot={}, preimages={}, anchor={} (#{}, stateRoot={})",
+            snapshotPath,
+            preimagesPath,
+            header.getBlockHash(),
+            header.getNumber(),
+            stateRoot.toHexString());
+        Eip8347DualCheckVerifier.verify(snapshotPath, preimagesPath, stateRoot);
+        LOG.info("EIP-8347 dual-check accepted");
+        return 0;
+      } catch (final Eip8347ArtifactVerificationException e) {
+        LOG.error("EIP-8347 dual-check rejected: {}", e.getMessage());
+        return 1;
+      } catch (final Exception e) {
+        LOG.error("EIP-8347 verify failed", e);
+        return 2;
+      }
+    }
+
+    static BlockHeader resolveAnchor(final Blockchain blockchain, final String anchor) {
+      if (anchor.startsWith("0x") || anchor.startsWith("0X")) {
+        final Hash hash = Hash.fromHexString(anchor);
+        return blockchain
+            .getBlockHeader(hash)
+            .orElseThrow(() -> new IllegalArgumentException("unknown anchor block hash " + anchor));
+      }
+      final long number;
+      try {
+        number = Long.parseLong(anchor);
+      } catch (final NumberFormatException e) {
+        throw new IllegalArgumentException(
+            "anchor must be a block hash (0x...) or decimal block number", e);
+      }
+      final Optional<BlockHeader> header = blockchain.getBlockHeader(number);
+      return header.orElseThrow(
+          () -> new IllegalArgumentException("unknown anchor block number " + number));
+    }
+  }
+}
