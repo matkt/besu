@@ -430,6 +430,9 @@ public class BackwardSyncContext {
       final Block block,
       final Optional<Integer> nbParallelizedTransactions,
       final boolean balProvided) {
+    if (!LOG.isDebugEnabled()) {
+      return;
+    }
     final int nbTransactions = block.getBody().getTransactions().size();
     final String balSuffix =
         block.getHeader().getBalHash().isPresent()
@@ -438,7 +441,7 @@ public class BackwardSyncContext {
     if (nbParallelizedTransactions.isPresent() && nbTransactions > 0) {
       final double parallelizedTxPercentage =
           (double) (nbParallelizedTransactions.get() * 100) / nbTransactions;
-      LOG.info(
+      LOG.debug(
           String.format(
               "Backward sync imported #%,d (%s)| %4d tx (%5.1f%% parallel)%s",
               block.getHeader().getNumber(),
@@ -447,7 +450,7 @@ public class BackwardSyncContext {
               parallelizedTxPercentage,
               balSuffix));
     } else {
-      LOG.info(
+      LOG.debug(
           String.format(
               "Backward sync imported #%,d (%s)| %4d tx%s",
               block.getHeader().getNumber(),
