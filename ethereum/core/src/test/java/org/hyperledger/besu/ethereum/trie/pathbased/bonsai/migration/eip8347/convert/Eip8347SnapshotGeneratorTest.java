@@ -21,17 +21,23 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieConstants;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactWriter;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageRecord;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile.AccountPreimages;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
+import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -47,7 +53,7 @@ class Eip8347SnapshotGeneratorTest {
   void generateEmptySnapshotFromEmptyPreimages() throws Exception {
     final Path preimages = tmp.resolve("empty.pre");
     final Path snapshot = tmp.resolve("empty.snap");
-    Eip8347ArtifactWriter.writePreimages(preimages, List.of());
+    Eip8347PreimageFile.write(preimages, List.of());
 
     final Eip8347SnapshotGenerator.Result result =
         Eip8347SnapshotGenerator.generate(preimages, missingAll(), snapshot);
@@ -74,14 +80,14 @@ class Eip8347SnapshotGeneratorTest {
     eoaSlots.put(Bytes32.leftPad(UInt256.valueOf(64)), UInt256.valueOf(9));
     storage.put(eoa, eoaSlots);
 
-    final List<Eip8347PreimageRecord> records =
+    final List<AccountPreimages> records =
         List.of(
-            new Eip8347PreimageRecord(eoa, List.copyOf(eoaSlots.keySet())),
-            new Eip8347PreimageRecord(contract, List.of()));
+            new AccountPreimages(eoa, List.copyOf(eoaSlots.keySet())),
+            new AccountPreimages(contract, List.of()));
 
     final Path preimages = tmp.resolve("ok.pre");
     final Path snapshot = tmp.resolve("ok.snap");
-    Eip8347ArtifactWriter.writePreimages(preimages, records);
+    Eip8347PreimageFile.write(preimages, records);
 
     final Eip8347StateSource state = mapSource(accounts, storage);
     final Eip8347SnapshotGenerator.Result result =
@@ -104,12 +110,11 @@ class Eip8347SnapshotGeneratorTest {
 
     final Map<Address, Eip8347StateSource.AccountView> accounts =
         Map.of(delegated, new Eip8347StateSource.AccountView(2L, Wei.of(5), delegationCode));
-    final List<Eip8347PreimageRecord> records =
-        List.of(new Eip8347PreimageRecord(delegated, List.of()));
+    final List<AccountPreimages> records = List.of(new AccountPreimages(delegated, List.of()));
 
     final Path preimages = tmp.resolve("del.pre");
     final Path snapshot = tmp.resolve("del.snap");
-    Eip8347ArtifactWriter.writePreimages(preimages, records);
+    Eip8347PreimageFile.write(preimages, records);
 
     final Eip8347SnapshotGenerator.Result result =
         Eip8347SnapshotGenerator.generate(preimages, mapSource(accounts, Map.of()), snapshot);
@@ -135,14 +140,14 @@ class Eip8347SnapshotGeneratorTest {
     eoaSlots.put(Bytes32.leftPad(UInt256.valueOf(64)), UInt256.valueOf(9));
     storage.put(eoa, eoaSlots);
 
-    final List<Eip8347PreimageRecord> records =
+    final List<AccountPreimages> records =
         List.of(
-            new Eip8347PreimageRecord(eoa, List.copyOf(eoaSlots.keySet())),
-            new Eip8347PreimageRecord(contract, List.of()));
+            new AccountPreimages(eoa, List.copyOf(eoaSlots.keySet())),
+            new AccountPreimages(contract, List.of()));
 
     final Path preimages = tmp.resolve("tiny-run.pre");
     final Path snapshot = tmp.resolve("tiny-run.snap");
-    Eip8347ArtifactWriter.writePreimages(preimages, records);
+    Eip8347PreimageFile.write(preimages, records);
 
     // Force many sorted runs so k-way merge is exercised (not a single in-memory flush).
     final Eip8347SnapshotGenerator.Result result =
@@ -161,13 +166,13 @@ class Eip8347SnapshotGeneratorTest {
         Map.of(
             a, new Eip8347StateSource.AccountView(0L, Wei.ONE, code),
             b, new Eip8347StateSource.AccountView(0L, Wei.of(2), code));
-    final List<Eip8347PreimageRecord> records =
-        List.of(new Eip8347PreimageRecord(a, List.of()), new Eip8347PreimageRecord(b, List.of()));
+    final List<AccountPreimages> records =
+        List.of(new AccountPreimages(a, List.of()), new AccountPreimages(b, List.of()));
 
     final Path preimages = tmp.resolve("shared-code.pre");
     final Path snapshotDefault = tmp.resolve("shared-code.snap");
     final Path snapshotTiny = tmp.resolve("shared-code-tiny.snap");
-    Eip8347ArtifactWriter.writePreimages(preimages, records);
+    Eip8347PreimageFile.write(preimages, records);
 
     final Eip8347SnapshotGenerator.Result once =
         Eip8347SnapshotGenerator.generate(
@@ -186,8 +191,7 @@ class Eip8347SnapshotGeneratorTest {
     final Address missing = Address.fromHexString("0x00000000000000000000000000000000000000ee");
     final Path preimages = tmp.resolve("miss.pre");
     final Path snapshot = tmp.resolve("miss.snap");
-    Eip8347ArtifactWriter.writePreimages(
-        preimages, List.of(new Eip8347PreimageRecord(missing, List.of())));
+    Eip8347PreimageFile.write(preimages, List.of(new AccountPreimages(missing, List.of())));
 
     assertThatThrownBy(() -> Eip8347SnapshotGenerator.generate(preimages, missingAll(), snapshot))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
@@ -201,8 +205,8 @@ class Eip8347SnapshotGeneratorTest {
         Map.of(eoa, new Eip8347StateSource.AccountView(0L, Wei.ONE, Bytes.EMPTY));
     final Path preimages = tmp.resolve("zero.pre");
     final Path snapshot = tmp.resolve("zero.snap");
-    Eip8347ArtifactWriter.writePreimages(
-        preimages, List.of(new Eip8347PreimageRecord(eoa, List.of(Bytes32.leftPad(UInt256.ZERO)))));
+    Eip8347PreimageFile.write(
+        preimages, List.of(new AccountPreimages(eoa, List.of(Bytes32.leftPad(UInt256.ZERO)))));
 
     assertThatThrownBy(
             () ->
@@ -243,26 +247,16 @@ class Eip8347SnapshotGeneratorTest {
       throws Exception {
     // Reuse fixture path: write generated snapshot+preimages already verified by DualCheckVerifier
     // with Fixture-built mptRoot is heavy; here compute via the same Patricia helpers as Fixture.
-    final var accountTrie =
-        new org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie<Bytes, Bytes>(
-            java.util.function.Function.identity());
-    final List<Address> ordered = new java.util.ArrayList<>(accounts.keySet());
-    ordered.sort(java.util.Comparator.comparing(Address::addressHash));
+    final var accountTrie = new SimpleMerklePatriciaTrie<Bytes, Bytes>(Function.identity());
+    final List<Address> ordered = new ArrayList<>(accounts.keySet());
+    ordered.sort(Comparator.comparing(Address::addressHash));
     for (final Address address : ordered) {
       final Eip8347StateSource.AccountView state = accounts.get(address);
       final Hash storageRoot = storageRoot(storage.getOrDefault(address, Map.of()));
-      final Hash codeHash;
-      if (Eip8347StateSource.isDelegationCode(state.code())) {
-        codeHash = Hash.hash(state.code());
-      } else {
-        codeHash = Eip8347StateSource.codeHashOf(state.code());
-      }
+      final Hash codeHash = Hash.hash(state.code());
       final var accountValue =
-          new org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue(
-              state.nonce(), state.balance(), storageRoot, codeHash);
-      accountTrie.put(
-          address.addressHash().getBytes(),
-          org.hyperledger.besu.ethereum.rlp.RLP.encode(accountValue::writeTo));
+          new PatriciaTrieAccountValue(state.nonce(), state.balance(), storageRoot, codeHash);
+      accountTrie.put(address.addressHash().getBytes(), RLP.encode(accountValue::writeTo));
     }
     return accountTrie.getRootHash();
   }
@@ -271,11 +265,9 @@ class Eip8347SnapshotGeneratorTest {
     if (storage.isEmpty()) {
       return Hash.EMPTY_TRIE_HASH;
     }
-    final var storageTrie =
-        new org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie<Bytes, Bytes>(
-            java.util.function.Function.identity());
-    final List<Bytes32> keys = new java.util.ArrayList<>(storage.keySet());
-    keys.sort(java.util.Comparator.comparing(Hash::hash));
+    final var storageTrie = new SimpleMerklePatriciaTrie<Bytes, Bytes>(Function.identity());
+    final List<Bytes32> keys = new ArrayList<>(storage.keySet());
+    keys.sort(Comparator.comparing(Hash::hash));
     boolean any = false;
     for (final Bytes32 key : keys) {
       final UInt256 value = storage.get(key);
@@ -284,8 +276,7 @@ class Eip8347SnapshotGeneratorTest {
       }
       any = true;
       final Bytes encoded =
-          org.hyperledger.besu.ethereum.rlp.RLP.encode(
-              out -> out.writeBytes(Bytes32.leftPad(value).trimLeadingZeros()));
+          RLP.encode(out -> out.writeBytes(Bytes32.leftPad(value).trimLeadingZeros()));
       storageTrie.put(Hash.hash(key).getBytes(), encoded);
     }
     return any ? Hash.wrap(storageTrie.getRootHash()) : Hash.EMPTY_TRIE_HASH;

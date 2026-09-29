@@ -33,11 +33,11 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactWriter;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageReader;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageRecord;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile.AccountPreimages;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotLeaf;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotReader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotWriter;
 import org.hyperledger.besu.ethereum.trie.patricia.AscendingCollapsePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
@@ -72,8 +72,8 @@ class Eip8347DualCheckVerifierTest {
   void emptyArtifactsMatchEmptyMptRoot() throws Exception {
     final Path snapshot = tmp.resolve("empty.snap");
     final Path preimages = tmp.resolve("empty.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, TrieConstants.EMPTY_TRIE_ROOT, List.of());
-    Eip8347ArtifactWriter.writePreimages(preimages, List.of());
+    Eip8347SnapshotWriter.write(snapshot, TrieConstants.EMPTY_TRIE_ROOT, List.of());
+    Eip8347PreimageFile.write(preimages, List.of());
 
     Eip8347DualCheckVerifier.verify(
         snapshot, preimages, Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes()));
@@ -98,8 +98,8 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("ok.snap");
     final Path preimages = tmp.resolve("ok.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot());
   }
@@ -120,8 +120,8 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("deleg.snap");
     final Path preimages = tmp.resolve("deleg.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot());
   }
@@ -147,8 +147,8 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("shared.snap");
     final Path preimages = tmp.resolve("shared.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot());
   }
@@ -181,25 +181,10 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("mixed.snap");
     final Path preimages = tmp.resolve("mixed.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot());
-  }
-
-  @Test
-  void preimageRecordCachesAddressAndSlotHashes() {
-    final Address address = Address.fromHexString("0x00000000000000000000000000000000000000b0");
-    final Bytes32 slot0 = Bytes32.leftPad(Bytes.of(1));
-    final Bytes32 slot1 = Bytes32.leftPad(Bytes.of(2));
-    final Eip8347PreimageRecord record = new Eip8347PreimageRecord(address, List.of(slot0, slot1));
-
-    assertThat(record.addressHash()).isSameAs(record.addressHash());
-    assertThat(record.addressHash()).isEqualTo(address.addressHash());
-    assertThat(record.slotKeyHashes()).hasSize(2);
-    assertThat(record.slotKeyHashes().get(0)).isSameAs(record.slotKeyHashes().get(0));
-    assertThat(record.slotKeyHashes().get(0)).isEqualTo(Hash.hash(slot0));
-    assertThat(record.slotKeyHashes().get(1)).isEqualTo(Hash.hash(slot1));
   }
 
   @Test
@@ -214,8 +199,8 @@ class Eip8347DualCheckVerifierTest {
             .build();
     final Path snapshot = tmp.resolve("badroot.snap");
     final Path preimages = tmp.resolve("badroot.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, Bytes32.ZERO, fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, Bytes32.ZERO, fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -235,8 +220,8 @@ class Eip8347DualCheckVerifierTest {
             .build();
     final Path snapshot = tmp.resolve("badmpt.snap");
     final Path preimages = tmp.resolve("badmpt.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () ->
@@ -247,7 +232,7 @@ class Eip8347DualCheckVerifierTest {
   }
 
   @Test
-  void rejectsWrongLeafCountInSnapshotHeader() throws Exception {
+  void rejectsWrongHeaderCountInSnapshot() throws Exception {
     final Fixture fixture =
         Fixture.builder()
             .eoa(
@@ -257,19 +242,14 @@ class Eip8347DualCheckVerifierTest {
                 Map.of())
             .build();
     final Path snapshot = tmp.resolve("badcount.snap");
-    try (final OutputStream out = Files.newOutputStream(snapshot)) {
-      out.write(fixture.pbtRoot().toArray());
-      out.write(
-          ByteBuffer.allocate(8)
-              .order(ByteOrder.BIG_ENDIAN)
-              .putLong(fixture.leaves().size() + 1L)
-              .array());
-      for (final Eip8347SnapshotLeaf leaf : fixture.leaves()) {
-        out.write(encodeSnapshotLeaf(leaf).toArray());
-      }
-    }
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    // Corrupt headerCount (bytes 32..40) to headerCount+1.
+    final byte[] bytes = Files.readAllBytes(snapshot);
+    final long headerCount = ByteBuffer.wrap(bytes, 32, 8).order(ByteOrder.BIG_ENDIAN).getLong();
+    ByteBuffer.wrap(bytes, 32, 8).order(ByteOrder.BIG_ENDIAN).putLong(headerCount + 1L);
+    Files.write(snapshot, bytes);
     final Path preimages = tmp.resolve("badcount.pre");
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -277,30 +257,162 @@ class Eip8347DualCheckVerifierTest {
   }
 
   @Test
-  void rejectsUnsortedSnapshotLeaves() throws Exception {
+  void rejectsUnsortedHeaderRecords() throws Exception {
     final Address a = Address.fromHexString("0x0000000000000000000000000000000000000011");
     final Address b = Address.fromHexString("0x0000000000000000000000000000000000000022");
     final Fixture fixture =
         Fixture.builder().eoa(a, 0L, Wei.ONE, Map.of()).eoa(b, 0L, Wei.ONE, Map.of()).build();
-    final List<Eip8347SnapshotLeaf> reversed = new ArrayList<>(fixture.leaves());
-    reversed.sort(Comparator.comparing(Eip8347SnapshotLeaf::key).reversed());
 
     final Path snapshot = tmp.resolve("unsorted.snap");
+    // Build two single-account snapshots and concatenate their header records in reverse
+    // addressHash order so the typed section is not strictly ascending.
+    final Fixture onlyA = Fixture.builder().eoa(a, 0L, Wei.ONE, Map.of()).build();
+    final Fixture onlyB = Fixture.builder().eoa(b, 0L, Wei.ONE, Map.of()).build();
+    final Path snapA = tmp.resolve("a.snap");
+    final Path snapB = tmp.resolve("b.snap");
+    Eip8347SnapshotWriter.write(snapA, onlyA.pbtRoot(), onlyA.leaves());
+    Eip8347SnapshotWriter.write(snapB, onlyB.pbtRoot(), onlyB.leaves());
+    final byte[] aBytes = Files.readAllBytes(snapA);
+    final byte[] bBytes = Files.readAllBytes(snapB);
+    // Extract header record payload (after pbtRoot+headerCount, before codeCount).
+    final byte[] headerA = extractFirstHeaderRecord(aBytes);
+    final byte[] headerB = extractFirstHeaderRecord(bBytes);
+    // Order by addressHash descending if needed.
+    final Bytes32 hashA =
+        TrieKeyDerivation.keyHash(TrieKeyDerivation.address20ToAddress32(a.getBytes()));
+    final Bytes32 hashB =
+        TrieKeyDerivation.keyHash(TrieKeyDerivation.address20ToAddress32(b.getBytes()));
+    final byte[] first = hashA.compareTo(hashB) < 0 ? headerB : headerA;
+    final byte[] second = hashA.compareTo(hashB) < 0 ? headerA : headerB;
     try (final OutputStream out = Files.newOutputStream(snapshot)) {
       out.write(fixture.pbtRoot().toArray());
-      out.write(
-          ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(reversed.size()).array());
-      for (final Eip8347SnapshotLeaf leaf : reversed) {
-        out.write(encodeSnapshotLeaf(leaf).toArray());
-      }
+      out.write(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(2L).array());
+      out.write(first);
+      out.write(second);
+      out.write(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(0L).array()); // code
+      out.write(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(0L).array()); // storage
     }
     final Path preimages = tmp.resolve("unsorted.pre");
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
+
+    assertThatThrownBy(
+            () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
+        // Reader order check and anchoring join run concurrently; either may report first.
+        .isInstanceOf(Eip8347ArtifactVerificationException.class);
+  }
+
+  @Test
+  void rejectsSurplusHeaderSlotWithoutPreimage() throws Exception {
+    final Address address = Address.fromHexString("0x0000000000000000000000000000000000000031");
+    // Snapshot carries header slots 0 and 1; the preimage and MPT only know slot 0.
+    final Fixture withSurplus =
+        Fixture.builder()
+            .eoa(
+                address,
+                1L,
+                Wei.ONE,
+                Map.of(UInt256.ZERO, UInt256.valueOf(7), UInt256.ONE, UInt256.valueOf(5)))
+            .build();
+    final Fixture anchored =
+        Fixture.builder()
+            .eoa(address, 1L, Wei.ONE, Map.of(UInt256.ZERO, UInt256.valueOf(7)))
+            .build();
+
+    final Path snapshot = tmp.resolve("surplus-slot.snap");
+    final Path preimages = tmp.resolve("surplus-slot.pre");
+    Eip8347SnapshotWriter.write(snapshot, withSurplus.pbtRoot(), withSurplus.leaves());
+    Eip8347PreimageFile.write(preimages, anchored.preimages());
+
+    assertThatThrownBy(
+            () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, anchored.mptRoot()))
+        .isInstanceOf(Eip8347ArtifactVerificationException.class)
+        .hasMessageContaining("not covered by consensus anchoring");
+  }
+
+  @Test
+  void rejectsStorageRecordSplitAcrossTwoRecords() throws Exception {
+    // Slots 64 and 1000 land in two storage groups of one account: one record, groupCount 2.
+    final Fixture fixture =
+        Fixture.builder()
+            .eoa(
+                Address.fromHexString("0x0000000000000000000000000000000000000032"),
+                1L,
+                Wei.ONE,
+                Map.of(UInt256.valueOf(64), UInt256.valueOf(9), UInt256.valueOf(1000), UInt256.ONE))
+            .build();
+    final Path canonical = tmp.resolve("split-canonical.snap");
+    Eip8347SnapshotWriter.write(canonical, fixture.pbtRoot(), fixture.leaves());
+    final byte[] bytes = Files.readAllBytes(canonical);
+
+    // Tail: storageCount[8]=1 | addressHash[32] | groupCount=0x01 0x02 | group(36) | group(36)
+    final int groupSize = 36;
+    final int recordStart = bytes.length - (32 + 2 + 2 * groupSize);
+    final int countStart = recordStart - 8;
+    final byte[] addressHash = java.util.Arrays.copyOfRange(bytes, recordStart, recordStart + 32);
+    final int groupsStart = recordStart + 34;
+    final Path snapshot = tmp.resolve("split.snap");
+    try (final OutputStream out = Files.newOutputStream(snapshot)) {
+      out.write(bytes, 0, countStart);
+      out.write(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(2L).array());
+      for (int g = 0; g < 2; g++) {
+        out.write(addressHash);
+        out.write(new byte[] {1, 1});
+        out.write(bytes, groupsStart + g * groupSize, groupSize);
+      }
+    }
+    final Path preimages = tmp.resolve("split.pre");
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
-        .hasMessageContaining("ascending");
+        .hasMessageContaining("storage records");
+  }
+
+  @Test
+  void dualCheckWithTinySortBufferUsesMultiPassMerges() throws Exception {
+    final Map<UInt256, UInt256> storage = new HashMap<>();
+    for (int slot = 0; slot < 150; slot++) {
+      storage.put(UInt256.valueOf(slot * 7L), UInt256.valueOf(slot + 1L));
+    }
+    // 9000 bytes of code: 291 chunks, i.e. two CODE_ZONE stem groups.
+    final Bytes code = Bytes.repeat((byte) 0x5b, 9000);
+    final Fixture fixture =
+        Fixture.builder()
+            .contract(
+                Address.fromHexString("0x0000000000000000000000000000000000000033"),
+                3L,
+                Wei.of(10),
+                code,
+                storage)
+            .contract(
+                Address.fromHexString("0x0000000000000000000000000000000000000034"),
+                0L,
+                Wei.ONE,
+                code,
+                Map.of())
+            .build();
+    final Path snapshot = tmp.resolve("multipass.snap");
+    final Path preimages = tmp.resolve("multipass.pre");
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
+
+    // One record per run: every sort goes through more than MAX_FAN_IN runs.
+    Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot(), 1L);
+    try (final var left = Files.list(tmp)) {
+      assertThat(left.map(p -> p.getFileName().toString()))
+          .noneMatch(n -> n.startsWith("eip8347-"));
+    }
+  }
+
+  /** Extracts the single header record from a one-account typed snapshot. */
+  private static byte[] extractFirstHeaderRecord(final byte[] snapshot) {
+    // pbtRoot[32] | headerCount[8]=1 | headerRecord | codeCount[8]=0 | storageCount[8]=0
+    final int start = 40;
+    final int end = snapshot.length - 16;
+    final byte[] record = new byte[end - start];
+    System.arraycopy(snapshot, start, record, 0, record.length);
+    return record;
   }
 
   @Test
@@ -337,12 +449,12 @@ class Eip8347DualCheckVerifierTest {
     final Address b = Address.fromHexString("0x0000000000000000000000000000000000000062");
     final Fixture fixture =
         Fixture.builder().eoa(a, 0L, Wei.ONE, Map.of()).eoa(b, 0L, Wei.ONE, Map.of()).build();
-    final List<Eip8347PreimageRecord> reversed = new ArrayList<>(fixture.preimages());
-    reversed.sort(Comparator.comparing(Eip8347PreimageRecord::addressHash).reversed());
+    final List<AccountPreimages> reversed = new ArrayList<>(fixture.preimages());
+    reversed.sort(Comparator.comparing(AccountPreimages::addressHash).reversed());
 
     final Path snapshot = tmp.resolve("unsorted-pre.snap");
     final Path preimages = tmp.resolve("unsorted-pre.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
     writePreimagesInGivenOrder(preimages, reversed);
 
     assertThatThrownBy(
@@ -359,11 +471,11 @@ class Eip8347DualCheckVerifierTest {
     final List<Bytes32> slots = new ArrayList<>(List.of(slotLow, slotHigh));
     slots.sort(Comparator.comparing(Hash::hash).reversed());
     final Path preimages = tmp.resolve("unsorted-slots.pre");
-    writePreimagesInGivenOrder(preimages, List.of(new Eip8347PreimageRecord(address, slots)));
+    writePreimagesInGivenOrder(preimages, List.of(new AccountPreimages(address, slots)));
 
     assertThatThrownBy(
             () -> {
-              try (final Eip8347PreimageReader reader = new Eip8347PreimageReader(preimages)) {
+              try (final Eip8347PreimageFile reader = new Eip8347PreimageFile(preimages)) {
                 reader.forEach(r -> {});
               }
             })
@@ -376,13 +488,13 @@ class Eip8347DualCheckVerifierTest {
     final Address present = Address.fromHexString("0x0000000000000000000000000000000000000071");
     final Address surplus = Address.fromHexString("0x0000000000000000000000000000000000000072");
     final Fixture fixture = Fixture.builder().eoa(present, 0L, Wei.ONE, Map.of()).build();
-    final List<Eip8347PreimageRecord> withSurplus = new ArrayList<>(fixture.preimages());
-    withSurplus.add(new Eip8347PreimageRecord(surplus, List.of()));
+    final List<AccountPreimages> withSurplus = new ArrayList<>(fixture.preimages());
+    withSurplus.add(new AccountPreimages(surplus, List.of()));
 
     final Path snapshot = tmp.resolve("surplus.snap");
     final Path preimages = tmp.resolve("surplus.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, withSurplus);
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, withSurplus);
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -401,8 +513,8 @@ class Eip8347DualCheckVerifierTest {
             .build();
     final Path snapshot = tmp.resolve("missing-pre.snap");
     final Path preimages = tmp.resolve("missing-pre.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, List.of());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, List.of());
 
     // Empty preimages rebuilds the empty MPT root; uncovered snapshot leaves are then rejected.
     assertThatThrownBy(
@@ -417,13 +529,13 @@ class Eip8347DualCheckVerifierTest {
   void rejectsPreimageSlotWithoutSnapshotLeaf() throws Exception {
     final Address address = Address.fromHexString("0x0000000000000000000000000000000000000074");
     final Fixture fixture = Fixture.builder().eoa(address, 0L, Wei.ONE, Map.of()).build();
-    final List<Eip8347PreimageRecord> mismatched =
-        List.of(new Eip8347PreimageRecord(address, List.of(Bytes32.leftPad(Bytes.of(9)))));
+    final List<AccountPreimages> mismatched =
+        List.of(new AccountPreimages(address, List.of(Bytes32.leftPad(Bytes.of(9)))));
 
     final Path snapshot = tmp.resolve("slot-miss.snap");
     final Path preimages = tmp.resolve("slot-miss.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-    Eip8347ArtifactWriter.writePreimages(preimages, mismatched);
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347PreimageFile.write(preimages, mismatched);
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -451,8 +563,8 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("badchunk.snap");
     final Path preimages = tmp.resolve("badchunk.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, tamperedRoot, tampered);
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, tamperedRoot, tampered);
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -483,8 +595,8 @@ class Eip8347DualCheckVerifierTest {
 
     final Path snapshot = tmp.resolve("badsize.snap");
     final Path preimages = tmp.resolve("badsize.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, tamperedRoot, tampered);
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
+    Eip8347SnapshotWriter.write(snapshot, tamperedRoot, tampered);
+    Eip8347PreimageFile.write(preimages, fixture.preimages());
 
     assertThatThrownBy(
             () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
@@ -493,7 +605,7 @@ class Eip8347DualCheckVerifierTest {
   }
 
   @Test
-  void rejectsBadBasicDataVersion() throws Exception {
+  void rejectsBadBasicDataVersionAtPackTime() throws Exception {
     final Address address = Address.fromHexString("0x0000000000000000000000000000000000000083");
     final Fixture fixture = Fixture.builder().eoa(address, 1L, Wei.of(7), Map.of()).build();
     final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(address.getBytes());
@@ -508,21 +620,16 @@ class Eip8347DualCheckVerifierTest {
         tampered.add(leaf);
       }
     }
-    final Bytes32 tamperedRoot = recomputePbtRoot(tampered);
-
     final Path snapshot = tmp.resolve("badver.snap");
-    final Path preimages = tmp.resolve("badver.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, tamperedRoot, tampered);
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
-
-    assertThatThrownBy(
-            () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
+    // Typed packing re-derives basic-data from nonce/balance/codeSize; non-canonical leaves are
+    // rejected when packing the header record.
+    assertThatThrownBy(() -> Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), tampered))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
         .hasMessageContaining("basic-data");
   }
 
   @Test
-  void rejectsBadBasicDataReservedBytes() throws Exception {
+  void rejectsBadBasicDataReservedBytesAtPackTime() throws Exception {
     final Address address = Address.fromHexString("0x0000000000000000000000000000000000000084");
     final Fixture fixture = Fixture.builder().eoa(address, 0L, Wei.ONE, Map.of()).build();
     final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(address.getBytes());
@@ -537,15 +644,8 @@ class Eip8347DualCheckVerifierTest {
         tampered.add(leaf);
       }
     }
-    final Bytes32 tamperedRoot = recomputePbtRoot(tampered);
-
     final Path snapshot = tmp.resolve("badres.snap");
-    final Path preimages = tmp.resolve("badres.pre");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, tamperedRoot, tampered);
-    Eip8347ArtifactWriter.writePreimages(preimages, fixture.preimages());
-
-    assertThatThrownBy(
-            () -> Eip8347DualCheckVerifier.verify(snapshot, preimages, fixture.mptRoot()))
+    assertThatThrownBy(() -> Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), tampered))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
         .hasMessageContaining("basic-data");
   }
@@ -556,7 +656,7 @@ class Eip8347DualCheckVerifierTest {
     Files.write(preimages, new byte[] {1, 2, 3});
     assertThatThrownBy(
             () -> {
-              try (final Eip8347PreimageReader reader = new Eip8347PreimageReader(preimages)) {
+              try (final Eip8347PreimageFile reader = new Eip8347PreimageFile(preimages)) {
                 reader.forEach(r -> {});
               }
             })
@@ -597,36 +697,6 @@ class Eip8347DualCheckVerifierTest {
   }
 
   @Test
-  void snapshotLeafIndexSeeksOriginalFile() throws Exception {
-    final Fixture fixture =
-        Fixture.builder()
-            .eoa(
-                Address.fromHexString("0x0000000000000000000000000000000000000045"),
-                1L,
-                Wei.of(3),
-                Map.of(UInt256.ZERO, UInt256.valueOf(5)))
-            .build();
-    final Path snapshot = tmp.resolve("index.snap");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
-
-    try (final Eip8347SnapshotReader reader = new Eip8347SnapshotReader(snapshot);
-        final Eip8347SnapshotLeafIndex index = new Eip8347SnapshotLeafIndex(snapshot)) {
-      reader.forEach(
-          leaf -> {
-            index.record(leaf.key(), reader.lastLeafOffset());
-          });
-      reader.ensureExhausted();
-      index.seal();
-
-      for (final Eip8347SnapshotLeaf leaf : fixture.leaves()) {
-        assertThat(index.require(leaf.key())).isEqualTo(leaf.value());
-      }
-      assertThat(index.get(Bytes.fromHexString("0x01" + "ff".repeat(33)))).isEmpty();
-      index.ensureAllConsumed();
-    }
-  }
-
-  @Test
   void snapshotReaderRoundTrip() throws Exception {
     final Fixture fixture =
         Fixture.builder()
@@ -637,14 +707,14 @@ class Eip8347DualCheckVerifierTest {
                 Map.of())
             .build();
     final Path snapshot = tmp.resolve("round.snap");
-    Eip8347ArtifactWriter.writeSnapshot(snapshot, fixture.pbtRoot(), fixture.leaves());
+    Eip8347SnapshotWriter.write(snapshot, fixture.pbtRoot(), fixture.leaves());
 
     try (final Eip8347SnapshotReader reader = new Eip8347SnapshotReader(snapshot)) {
       assertThat(reader.claimedRoot()).isEqualTo(fixture.pbtRoot());
-      assertThat(reader.leafCount()).isEqualTo(fixture.leaves().size());
       final List<Eip8347SnapshotLeaf> read = new ArrayList<>();
       reader.forEach(read::add);
       reader.ensureExhausted();
+      assertThat(reader.leafCount()).isEqualTo(fixture.leaves().size());
       assertThat(read).hasSize(fixture.leaves().size());
       assertThat(read.getFirst().key()).isEqualTo(fixture.leaves().getFirst().key());
     }
@@ -669,16 +739,6 @@ class Eip8347DualCheckVerifierTest {
     assertThat(ascending.rootHash()).isEqualTo(fixture.pbtRoot());
   }
 
-  private static Bytes encodeSnapshotLeaf(final Eip8347SnapshotLeaf leaf) {
-    return RLP.encode(
-        rlp -> {
-          rlp.startList();
-          rlp.writeBytes(leaf.key());
-          rlp.writeBytes(leaf.value().trimLeadingZeros());
-          rlp.endList();
-        });
-  }
-
   private static Bytes32 recomputePbtRoot(final List<Eip8347SnapshotLeaf> leaves) {
     final List<Eip8347SnapshotLeaf> ordered = new ArrayList<>(leaves);
     ordered.sort(Comparator.comparing(Eip8347SnapshotLeaf::key));
@@ -691,9 +751,9 @@ class Eip8347DualCheckVerifierTest {
 
   /** Writes preimage records in the given order without sorting (for negative tests). */
   private static void writePreimagesInGivenOrder(
-      final Path path, final List<Eip8347PreimageRecord> records) throws Exception {
+      final Path path, final List<AccountPreimages> records) throws Exception {
     try (final OutputStream out = Files.newOutputStream(path)) {
-      for (final Eip8347PreimageRecord record : records) {
+      for (final AccountPreimages record : records) {
         out.write(record.address().getBytes().toArrayUnsafe());
         out.write(
             ByteBuffer.allocate(4)
@@ -710,13 +770,13 @@ class Eip8347DualCheckVerifierTest {
   /** Builds small EIP-8347 fixtures from Besu PBT/MPT APIs. */
   private static final class Fixture {
     private final List<Eip8347SnapshotLeaf> leaves;
-    private final List<Eip8347PreimageRecord> preimages;
+    private final List<AccountPreimages> preimages;
     private final Bytes32 pbtRoot;
     private final Bytes32 mptRoot;
 
     private Fixture(
         final List<Eip8347SnapshotLeaf> leaves,
-        final List<Eip8347PreimageRecord> preimages,
+        final List<AccountPreimages> preimages,
         final Bytes32 pbtRoot,
         final Bytes32 mptRoot) {
       this.leaves = leaves;
@@ -729,7 +789,7 @@ class Eip8347DualCheckVerifierTest {
       return leaves;
     }
 
-    List<Eip8347PreimageRecord> preimages() {
+    List<AccountPreimages> preimages() {
       return preimages;
     }
 
@@ -747,7 +807,7 @@ class Eip8347DualCheckVerifierTest {
 
     static final class Builder {
       private final Map<Bytes, Bytes32> leafMap = new TreeMap<>();
-      private final List<Eip8347PreimageRecord> preimages = new ArrayList<>();
+      private final List<AccountPreimages> preimages = new ArrayList<>();
       private final Map<Address, AccountState> accounts = new HashMap<>();
 
       Builder eoa(
@@ -791,7 +851,7 @@ class Eip8347DualCheckVerifierTest {
                 TrieKeyDerivation.getTreeKeyForStorageSlot(address32, slot.getKey()),
                 Bytes32.leftPad(slot.getValue()));
           }
-          preimages.add(new Eip8347PreimageRecord(address, slotKeys));
+          preimages.add(new AccountPreimages(address, slotKeys));
 
           if (state.delegation) {
             final long codeSize = EmbeddingParameters.DELEGATION_CODE_SIZE;

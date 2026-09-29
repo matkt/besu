@@ -23,9 +23,9 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347PreimageFromGenesis;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347SnapshotGenerator;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347WorldStateSource;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347StateSource;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
 import org.hyperledger.besu.evm.worldstate.WorldState;
 
@@ -233,7 +233,7 @@ public class PbtSubCommand implements Runnable {
             stateRoot);
         final Eip8347SnapshotGenerator.Result result =
             Eip8347SnapshotGenerator.generate(
-                effectivePreimages, new Eip8347WorldStateSource(worldState.get()), snapshotPath);
+                effectivePreimages, Eip8347StateSource.of(worldState.get()), snapshotPath);
         // Dual-check: incomplete / surplus preimages must refuse (converter step 2).
         Eip8347DualCheckVerifier.verify(
             snapshotPath, effectivePreimages, Bytes32.wrap(stateRoot.getBytes()));
@@ -269,7 +269,7 @@ public class PbtSubCommand implements Runnable {
       }
       final GenesisConfig genesis = parentCommand.parentCommand.besuCommand.getGenesisConfig();
       final int records =
-          Eip8347PreimageFromGenesis.write(preimagesOutPath, genesis.streamAllocations());
+          Eip8347PreimageFile.writeGenesis(preimagesOutPath, genesis.streamAllocations());
       LOG.info(
           "EIP-8347 preimages derived from genesis alloc (records={}, path={})",
           records,

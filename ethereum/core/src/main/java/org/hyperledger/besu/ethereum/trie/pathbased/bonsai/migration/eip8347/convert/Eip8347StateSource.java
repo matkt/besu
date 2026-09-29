@@ -15,10 +15,11 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
+import org.hyperledger.besu.evm.account.Account;
+import org.hyperledger.besu.evm.worldstate.WorldState;
 
+import java.util.Objects;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -26,11 +27,9 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Read-only view of MPT account state used by {@link Eip8347SnapshotGenerator}.
- *
- * <p>EIP-8347 converter step: given preimages and the state committed by {@code ANCHOR_BLOCK}, look
- * up nonce/balance/code/storage to derive PBT leaves. Production convert uses {@link
- * Eip8347WorldStateSource}; tests may stub this interface directly.
+ * Read-only view of the anchor MPT state used by {@link Eip8347SnapshotGenerator}: nonce, balance,
+ * code and storage per preimage address. Production uses {@link #of(WorldState)}; tests stub it.
+ * Called from a single thread, so implementations need not be thread-safe.
  */
 @FunctionalInterface
 public interface Eip8347StateSource {
@@ -52,13 +51,35 @@ public interface Eip8347StateSource {
     return UInt256.ZERO;
   }
 
-  /** True when {@code code} is an EIP-7702 delegation indicator ({@code 0xef0100 ‖ address}). */
-  static boolean isDelegationCode(final Bytes code) {
-    return CodeDelegationHelper.hasCodeDelegation(code);
-  }
+  /**
+   * View over a Besu {@link WorldState}. The generator reads an account and then its slots, so the
+   * last resolved account is kept to avoid one world-state lookup per slot.
+   */
+  static Eip8347StateSource of(final WorldState worldState) {
+    Objects.requireNonNull(worldState, "worldState");
+    return new Eip8347StateSource() {
+      private Address cachedAddress;
+      private Account cachedAccount;
 
-  /** Code hash for a non-delegation account (empty code → {@link Hash#EMPTY}). */
-  static Hash codeHashOf(final Bytes code) {
-    return code == null || code.isEmpty() ? Hash.EMPTY : Hash.hash(code);
+      @Override
+      public Optional<AccountView> getAccount(final Address address) {
+        return Optional.ofNullable(resolve(address))
+            .map(a -> new AccountView(a.getNonce(), a.getBalance(), a.getCode()));
+      }
+
+      @Override
+      public UInt256 getStorage(final Address address, final Bytes32 slotKey) {
+        final Account account = resolve(address);
+        return account == null ? UInt256.ZERO : account.getStorageValue(UInt256.fromBytes(slotKey));
+      }
+
+      private Account resolve(final Address address) {
+        if (!address.equals(cachedAddress)) {
+          cachedAddress = address;
+          cachedAccount = worldState.get(address);
+        }
+        return cachedAccount;
+      }
+    };
   }
 }

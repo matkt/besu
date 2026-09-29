@@ -14,258 +14,218 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact;
 
-import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Group;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.HeaderRecord;
 
+import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
+import java.util.List;
 import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
-import org.apache.tuweni.bytes.MutableBytes;
 
 /**
- * Streaming reader for an EIP-8347 PBT snapshot.
+ * Sequential reader of an EIP-8347 typed snapshot, one record ("unit") at a time.
  *
- * <p>Format: {@code pbtRoot[32] | leafCount[8, BE] | RLP([key, value]) * leafCount}. Values are
- * canonical RLP integers (no leading zero); this reader left-pads them to 32 bytes.
+ * <p>{@code pbtRoot[32] | headerCount[8] | headers | codeCount[8] | code groups | storageCount[8] |
+ * storage records}. Enforces the byte-canonical layout: units strictly ascending by stem (so
+ * derived leaves are strictly ascending in PBT key order), storage records strictly ascending by
+ * {@code addressHash} with a non-zero {@code groupCount}, and no trailing byte. Memory is one unit.
  */
 public final class Eip8347SnapshotReader implements Closeable {
 
-  private final InputStream in;
-  private final Bytes32 claimedRoot;
-  private final long leafCount;
-  private long readCount;
-  private long position;
-  private long lastLeafOffset;
-  private Bytes previousKey;
+  /** One typed record together with the PBT leaves it derives. */
+  public sealed interface Unit permits HeaderUnit, CodeUnit, StorageUnit {
+    Bytes stem();
 
-  public Eip8347SnapshotReader(final Path path) throws IOException {
-    this.in = Files.newInputStream(path);
-    final byte[] header = readFully(40);
-    this.claimedRoot = Bytes32.wrap(header, 0);
-    this.leafCount = ByteBuffer.wrap(header, 32, 8).order(ByteOrder.BIG_ENDIAN).getLong();
-    if (leafCount < 0) {
-      throw new Eip8347ArtifactVerificationException("snapshot leafCount is negative");
+    List<Eip8347SnapshotLeaf> leaves();
+
+    int leafCount();
+  }
+
+  public record HeaderUnit(HeaderRecord header) implements Unit {
+    @Override
+    public Bytes stem() {
+      return header.stem();
+    }
+
+    @Override
+    public List<Eip8347SnapshotLeaf> leaves() {
+      return header.leaves();
+    }
+
+    @Override
+    public int leafCount() {
+      return 2 + header.slots().size();
     }
   }
 
-  /**
-   * Byte offset in the snapshot file of the leaf most recently returned by {@link #iterator()} /
-   * {@link #forEach(Consumer)}. Valid only after at least one leaf has been read.
-   */
-  public long lastLeafOffset() {
-    return lastLeafOffset;
+  public record CodeUnit(Group group) implements Unit {
+    private static final Bytes PREFIX = Bytes.of((byte) EmbeddingParameters.CODE_ZONE);
+
+    @Override
+    public Bytes stem() {
+      return Bytes.concatenate(PREFIX, group.stemHash());
+    }
+
+    @Override
+    public List<Eip8347SnapshotLeaf> leaves() {
+      return group.leaves(PREFIX);
+    }
+
+    @Override
+    public int leafCount() {
+      return group.entries().size();
+    }
+  }
+
+  /** One group of a storage record; {@code addressHash} is the record's. */
+  public record StorageUnit(Bytes32 addressHash, Group group) implements Unit {
+    @Override
+    public Bytes stem() {
+      return Bytes.concatenate(
+          Eip8347TypedSnapshotCodec.storagePrefix(addressHash), group.stemHash());
+    }
+
+    @Override
+    public List<Eip8347SnapshotLeaf> leaves() {
+      return group.leaves(Eip8347TypedSnapshotCodec.storagePrefix(addressHash));
+    }
+
+    @Override
+    public int leafCount() {
+      return group.entries().size();
+    }
+  }
+
+  private enum Section {
+    HEADER,
+    CODE,
+    STORAGE,
+    DONE
+  }
+
+  private final InputStream in;
+  private final Bytes32 claimedRoot;
+
+  private Section section = Section.HEADER;
+  private long recordsLeft;
+  private long groupsLeft;
+  private Bytes32 storageAddressHash;
+  private Bytes previousStem;
+  private long leafCount;
+
+  public Eip8347SnapshotReader(final Path path) throws IOException {
+    this.in = new BufferedInputStream(Files.newInputStream(path), 1 << 16);
+    this.claimedRoot = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, 32));
+    this.recordsLeft = Eip8347TypedSnapshotCodec.readCount(in);
   }
 
   public Bytes32 claimedRoot() {
     return claimedRoot;
   }
 
+  /** Leaves derived by the units read so far. */
   public long leafCount() {
     return leafCount;
   }
 
-  /** Streams every leaf in order, invoking {@code consumer} once per leaf. */
+  /** Next unit in file order, or {@code null} once the snapshot is fully and validly consumed. */
+  public Unit next() throws IOException {
+    while (true) {
+      switch (section) {
+        case HEADER -> {
+          if (recordsLeft > 0) {
+            recordsLeft--;
+            return accept(new HeaderUnit(Eip8347TypedSnapshotCodec.readHeaderRecord(in)));
+          }
+          enter(Section.CODE);
+        }
+        case CODE -> {
+          if (recordsLeft > 0) {
+            recordsLeft--;
+            return accept(new CodeUnit(Eip8347TypedSnapshotCodec.readGroup(in)));
+          }
+          enter(Section.STORAGE);
+        }
+        case STORAGE -> {
+          if (groupsLeft > 0) {
+            groupsLeft--;
+            return accept(
+                new StorageUnit(storageAddressHash, Eip8347TypedSnapshotCodec.readGroup(in)));
+          }
+          if (recordsLeft > 0) {
+            recordsLeft--;
+            beginStorageRecord();
+          } else {
+            section = Section.DONE;
+            if (in.read() != -1) {
+              throw new Eip8347ArtifactVerificationException("trailing bytes after snapshot");
+            }
+          }
+        }
+        case DONE -> {
+          return null;
+        }
+      }
+    }
+  }
+
+  /** Streams every derived leaf in PBT key order. */
   public void forEach(final Consumer<Eip8347SnapshotLeaf> consumer) throws IOException {
-    final Iterator<Eip8347SnapshotLeaf> it = iterator();
-    while (it.hasNext()) {
-      consumer.accept(it.next());
+    for (Unit unit = next(); unit != null; unit = next()) {
+      unit.leaves().forEach(consumer);
     }
   }
 
-  public Iterator<Eip8347SnapshotLeaf> iterator() {
-    return new Iterator<>() {
-      private Eip8347SnapshotLeaf next;
-
-      @Override
-      public boolean hasNext() {
-        if (next != null) {
-          return true;
-        }
-        if (readCount >= leafCount) {
-          return false;
-        }
-        try {
-          next = readOne();
-          return true;
-        } catch (final IOException e) {
-          throw new Eip8347ArtifactVerificationException("failed reading snapshot leaf", e);
-        }
-      }
-
-      @Override
-      public Eip8347SnapshotLeaf next() {
-        if (!hasNext()) {
-          throw new NoSuchElementException();
-        }
-        final Eip8347SnapshotLeaf leaf = next;
-        next = null;
-        return leaf;
-      }
-    };
-  }
-
-  private Eip8347SnapshotLeaf readOne() throws IOException {
-    lastLeafOffset = position;
-    final Bytes encoded = readRlpItem();
-    final Bytes key;
-    final Bytes rawValue;
-    try {
-      final RLPInput input = RLP.input(encoded);
-      input.enterList();
-      if (input.isEndOfCurrentList()) {
-        throw new Eip8347ArtifactVerificationException(
-            "snapshot leaf record must be a key-value pair");
-      }
-      key = input.readBytes();
-      if (input.isEndOfCurrentList()) {
-        throw new Eip8347ArtifactVerificationException(
-            "snapshot leaf record must be a key-value pair");
-      }
-      rawValue = input.readBytes();
-      if (!input.isEndOfCurrentList()) {
-        throw new Eip8347ArtifactVerificationException(
-            "snapshot leaf record has trailing RLP elements");
-      }
-      input.leaveList();
-    } catch (final org.hyperledger.besu.ethereum.rlp.RLPException e) {
-      throw new Eip8347ArtifactVerificationException("malformed snapshot leaf RLP", e);
-    }
-    if (rawValue.isEmpty()) {
-      throw new Eip8347ArtifactVerificationException("snapshot leaf value must not be empty RLP");
-    }
-    if (rawValue.get(0) == 0) {
+  /** Fails unless {@link #next} has already returned {@code null}. */
+  public void ensureExhausted() {
+    if (section != Section.DONE) {
       throw new Eip8347ArtifactVerificationException(
-          "snapshot leaf value has a leading zero byte (non-canonical RLP integer)");
-    }
-    if (rawValue.size() > 32) {
-      throw new Eip8347ArtifactVerificationException(
-          "snapshot leaf value exceeds 32 bytes: " + rawValue.size());
-    }
-    final Bytes32 value = Bytes32.leftPad(rawValue);
-    if (previousKey != null && previousKey.compareTo(key) >= 0) {
-      throw new Eip8347ArtifactVerificationException(
-          "snapshot leaves are not strictly ascending in PBT key order");
-    }
-    previousKey = key;
-    readCount++;
-    return new Eip8347SnapshotLeaf(key, value);
-  }
-
-  /** Reads one top-level RLP item from the stream without buffering the remainder of the file. */
-  private Bytes readRlpItem() throws IOException {
-    final int prefix = readByte();
-    if (prefix < 0) {
-      throw new Eip8347ArtifactVerificationException(
-          "unexpected EOF reading snapshot leaf " + readCount + " of " + leafCount);
-    }
-    if (prefix <= 0x7f) {
-      return Bytes.of((byte) prefix);
-    }
-    if (prefix <= 0xb7) {
-      final int len = prefix - 0x80;
-      final byte[] payload = readFully(len);
-      final MutableBytes out = MutableBytes.create(1 + len);
-      out.set(0, (byte) prefix);
-      out.set(1, Bytes.wrap(payload));
-      return out;
-    }
-    if (prefix <= 0xbf) {
-      final int lenOfLen = prefix - 0xb7;
-      final byte[] lenBytes = readFully(lenOfLen);
-      final int len = decodeLength(lenBytes);
-      if (len < 56) {
-        throw new Eip8347ArtifactVerificationException(
-            "non-canonical RLP: long-form length for short string");
-      }
-      final byte[] payload = readFully(len);
-      final MutableBytes out = MutableBytes.create(1 + lenOfLen + len);
-      out.set(0, (byte) prefix);
-      out.set(1, Bytes.wrap(lenBytes));
-      out.set(1 + lenOfLen, Bytes.wrap(payload));
-      return out;
-    }
-    if (prefix <= 0xf7) {
-      final int len = prefix - 0xc0;
-      final byte[] payload = readFully(len);
-      final MutableBytes out = MutableBytes.create(1 + len);
-      out.set(0, (byte) prefix);
-      out.set(1, Bytes.wrap(payload));
-      return out;
-    }
-    final int lenOfLen = prefix - 0xf7;
-    final byte[] lenBytes = readFully(lenOfLen);
-    final int len = decodeLength(lenBytes);
-    if (len < 56) {
-      throw new Eip8347ArtifactVerificationException(
-          "non-canonical RLP: long-form length for short list");
-    }
-    final byte[] payload = readFully(len);
-    final MutableBytes out = MutableBytes.create(1 + lenOfLen + len);
-    out.set(0, (byte) prefix);
-    out.set(1, Bytes.wrap(lenBytes));
-    out.set(1 + lenOfLen, Bytes.wrap(payload));
-    return out;
-  }
-
-  private static int decodeLength(final byte[] lenBytes) {
-    if (lenBytes.length == 0 || (lenBytes[0] == 0)) {
-      throw new Eip8347ArtifactVerificationException("non-canonical RLP length encoding");
-    }
-    long len = 0;
-    for (final byte b : lenBytes) {
-      len = (len << 8) | (b & 0xFF);
-      if (len > Integer.MAX_VALUE) {
-        throw new Eip8347ArtifactVerificationException("RLP item too large");
-      }
-    }
-    return (int) len;
-  }
-
-  private int readByte() throws IOException {
-    final int b = in.read();
-    if (b >= 0) {
-      position++;
-    }
-    return b;
-  }
-
-  private byte[] readFully(final int len) throws IOException {
-    final byte[] buf = new byte[len];
-    int off = 0;
-    while (off < len) {
-      final int n = in.read(buf, off, len - off);
-      if (n < 0) {
-        throw new Eip8347ArtifactVerificationException(
-            "unexpected EOF (wanted " + len + " bytes, got " + off + ")");
-      }
-      off += n;
-    }
-    position += len;
-    return buf;
-  }
-
-  public void ensureExhausted() throws IOException {
-    if (readCount != leafCount) {
-      throw new Eip8347ArtifactVerificationException(
-          "read " + readCount + " leaves but header leafCount is " + leafCount);
-    }
-    if (in.read() != -1) {
-      throw new Eip8347ArtifactVerificationException("trailing bytes after snapshot leaf stream");
+          "snapshot has unread records in section " + section);
     }
   }
 
   @Override
   public void close() throws IOException {
     in.close();
+  }
+
+  private void enter(final Section next) throws IOException {
+    section = next;
+    recordsLeft = Eip8347TypedSnapshotCodec.readCount(in);
+  }
+
+  private void beginStorageRecord() throws IOException {
+    final Bytes32 addressHash = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, 32));
+    if (storageAddressHash != null
+        && Eip8347TypedSnapshotCodec.compare(storageAddressHash, addressHash) >= 0) {
+      throw new Eip8347ArtifactVerificationException(
+          "storage records are not strictly ascending by addressHash at "
+              + addressHash.toHexString());
+    }
+    storageAddressHash = addressHash;
+    groupsLeft = Eip8347TypedSnapshotCodec.readUint(in, 8);
+    if (groupsLeft == 0L) {
+      throw new Eip8347ArtifactVerificationException(
+          "storage groupCount must be non-zero for " + addressHash.toHexString());
+    }
+  }
+
+  private Unit accept(final Unit unit) {
+    final Bytes stem = unit.stem();
+    if (previousStem != null && Eip8347TypedSnapshotCodec.compare(previousStem, stem) >= 0) {
+      throw new Eip8347ArtifactVerificationException(
+          "snapshot records are not strictly ascending in PBT key order at " + stem.toHexString());
+    }
+    previousStem = stem;
+    leafCount += unit.leafCount();
+    return unit;
   }
 }

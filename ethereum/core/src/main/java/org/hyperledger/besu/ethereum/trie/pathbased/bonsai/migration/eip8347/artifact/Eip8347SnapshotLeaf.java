@@ -20,17 +20,16 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * One PBT leaf from an EIP-8347 snapshot: full tree key and left-padded 32-byte value.
+ * One PBT leaf derived from an EIP-8347 typed snapshot: full tree key and left-padded 32-byte
+ * value.
  *
- * <p>Snapshot serialization stores {@code value} as a canonical RLP integer (no leading zeros); the
- * verifier left-pads back to 32 bytes before hashing.
+ * <p>The on-disk snapshot packs leaves into typed, stem-grouped records (EIP PR 12379); readers
+ * expand those records into {@code Eip8347SnapshotLeaf} instances before hashing.
  */
-public final class Eip8347SnapshotLeaf {
+@SuppressWarnings("MethodInputParametersMustBeFinal") // compact record constructor
+public record Eip8347SnapshotLeaf(Bytes key, Bytes32 value) {
 
-  private final Bytes key;
-  private final Bytes32 value;
-
-  public Eip8347SnapshotLeaf(final Bytes key, final Bytes32 value) {
+  public Eip8347SnapshotLeaf {
     if (key == null || key.isEmpty()) {
       throw new Eip8347ArtifactVerificationException("snapshot leaf key must be non-empty");
     }
@@ -38,20 +37,10 @@ public final class Eip8347SnapshotLeaf {
       throw new Eip8347ArtifactVerificationException("snapshot leaf value must be present");
     }
     validateKeyLength(key);
-    if (Bytes32.ZERO.equals(value)) {
+    if (value.isZero()) {
       throw new Eip8347ArtifactVerificationException(
           "snapshot must not contain a zero-valued leaf (EIP-8297 absence rule)");
     }
-    this.key = key;
-    this.value = value;
-  }
-
-  public Bytes key() {
-    return key;
-  }
-
-  public Bytes32 value() {
-    return value;
   }
 
   static void validateKeyLength(final Bytes key) {
