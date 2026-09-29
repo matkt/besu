@@ -19,6 +19,7 @@ import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,7 +43,9 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -210,6 +213,76 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
+  void importBlocks_requestsFailedWindowOnlyOnce() throws Exception {
+    final List<BlockWithAccessList> chain = chainWithBals(3);
+    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
+        .thenReturn(
+            new PeerTaskExecutorResult<>(
+                Optional.empty(),
+                PeerTaskExecutorResponseCode.TIMEOUT,
+                List.of(peer.getEthPeer())));
+    appendOnSave();
+
+    new BackwardSyncBalImporter(context).importBlocks(blocksOf(chain)).get();
+
+    verify(peerTaskExecutor, times(1)).execute(any(GetBlockAccessListsFromPeerTask.class));
+    verify(context, times(3)).saveBlock(any(Block.class), eq(Optional.empty()));
+  }
+
+  @Test
+  void importBlocks_fetchesOneRequestPerWindow() throws Exception {
+    final int nbBlocks = BackwardSyncBalImporter.BAL_REQUEST_WINDOW + 4;
+    final List<BlockWithAccessList> chain = chainWithBals(nbBlocks);
+    final List<Optional<BlockAccessList>> bals =
+        chain.stream().map(BlockWithAccessList::getBlockAccessList).toList();
+    final int window = BackwardSyncBalImporter.BAL_REQUEST_WINDOW;
+    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
+        .thenReturn(
+            new PeerTaskExecutorResult<>(
+                Optional.of(bals.subList(0, window)),
+                PeerTaskExecutorResponseCode.SUCCESS,
+                List.of(peer.getEthPeer())))
+        .thenReturn(
+            new PeerTaskExecutorResult<>(
+                Optional.of(bals.subList(window, nbBlocks)),
+                PeerTaskExecutorResponseCode.SUCCESS,
+                List.of(peer.getEthPeer())));
+    appendOnSave();
+
+    new BackwardSyncBalImporter(context).importBlocks(blocksOf(chain)).get();
+
+    verify(peerTaskExecutor, times(2)).execute(any(GetBlockAccessListsFromPeerTask.class));
+    @SuppressWarnings("unchecked")
+    final ArgumentCaptor<Optional<BlockAccessList>> balCaptor =
+        ArgumentCaptor.forClass(Optional.class);
+    verify(context, times(nbBlocks)).saveBlock(any(Block.class), balCaptor.capture());
+    assertThat(balCaptor.getAllValues()).containsExactlyElementsOf(bals);
+  }
+
+  @Test
+  void importBlocks_usesPrefetchedFirstWindow() throws Exception {
+    final List<BlockWithAccessList> chain = chainWithBals(2);
+    appendOnSave();
+
+    new BackwardSyncBalImporter(context)
+        .importBlocks(
+            blocksOf(chain),
+            CompletableFuture.completedFuture(
+                Map.of(
+                    chain.get(0).getBlock().getHash(),
+                    chain.get(0).getBlockAccessList().orElseThrow())))
+        .get();
+
+    verify(peerTaskExecutor, never()).execute(any(GetBlockAccessListsFromPeerTask.class));
+    @SuppressWarnings("unchecked")
+    final ArgumentCaptor<Optional<BlockAccessList>> balCaptor =
+        ArgumentCaptor.forClass(Optional.class);
+    verify(context, times(2)).saveBlock(any(Block.class), balCaptor.capture());
+    assertThat(balCaptor.getAllValues())
+        .containsExactly(chain.get(0).getBlockAccessList(), Optional.empty());
+  }
+
+  @Test
   void lookupStoredBal_skipsStorageWhenNoBalHash() {
     final Block block = getBlockByNumber(LOCAL_HEIGHT + 1);
     assertThat(block.getHeader().getBalHash()).isEmpty();
@@ -224,6 +297,37 @@ public class BackwardSyncBalImporterTest {
                 Optional.of(bals),
                 PeerTaskExecutorResponseCode.SUCCESS,
                 List.of(peer.getEthPeer())));
+  }
+
+  private List<BlockWithAccessList> chainWithBals(final int count) {
+    final List<BlockWithAccessList> chain = new java.util.ArrayList<>();
+    Hash parentHash = localBlockchain.getChainHeadHash();
+    for (int i = 1; i <= count; i++) {
+      final BlockWithAccessList block =
+          blockDataGenerator.blockWithAccessList(
+              new BlockDataGenerator.BlockOptions()
+                  .setBlockNumber(LOCAL_HEIGHT + i)
+                  .setParentHash(parentHash)
+                  .withGeneratedBlockAccessList(2));
+      chain.add(block);
+      parentHash = block.getBlock().getHash();
+    }
+    return chain;
+  }
+
+  private static List<Block> blocksOf(final List<BlockWithAccessList> chain) {
+    return chain.stream().map(BlockWithAccessList::getBlock).toList();
+  }
+
+  private void appendOnSave() {
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              final Block block = invocation.getArgument(0);
+              localBlockchain.appendBlock(block, blockDataGenerator.receipts(block));
+              return null;
+            })
+        .when(context)
+        .saveBlock(any(Block.class), any());
   }
 
   private BlockWithAccessList blockWithBal(final long number) {

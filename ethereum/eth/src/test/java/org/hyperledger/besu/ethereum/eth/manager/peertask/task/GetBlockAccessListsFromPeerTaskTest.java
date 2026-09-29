@@ -129,7 +129,8 @@ class GetBlockAccessListsFromPeerTaskTest {
                 .test(EthPeerImmutableAttributes.from(successfulCandidate)))
         .isTrue();
     assertThat(
-            task.getPeerRequirementFilter().test(EthPeerImmutableAttributes.from(lowHeightCandidate)))
+            task.getPeerRequirementFilter()
+                .test(EthPeerImmutableAttributes.from(lowHeightCandidate)))
         .isFalse();
     assertThat(
             task.getPeerRequirementFilter()

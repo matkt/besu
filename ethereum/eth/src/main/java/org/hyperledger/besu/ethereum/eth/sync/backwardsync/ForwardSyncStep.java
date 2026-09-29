@@ -14,14 +14,17 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.backwardsync;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResponseCode;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetBodiesFromPeerTask;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -68,8 +71,10 @@ public class ForwardSyncStep {
           .addArgument(() -> blockHeaders.getLast().getNumber())
           .addArgument(() -> blockHeaders.getFirst().getHash().getBytes().toHexString())
           .log();
+      final CompletableFuture<Map<Hash, BlockAccessList>> firstWindowBals =
+          balImporter.prefetchFirstWindow(blockHeaders);
       return requestBodies(blockHeaders)
-          .thenCompose(balImporter::importBlocks)
+          .thenCompose(blocks -> balImporter.importBlocks(blocks, firstWindowBals))
           .exceptionally(
               throwable -> {
                 context.halveBatchSize();
