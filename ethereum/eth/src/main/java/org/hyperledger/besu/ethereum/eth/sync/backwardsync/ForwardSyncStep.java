@@ -17,12 +17,14 @@ package org.hyperledger.besu.ethereum.eth.sync.backwardsync;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.eth.EthProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResponseCode;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetBlockAccessListsFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -38,6 +41,9 @@ import org.slf4j.LoggerFactory;
 public class ForwardSyncStep {
 
   private static final Logger LOG = LoggerFactory.getLogger(ForwardSyncStep.class);
+  private static final int DEFAULT_BAL_DOWNLOAD_MAX_ATTEMPTS = 40;
+  private static final Duration DEFAULT_BAL_PEER_WAIT_TIMEOUT = Duration.ofSeconds(5);
+
   private final BackwardSyncContext context;
   private final BackwardChain backwardChain;
 
@@ -116,8 +122,10 @@ public class ForwardSyncStep {
   }
 
   /**
-   * Best-effort download of BALs for headers that advertise a BAL hash. Failures or unavailable
-   * entries do not fail the forward step — import falls back to reconstructing the BAL.
+   * Best-effort download of BALs for headers that advertise a BAL hash. Peers soft-limit responses
+   * by message size, so this retries for still-missing headers until complete, attempts are
+   * exhausted, or no eth/71 peer is available. Remaining gaps fall back to reconstruction at
+   * import.
    */
   @VisibleForTesting
   protected CompletableFuture<Map<Hash, BlockAccessList>> requestBlockAccessLists(
@@ -136,53 +144,139 @@ public class ForwardSyncStep {
         .addArgument(balHeaders::size)
         .log();
 
+    return downloadBlockAccessLists(
+        balHeaders, new HashMap<>(), balHeaders, balDownloadMaxAttempts());
+  }
+
+  private CompletableFuture<Map<Hash, BlockAccessList>> downloadBlockAccessLists(
+      final List<BlockHeader> allBalHeaders,
+      final Map<Hash, BlockAccessList> collected,
+      final List<BlockHeader> pendingHeaders,
+      final int attemptsRemaining) {
     return context
         .getEthContext()
         .getScheduler()
         .scheduleServiceTask(
             () -> {
               try {
+                LOG.atInfo()
+                    .setMessage(
+                        "Requesting {} remaining BAL(s) ({}/{} already fetched, {} attempts left)")
+                    .addArgument(pendingHeaders::size)
+                    .addArgument(collected::size)
+                    .addArgument(allBalHeaders::size)
+                    .addArgument(attemptsRemaining)
+                    .log();
                 final GetBlockAccessListsFromPeerTask task =
-                    new GetBlockAccessListsFromPeerTask(balHeaders);
+                    new GetBlockAccessListsFromPeerTask(pendingHeaders);
                 final PeerTaskExecutorResult<List<Optional<BlockAccessList>>> taskResult =
                     context.getEthContext().getPeerTaskExecutor().execute(task);
-                if (taskResult.responseCode() != PeerTaskExecutorResponseCode.SUCCESS
-                    || taskResult.result().isEmpty()) {
+                if (taskResult.responseCode() == PeerTaskExecutorResponseCode.SUCCESS
+                    && taskResult.result().isPresent()) {
+                  final int before = collected.size();
+                  mergeAvailableBlockAccessLists(
+                      pendingHeaders, taskResult.result().get(), collected);
+                  final int newlyFetched = collected.size() - before;
+                  final List<BlockHeader> stillPending =
+                      allBalHeaders.stream()
+                          .filter(header -> !collected.containsKey(header.getHash()))
+                          .toList();
                   LOG.atInfo()
                       .setMessage(
-                          "Block access list download unsuccessful ({}), continuing without BALs")
-                      .addArgument(taskResult::responseCode)
+                          "BAL download round: +{} this round, {}/{} total ({} still pending)")
+                      .addArgument(newlyFetched)
+                      .addArgument(collected::size)
+                      .addArgument(allBalHeaders::size)
+                      .addArgument(stillPending::size)
                       .log();
-                  return CompletableFuture.completedFuture(Collections.emptyMap());
+                  if (stillPending.isEmpty()) {
+                    return CompletableFuture.completedFuture(collected);
+                  }
+                  final boolean madeProgress = newlyFetched > 0;
+                  if (madeProgress) {
+                    // Soft-limited partial response: keep fetching remaining headers.
+                    return downloadBlockAccessLists(
+                        allBalHeaders, collected, stillPending, balDownloadMaxAttempts());
+                  }
+                  if (attemptsRemaining > 1) {
+                    return downloadBlockAccessLists(
+                        allBalHeaders, collected, stillPending, attemptsRemaining - 1);
+                  }
+                  return CompletableFuture.completedFuture(collected);
                 }
-                return CompletableFuture.completedFuture(
-                    indexAvailableBlockAccessLists(balHeaders, taskResult.result().get()));
+                if (taskResult.responseCode() == PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE
+                    && attemptsRemaining > 1) {
+                  LOG.atInfo()
+                      .setMessage(
+                          "No eth/71 peer available for BAL download, waiting up to {}s ({} attempts left, {}/{} fetched)")
+                      .addArgument(() -> balPeerWaitTimeout().toSeconds())
+                      .addArgument(attemptsRemaining - 1)
+                      .addArgument(collected::size)
+                      .addArgument(allBalHeaders::size)
+                      .log();
+                  return waitForEth71Peer()
+                      .handle((peer, error) -> null)
+                      .thenCompose(
+                          ignored ->
+                              downloadBlockAccessLists(
+                                  allBalHeaders,
+                                  collected,
+                                  pendingHeaders,
+                                  attemptsRemaining - 1));
+                }
+                LOG.atInfo()
+                    .setMessage(
+                        "Block access list download unsuccessful ({}), continuing with {}/{} BALs")
+                    .addArgument(taskResult::responseCode)
+                    .addArgument(collected::size)
+                    .addArgument(allBalHeaders::size)
+                    .log();
+                return CompletableFuture.completedFuture(collected);
               } catch (final RuntimeException e) {
                 LOG.atInfo()
-                    .setMessage("Block access list download failed ({}), continuing without BALs")
+                    .setMessage(
+                        "Block access list download failed ({}), continuing with {}/{} BALs")
                     .addArgument(e::toString)
+                    .addArgument(collected::size)
+                    .addArgument(allBalHeaders::size)
                     .log();
-                return CompletableFuture.completedFuture(Collections.emptyMap());
+                return CompletableFuture.completedFuture(collected);
               }
             });
   }
 
-  private static Map<Hash, BlockAccessList> indexAvailableBlockAccessLists(
-      final List<BlockHeader> balHeaders, final List<Optional<BlockAccessList>> downloaded) {
-    final Map<Hash, BlockAccessList> byHash = new HashMap<>();
-    final int count = Math.min(balHeaders.size(), downloaded.size());
+  private CompletableFuture<?> waitForEth71Peer() {
+    return context
+        .getEthContext()
+        .getEthPeers()
+        .waitForPeer(
+            attrs ->
+                attrs.ethPeer().getAgreedCapabilities().stream()
+                    .anyMatch(EthProtocol::isEth71Compatible))
+        .orTimeout(balPeerWaitTimeout().toMillis(), TimeUnit.MILLISECONDS);
+  }
+
+  @VisibleForTesting
+  protected int balDownloadMaxAttempts() {
+    return DEFAULT_BAL_DOWNLOAD_MAX_ATTEMPTS;
+  }
+
+  @VisibleForTesting
+  protected Duration balPeerWaitTimeout() {
+    return DEFAULT_BAL_PEER_WAIT_TIMEOUT;
+  }
+
+  private static void mergeAvailableBlockAccessLists(
+      final List<BlockHeader> requestedHeaders,
+      final List<Optional<BlockAccessList>> downloaded,
+      final Map<Hash, BlockAccessList> collected) {
+    final int count = Math.min(requestedHeaders.size(), downloaded.size());
     for (int i = 0; i < count; i++) {
       final Optional<BlockAccessList> maybeBal = downloaded.get(i);
       if (maybeBal.isPresent()) {
-        byHash.put(balHeaders.get(i).getHash(), maybeBal.get());
+        collected.put(requestedHeaders.get(i).getHash(), maybeBal.get());
       }
     }
-    LOG.atInfo()
-        .setMessage("Got {}/{} block access list(s) from peers")
-        .addArgument(byHash::size)
-        .addArgument(balHeaders::size)
-        .log();
-    return byHash;
   }
 
   @VisibleForTesting
