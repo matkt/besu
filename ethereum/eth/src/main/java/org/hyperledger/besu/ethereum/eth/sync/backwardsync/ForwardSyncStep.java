@@ -131,7 +131,7 @@ public class ForwardSyncStep {
       return CompletableFuture.completedFuture(Collections.emptyMap());
     }
 
-    LOG.atDebug()
+    LOG.atInfo()
         .setMessage("Requesting {} block access list(s) for backward sync batch")
         .addArgument(balHeaders::size)
         .log();
@@ -148,7 +148,7 @@ public class ForwardSyncStep {
                     context.getEthContext().getPeerTaskExecutor().execute(task);
                 if (taskResult.responseCode() != PeerTaskExecutorResponseCode.SUCCESS
                     || taskResult.result().isEmpty()) {
-                  LOG.atDebug()
+                  LOG.atInfo()
                       .setMessage(
                           "Block access list download unsuccessful ({}), continuing without BALs")
                       .addArgument(taskResult::responseCode)
@@ -158,7 +158,7 @@ public class ForwardSyncStep {
                 return CompletableFuture.completedFuture(
                     indexAvailableBlockAccessLists(balHeaders, taskResult.result().get()));
               } catch (final RuntimeException e) {
-                LOG.atDebug()
+                LOG.atInfo()
                     .setMessage("Block access list download failed ({}), continuing without BALs")
                     .addArgument(e::toString)
                     .log();
@@ -177,7 +177,7 @@ public class ForwardSyncStep {
         byHash.put(balHeaders.get(i).getHash(), maybeBal.get());
       }
     }
-    LOG.atDebug()
+    LOG.atInfo()
         .setMessage("Got {}/{} block access list(s) from peers")
         .addArgument(byHash::size)
         .addArgument(balHeaders::size)

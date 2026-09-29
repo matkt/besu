@@ -120,15 +120,20 @@ class GetBlockAccessListsFromPeerTaskTest {
     final GetBlockAccessListsFromPeerTask task =
         new GetBlockAccessListsFromPeerTask(List.of(header));
 
-    final EthPeer successfulCandidate = mockPeer(5);
-    final EthPeer failedCandidate = mockPeer(2);
+    final EthPeer successfulCandidate = mockPeer(5, true);
+    final EthPeer lowHeightCandidate = mockPeer(2, true);
+    final EthPeer nonEth71Candidate = mockPeer(5, false);
 
     assertThat(
             task.getPeerRequirementFilter()
                 .test(EthPeerImmutableAttributes.from(successfulCandidate)))
         .isTrue();
     assertThat(
-            task.getPeerRequirementFilter().test(EthPeerImmutableAttributes.from(failedCandidate)))
+            task.getPeerRequirementFilter().test(EthPeerImmutableAttributes.from(lowHeightCandidate)))
+        .isFalse();
+    assertThat(
+            task.getPeerRequirementFilter()
+                .test(EthPeerImmutableAttributes.from(nonEth71Candidate)))
         .isFalse();
   }
 
@@ -166,7 +171,7 @@ class GetBlockAccessListsFromPeerTaskTest {
     return blockHeader;
   }
 
-  private EthPeer mockPeer(final long chainHeight) {
+  private EthPeer mockPeer(final long chainHeight, final boolean eth71Compatible) {
     final EthPeer ethPeer = Mockito.mock(EthPeer.class);
     final ChainState chainState = Mockito.mock(ChainState.class);
 
@@ -176,6 +181,8 @@ class GetBlockAccessListsFromPeerTaskTest {
     Mockito.when(ethPeer.getReputation()).thenReturn(new PeerReputation());
     final PeerConnection connection = Mockito.mock(PeerConnection.class);
     Mockito.when(ethPeer.getConnection()).thenReturn(connection);
+    Mockito.when(ethPeer.getAgreedCapabilities())
+        .thenReturn(eth71Compatible ? Set.of(EthProtocol.ETH71) : Set.of(EthProtocol.ETH69));
     return ethPeer;
   }
 }
