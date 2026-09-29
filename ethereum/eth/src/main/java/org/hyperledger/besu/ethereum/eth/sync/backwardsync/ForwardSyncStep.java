@@ -25,7 +25,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetBodiesFromPeer
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.time.Duration;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -41,8 +41,11 @@ import org.slf4j.LoggerFactory;
 public class ForwardSyncStep {
 
   private static final Logger LOG = LoggerFactory.getLogger(ForwardSyncStep.class);
-  private static final int DEFAULT_BAL_DOWNLOAD_MAX_ATTEMPTS = 40;
-  private static final Duration DEFAULT_BAL_PEER_WAIT_TIMEOUT = Duration.ofSeconds(5);
+  /** Small windows keep eth soft-limited responses useful and let import start sooner. */
+  private static final int DEFAULT_BAL_REQUEST_WINDOW = 16;
+  /** Stalled rounds before importing the next block without a BAL. */
+  private static final int DEFAULT_BAL_STALL_ATTEMPTS = 2;
+  private static final Duration DEFAULT_BAL_PEER_WAIT_TIMEOUT = Duration.ofSeconds(2);
 
   private final BackwardSyncContext context;
   private final BackwardChain backwardChain;
@@ -71,11 +74,7 @@ public class ForwardSyncStep {
           .addArgument(() -> blockHeaders.getFirst().getHash().getBytes().toHexString())
           .log();
       return requestBodies(blockHeaders)
-          .thenCompose(
-              blocks ->
-                  requestBlockAccessLists(blocks)
-                      .thenApply(blockAccessLists -> Map.entry(blocks, blockAccessLists)))
-          .thenApply(this::saveBlocks)
+          .thenCompose(this::downloadBalsAndSaveBlocks)
           .exceptionally(
               throwable -> {
                 context.halveBatchSize();
@@ -122,127 +121,232 @@ public class ForwardSyncStep {
   }
 
   /**
-   * Best-effort download of BALs for headers that advertise a BAL hash. Peers soft-limit responses
-   * by message size, so this retries for still-missing headers until complete, attempts are
-   * exhausted, or no eth/71 peer is available. Remaining gaps fall back to reconstruction at
-   * import.
+   * Pipelines BAL download with import: fetch a small window of BALs, import every consecutive
+   * block that already has one (or needs none), and only stall briefly before falling back to
+   * reconstruction. This avoids waiting for a full soft-limited 200-BAL download before importing.
    */
   @VisibleForTesting
-  protected CompletableFuture<Map<Hash, BlockAccessList>> requestBlockAccessLists(
-      final List<Block> blocks) {
-    final List<BlockHeader> balHeaders =
-        blocks.stream()
-            .map(Block::getHeader)
-            .filter(header -> header.getBalHash().isPresent())
-            .toList();
-    if (balHeaders.isEmpty()) {
-      return CompletableFuture.completedFuture(Collections.emptyMap());
+  protected CompletableFuture<Void> downloadBalsAndSaveBlocks(final List<Block> blocks) {
+    if (blocks.isEmpty()) {
+      context.halveBatchSize();
+      LOG.debug("No blocks to save, reducing batch size to {}", context.getBatchSize());
+      return CompletableFuture.completedFuture(null);
     }
-
-    LOG.atInfo()
-        .setMessage("Requesting {} block access list(s) for backward sync batch")
-        .addArgument(balHeaders::size)
-        .log();
-
-    return downloadBlockAccessLists(
-        balHeaders, new HashMap<>(), balHeaders, balDownloadMaxAttempts());
+    return downloadBalsAndSaveBlocks(blocks, 0, new HashMap<>(), balStallAttempts());
   }
 
-  private CompletableFuture<Map<Hash, BlockAccessList>> downloadBlockAccessLists(
-      final List<BlockHeader> allBalHeaders,
+  private CompletableFuture<Void> downloadBalsAndSaveBlocks(
+      final List<Block> blocks,
+      final int startIndex,
       final Map<Hash, BlockAccessList> collected,
-      final List<BlockHeader> pendingHeaders,
-      final int attemptsRemaining) {
+      final int stallAttemptsRemaining) {
     return context
         .getEthContext()
         .getScheduler()
         .scheduleServiceTask(
             () -> {
-              try {
-                LOG.atInfo()
-                    .setMessage(
-                        "Requesting {} remaining BAL(s) ({}/{} already fetched, {} attempts left)")
-                    .addArgument(pendingHeaders::size)
-                    .addArgument(collected::size)
-                    .addArgument(allBalHeaders::size)
-                    .addArgument(attemptsRemaining)
-                    .log();
-                final GetBlockAccessListsFromPeerTask task =
-                    new GetBlockAccessListsFromPeerTask(pendingHeaders);
-                final PeerTaskExecutorResult<List<Optional<BlockAccessList>>> taskResult =
-                    context.getEthContext().getPeerTaskExecutor().execute(task);
-                if (taskResult.responseCode() == PeerTaskExecutorResponseCode.SUCCESS
-                    && taskResult.result().isPresent()) {
-                  final int before = collected.size();
-                  mergeAvailableBlockAccessLists(
-                      pendingHeaders, taskResult.result().get(), collected);
-                  final int newlyFetched = collected.size() - before;
-                  final List<BlockHeader> stillPending =
-                      allBalHeaders.stream()
-                          .filter(header -> !collected.containsKey(header.getHash()))
-                          .toList();
-                  LOG.atInfo()
-                      .setMessage(
-                          "BAL download round: +{} this round, {}/{} total ({} still pending)")
-                      .addArgument(newlyFetched)
-                      .addArgument(collected::size)
-                      .addArgument(allBalHeaders::size)
-                      .addArgument(stillPending::size)
-                      .log();
-                  if (stillPending.isEmpty()) {
-                    return CompletableFuture.completedFuture(collected);
+              int index = startIndex;
+              int stallLeft = stallAttemptsRemaining;
+
+              // Import any ready prefix before spending another peer round.
+              final int importedBeforeFetch = importReadyPrefix(blocks, index, collected);
+              if (importedBeforeFetch < 0) {
+                return CompletableFuture.completedFuture(null);
+              }
+              index += importedBeforeFetch;
+              if (index >= blocks.size()) {
+                finishBatch(blocks.size());
+                return CompletableFuture.completedFuture(null);
+              }
+
+              final List<BlockHeader> pendingWindow = nextBalWindow(blocks, index, collected);
+              if (pendingWindow.isEmpty()) {
+                // Remaining blocks do not advertise a BAL hash — import the rest.
+                while (index < blocks.size()) {
+                  if (!saveOneBlock(blocks.get(index), Optional.empty())) {
+                    return CompletableFuture.completedFuture(null);
                   }
-                  final boolean madeProgress = newlyFetched > 0;
-                  if (madeProgress) {
-                    // Soft-limited partial response: keep fetching remaining headers.
-                    return downloadBlockAccessLists(
-                        allBalHeaders, collected, stillPending, balDownloadMaxAttempts());
-                  }
-                  if (attemptsRemaining > 1) {
-                    return downloadBlockAccessLists(
-                        allBalHeaders, collected, stillPending, attemptsRemaining - 1);
-                  }
-                  return CompletableFuture.completedFuture(collected);
+                  index++;
                 }
-                if (taskResult.responseCode() == PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE
-                    && attemptsRemaining > 1) {
-                  LOG.atInfo()
-                      .setMessage(
-                          "No eth/71 peer available for BAL download, waiting up to {}s ({} attempts left, {}/{} fetched)")
-                      .addArgument(() -> balPeerWaitTimeout().toSeconds())
-                      .addArgument(attemptsRemaining - 1)
-                      .addArgument(collected::size)
-                      .addArgument(allBalHeaders::size)
-                      .log();
+                finishBatch(blocks.size());
+                return CompletableFuture.completedFuture(null);
+              }
+
+              final long windowStartNumber = blocks.get(index).getHeader().getNumber();
+              final int indexForRetry = index;
+              final int stallForRetry = stallLeft;
+              LOG.atInfo()
+                  .setMessage(
+                      "Requesting {} BAL(s) for import window at block {} ({}/{} bals cached, {} stall attempts left)")
+                  .addArgument(pendingWindow::size)
+                  .addArgument(windowStartNumber)
+                  .addArgument(collected::size)
+                  .addArgument(blocks::size)
+                  .addArgument(stallForRetry)
+                  .log();
+
+              final Optional<Map<Hash, BlockAccessList>> fetched = fetchBalWindow(pendingWindow);
+              if (fetched.isEmpty()) {
+                // No eth/71 peer (or hard failure): wait briefly once, then import without BALs.
+                if (stallForRetry > 1) {
                   return waitForEth71Peer()
                       .handle((peer, error) -> null)
                       .thenCompose(
                           ignored ->
-                              downloadBlockAccessLists(
-                                  allBalHeaders,
-                                  collected,
-                                  pendingHeaders,
-                                  attemptsRemaining - 1));
+                              downloadBalsAndSaveBlocks(
+                                  blocks, indexForRetry, collected, stallForRetry - 1));
                 }
                 LOG.atInfo()
                     .setMessage(
-                        "Block access list download unsuccessful ({}), continuing with {}/{} BALs")
-                    .addArgument(taskResult::responseCode)
-                    .addArgument(collected::size)
-                    .addArgument(allBalHeaders::size)
+                        "Proceeding without BALs from block {} (no eth/71 peer), reconstructing")
+                    .addArgument(windowStartNumber)
                     .log();
-                return CompletableFuture.completedFuture(collected);
-              } catch (final RuntimeException e) {
-                LOG.atInfo()
-                    .setMessage(
-                        "Block access list download failed ({}), continuing with {}/{} BALs")
-                    .addArgument(e::toString)
-                    .addArgument(collected::size)
-                    .addArgument(allBalHeaders::size)
-                    .log();
-                return CompletableFuture.completedFuture(collected);
+                while (index < blocks.size()) {
+                  if (!saveOneBlock(blocks.get(index), Optional.empty())) {
+                    return CompletableFuture.completedFuture(null);
+                  }
+                  index++;
+                }
+                finishBatch(blocks.size());
+                return CompletableFuture.completedFuture(null);
               }
+
+              final int before = collected.size();
+              collected.putAll(fetched.get());
+              final int newlyFetched = collected.size() - before;
+              LOG.atInfo()
+                  .setMessage("BAL download round: +{} this round, {} cached for batch of {}")
+                  .addArgument(newlyFetched)
+                  .addArgument(collected::size)
+                  .addArgument(blocks::size)
+                  .log();
+
+              final int importedAfterFetch = importReadyPrefix(blocks, index, collected);
+              if (importedAfterFetch < 0) {
+                return CompletableFuture.completedFuture(null);
+              }
+              index += importedAfterFetch;
+
+              if (index >= blocks.size()) {
+                finishBatch(blocks.size());
+                return CompletableFuture.completedFuture(null);
+              }
+
+              if (importedAfterFetch > 0 || newlyFetched > 0) {
+                stallLeft = balStallAttempts();
+              } else {
+                stallLeft--;
+              }
+
+              if (stallLeft <= 0) {
+                // Next block still missing its BAL after stalled rounds — import without it.
+                final Block stalledBlock = blocks.get(index);
+                LOG.atDebug()
+                    .setMessage(
+                        "Importing block {} without BAL after stalled download, reconstructing")
+                    .addArgument(stalledBlock::toLogString)
+                    .log();
+                if (!saveOneBlock(stalledBlock, Optional.empty())) {
+                  return CompletableFuture.completedFuture(null);
+                }
+                index++;
+                stallLeft = balStallAttempts();
+              }
+
+              if (index >= blocks.size()) {
+                finishBatch(blocks.size());
+                return CompletableFuture.completedFuture(null);
+              }
+              return downloadBalsAndSaveBlocks(blocks, index, collected, stallLeft);
             });
+  }
+
+  private List<BlockHeader> nextBalWindow(
+      final List<Block> blocks,
+      final int startIndex,
+      final Map<Hash, BlockAccessList> collected) {
+    final List<BlockHeader> window = new ArrayList<>(balRequestWindow());
+    for (int i = startIndex; i < blocks.size() && window.size() < balRequestWindow(); i++) {
+      final BlockHeader header = blocks.get(i).getHeader();
+      if (header.getBalHash().isPresent() && !collected.containsKey(header.getHash())) {
+        window.add(header);
+      }
+    }
+    return window;
+  }
+
+  private Optional<Map<Hash, BlockAccessList>> fetchBalWindow(
+      final List<BlockHeader> pendingWindow) {
+    try {
+      final GetBlockAccessListsFromPeerTask task =
+          new GetBlockAccessListsFromPeerTask(pendingWindow);
+      final PeerTaskExecutorResult<List<Optional<BlockAccessList>>> taskResult =
+          context.getEthContext().getPeerTaskExecutor().execute(task);
+      if (taskResult.responseCode() == PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE
+          || taskResult.responseCode() != PeerTaskExecutorResponseCode.SUCCESS
+          || taskResult.result().isEmpty()) {
+        LOG.atInfo()
+            .setMessage("BAL window download unsuccessful ({})")
+            .addArgument(taskResult::responseCode)
+            .log();
+        return Optional.empty();
+      }
+      final Map<Hash, BlockAccessList> fetched = new HashMap<>();
+      mergeAvailableBlockAccessLists(pendingWindow, taskResult.result().get(), fetched);
+      return Optional.of(fetched);
+    } catch (final RuntimeException e) {
+      LOG.atInfo()
+          .setMessage("BAL window download failed ({})")
+          .addArgument(e::toString)
+          .log();
+      return Optional.empty();
+    }
+  }
+
+  private int importReadyPrefix(
+      final List<Block> blocks, final int startIndex, final Map<Hash, BlockAccessList> collected) {
+    int imported = 0;
+    for (int i = startIndex; i < blocks.size(); i++) {
+      final Block block = blocks.get(i);
+      final boolean needsBal = block.getHeader().getBalHash().isPresent();
+      final Optional<BlockAccessList> bal =
+          Optional.ofNullable(collected.get(block.getHash()));
+      if (needsBal && bal.isEmpty()) {
+        break;
+      }
+      if (!saveOneBlock(block, bal)) {
+        return -1;
+      }
+      imported++;
+    }
+    return imported;
+  }
+
+  private boolean saveOneBlock(final Block block, final Optional<BlockAccessList> bal) {
+    final Optional<BlockHeader> parent =
+        context
+            .getProtocolContext()
+            .getBlockchain()
+            .getBlockHeader(block.getHeader().getParentHash());
+    if (parent.isEmpty()) {
+      context.halveBatchSize();
+      LOG.atDebug()
+          .setMessage(
+              "Parent block {} not found, while saving block {}, reducing batch size to {}")
+          .addArgument(block.getHeader().getParentHash())
+          .addArgument(block::toLogString)
+          .addArgument(context::getBatchSize)
+          .log();
+      return false;
+    }
+    context.saveBlock(block, bal);
+    return true;
+  }
+
+  private void finishBatch(final int importedCount) {
+    if (importedCount == context.getBatchSize()) {
+      context.resetBatchSize();
+    }
   }
 
   private CompletableFuture<?> waitForEth71Peer() {
@@ -257,13 +361,73 @@ public class ForwardSyncStep {
   }
 
   @VisibleForTesting
-  protected int balDownloadMaxAttempts() {
-    return DEFAULT_BAL_DOWNLOAD_MAX_ATTEMPTS;
+  protected int balRequestWindow() {
+    return DEFAULT_BAL_REQUEST_WINDOW;
+  }
+
+  @VisibleForTesting
+  protected int balStallAttempts() {
+    return DEFAULT_BAL_STALL_ATTEMPTS;
   }
 
   @VisibleForTesting
   protected Duration balPeerWaitTimeout() {
     return DEFAULT_BAL_PEER_WAIT_TIMEOUT;
+  }
+
+  /**
+   * Best-effort download of BALs for the given blocks, used by unit tests and callers that only
+   * need the map. Prefer {@link #downloadBalsAndSaveBlocks(List)} on the sync hot path.
+   */
+  @VisibleForTesting
+  protected CompletableFuture<Map<Hash, BlockAccessList>> requestBlockAccessLists(
+      final List<Block> blocks) {
+    final List<BlockHeader> balHeaders =
+        blocks.stream()
+            .map(Block::getHeader)
+            .filter(header -> header.getBalHash().isPresent())
+            .toList();
+    if (balHeaders.isEmpty()) {
+      return CompletableFuture.completedFuture(Map.of());
+    }
+    return context
+        .getEthContext()
+        .getScheduler()
+        .scheduleServiceTask(
+            () -> {
+              final Map<Hash, BlockAccessList> collected = new HashMap<>();
+              int stallLeft = balStallAttempts();
+              List<BlockHeader> pending = balHeaders;
+              while (!pending.isEmpty() && stallLeft > 0) {
+                final List<BlockHeader> window =
+                    pending.subList(0, Math.min(balRequestWindow(), pending.size()));
+                final Optional<Map<Hash, BlockAccessList>> fetched = fetchBalWindow(window);
+                if (fetched.isEmpty()) {
+                  stallLeft--;
+                  if (stallLeft > 0) {
+                    try {
+                      waitForEth71Peer().handle((p, e) -> null).get();
+                    } catch (final Exception e) {
+                      Thread.currentThread().interrupt();
+                      break;
+                    }
+                  }
+                  continue;
+                }
+                final int before = collected.size();
+                collected.putAll(fetched.get());
+                pending =
+                    balHeaders.stream()
+                        .filter(header -> !collected.containsKey(header.getHash()))
+                        .toList();
+                if (collected.size() > before) {
+                  stallLeft = balStallAttempts();
+                } else {
+                  stallLeft--;
+                }
+              }
+              return CompletableFuture.completedFuture(collected);
+            });
   }
 
   private static void mergeAvailableBlockAccessLists(
@@ -290,32 +454,13 @@ public class ForwardSyncStep {
       return null;
     }
 
-    for (Block block : blocks) {
-      final Optional<BlockHeader> parent =
-          context
-              .getProtocolContext()
-              .getBlockchain()
-              .getBlockHeader(block.getHeader().getParentHash());
-
-      if (parent.isEmpty()) {
-        context.halveBatchSize();
-        LOG.atDebug()
-            .setMessage(
-                "Parent block {} not found, while saving block {}, reducing batch size to {}")
-            .addArgument(block.getHeader().getParentHash())
-            .addArgument(block::toLogString)
-            .addArgument(context::getBatchSize)
-            .log();
+    for (final Block block : blocks) {
+      if (!saveOneBlock(
+          block, Optional.ofNullable(blockAccessLists.get(block.getHash())))) {
         return null;
-      } else {
-        context.saveBlock(block, Optional.ofNullable(blockAccessLists.get(block.getHash())));
       }
     }
-
-    if (blocks.size() == context.getBatchSize()) {
-      // reset the batch size only if we got a full batch
-      context.resetBatchSize();
-    }
+    finishBatch(blocks.size());
     return null;
   }
 }

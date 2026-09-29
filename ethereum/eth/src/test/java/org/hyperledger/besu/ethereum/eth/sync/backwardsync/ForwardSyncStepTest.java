@@ -282,7 +282,7 @@ public class ForwardSyncStepTest {
     final ForwardSyncStep step =
         new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
           @Override
-          protected int balDownloadMaxAttempts() {
+          protected int balStallAttempts() {
             return 2;
           }
         };
@@ -394,7 +394,7 @@ public class ForwardSyncStepTest {
     final ForwardSyncStep step =
         new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
           @Override
-          protected int balDownloadMaxAttempts() {
+          protected int balStallAttempts() {
             return 2;
           }
 
@@ -500,7 +500,17 @@ public class ForwardSyncStepTest {
                 List.of(peer.getEthPeer())));
 
     final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
+        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
+          @Override
+          protected Duration balPeerWaitTimeout() {
+            return Duration.ZERO;
+          }
+
+          @Override
+          protected int balStallAttempts() {
+            return 1;
+          }
+        };
     step.possibleRequestBodies(List.of(withBal.getBlock().getHeader())).get();
 
     verify(context).saveBlock(eq(withBal.getBlock()), eq(Optional.empty()));
