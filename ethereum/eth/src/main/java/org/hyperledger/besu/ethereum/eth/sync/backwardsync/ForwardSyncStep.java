@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -74,19 +75,24 @@ public class ForwardSyncStep {
       final CompletableFuture<Map<Hash, BlockAccessList>> firstWindowBals =
           balImporter.prefetchFirstWindow(blockHeaders);
       return requestBodies(blockHeaders)
-          .thenCompose(blocks -> balImporter.importBlocks(blocks, firstWindowBals))
-          .exceptionally(
-              throwable -> {
-                context.halveBatchSize();
-                LOG.atDebug()
-                    .setMessage(
-                        "Getting {} blocks from peers failed with reason {}, reducing batch size to {}")
-                    .addArgument(blockHeaders::size)
-                    .addArgument(throwable::getMessage)
-                    .addArgument(context::getBatchSize)
-                    .log();
-                return null;
-              });
+          .handle(
+              (blocks, throwable) -> {
+                if (throwable != null) {
+                  context.halveBatchSize();
+                  LOG.atDebug()
+                      .setMessage(
+                          "Getting {} blocks from peers failed with reason {}, reducing batch size to {}")
+                      .addArgument(blockHeaders::size)
+                      .addArgument(throwable::getMessage)
+                      .addArgument(context::getBatchSize)
+                      .log();
+                  return CompletableFuture.<Void>completedFuture(null);
+                }
+                // a block that cannot be saved is not a failed download, retrying it right away
+                // repeats the failure, so the sync session decides whether and when to retry
+                return balImporter.importBlocks(blocks, firstWindowBals);
+              })
+          .thenCompose(Function.identity());
     }
   }
 
