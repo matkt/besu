@@ -20,7 +20,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,11 +58,9 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -232,210 +229,6 @@ public class ForwardSyncStepTest {
   }
 
   @Test
-  void requestBlockAccessLists_skipsPeerTaskWhenNoBalHashes() throws Exception {
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final Block blockWithoutBal = getBlockByNumber(LOCAL_HEIGHT + 1);
-    assertThat(blockWithoutBal.getHeader().getBalHash()).isEmpty();
-
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(blockWithoutBal)).get();
-
-    assertThat(bals).isEmpty();
-    verify(peerTaskExecutor, never()).execute(any(GetBlockAccessListsFromPeerTask.class));
-  }
-
-  @Test
-  void requestBlockAccessLists_indexesAvailableBalsByBlockHash() throws Exception {
-    final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
-    final BlockWithAccessList second = blockWithBal(LOCAL_HEIGHT + 2);
-    stubSuccessfulBalDownload(List.of(first.getBlockAccessList(), second.getBlockAccessList()));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(first.getBlock(), second.getBlock())).get();
-
-    assertThat(bals)
-        .hasSize(2)
-        .containsEntry(first.getBlock().getHash(), first.getBlockAccessList().orElseThrow())
-        .containsEntry(second.getBlock().getHash(), second.getBlockAccessList().orElseThrow());
-    verify(peerTaskExecutor).execute(any(GetBlockAccessListsFromPeerTask.class));
-  }
-
-  @Test
-  void requestBlockAccessLists_ignoresUnavailableEntriesAndKeepsPresentOnes() throws Exception {
-    final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
-    final BlockWithAccessList second = blockWithBal(LOCAL_HEIGHT + 2);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(List.of(first.getBlockAccessList(), Optional.empty())),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(List.of(Optional.empty())),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
-          @Override
-          protected int balStallAttempts() {
-            return 2;
-          }
-        };
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(first.getBlock(), second.getBlock())).get();
-
-    assertThat(bals)
-        .hasSize(1)
-        .containsEntry(first.getBlock().getHash(), first.getBlockAccessList().orElseThrow())
-        .doesNotContainKey(second.getBlock().getHash());
-  }
-
-  @Test
-  void requestBlockAccessLists_retriesMissingAfterSoftLimitedPartialResponse() throws Exception {
-    final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
-    final BlockWithAccessList second = blockWithBal(LOCAL_HEIGHT + 2);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(List.of(first.getBlockAccessList())),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(List.of(second.getBlockAccessList())),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(first.getBlock(), second.getBlock())).get();
-
-    assertThat(bals)
-        .hasSize(2)
-        .containsEntry(first.getBlock().getHash(), first.getBlockAccessList().orElseThrow())
-        .containsEntry(second.getBlock().getHash(), second.getBlockAccessList().orElseThrow());
-    verify(peerTaskExecutor, times(2)).execute(any(GetBlockAccessListsFromPeerTask.class));
-  }
-
-  @Test
-  void requestBlockAccessLists_returnsEmptyOnPeerFailure() throws Exception {
-    final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.empty(),
-                PeerTaskExecutorResponseCode.INVALID_RESPONSE,
-                List.of(peer.getEthPeer())));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(withBal.getBlock())).get();
-
-    assertThat(bals).isEmpty();
-  }
-
-  @Test
-  void requestBlockAccessLists_returnsEmptyWhenPeerThrows() throws Exception {
-    final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenThrow(new RuntimeException("no eth70 peers"));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(withBal.getBlock())).get();
-
-    assertThat(bals).isEmpty();
-  }
-
-  @Test
-  void requestBlockAccessLists_retriesWhenNoPeerThenSucceeds() throws Exception {
-    final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.empty(), PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE, List.of()))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(List.of(withBal.getBlockAccessList())),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
-          @Override
-          protected Duration balPeerWaitTimeout() {
-            return Duration.ZERO;
-          }
-        };
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(withBal.getBlock())).get();
-
-    assertThat(bals)
-        .containsEntry(withBal.getBlock().getHash(), withBal.getBlockAccessList().orElseThrow());
-    verify(peerTaskExecutor, times(2)).execute(any(GetBlockAccessListsFromPeerTask.class));
-  }
-
-  @Test
-  void requestBlockAccessLists_givesUpAfterNoPeerRetriesExhausted() throws Exception {
-    final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.empty(), PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE, List.of()));
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
-          @Override
-          protected int balStallAttempts() {
-            return 2;
-          }
-
-          @Override
-          protected Duration balPeerWaitTimeout() {
-            return Duration.ZERO;
-          }
-        };
-    final Map<Hash, BlockAccessList> bals =
-        step.requestBlockAccessLists(List.of(withBal.getBlock())).get();
-
-    assertThat(bals).isEmpty();
-    verify(peerTaskExecutor, times(2)).execute(any(GetBlockAccessListsFromPeerTask.class));
-  }
-
-  @Test
-  void saveBlocks_passesDownloadedBalIntoSaveBlock() {
-    final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
-    assertThat(localBlockchain.contains(withBal.getBlock().getHeader().getParentHash())).isTrue();
-
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-    final BlockAccessList bal = withBal.getBlockAccessList().orElseThrow();
-    step.saveBlocks(
-        Map.entry(List.of(withBal.getBlock()), Map.of(withBal.getBlock().getHash(), bal)));
-
-    verify(context).saveBlock(withBal.getBlock(), Optional.of(bal));
-  }
-
-  @Test
-  void saveBlocks_passesEmptyOptionalWhenBalMissing() {
-    final Block block = getBlockByNumber(LOCAL_HEIGHT + 1);
-    final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
-
-    step.saveBlocks(Map.entry(List.of(block), Map.of()));
-
-    verify(context).saveBlock(block, Optional.empty());
-  }
-
-  @Test
   void possibleRequestBodies_downloadsBalsAndPassesThemToSaveBlock() throws Exception {
     final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
     final BlockWithAccessList second =
@@ -462,7 +255,12 @@ public class ForwardSyncStepTest {
                 Optional.of(new ArrayList<>(List.of(first.getBlock(), second.getBlock()))),
                 PeerTaskExecutorResponseCode.SUCCESS,
                 List.of(peer.getEthPeer())));
-    stubSuccessfulBalDownload(List.of(first.getBlockAccessList(), second.getBlockAccessList()));
+    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
+        .thenReturn(
+            new PeerTaskExecutorResult<>(
+                Optional.of(List.of(first.getBlockAccessList(), second.getBlockAccessList())),
+                PeerTaskExecutorResponseCode.SUCCESS,
+                List.of(peer.getEthPeer())));
 
     final BackwardChain backwardChain =
         new BackwardChain(headersStorage, blocksStorage, chainStorage, sessionDataStorage);
@@ -500,29 +298,10 @@ public class ForwardSyncStepTest {
                 List.of(peer.getEthPeer())));
 
     final ForwardSyncStep step =
-        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1)) {
-          @Override
-          protected Duration balPeerWaitTimeout() {
-            return Duration.ZERO;
-          }
-
-          @Override
-          protected int balStallAttempts() {
-            return 1;
-          }
-        };
+        new ForwardSyncStep(context, createBackwardChain(LOCAL_HEIGHT, LOCAL_HEIGHT + 1));
     step.possibleRequestBodies(List.of(withBal.getBlock().getHeader())).get();
 
     verify(context).saveBlock(eq(withBal.getBlock()), eq(Optional.empty()));
-  }
-
-  private void stubSuccessfulBalDownload(final List<Optional<BlockAccessList>> bals) {
-    when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
-        .thenReturn(
-            new PeerTaskExecutorResult<>(
-                Optional.of(bals),
-                PeerTaskExecutorResponseCode.SUCCESS,
-                List.of(peer.getEthPeer())));
   }
 
   private BlockWithAccessList blockWithBal(final long number) {

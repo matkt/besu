@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryBlockchain;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -123,9 +124,9 @@ public class ProcessKnownAncestorsStepTest {
             new BlockDataGenerator.BlockOptions()
                 .setBlockNumber(1)
                 .setParentHash(localBlockchain.getChainHeadHash()));
+    assertThat(block.getHeader().getBalHash()).isEmpty();
 
     stubParentPresentButBlockNotImported(block);
-    when(blockchain.getBlockAccessList(block.getHash())).thenReturn(Optional.empty());
 
     final BackwardChain backwardChain =
         new BackwardChain(headersStorage, blocksStorage, chainStorage, sessionDataStorage);
@@ -134,6 +135,7 @@ public class ProcessKnownAncestorsStepTest {
     new ProcessKnownAncestorsStep(context, backwardChain).processKnownAncestors();
 
     verify(context).saveBlock(eq(block), eq(Optional.empty()));
+    verify(blockchain, never()).getBlockAccessList(any());
   }
 
   private void stubParentPresentButBlockNotImported(final Block block) {

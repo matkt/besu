@@ -18,7 +18,6 @@ import static org.slf4j.LoggerFactory.getLogger;
 
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -31,11 +30,21 @@ public class ProcessKnownAncestorsStep {
 
   private final BackwardSyncContext context;
   private final BackwardChain backwardChain;
+  private final BackwardSyncBalImporter balImporter;
 
   public ProcessKnownAncestorsStep(
       final BackwardSyncContext backwardSyncContext, final BackwardChain backwardChain) {
+    this(backwardSyncContext, backwardChain, new BackwardSyncBalImporter(backwardSyncContext));
+  }
+
+  @VisibleForTesting
+  ProcessKnownAncestorsStep(
+      final BackwardSyncContext backwardSyncContext,
+      final BackwardChain backwardChain,
+      final BackwardSyncBalImporter balImporter) {
     this.context = backwardSyncContext;
     this.backwardChain = backwardChain;
+    this.balImporter = balImporter;
   }
 
   public CompletableFuture<Void> executeAsync() {
@@ -65,12 +74,7 @@ public class ProcessKnownAncestorsStep {
                 : context.getProtocolContext().getBlockchain().getBlockByHash(header.getHash());
         if (block.isPresent()) {
           LOG.atDebug().setMessage("Importing block {}").addArgument(header::toLogString).log();
-          final Optional<BlockAccessList> maybeBal =
-              context
-                  .getProtocolContext()
-                  .getBlockchain()
-                  .getBlockAccessList(block.get().getHash());
-          context.saveBlock(block.get(), maybeBal);
+          context.saveBlock(block.get(), balImporter.lookupStoredBal(header));
           if (isTrustedBlock) {
             backwardChain.dropFirstHeader();
             isFirstUnProcessedHeader = false;
