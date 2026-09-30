@@ -130,6 +130,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1088,7 +1089,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
    * inserted entry would be thrown away when the flat db is reset or upgraded at the end. The cache
    * is turned on once the initial sync completes, and off again if it restarts.
    */
-  private static void bindCrossBlockCacheToInitialSync(
+  @VisibleForTesting
+  static void bindCrossBlockCacheToInitialSync(
       final FlatDbCacheManager cacheManager, final SyncState syncState) {
     if (cacheManager == FlatDbCacheManager.NO_OP_CACHE) {
       return;
