@@ -27,12 +27,15 @@ import org.hyperledger.besu.ethereum.trie.PathNodeVisitor;
 import org.hyperledger.besu.ethereum.trie.StoredNode;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.function.Function;
@@ -45,8 +48,17 @@ import org.apache.tuweni.bytes.Bytes32;
  * A parallel implementation of StoredMerklePatriciaTrie that processes updates in parallel.
  *
  * <p>This implementation batches updates and processes them concurrently when it's possible and
- * there are sufficient updates to warrant parallel processing. The parallelization strategy
- * recursively descends the trie structure, processing independent nodes concurrently.
+ * there are sufficient updates to warrant parallel processing. It runs in two phases:
+ *
+ * <ol>
+ *   <li><b>Load</b>: the stored nodes on the update paths are resolved level by level. Each level
+ *       is sorted by location (the storage key order of path-keyed layouts, so neighbouring reads
+ *       share SST files and data blocks), cut into contiguous ranges, and each range is read with
+ *       one {@link NodeLoader#getNodes} batch, ranges running in parallel. The number of I/O round
+ *       trips is bounded by the trie depth instead of the number of nodes.
+ *   <li><b>Update</b>: the trie is updated and hashed by recursively descending it, processing
+ *       independent subtrees concurrently. Nodes are already in memory, so this is CPU work.
+ * </ol>
  *
  * @param <K> the key type, must extend Bytes
  * @param <V> the value type
@@ -68,6 +80,16 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
   private final Map<K, PendingUpdate<V>> pendingUpdates = new ConcurrentHashMap<>();
 
   private final ForkJoinPool forkJoinPool;
+
+  /** Maximum number of nodes read in one batch while loading the update paths. */
+  private static final int LOAD_RANGE_SIZE = 128;
+
+  /**
+   * Executor running the batched node reads of the load phase, or {@code null} to run them on
+   * {@link #forkJoinPool}. Sizing it to the storage device rather than to the CPU lets the I/O
+   * parallelism be tuned independently from the hashing parallelism.
+   */
+  private final Executor loadExecutor;
 
   /**
    * Stages a deferred operation for the given key. The function is called with the existing value
@@ -105,6 +127,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final ForkJoinPool forkJoinPool) {
     super(nodeLoader, valueSerializer, valueDeserializer);
     this.forkJoinPool = forkJoinPool;
+    this.loadExecutor = null;
   }
 
   /**
@@ -140,6 +163,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final ForkJoinPool forkJoinPool) {
     super(nodeLoader, rootHash, rootLocation, valueSerializer, valueDeserializer);
     this.forkJoinPool = forkJoinPool;
+    this.loadExecutor = null;
   }
 
   /**
@@ -166,6 +190,30 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final ForkJoinPool forkJoinPool) {
     super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
     this.forkJoinPool = forkJoinPool;
+    this.loadExecutor = null;
+  }
+
+  /**
+   * Creates a new parallel trie whose load phase runs its batched node reads on {@code
+   * loadExecutor}.
+   *
+   * @param nodeLoader the node loader for retrieving stored nodes
+   * @param rootHash the hash of the root node
+   * @param valueSerializer function to serialize values to bytes
+   * @param valueDeserializer function to deserialize bytes to values
+   * @param forkJoinPool pool running the parallel update and hashing
+   * @param loadExecutor executor running the batched node reads
+   */
+  public ParallelStoredMerklePatriciaTrie(
+      final NodeLoader nodeLoader,
+      final Bytes32 rootHash,
+      final Function<V, Bytes> valueSerializer,
+      final Function<Bytes, V> valueDeserializer,
+      final ForkJoinPool forkJoinPool,
+      final Executor loadExecutor) {
+    super(nodeLoader, rootHash, valueSerializer, valueDeserializer);
+    this.forkJoinPool = forkJoinPool;
+    this.loadExecutor = loadExecutor;
   }
 
   /**
@@ -185,6 +233,7 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final ForkJoinPool forkJoinPool) {
     super(nodeFactory, rootHash);
     this.forkJoinPool = forkJoinPool;
+    this.loadExecutor = null;
   }
 
   /**
@@ -254,6 +303,10 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       final List<UpdateEntry<V>> entries = new ArrayList<>();
       pendingUpdates.forEach((k, update) -> entries.add(update.toEntry(bytesToPath(k))));
 
+      // Load phase: resolve every stored node on the update paths with batched reads, so the
+      // parallel update below only does CPU work.
+      loadUpdatePaths(entries);
+
       final CommitCache commitCache = new CommitCache();
       final boolean shouldCommit = maybeNodeUpdater.isPresent();
 
@@ -278,6 +331,168 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       pendingUpdates.clear();
     }
   }
+
+  /**
+   * Resolves, level by level and with batched reads, every stored node the update will traverse.
+   * Best-effort: a node that cannot be loaded here is loaded on demand by the update.
+   *
+   * @param entries the updates to apply
+   */
+  private void loadUpdatePaths(final List<UpdateEntry<V>> entries) {
+    if (!(nodeFactory instanceof StoredNodeFactory<V> storedNodeFactory)) {
+      return;
+    }
+    List<PathLoad<V>> frontier = new ArrayList<>();
+    collectPathLoads(root, Bytes.EMPTY, entries, frontier);
+    while (!frontier.isEmpty()) {
+      frontier.sort(
+          (a, b) ->
+              Arrays.compareUnsigned(a.location().toArrayUnsafe(), b.location().toArrayUnsafe()));
+      final List<Runnable> ranges = new ArrayList<>();
+      for (int from = 0; from < frontier.size(); from += LOAD_RANGE_SIZE) {
+        final List<PathLoad<V>> range =
+            frontier.subList(from, Math.min(from + LOAD_RANGE_SIZE, frontier.size()));
+        ranges.add(() -> loadRange(storedNodeFactory, range));
+      }
+      runAll(ranges);
+
+      final List<PathLoad<V>> next = new ArrayList<>();
+      for (final PathLoad<V> load : frontier) {
+        if (load.node().isLoaded() && !load.updates().isEmpty()) {
+          collectPathLoads(loadNode(load.node()), load.location(), load.updates(), next);
+        }
+      }
+      frontier = next;
+    }
+  }
+
+  private void loadRange(
+      final StoredNodeFactory<V> storedNodeFactory, final List<PathLoad<V>> range) {
+    final List<Bytes> locations = new ArrayList<>(range.size());
+    final List<Bytes32> hashes = new ArrayList<>(range.size());
+    for (final PathLoad<V> load : range) {
+      locations.add(load.location());
+      hashes.add(load.node().getHash());
+    }
+    final List<Optional<Node<V>>> nodes = storedNodeFactory.retrieveAll(locations, hashes);
+    for (int i = 0; i < range.size(); i++) {
+      final PathLoad<V> load = range.get(i);
+      nodes.get(i).ifPresent(node -> load.node().preload(node));
+    }
+  }
+
+  private void runAll(final List<Runnable> tasks) {
+    if (tasks.size() == 1) {
+      tasks.getFirst().run();
+    } else if (loadExecutor == null) {
+      forkJoinPool.invoke(
+          ForkJoinTask.adapt(
+              () -> ForkJoinTask.invokeAll(tasks.stream().map(ForkJoinTask::adapt).toList())));
+    } else {
+      CompletableFuture.allOf(
+              tasks.stream()
+                  .map(task -> CompletableFuture.runAsync(task, loadExecutor))
+                  .toArray(CompletableFuture[]::new))
+          .join();
+    }
+  }
+
+  /**
+   * Collects the unresolved stored nodes lying on the update paths below {@code node}. Resolved and
+   * inline nodes are walked through without I/O.
+   */
+  private void collectPathLoads(
+      final Node<V> node,
+      final Bytes location,
+      final List<UpdateEntry<V>> updates,
+      final List<PathLoad<V>> out) {
+    final int depth = location.size();
+    switch (node) {
+      case BranchNode<V> branch -> {
+        final List<List<UpdateEntry<V>>> byNibble =
+            new ArrayList<>(Collections.nCopies(NB_CHILD, null));
+        boolean onlyRemovals = true;
+        for (final UpdateEntry<V> update : updates) {
+          if (update.path().size() <= depth) {
+            continue;
+          }
+          final byte nibble = update.path().get(depth);
+          if (nibble == CompactEncoding.LEAF_TERMINATOR) {
+            continue;
+          }
+          if (byNibble.get(nibble) == null) {
+            byNibble.set(nibble, new ArrayList<>());
+          }
+          byNibble.get(nibble).add(update);
+          onlyRemovals &= update.isRemoval();
+        }
+        int sibling = -1;
+        int siblings = 0;
+        for (int nibble = 0; nibble < NB_CHILD; nibble++) {
+          final Node<V> child = branch.child((byte) nibble);
+          if (byNibble.get(nibble) != null) {
+            collectChild(
+                child, Bytes.concatenate(location, Bytes.of(nibble)), byNibble.get(nibble), out);
+          } else if (!(child instanceof NullNode)) {
+            siblings++;
+            sibling = nibble;
+          }
+        }
+        // Removals only: the branch may be left with its single untouched child and collapse,
+        // which requires loading that child.
+        if (onlyRemovals && siblings == 1 && branch.getValue().isEmpty()) {
+          collectChild(
+              branch.child((byte) sibling),
+              Bytes.concatenate(location, Bytes.of(sibling)),
+              List.of(),
+              out);
+        }
+      }
+      case ExtensionNode<V> extension -> {
+        final Bytes extensionPath = extension.getPath();
+        final List<UpdateEntry<V>> through = new ArrayList<>(updates.size());
+        for (final UpdateEntry<V> update : updates) {
+          if (update.path().size() >= depth + extensionPath.size()
+              && update.path().slice(depth, extensionPath.size()).equals(extensionPath)) {
+            through.add(update);
+          }
+        }
+        if (!through.isEmpty()) {
+          collectChild(
+              extension.getChild(), Bytes.concatenate(location, extensionPath), through, out);
+        }
+      }
+      default -> {
+        // Leaf and null nodes end the path.
+      }
+    }
+  }
+
+  private void collectChild(
+      final Node<V> child,
+      final Bytes childLocation,
+      final List<UpdateEntry<V>> updates,
+      final List<PathLoad<V>> out) {
+    if (child instanceof StoredNode<V> stored) {
+      if (!stored.isLoaded()) {
+        out.add(new PathLoad<>(stored, childLocation, updates));
+      } else if (!updates.isEmpty()) {
+        collectPathLoads(loadNode(stored), childLocation, updates, out);
+      }
+    } else if (!(child instanceof NullNode) && !updates.isEmpty()) {
+      collectPathLoads(child, childLocation, updates, out);
+    }
+  }
+
+  /**
+   * A stored node to resolve during the load phase.
+   *
+   * @param node the unresolved reference
+   * @param location the node location
+   * @param updates the updates whose paths go through the node; empty for a node loaded only
+   *     because its parent may collapse
+   */
+  private record PathLoad<V>(StoredNode<V> node, Bytes location, List<UpdateEntry<V>> updates) {}
 
   /**
    * Processes a node with a list of updates. This is the unified entry point for both root-level
@@ -770,6 +985,10 @@ public class ParallelStoredMerklePatriciaTrie<K extends Bytes, V>
       Bytes path, Optional<V> value, Function<Optional<V>, Optional<V>> merger) {
     boolean isMerge() {
       return merger != null;
+    }
+
+    boolean isRemoval() {
+      return merger == null && value.isEmpty();
     }
 
     byte getNibble(final int index) {

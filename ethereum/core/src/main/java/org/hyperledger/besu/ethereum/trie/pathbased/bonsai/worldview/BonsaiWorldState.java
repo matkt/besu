@@ -44,6 +44,7 @@ import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ForkJoinPool;
@@ -239,9 +240,20 @@ public class BonsaiWorldState extends PathBasedWorldState {
   /** Account state trie rooted at the current world state root. */
   public MerkleTrie<Bytes, Bytes> createAccountStateTrie() {
     return createTrie(
-        (location, hash) ->
-            bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
-                getWorldStateStorage(), location, hash),
+        new NodeLoader() {
+          @Override
+          public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+            return bonsaiCachedMerkleTrieLoader.getAccountStateTrieNode(
+                getWorldStateStorage(), location, hash);
+          }
+
+          @Override
+          public List<Optional<Bytes>> getNodes(
+              final List<Bytes> locations, final List<Bytes32> hashes) {
+            return bonsaiCachedMerkleTrieLoader.getAccountStateTrieNodes(
+                getWorldStateStorage(), locations, hashes);
+          }
+        },
         Bytes32.wrap(worldStateRootHash.getBytes()),
         BlockProcessingExecutors.accountTrieForkJoinPool());
   }
@@ -250,9 +262,20 @@ public class BonsaiWorldState extends PathBasedWorldState {
   public MerkleTrie<Bytes, Bytes> createStorageTrie(
       final Hash accountHash, final Hash storageRoot) {
     return createTrie(
-        (location, key) ->
-            bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
-                getWorldStateStorage(), accountHash, location, key),
+        new NodeLoader() {
+          @Override
+          public Optional<Bytes> getNode(final Bytes location, final Bytes32 hash) {
+            return bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNode(
+                getWorldStateStorage(), accountHash, location, hash);
+          }
+
+          @Override
+          public List<Optional<Bytes>> getNodes(
+              final List<Bytes> locations, final List<Bytes32> hashes) {
+            return bonsaiCachedMerkleTrieLoader.getAccountStorageTrieNodes(
+                getWorldStateStorage(), accountHash, locations, hashes);
+          }
+        },
         Bytes32.wrap(storageRoot.getBytes()),
         BlockProcessingExecutors.storageTrieForkJoinPool());
   }
@@ -268,7 +291,12 @@ public class BonsaiWorldState extends PathBasedWorldState {
     }
     if (worldStateConfig.isParallelStateRootComputationEnabled()) {
       return new ParallelStoredMerklePatriciaTrie<>(
-          nodeLoader, rootHash, Function.identity(), Function.identity(), forkJoinPool);
+          nodeLoader,
+          rootHash,
+          Function.identity(),
+          Function.identity(),
+          forkJoinPool,
+          BlockProcessingExecutors.ioExecutor());
     }
     return new StoredMerklePatriciaTrie<>(
         nodeLoader, rootHash, Function.identity(), Function.identity());

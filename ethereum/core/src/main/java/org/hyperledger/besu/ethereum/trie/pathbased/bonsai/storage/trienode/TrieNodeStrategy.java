@@ -18,6 +18,8 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -35,6 +37,30 @@ public interface TrieNodeStrategy {
 
   Optional<Bytes> getFlatStorageTrieNode(
       Hash accountHash, Bytes location, Bytes32 nodeHash, SegmentedKeyValueStorage storage);
+
+  /**
+   * Batch variant of {@link #getFlatAccountTrieNode} / {@link #getFlatStorageTrieNode}. Results are
+   * returned in request order and are not hash-verified.
+   *
+   * <p>The default loops over the single-node getters. Strategies whose keys are known up front
+   * (path-keyed layouts) should override this with a single MultiGet.
+   *
+   * @param requests the nodes to load
+   * @param storage the backing storage
+   * @return the raw node bytes, in the same order as {@code requests}
+   */
+  default List<Optional<Bytes>> getFlatTrieNodes(
+      final List<TrieNodeRequest> requests, final SegmentedKeyValueStorage storage) {
+    final List<Optional<Bytes>> results = new ArrayList<>(requests.size());
+    for (final TrieNodeRequest request : requests) {
+      results.add(
+          request.isAccountTrie()
+              ? getFlatAccountTrieNode(request.location(), request.nodeHash(), storage)
+              : getFlatStorageTrieNode(
+                  request.accountHash(), request.location(), request.nodeHash(), storage));
+    }
+    return results;
+  }
 
   void putFlatAccountTrieNode(
       SegmentedKeyValueStorage storage,
@@ -61,4 +87,27 @@ public interface TrieNodeStrategy {
       final SegmentedKeyValueStorageTransaction transaction) {}
 
   default void onRollback(final SegmentedKeyValueStorageTransaction transaction) {}
+
+  /**
+   * A trie node to load.
+   *
+   * @param accountHash owning account for a storage-trie node, or {@code null} for the account trie
+   * @param location the node's nibble path from its trie root
+   * @param nodeHash the expected node hash
+   */
+  record TrieNodeRequest(Hash accountHash, Bytes location, Bytes32 nodeHash) {
+
+    public static TrieNodeRequest account(final Bytes location, final Bytes32 nodeHash) {
+      return new TrieNodeRequest(null, location, nodeHash);
+    }
+
+    public static TrieNodeRequest storage(
+        final Hash accountHash, final Bytes location, final Bytes32 nodeHash) {
+      return new TrieNodeRequest(accountHash, location, nodeHash);
+    }
+
+    public boolean isAccountTrie() {
+      return accountHash == null;
+    }
+  }
 }

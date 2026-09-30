@@ -116,6 +116,35 @@ public class StoredNodeFactory<V> implements NodeFactory<V> {
             });
   }
 
+  /**
+   * Batch variant of {@link #retrieve}, reading all nodes through {@link NodeLoader#getNodes}.
+   *
+   * @param locations the node locations
+   * @param hashes the expected node hashes, aligned with {@code locations}
+   * @return the decoded nodes, in request order
+   */
+  public List<Optional<Node<V>>> retrieveAll(
+      final List<Bytes> locations, final List<Bytes32> hashes) throws MerkleTrieException {
+    final List<Optional<Bytes>> encoded = nodeLoader.getNodes(locations, hashes);
+    final List<Optional<Node<V>>> nodes = new ArrayList<>(encoded.size());
+    for (int i = 0; i < encoded.size(); i++) {
+      final Bytes location = locations.get(i);
+      final Bytes32 hash = hashes.get(i);
+      nodes.add(
+          encoded
+              .get(i)
+              .map(
+                  rlp -> {
+                    final Node<V> node =
+                        decode(location, rlp, () -> format("Invalid RLP value for hash %s", hash));
+                    assert (hash.equals(node.getHash()))
+                        : "Node hash " + node.getHash() + " not equal to expected " + hash;
+                    return node;
+                  }));
+    }
+    return nodes;
+  }
+
   public Node<V> decode(final Bytes location, final Bytes rlp) {
     return decode(location, rlp, () -> String.format("Failed to decode value %s", rlp.toString()));
   }

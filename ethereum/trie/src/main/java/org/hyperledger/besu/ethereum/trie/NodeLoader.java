@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.trie;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -21,4 +23,20 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public interface NodeLoader {
   Optional<Bytes> getNode(Bytes location, Bytes32 hash);
+
+  /**
+   * Batch variant of {@link #getNode}. The default loops over {@link #getNode}; loaders backed by a
+   * store supporting batched reads (e.g. a RocksDB MultiGet) should override it.
+   *
+   * @param locations the node locations
+   * @param hashes the expected node hashes, aligned with {@code locations}
+   * @return the encoded nodes, in request order
+   */
+  default List<Optional<Bytes>> getNodes(final List<Bytes> locations, final List<Bytes32> hashes) {
+    final List<Optional<Bytes>> nodes = new ArrayList<>(locations.size());
+    for (int i = 0; i < locations.size(); i++) {
+      nodes.add(getNode(locations.get(i), hashes.get(i)));
+    }
+    return nodes;
+  }
 }

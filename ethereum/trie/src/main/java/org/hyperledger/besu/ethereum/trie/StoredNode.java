@@ -145,6 +145,25 @@ public class StoredNode<V> implements Node<V> {
     return loaded;
   }
 
+  /**
+   * Returns whether the referenced node has already been resolved.
+   *
+   * @return true if the referenced node has already been resolved
+   */
+  public boolean isLoaded() {
+    return loaded != null;
+  }
+
+  /**
+   * Resolves this reference with a node loaded elsewhere (e.g. by a batched read), so that later
+   * accesses do not hit storage. The node must be the one referenced by {@link #getHash()}.
+   *
+   * @param node the resolved node
+   */
+  public void preload(final Node<V> node) {
+    this.loaded = node;
+  }
+
   @Override
   public void unload() {
     loaded = null;

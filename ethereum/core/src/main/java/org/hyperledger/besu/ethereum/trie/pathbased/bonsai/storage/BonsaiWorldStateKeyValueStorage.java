@@ -413,6 +413,40 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .filter(b -> Hash.hash(b).getBytes().equals(nodeHash));
   }
 
+  /**
+   * Loads several account/storage trie nodes in one batch. Same semantics as {@link
+   * #getAccountStateTrieNode} and {@link #getAccountStorageTrieNode}: a node whose bytes do not
+   * hash to the requested hash is reported as absent.
+   *
+   * @param requests the nodes to load
+   * @return the node bytes, in the same order as {@code requests}
+   */
+  public List<Optional<Bytes>> getTrieNodes(final List<TrieNodeStrategy.TrieNodeRequest> requests) {
+    final List<TrieNodeStrategy.TrieNodeRequest> toFetch = new ArrayList<>(requests.size());
+    for (final TrieNodeStrategy.TrieNodeRequest request : requests) {
+      if (!request.nodeHash().equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+        toFetch.add(request);
+      }
+    }
+    final List<Optional<Bytes>> fetched =
+        toFetch.isEmpty()
+            ? List.of()
+            : trieNodeStrategy.getFlatTrieNodes(toFetch, composedWorldStateStorage);
+    final List<Optional<Bytes>> results = new ArrayList<>(requests.size());
+    int fetchedIndex = 0;
+    for (final TrieNodeStrategy.TrieNodeRequest request : requests) {
+      if (request.nodeHash().equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+        results.add(Optional.of(MerkleTrie.EMPTY_TRIE_NODE));
+      } else {
+        results.add(
+            fetched
+                .get(fetchedIndex++)
+                .filter(b -> Hash.hash(b).getBytes().equals(request.nodeHash())));
+      }
+    }
+    return results;
+  }
+
   public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
     return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
   }

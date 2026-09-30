@@ -23,9 +23,12 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeStrategy.TrieNodeRequest;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -159,5 +162,62 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
                   worldStateKeyValueStorage.getAccountStorageTrieNode(
                       accountHash, location, nodeHash));
     }
+  }
+
+  /**
+   * Batch variant of {@link #getAccountStateTrieNode}: cached nodes are served from memory, the
+   * others are read in one batch.
+   */
+  public List<Optional<Bytes>> getAccountStateTrieNodes(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final List<Bytes> locations,
+      final List<Bytes32> nodeHashes) {
+    return getTrieNodes(worldStateKeyValueStorage, accountNodes, null, locations, nodeHashes);
+  }
+
+  /**
+   * Batch variant of {@link #getAccountStorageTrieNode}: cached nodes are served from memory, the
+   * others are read in one batch.
+   */
+  public List<Optional<Bytes>> getAccountStorageTrieNodes(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Hash accountHash,
+      final List<Bytes> locations,
+      final List<Bytes32> nodeHashes) {
+    return getTrieNodes(
+        worldStateKeyValueStorage, storageNodes, accountHash, locations, nodeHashes);
+  }
+
+  private static List<Optional<Bytes>> getTrieNodes(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Cache<Bytes, Bytes> cache,
+      final Hash accountHash,
+      final List<Bytes> locations,
+      final List<Bytes32> nodeHashes) {
+    final List<Optional<Bytes>> results = new ArrayList<>(locations.size());
+    final List<Integer> missIndexes = new ArrayList<>();
+    final List<TrieNodeRequest> misses = new ArrayList<>();
+    for (int i = 0; i < locations.size(); i++) {
+      final Bytes32 nodeHash = nodeHashes.get(i);
+      final Bytes cached =
+          nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)
+              ? MerkleTrie.EMPTY_TRIE_NODE
+              : cache.getIfPresent(nodeHash);
+      results.add(Optional.ofNullable(cached));
+      if (cached == null) {
+        missIndexes.add(i);
+        misses.add(
+            accountHash == null
+                ? TrieNodeRequest.account(locations.get(i), nodeHash)
+                : TrieNodeRequest.storage(accountHash, locations.get(i), nodeHash));
+      }
+    }
+    if (!misses.isEmpty()) {
+      final List<Optional<Bytes>> loaded = worldStateKeyValueStorage.getTrieNodes(misses);
+      for (int i = 0; i < misses.size(); i++) {
+        results.set(missIndexes.get(i), loaded.get(i));
+      }
+    }
+    return results;
   }
 }
