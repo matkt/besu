@@ -22,6 +22,7 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.AfterEach;
@@ -98,5 +99,173 @@ class VersionedFlatDbCacheManagerTest {
         .hasValueSatisfying(cv -> assertThat(cv.isRemoval()).isTrue());
     assertThat(cacheManager.getCachedValue(ACCOUNT_INFO_STATE, keyC))
         .hasValueSatisfying(cv -> assertThat(cv.getValue()).isEqualTo(valueC));
+  }
+
+  @Test
+  void readThatOverlapsCommitPublish_doesNotInsertItsValue() {
+    final Bytes key = Bytes.of(4);
+    final long readerVersion = cacheManager.getCurrentVersion();
+
+    // The reader passed the bypass check, then a commit started while it was loading from storage
+    // (storage not yet committed, version not yet bumped): the value it loaded may be stale and
+    // must not be cached, otherwise it can survive the publish if the new entry is evicted.
+    final Optional<Bytes> result =
+        cacheManager.getFromCacheOrStorage(
+            ACCOUNT_INFO_STATE,
+            key,
+            readerVersion,
+            () -> {
+              cacheManager.beginCommitCacheBypass();
+              return Optional.of(Bytes.of(1));
+            });
+    cacheManager.endCommitCacheBypass();
+
+    assertThat(result).contains(Bytes.of(1));
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void batchReadThatOverlapsCommitPublish_doesNotInsertItsValues() {
+    final Bytes key = Bytes.of(5);
+    final long readerVersion = cacheManager.getCurrentVersion();
+
+    final List<Optional<Bytes>> results =
+        cacheManager.getMultipleFromCacheOrStorage(
+            ACCOUNT_INFO_STATE,
+            List.of(key),
+            readerVersion,
+            keys -> {
+              cacheManager.beginCommitCacheBypass();
+              return List.of(Optional.of(Bytes.of(1)));
+            });
+    cacheManager.endCommitCacheBypass();
+
+    assertThat(results).containsExactly(Optional.of(Bytes.of(1)));
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void readPinnedToSupersededVersion_doesNotInsertItsValue() {
+    final Bytes key = Bytes.of(6);
+    final long readerVersion = cacheManager.getCurrentVersion();
+
+    cacheManager.getFromCacheOrStorage(
+        ACCOUNT_INFO_STATE,
+        key,
+        readerVersion,
+        () -> {
+          cacheManager.incrementAndGetVersion();
+          cacheManager.clear(ACCOUNT_INFO_STATE);
+          return Optional.of(Bytes.of(1));
+        });
+
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void commitAndPublish_bypassesReadsDuringCommitAndPublishesAtNewVersion() {
+    final Bytes key = Bytes.of(7);
+    final long before = cacheManager.getCurrentVersion();
+    final AtomicLong published = new AtomicLong(-1);
+
+    cacheManager.commitAndPublish(
+        () -> assertThat(cacheManager.isCommitCacheBypassActive()).isTrue(),
+        version -> {
+          assertThat(cacheManager.isCommitCacheBypassActive()).isTrue();
+          published.set(version);
+          cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), version);
+        });
+
+    assertThat(cacheManager.isCommitCacheBypassActive()).isFalse();
+    assertThat(published.get()).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
+    assertThat(cacheManager.getCachedValue(ACCOUNT_INFO_STATE, key))
+        .hasValueSatisfying(cv -> assertThat(cv.getVersion()).isEqualTo(before + 1));
+  }
+
+  @Test
+  void invalidateAll_advancesVersionAndDropsEntries() {
+    final Bytes key = Bytes.of(8);
+    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), cacheManager.getCurrentVersion());
+    final long before = cacheManager.getCurrentVersion();
+    final AtomicLong newVersion = new AtomicLong(-1);
+
+    cacheManager.invalidateAll(newVersion::set);
+
+    assertThat(newVersion.get()).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void disabled_readsGoToStorageAndNothingIsCached() {
+    final Bytes key = Bytes.of(9);
+    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), cacheManager.getCurrentVersion());
+
+    cacheManager.disable();
+
+    assertThat(cacheManager.isEnabled()).isFalse();
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+    final long version = cacheManager.getCurrentVersion();
+    assertThat(
+            cacheManager.getFromCacheOrStorage(
+                ACCOUNT_INFO_STATE, key, version, () -> Optional.of(Bytes.of(2))))
+        .contains(Bytes.of(2));
+    assertThat(
+            cacheManager.getMultipleFromCacheOrStorage(
+                ACCOUNT_INFO_STATE,
+                List.of(key),
+                version,
+                keys -> List.of(Optional.of(Bytes.of(3)))))
+        .containsExactly(Optional.of(Bytes.of(3)));
+    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(4), version);
+    cacheManager.removeFromCache(ACCOUNT_INFO_STATE, Bytes.of(10), version);
+
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, Bytes.of(10))).isFalse();
+  }
+
+  @Test
+  void disabled_commitsStillAdvanceVersionUnderBypass() {
+    cacheManager.disable();
+    final long before = cacheManager.getCurrentVersion();
+    final AtomicLong published = new AtomicLong(-1);
+
+    cacheManager.commitAndPublish(
+        () -> assertThat(cacheManager.isCommitCacheBypassActive()).isTrue(), published::set);
+
+    assertThat(published.get()).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
+    assertThat(cacheManager.isCommitCacheBypassActive()).isFalse();
+  }
+
+  @Test
+  void readSpanningDisableCommitEnable_doesNotInsert() {
+    final Bytes key = Bytes.of(11);
+    final long readerVersion = cacheManager.getCurrentVersion();
+
+    // the reader starts while enabled; while it loads, the cache is disabled, a commit lands
+    // (nothing published) and the cache is enabled again before the reader tries to insert
+    cacheManager.getFromCacheOrStorage(
+        ACCOUNT_INFO_STATE,
+        key,
+        readerVersion,
+        () -> {
+          cacheManager.disable();
+          cacheManager.commitAndPublish(() -> {}, v -> {});
+          cacheManager.enable();
+          return Optional.of(Bytes.of(1));
+        });
+
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void enable_restoresCaching() {
+    final Bytes key = Bytes.of(12);
+    cacheManager.disable();
+    cacheManager.enable();
+
+    assertThat(cacheManager.isEnabled()).isTrue();
+    cacheManager.getFromCacheOrStorage(
+        ACCOUNT_INFO_STATE, key, cacheManager.getCurrentVersion(), () -> Optional.of(Bytes.of(1)));
+    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isTrue();
   }
 }

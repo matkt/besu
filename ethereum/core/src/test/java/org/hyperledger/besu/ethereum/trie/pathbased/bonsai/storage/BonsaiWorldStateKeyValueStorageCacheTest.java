@@ -29,6 +29,14 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.io.Closeable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -427,6 +435,71 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
     assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
     assertThat(head.getAccount(account)).contains(value);
     assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isTrue();
+  }
+
+  @Test
+  void clearCrossBlockCacheAdvancesVersionSoInFlightReadsCannotRepopulate() throws Exception {
+    newHead(true);
+    final Hash account = Hash.hash(Bytes.of(47));
+    commitAccount(account, Bytes.of(1));
+    final long versionBeforeClear = head.getCurrentVersion();
+
+    head.clearCrossBlockCache();
+
+    assertThat(head.getCurrentVersion()).isGreaterThan(versionBeforeClear);
+    assertThat(head.getCurrentVersion()).isEqualTo(head.getCacheManager().getCurrentVersion());
+    // a read still pinned to the pre-clear version must not warm the cache
+    head.getCacheManager()
+        .getFromCacheOrStorage(
+            ACCOUNT_INFO_STATE,
+            account.getBytes(),
+            versionBeforeClear,
+            () -> Optional.of(Bytes.of(1)));
+    assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
+  }
+
+  @Test
+  void concurrentCommitsKeepCacheAlignedWithStorage() throws Exception {
+    newHead(true);
+    final Hash account = Hash.hash(Bytes.of(48));
+    final int threads = 4;
+    final int commitsPerThread = 200;
+    final ExecutorService executor = Executors.newFixedThreadPool(threads);
+    final CountDownLatch start = new CountDownLatch(1);
+    try {
+      final List<Future<?>> futures = new ArrayList<>();
+      for (int t = 0; t < threads; t++) {
+        final int thread = t;
+        futures.add(
+            executor.submit(
+                () -> {
+                  start.await();
+                  for (int i = 0; i < commitsPerThread; i++) {
+                    commitAccount(account, Bytes.of(thread + 1, i & 0xff));
+                  }
+                  return null;
+                }));
+      }
+      start.countDown();
+      for (final Future<?> future : futures) {
+        future.get(30, TimeUnit.SECONDS);
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+
+    assertThat(head.getCurrentVersion()).isEqualTo((long) threads * commitsPerThread);
+    assertThat(head.getCurrentVersion()).isEqualTo(head.getCacheManager().getCurrentVersion());
+    final Optional<Bytes> persisted =
+        head.getComposedWorldStateStorage()
+            .get(ACCOUNT_INFO_STATE, account.getBytes().toArrayUnsafe())
+            .map(Bytes::wrap);
+    assertThat(head.getCachedValue(ACCOUNT_INFO_STATE, account.getBytes()))
+        .hasValueSatisfying(
+            cv -> {
+              assertThat(Optional.ofNullable(cv.getValue())).isEqualTo(persisted);
+              assertThat(cv.getVersion()).isEqualTo(head.getCurrentVersion());
+            });
   }
 
   private void commitAccount(final Hash accountHash, final Bytes value) {
