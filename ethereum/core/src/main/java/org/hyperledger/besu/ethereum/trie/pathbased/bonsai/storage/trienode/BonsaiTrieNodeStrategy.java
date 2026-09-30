@@ -21,6 +21,8 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -58,6 +60,25 @@ public class BonsaiTrieNodeStrategy implements TrieNodeStrategy {
     return storage
         .get(trieSegment, Bytes.concatenate(accountHash.getBytes(), location).toArrayUnsafe())
         .map(Bytes::wrap);
+  }
+
+  @Override
+  public List<Optional<Bytes>> getFlatTrieNodes(
+      final List<TrieNodeRequest> requests, final SegmentedKeyValueStorage storage) {
+    final List<byte[]> keys = new ArrayList<>(requests.size());
+    for (final TrieNodeRequest request : requests) {
+      keys.add(
+          request.isAccountTrie()
+              ? request.location().toArrayUnsafe()
+              : Bytes.concatenate(request.accountHash().getBytes(), request.location())
+                  .toArrayUnsafe());
+    }
+    final List<Optional<byte[]>> raw = storage.multiget(trieSegment, keys);
+    final List<Optional<Bytes>> results = new ArrayList<>(raw.size());
+    for (final Optional<byte[]> value : raw) {
+      results.add(value.map(Bytes::wrap));
+    }
+    return results;
   }
 
   @Override

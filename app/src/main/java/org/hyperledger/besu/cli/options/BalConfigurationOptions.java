@@ -69,6 +69,14 @@ public class BalConfigurationOptions {
           "Enable sorting of storage state data based on BAL (default: ${DEFAULT-VALUE}).")
   boolean balPreFetchSortingEnabled = BalConfiguration.DEFAULT.isBalPreFetchSortingEnabled();
 
+  @CommandLine.Option(
+      names = {"--Xbal-trie-prefetch-enabled"},
+      hidden = true,
+      arity = "1",
+      description =
+          "Prefetch the trie nodes on the BAL write paths before computing the BAL state root (default: ${DEFAULT-VALUE}).")
+  boolean balTriePrefetchEnabled = BalConfiguration.DEFAULT.isBalTriePrefetchEnabled();
+
   /**
    * Builds the immutable {@link BalConfiguration} corresponding to the parsed CLI options.
    *
@@ -81,6 +89,7 @@ public class BalConfigurationOptions {
         .isBalStateRootEnabled(balStateRootEnabled)
         .isBalPreFetchReadingEnabled(balPreFetchReadingEnabled)
         .isBalPreFetchSortingEnabled(balPreFetchSortingEnabled)
+        .isBalTriePrefetchEnabled(balTriePrefetchEnabled)
         .balPreFetchBatchSize(balPreFetchBatchSize)
         .build();
   }

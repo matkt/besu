@@ -61,7 +61,8 @@ public final class StateRootCommitterFactory {
                   protocolContext,
                   blockHeader,
                   BlockAccessListAccountLookup.of(maybeBal.get()),
-                  storageFrozen)
+                  storageFrozen,
+                  balConfiguration)
               .start();
       case DEFAULT -> new DefaultStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;

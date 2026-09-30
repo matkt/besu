@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
+import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
@@ -50,13 +51,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class BalStateRootCommitter implements StateRootCommitter {
+
+  private static final Logger LOG = LoggerFactory.getLogger(BalStateRootCommitter.class);
 
   private final ProtocolContext protocolContext;
   private final BlockHeader blockHeader;
   private final BlockAccessListAccountLookup accountLookup;
   private final boolean storageFrozen;
+  private final BalConfiguration balConfiguration;
 
   private final AtomicBoolean cancelled = new AtomicBoolean(false);
   // Assigned by start(); null until then. start() must be called before compute()/cancel().
@@ -67,10 +73,20 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       final BlockHeader blockHeader,
       final BlockAccessListAccountLookup accountLookup,
       final boolean storageFrozen) {
+    this(protocolContext, blockHeader, accountLookup, storageFrozen, BalConfiguration.DEFAULT);
+  }
+
+  public BalStateRootCommitter(
+      final ProtocolContext protocolContext,
+      final BlockHeader blockHeader,
+      final BlockAccessListAccountLookup accountLookup,
+      final boolean storageFrozen,
+      final BalConfiguration balConfiguration) {
     this.protocolContext = protocolContext;
     this.blockHeader = blockHeader;
     this.accountLookup = accountLookup;
     this.storageFrozen = storageFrozen;
+    this.balConfiguration = balConfiguration;
   }
 
   /**
@@ -145,7 +161,37 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     if (accountLookup.isEmpty()) {
       return new BackgroundResult(worldState.getWorldStateRootHash(), List.of(), Map.of());
     }
+    if (balConfiguration.isBalTriePrefetchEnabled()) {
+      prefetchTrieNodes(worldState, accountLookup);
+    }
     return new BalComputation(worldState, accountLookup, storageFrozen).execute();
+  }
+
+  /**
+   * Loads the trie nodes on the BAL write paths and makes the tries created from {@code worldState}
+   * serve them from memory. Best-effort: on failure the tries load nodes on demand.
+   */
+  private void prefetchTrieNodes(
+      final BonsaiWorldState worldState, final BlockAccessListAccountLookup accountLookup) {
+    final long start = System.nanoTime();
+    try {
+      final BalTrieNodePrefetcher.Result result =
+          BalTrieNodePrefetcher.prefetch(
+              worldState,
+              accountLookup,
+              balConfiguration.getBalPreFetchBatchSize(),
+              BlockProcessingExecutors.ioExecutor());
+      worldState.setCachedMerkleTrieLoader(
+          new BalTrieNodePrefetcher.PrefetchedMerkleTrieLoader(result.nodes()));
+      LOG.debug(
+          "BAL trie prefetch: {} nodes loaded ({} requested) in {} rounds, {} ms",
+          result.nodes().size(),
+          result.requests(),
+          result.rounds(),
+          (System.nanoTime() - start) / 1_000_000);
+    } catch (final RuntimeException e) {
+      LOG.debug("BAL trie prefetch failed, falling back to on-demand node loading", e);
+    }
   }
 
   private BackgroundResult awaitBackgroundComputation(

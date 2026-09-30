@@ -47,6 +47,15 @@ public interface BalConfiguration {
     return true;
   }
 
+  /**
+   * Returns whether the BAL state root computation first prefetches, level by level, the account
+   * and storage trie nodes on the BAL write paths.
+   */
+  @Value.Default
+  default boolean isBalTriePrefetchEnabled() {
+    return true;
+  }
+
   /** Returns whether BAL sorting optimization should be enabled during prefetch. */
   @Value.Default
   default boolean isBalPreFetchSortingEnabled() {
