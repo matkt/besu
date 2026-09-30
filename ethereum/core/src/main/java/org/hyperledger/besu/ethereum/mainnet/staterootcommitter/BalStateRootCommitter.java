@@ -47,11 +47,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class BalStateRootCommitter implements StateRootCommitter {
+
+  private static final Logger LOG = LoggerFactory.getLogger(BalStateRootCommitter.class);
 
   private final ProtocolContext protocolContext;
   private final BlockHeader blockHeader;
@@ -225,6 +230,9 @@ public final class BalStateRootCommitter implements StateRootCommitter {
     private final ConcurrentLinkedQueue<StateRootComputations.UpdaterWrite> writes =
         new ConcurrentLinkedQueue<>();
 
+    /** Slots whose final value equals their prior value, left untouched. */
+    private final AtomicInteger unchangedSlots = new AtomicInteger();
+
     /** Populated during account resolution once storage futures complete. */
     private final Map<Address, Hash> storageRoots = new ConcurrentHashMap<>();
 
@@ -285,6 +293,10 @@ public final class BalStateRootCommitter implements StateRootCommitter {
       sink.commitTrie(
           accountTrie,
           (location, hash, value) -> u -> u.putAccountStateTrieNode(location, hash, value));
+      if (unchangedSlots.get() > 0) {
+        LOG.debug(
+            "BAL state root: {} slots unchanged over the block skipped", unchangedSlots.get());
+      }
       return new BackgroundResult(
           Hash.wrap(accountTrie.getRootHash()), new ArrayList<>(writes), storageRoots);
     }
@@ -367,13 +379,20 @@ public final class BalStateRootCommitter implements StateRootCommitter {
 
       final Hash priorStorageRoot = priorStorageRoot(address);
 
-      final MerkleTrie<Bytes, Bytes> storageTrie =
-          worldState.createStorageTrie(accountHash, priorStorageRoot);
-
+      // Created on the first slot that actually changes: when none does, the storage root is
+      // unchanged and the trie is never read.
+      MerkleTrie<Bytes, Bytes> storageTrie = null;
       for (final BlockAccessList.SlotChanges slotChanges : accountChanges.storageChanges()) {
         final Hash slotHash = slotChanges.slot().getSlotHash();
         final UInt256 rawValue = slotChanges.changes().getLast().newValue();
         final UInt256 value = rawValue == null ? UInt256.ZERO : rawValue;
+        if (isNetUnchanged(accountHash, slotChanges, value)) {
+          unchangedSlots.incrementAndGet();
+          continue;
+        }
+        if (storageTrie == null) {
+          storageTrie = worldState.createStorageTrie(accountHash, priorStorageRoot);
+        }
         if (value.equals(UInt256.ZERO)) {
           sink.removeStorageValueBySlotHash(accountHash, slotHash);
           storageTrie.remove(slotHash.getBytes());
@@ -383,11 +402,42 @@ public final class BalStateRootCommitter implements StateRootCommitter {
         }
       }
 
+      if (storageTrie == null) {
+        return priorStorageRoot;
+      }
       sink.commitTrie(
           storageTrie,
           (location, nodeHash, value) ->
               u -> u.putAccountStorageTrieNode(accountHash, location, nodeHash, value));
       return Hash.wrap(storageTrie.getRootHash());
+    }
+
+    /**
+     * Whether a slot ends the block with its value from the start of the block, e.g. {@code 0 -> X}
+     * in one transaction and {@code X -> 0} in a later one. Writing it would read and rewrite its
+     * whole trie path for an identical result.
+     *
+     * <p>A change is recorded per transaction and differs from the value before that transaction (a
+     * write keeping the value is recorded as a read), so a slot with a single change always ends
+     * with a new value and is not checked. Only slots changed by several transactions are compared
+     * with their prior value, read from the parent state: during execution it has already been read
+     * (the first write needs it for gas) and prefetched, so this is a cache lookup. Should a block
+     * access list record a change keeping the value, the slot is simply written, as before.
+     */
+    private boolean isNetUnchanged(
+        final Hash accountHash,
+        final BlockAccessList.SlotChanges slotChanges,
+        final UInt256 finalValue) {
+      if (slotChanges.changes().size() < 2) {
+        return false;
+      }
+      final UInt256 priorValue =
+          worldState
+              .getWorldStateStorage()
+              .getStorageValueByStorageSlotKey(accountHash, slotChanges.slot())
+              .map(UInt256::fromBytes)
+              .orElse(UInt256.ZERO);
+      return priorValue.equals(finalValue);
     }
 
     private Hash priorStorageRoot(final Address address) {

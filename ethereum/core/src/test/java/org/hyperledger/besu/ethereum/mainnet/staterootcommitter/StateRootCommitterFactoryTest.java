@@ -438,6 +438,120 @@ class StateRootCommitterFactoryTest {
     }
 
     @Test
+    void storageChangedBySeveralTransactions_rootIgnoresSlotsBackToTheirPriorValue() {
+      final Address address = testAddress("a7");
+      final Wei balance = Wei.of(7_000_000L);
+      // 0 -> 5 -> 0: back to its prior value, skipped.
+      final StorageSlotKey backToZero = new StorageSlotKey(UInt256.valueOf(1));
+      // 0 -> 5 -> 6 -> 0 (odd number of changes): back to its prior value too.
+      final StorageSlotKey backToZeroOdd = new StorageSlotKey(UInt256.valueOf(2));
+      // 0 -> 5 -> 6: several changes, but a new final value.
+      final StorageSlotKey changedTwice = new StorageSlotKey(UInt256.valueOf(3));
+      // 0 -> 9: single change, applied without checking.
+      final StorageSlotKey changedOnce = new StorageSlotKey(UInt256.valueOf(4));
+
+      final BlockAccessList bal =
+          new BlockAccessList(
+              List.of(
+                  new AccountChanges(
+                      address,
+                      List.of(
+                          new SlotChanges(
+                              backToZero,
+                              List.of(
+                                  new StorageChange(0, UInt256.valueOf(5)),
+                                  new StorageChange(1, UInt256.ZERO))),
+                          new SlotChanges(
+                              backToZeroOdd,
+                              List.of(
+                                  new StorageChange(0, UInt256.valueOf(5)),
+                                  new StorageChange(1, UInt256.valueOf(6)),
+                                  new StorageChange(2, UInt256.ZERO))),
+                          new SlotChanges(
+                              changedTwice,
+                              List.of(
+                                  new StorageChange(0, UInt256.valueOf(5)),
+                                  new StorageChange(2, UInt256.valueOf(6)))),
+                          new SlotChanges(
+                              changedOnce, List.of(new StorageChange(1, UInt256.valueOf(9))))),
+                      List.of(),
+                      List.of(new BalanceChange(2, balance)),
+                      List.of(),
+                      List.of())));
+
+      final Hash expectedRoot;
+      try (BonsaiWorldState expectedWorldState = getWorldState(false)) {
+        final WorldUpdater updater = expectedWorldState.updater();
+        final MutableAccount account = updater.getOrCreate(address);
+        account.setBalance(balance);
+        account.setStorageValue(changedTwice.getSlotKey().orElseThrow(), UInt256.valueOf(6));
+        account.setStorageValue(changedOnce.getSlotKey().orElseThrow(), UInt256.valueOf(9));
+        updater.commit();
+        expectedRoot = expectedWorldState.rootHash();
+      }
+
+      final BlockHeader blockHeader = childHeader(expectedRoot);
+
+      try (BonsaiWorldState worldState = getWorldState(true)) {
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
+        worldState.persist(blockHeader, committer);
+
+        assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
+        assertThat(worldState.getStorageValue(address, backToZero.getSlotKey().orElseThrow()))
+            .isEqualTo(UInt256.ZERO);
+        assertThat(worldState.getStorageValue(address, backToZeroOdd.getSlotKey().orElseThrow()))
+            .isEqualTo(UInt256.ZERO);
+        assertThat(worldState.getStorageValue(address, changedTwice.getSlotKey().orElseThrow()))
+            .isEqualTo(UInt256.valueOf(6));
+        assertThat(worldState.getStorageValue(address, changedOnce.getSlotKey().orElseThrow()))
+            .isEqualTo(UInt256.valueOf(9));
+      }
+    }
+
+    @Test
+    void storageOnlyBackToPriorValues_keepsThePriorStorageRoot() {
+      final Address address = testAddress("a8");
+      final Wei balance = Wei.of(8_000_000L);
+      final StorageSlotKey slot = new StorageSlotKey(UInt256.valueOf(1));
+
+      final BlockAccessList bal =
+          new BlockAccessList(
+              List.of(
+                  new AccountChanges(
+                      address,
+                      List.of(
+                          new SlotChanges(
+                              slot,
+                              List.of(
+                                  new StorageChange(0, UInt256.valueOf(3)),
+                                  new StorageChange(1, UInt256.ZERO)))),
+                      List.of(),
+                      List.of(new BalanceChange(1, balance)),
+                      List.of(),
+                      List.of())));
+
+      final Hash expectedRoot;
+      try (BonsaiWorldState expectedWorldState = getWorldState(false)) {
+        final WorldUpdater updater = expectedWorldState.updater();
+        updater.getOrCreate(address).setBalance(balance);
+        updater.commit();
+        expectedRoot = expectedWorldState.rootHash();
+      }
+
+      final BlockHeader blockHeader = childHeader(expectedRoot);
+
+      try (BonsaiWorldState worldState = getWorldState(true)) {
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
+        worldState.persist(blockHeader, committer);
+        assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
+      }
+    }
+
+    @Test
     void mergeBalStateChanges_withCode() {
       final Address address = testAddress("b1");
       final Wei balance = Wei.of(3_000_000L);
