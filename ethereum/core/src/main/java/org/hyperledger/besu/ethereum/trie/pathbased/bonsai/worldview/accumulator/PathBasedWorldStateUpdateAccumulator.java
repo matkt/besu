@@ -62,6 +62,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     implements BonsaiWorldView, TrieLogAccumulator {
   private static final Logger LOG =
       LoggerFactory.getLogger(PathBasedWorldStateUpdateAccumulator.class);
+
+  /**
+   * Below this number of updated accounts, {@link #commit()} iterates sequentially: the fork/join
+   * overhead of a parallel stream outweighs the per-account work (commit runs once per transaction,
+   * which usually touches only a handful of accounts).
+   */
+  private static final int PARALLEL_COMMIT_THRESHOLD = 64;
+
   protected final Consumer<BonsaiValue<ACCOUNT>> accountPreloader;
   protected final Consumer<StorageSlotKey> storagePreloader;
 
@@ -510,18 +518,17 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       accountValue.setUpdated(null);
     }
 
-    getUpdatedAccounts().parallelStream()
+    final Collection<UpdateTrackingAccount<ACCOUNT>> updatedAccounts = getUpdatedAccounts();
+    (updatedAccounts.size() < PARALLEL_COMMIT_THRESHOLD
+            ? updatedAccounts.stream()
+            : updatedAccounts.parallelStream())
         .forEach(
             tracked -> {
               final Address updatedAddress = tracked.getAddress();
               final ACCOUNT updatedAccount;
               final BonsaiValue<ACCOUNT> updatedAccountValue = accountsToUpdate.get(updatedAddress);
               final Map<StorageSlotKey, BonsaiValue<UInt256>> pendingStorageUpdates =
-                  storageToUpdate.computeIfAbsent(
-                      updatedAddress,
-                      k ->
-                          new StorageConsumingMap<>(
-                              updatedAddress, new ConcurrentHashMap<>(), storagePreloader));
+                  getOrCreatePendingStorageUpdates(updatedAddress);
 
               if (tracked.getWrappedAccount() == null) {
                 updatedAccount = createAccount(this, tracked);
@@ -602,6 +609,18 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                 tracked.setStorageWasCleared(false); // storage already cleared for this transaction
               }
             });
+  }
+
+  private Map<StorageSlotKey, BonsaiValue<UInt256>> getOrCreatePendingStorageUpdates(
+      final Address address) {
+    // plain get first to avoid allocating the computeIfAbsent lambda when the map already exists
+    final Map<StorageSlotKey, BonsaiValue<UInt256>> existing = storageToUpdate.get(address);
+    if (existing != null) {
+      return existing;
+    }
+    return storageToUpdate.computeIfAbsent(
+        address,
+        k -> new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader));
   }
 
   @Override
