@@ -74,7 +74,12 @@ public class ProcessKnownAncestorsStep {
                 : context.getProtocolContext().getBlockchain().getBlockByHash(header.getHash());
         if (block.isPresent()) {
           LOG.atDebug().setMessage("Importing block {}").addArgument(header::toLogString).log();
-          context.saveBlock(block.get(), balImporter.lookupStoredBal(header));
+          // a trusted block may carry the BAL received with its newPayload
+          context.saveBlock(
+              block.get(),
+              backwardChain
+                  .getTrustedBlockAccessList(header.getHash())
+                  .or(() -> balImporter.lookupStoredBal(header)));
           if (isTrustedBlock) {
             backwardChain.dropFirstHeader();
             isFirstUnProcessedHeader = false;

@@ -242,7 +242,7 @@ public class BackwardSyncContextTest {
             BackwardSyncContext.class,
             () -> {
               for (final Block attempted : List.of(block, block, block, otherBlock)) {
-                assertThatThrownBy(() -> context.saveBlock(attempted))
+                assertThatThrownBy(() -> context.saveBlock(attempted, Optional.empty()))
                     .isInstanceOf(BackwardSyncException.class);
               }
             });
@@ -532,7 +532,7 @@ public class BackwardSyncContextTest {
         .when(blockValidator)
         .validateAndProcessBlock(any(), any(), any(), any(), any(), anyBoolean());
 
-    assertThatThrownBy(() -> context.saveBlock(block))
+    assertThatThrownBy(() -> context.saveBlock(block, Optional.empty()))
         .isInstanceOf(BackwardSyncException.class)
         .hasMessageContaining("custom error");
 
@@ -562,7 +562,8 @@ public class BackwardSyncContextTest {
         .when(blockValidator)
         .validateAndProcessBlock(any(), any(), any(), any(), any(), anyBoolean());
 
-    assertThatThrownBy(() -> context.saveBlock(block)).isInstanceOf(BackwardSyncException.class);
+    assertThatThrownBy(() -> context.saveBlock(block, Optional.empty()))
+        .isInstanceOf(BackwardSyncException.class);
 
     verify(badChainListener, never()).onBadChain(any(), any(), any());
   }
@@ -592,7 +593,7 @@ public class BackwardSyncContextTest {
         .when(blockValidator)
         .validateAndProcessBlock(any(), any(), any(), any(), any(), anyBoolean());
 
-    assertThatThrownBy(() -> context.saveBlock(block))
+    assertThatThrownBy(() -> context.saveBlock(block, Optional.empty()))
         .isInstanceOf(BackwardSyncException.class)
         .hasMessageContaining("custom error");
 
@@ -631,7 +632,7 @@ public class BackwardSyncContextTest {
         .when(blockValidator)
         .validateAndProcessBlock(any(), any(), any(), any(), any(), anyBoolean());
 
-    assertThatThrownBy(() -> context.saveBlock(block))
+    assertThatThrownBy(() -> context.saveBlock(block, Optional.empty()))
         .isInstanceOf(BackwardSyncException.class)
         .hasMessageContaining("custom error");
 

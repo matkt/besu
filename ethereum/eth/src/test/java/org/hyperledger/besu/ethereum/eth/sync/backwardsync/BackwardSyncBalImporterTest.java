@@ -1,5 +1,5 @@
 /*
- * Copyright contributors to Hyperledger Besu.
+ * Copyright contributors to Besu.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -110,18 +110,18 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
-  void importBlocks_skipsPeerTaskWhenNoBalHashes() throws Exception {
+  void importBlocks_skipsPeerTaskWhenNoBalHashes() {
     final Block blockWithoutBal = getBlockByNumber(LOCAL_HEIGHT + 1);
     assertThat(blockWithoutBal.getHeader().getBalHash()).isEmpty();
 
-    new BackwardSyncBalImporter(context).importBlocks(List.of(blockWithoutBal)).get();
+    importBlocks(List.of(blockWithoutBal));
 
     verify(peerTaskExecutor, never()).execute(any(GetBlockAccessListsFromPeerTask.class));
     verify(context).saveBlock(blockWithoutBal, Optional.empty());
   }
 
   @Test
-  void importBlocks_passesDownloadedBalsToSaveBlock() throws Exception {
+  void importBlocks_passesDownloadedBalsToSaveBlock() {
     final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
     final BlockWithAccessList second =
         blockDataGenerator.blockWithAccessList(
@@ -142,9 +142,7 @@ public class BackwardSyncBalImporterTest {
         .when(context)
         .saveBlock(any(Block.class), any());
 
-    new BackwardSyncBalImporter(context)
-        .importBlocks(List.of(first.getBlock(), second.getBlock()))
-        .get();
+    importBlocks(List.of(first.getBlock(), second.getBlock()));
 
     @SuppressWarnings("unchecked")
     final ArgumentCaptor<Optional<BlockAccessList>> balCaptor =
@@ -155,7 +153,7 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
-  void importBlocks_continuesWithoutBalWhenDownloadFails() throws Exception {
+  void importBlocks_continuesWithoutBalWhenDownloadFails() {
     final BlockWithAccessList withBal = blockWithBal(LOCAL_HEIGHT + 1);
     when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
         .thenReturn(
@@ -164,13 +162,13 @@ public class BackwardSyncBalImporterTest {
                 PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE,
                 List.of(peer.getEthPeer())));
 
-    new BackwardSyncBalImporter(context).importBlocks(List.of(withBal.getBlock())).get();
+    importBlocks(List.of(withBal.getBlock()));
 
     verify(context).saveBlock(eq(withBal.getBlock()), eq(Optional.empty()));
   }
 
   @Test
-  void importBlocks_usesPartialBalResponseAndImportsRestWithout() throws Exception {
+  void importBlocks_usesPartialBalResponseAndImportsRestWithout() {
     final BlockWithAccessList first = blockWithBal(LOCAL_HEIGHT + 1);
     final BlockWithAccessList second =
         blockDataGenerator.blockWithAccessList(
@@ -200,9 +198,7 @@ public class BackwardSyncBalImporterTest {
         .when(context)
         .saveBlock(any(Block.class), any());
 
-    new BackwardSyncBalImporter(context)
-        .importBlocks(List.of(first.getBlock(), second.getBlock()))
-        .get();
+    importBlocks(List.of(first.getBlock(), second.getBlock()));
 
     @SuppressWarnings("unchecked")
     final ArgumentCaptor<Optional<BlockAccessList>> balCaptor =
@@ -213,7 +209,7 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
-  void importBlocks_requestsFailedWindowOnlyOnce() throws Exception {
+  void importBlocks_requestsFailedWindowOnlyOnce() {
     final List<BlockWithAccessList> chain = chainWithBals(3);
     when(peerTaskExecutor.execute(any(GetBlockAccessListsFromPeerTask.class)))
         .thenReturn(
@@ -223,14 +219,14 @@ public class BackwardSyncBalImporterTest {
                 List.of(peer.getEthPeer())));
     appendOnSave();
 
-    new BackwardSyncBalImporter(context).importBlocks(blocksOf(chain)).get();
+    importBlocks(blocksOf(chain));
 
     verify(peerTaskExecutor, times(1)).execute(any(GetBlockAccessListsFromPeerTask.class));
     verify(context, times(3)).saveBlock(any(Block.class), eq(Optional.empty()));
   }
 
   @Test
-  void importBlocks_fetchesOneRequestPerWindow() throws Exception {
+  void importBlocks_fetchesOneRequestPerWindow() {
     final int nbBlocks = BackwardSyncBalImporter.BAL_REQUEST_WINDOW + 4;
     final List<BlockWithAccessList> chain = chainWithBals(nbBlocks);
     final List<Optional<BlockAccessList>> bals =
@@ -249,7 +245,7 @@ public class BackwardSyncBalImporterTest {
                 List.of(peer.getEthPeer())));
     appendOnSave();
 
-    new BackwardSyncBalImporter(context).importBlocks(blocksOf(chain)).get();
+    importBlocks(blocksOf(chain));
 
     verify(peerTaskExecutor, times(2)).execute(any(GetBlockAccessListsFromPeerTask.class));
     @SuppressWarnings("unchecked")
@@ -260,7 +256,7 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
-  void importBlocks_usesPrefetchedFirstWindow() throws Exception {
+  void importBlocks_usesPrefetchedFirstWindow() {
     final List<BlockWithAccessList> chain = chainWithBals(2);
     appendOnSave();
 
@@ -270,8 +266,7 @@ public class BackwardSyncBalImporterTest {
             CompletableFuture.completedFuture(
                 Map.of(
                     chain.get(0).getBlock().getHash(),
-                    chain.get(0).getBlockAccessList().orElseThrow())))
-        .get();
+                    chain.get(0).getBlockAccessList().orElseThrow())));
 
     verify(peerTaskExecutor, never()).execute(any(GetBlockAccessListsFromPeerTask.class));
     @SuppressWarnings("unchecked")
@@ -283,11 +278,39 @@ public class BackwardSyncBalImporterTest {
   }
 
   @Test
+  void importBlocks_continuesWithoutBalWhenDownloadTimesOut() {
+    final List<BlockWithAccessList> chain = chainWithBals(1);
+    final CompletableFuture<Map<Hash, BlockAccessList>> neverCompletingPrefetch =
+        new CompletableFuture<>();
+    appendOnSave();
+
+    new BackwardSyncBalImporter(context).importBlocks(blocksOf(chain), neverCompletingPrefetch);
+
+    verify(context).saveBlock(eq(chain.get(0).getBlock()), eq(Optional.empty()));
+    assertThat(neverCompletingPrefetch).isCancelled();
+  }
+
+  @Test
+  void importBlocks_cancelsPrefetchWhenNothingToImport() {
+    final CompletableFuture<Map<Hash, BlockAccessList>> prefetch = new CompletableFuture<>();
+
+    new BackwardSyncBalImporter(context).importBlocks(List.of(), prefetch);
+
+    assertThat(prefetch).isCancelled();
+  }
+
+  @Test
   void lookupStoredBal_skipsStorageWhenNoBalHash() {
     final Block block = getBlockByNumber(LOCAL_HEIGHT + 1);
     assertThat(block.getHeader().getBalHash()).isEmpty();
 
     assertThat(new BackwardSyncBalImporter(context).lookupStoredBal(block.getHeader())).isEmpty();
+  }
+
+  private void importBlocks(final List<Block> blocks) {
+    final BackwardSyncBalImporter importer = new BackwardSyncBalImporter(context);
+    importer.importBlocks(
+        blocks, importer.prefetchFirstWindow(blocks.stream().map(Block::getHeader).toList()));
   }
 
   private void stubSuccessfulBalDownload(final List<Optional<BlockAccessList>> bals) {

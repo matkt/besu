@@ -1,5 +1,5 @@
 /*
- * Copyright contributors to Hyperledger Besu.
+ * Copyright contributors to Besu.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -115,6 +115,30 @@ public class ProcessKnownAncestorsStepTest {
         ArgumentCaptor.forClass(Optional.class);
     verify(context).saveBlock(any(Block.class), balCaptor.capture());
     assertThat(balCaptor.getValue()).contains(bal);
+  }
+
+  @Test
+  void processKnownAncestors_passesBalReceivedWithTrustedBlock() {
+    final BlockWithAccessList withBal =
+        blockDataGenerator.blockWithAccessList(
+            new BlockDataGenerator.BlockOptions()
+                .setBlockNumber(1)
+                .setParentHash(localBlockchain.getChainHeadHash())
+                .withGeneratedBlockAccessList(2));
+    final Block block = withBal.getBlock();
+    final BlockAccessList bal = withBal.getBlockAccessList().orElseThrow();
+
+    stubParentPresentButBlockNotImported(block);
+
+    final BackwardChain backwardChain =
+        new BackwardChain(headersStorage, blocksStorage, chainStorage, sessionDataStorage);
+    backwardChain.appendTrustedBlock(block, Optional.of(bal));
+
+    new ProcessKnownAncestorsStep(context, backwardChain).processKnownAncestors();
+
+    verify(context).saveBlock(any(Block.class), eq(Optional.of(bal)));
+    verify(blockchain, never()).getBlockAccessList(any());
+    assertThat(backwardChain.getTrustedBlockAccessList(block.getHash())).isEmpty();
   }
 
   @Test

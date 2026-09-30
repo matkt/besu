@@ -160,8 +160,13 @@ public class BackwardSyncContext {
   }
 
   public synchronized CompletableFuture<Void> syncBackwardsUntil(final Block newPivot) {
+    return syncBackwardsUntil(newPivot, Optional.empty());
+  }
+
+  public synchronized CompletableFuture<Void> syncBackwardsUntil(
+      final Block newPivot, final Optional<BlockAccessList> blockAccessList) {
     if (!isTrusted(newPivot.getHash())) {
-      backwardChain.appendTrustedBlock(newPivot);
+      backwardChain.appendTrustedBlock(newPivot, blockAccessList);
     }
 
     final Status status = getOrStartSyncSession();
@@ -318,10 +323,6 @@ public class BackwardSyncContext {
 
   public void resetBatchSize() {
     this.batchSize = BATCH_SIZE;
-  }
-
-  protected Void saveBlock(final Block block) {
-    return saveBlock(block, Optional.empty());
   }
 
   protected Void saveBlock(final Block block, final Optional<BlockAccessList> blockAccessList) {

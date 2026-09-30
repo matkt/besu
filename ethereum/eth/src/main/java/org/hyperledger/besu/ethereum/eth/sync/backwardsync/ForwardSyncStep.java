@@ -26,7 +26,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -78,6 +77,7 @@ public class ForwardSyncStep {
           .handle(
               (blocks, throwable) -> {
                 if (throwable != null) {
+                  firstWindowBals.cancel(false);
                   context.halveBatchSize();
                   LOG.atDebug()
                       .setMessage(
@@ -86,13 +86,13 @@ public class ForwardSyncStep {
                       .addArgument(throwable::getMessage)
                       .addArgument(context::getBatchSize)
                       .log();
-                  return CompletableFuture.<Void>completedFuture(null);
+                  return null;
                 }
                 // a block that cannot be saved is not a failed download, retrying it right away
                 // repeats the failure, so the sync session decides whether and when to retry
-                return balImporter.importBlocks(blocks, firstWindowBals);
-              })
-          .thenCompose(Function.identity());
+                balImporter.importBlocks(blocks, firstWindowBals);
+                return null;
+              });
     }
   }
 

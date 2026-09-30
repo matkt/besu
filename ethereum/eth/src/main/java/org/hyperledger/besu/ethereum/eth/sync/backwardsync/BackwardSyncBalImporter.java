@@ -1,5 +1,5 @@
 /*
- * Copyright contributors to Hyperledger Besu.
+ * Copyright contributors to Besu.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -22,27 +22,33 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetBlockAccessListsFromPeerTask;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Downloads block access lists over eth/71 and imports backward-sync blocks. Blocks are processed
  * in windows of {@link #BAL_REQUEST_WINDOW}; the BALs of the next window are fetched while the
- * current one is executing, so network latency is hidden behind block execution. Missing BALs fall
- * back to reconstruction during execution.
+ * current one is executing, so network latency is hidden behind block execution. Downloads are
+ * best-effort: each request goes to a single peer without retries and the import waits at most
+ * {@link #BAL_WAIT_TIMEOUT} for a window, missing BALs being reconstructed during execution.
  */
 public class BackwardSyncBalImporter {
 
   private static final Logger LOG = LoggerFactory.getLogger(BackwardSyncBalImporter.class);
   static final int BAL_REQUEST_WINDOW = 16;
+  static final Duration BAL_WAIT_TIMEOUT = Duration.ofSeconds(2);
 
   private final BackwardSyncContext context;
 
@@ -63,7 +69,8 @@ public class BackwardSyncBalImporter {
 
   /**
    * Starts downloading the BALs of the first window of {@code headers}, so it can run concurrently
-   * with the bodies download. Pass the result to {@link #importBlocks(List, CompletableFuture)}.
+   * with the bodies download. Pass the result to {@link #importBlocks(List, CompletableFuture)}, or
+   * cancel it if the blocks are not imported.
    */
   public CompletableFuture<Map<Hash, BlockAccessList>> prefetchFirstWindow(
       final List<BlockHeader> headers) {
@@ -74,55 +81,53 @@ public class BackwardSyncBalImporter {
             .toList());
   }
 
-  /** Imports {@code blocks} in order, downloading their BALs window by window. */
-  @VisibleForTesting
-  public CompletableFuture<Void> importBlocks(final List<Block> blocks) {
-    return importBlocks(blocks, fetchBalsAsync(windowHeaders(blocks, 0)));
+  /**
+   * Imports {@code blocks} in order, using {@code firstWindowBals} for the first window and
+   * prefetching the BALs of each following window while the previous one executes. BAL downloads
+   * still pending when the import stops are cancelled.
+   */
+  public void importBlocks(
+      final List<Block> blocks,
+      final CompletableFuture<Map<Hash, BlockAccessList>> firstWindowBals) {
+    CompletableFuture<Map<Hash, BlockAccessList>> currentBals = firstWindowBals;
+    CompletableFuture<Map<Hash, BlockAccessList>> nextBals = currentBals;
+    try {
+      if (blocks.isEmpty()) {
+        context.halveBatchSize();
+        LOG.debug("No blocks to save, reducing batch size to {}", context.getBatchSize());
+        return;
+      }
+
+      for (int start = 0; start < blocks.size(); start += BAL_REQUEST_WINDOW) {
+        final int end = Math.min(start + BAL_REQUEST_WINDOW, blocks.size());
+        nextBals =
+            end < blocks.size()
+                ? fetchBalsAsync(windowHeaders(blocks, end))
+                : CompletableFuture.completedFuture(Map.of());
+        final Map<Hash, BlockAccessList> bals = awaitBals(currentBals);
+        for (int i = start; i < end; i++) {
+          final Block block = blocks.get(i);
+          if (!saveBlock(block, Optional.ofNullable(bals.get(block.getHash())))) {
+            return;
+          }
+        }
+        currentBals = nextBals;
+      }
+
+      if (blocks.size() == context.getBatchSize()) {
+        context.resetBatchSize();
+      }
+    } finally {
+      // no-op for completed downloads, stops the ones abandoned by an early return or a failure
+      currentBals.cancel(false);
+      nextBals.cancel(false);
+    }
   }
 
   /**
-   * Imports {@code blocks} in order, using {@code firstWindowBals} for the first window and
-   * prefetching the BALs of each following window while the previous one executes.
+   * Headers of the window of blocks starting at {@code start}, including the ones without a BAL
+   * hash: {@link #fetchBalsAsync(List)} filters them out.
    */
-  public CompletableFuture<Void> importBlocks(
-      final List<Block> blocks,
-      final CompletableFuture<Map<Hash, BlockAccessList>> firstWindowBals) {
-    return context
-        .getEthContext()
-        .getScheduler()
-        .scheduleServiceTask(
-            () -> {
-              if (blocks.isEmpty()) {
-                context.halveBatchSize();
-                LOG.debug("No blocks to save, reducing batch size to {}", context.getBatchSize());
-                return CompletableFuture.completedFuture(null);
-              }
-
-              CompletableFuture<Map<Hash, BlockAccessList>> currentBals = firstWindowBals;
-              for (int start = 0; start < blocks.size(); start += BAL_REQUEST_WINDOW) {
-                final int end = Math.min(start + BAL_REQUEST_WINDOW, blocks.size());
-                final CompletableFuture<Map<Hash, BlockAccessList>> nextBals =
-                    end < blocks.size()
-                        ? fetchBalsAsync(windowHeaders(blocks, end))
-                        : CompletableFuture.completedFuture(Map.of());
-                final Map<Hash, BlockAccessList> bals = awaitBals(currentBals);
-                for (int i = start; i < end; i++) {
-                  final Block block = blocks.get(i);
-                  if (!saveBlock(block, Optional.ofNullable(bals.get(block.getHash())))) {
-                    return CompletableFuture.completedFuture(null);
-                  }
-                }
-                currentBals = nextBals;
-              }
-
-              if (blocks.size() == context.getBatchSize()) {
-                context.resetBatchSize();
-              }
-              return CompletableFuture.completedFuture(null);
-            });
-  }
-
-  /** Headers advertising a BAL in the window of blocks starting at {@code start}. */
   private static List<BlockHeader> windowHeaders(final List<Block> blocks, final int start) {
     return blocks.subList(start, Math.min(start + BAL_REQUEST_WINDOW, blocks.size())).stream()
         .map(Block::getHeader)
@@ -136,17 +141,38 @@ public class BackwardSyncBalImporter {
     if (balHeaders.isEmpty()) {
       return CompletableFuture.completedFuture(Map.of());
     }
-    return context
+    // the fetch stops between requests once the returned future is completed or cancelled
+    final CompletableFuture<Map<Hash, BlockAccessList>> bals = new CompletableFuture<>();
+    context
         .getEthContext()
         .getScheduler()
-        .scheduleServiceTask(() -> CompletableFuture.completedFuture(fetchBals(balHeaders)));
+        .scheduleServiceTask(
+            () -> {
+              bals.complete(fetchBals(balHeaders, bals::isDone));
+              return CompletableFuture.completedFuture(null);
+            })
+        .whenComplete(
+            (result, throwable) -> {
+              if (throwable != null) {
+                bals.completeExceptionally(throwable);
+              }
+            });
+    return bals;
   }
 
   private static Map<Hash, BlockAccessList> awaitBals(
       final CompletableFuture<Map<Hash, BlockAccessList>> bals) {
     try {
-      return bals.join();
-    } catch (final RuntimeException e) {
+      return bals.get(BAL_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (final TimeoutException e) {
+      bals.cancel(false);
+      LOG.debug("BAL download timed out after {}, continuing without", BAL_WAIT_TIMEOUT);
+      return Map.of();
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+      bals.cancel(false);
+      return Map.of();
+    } catch (final ExecutionException | RuntimeException e) {
       LOG.atDebug()
           .setMessage("BAL download failed ({}), continuing without")
           .addArgument(e::toString)
@@ -157,13 +183,15 @@ public class BackwardSyncBalImporter {
 
   /**
    * Downloads the BALs of {@code headers}. A soft-limited (partial) response is followed by a
-   * request for the remaining headers; stops as soon as a request fails or returns nothing, so an
-   * unhelpful peer costs a single request per window.
+   * request for the remaining headers; stops as soon as a request fails or returns nothing, or once
+   * {@code abandoned} is true. Each request is a single attempt against one peer, so an unhelpful
+   * peer costs a single request per window.
    */
-  private Map<Hash, BlockAccessList> fetchBals(final List<BlockHeader> headers) {
+  private Map<Hash, BlockAccessList> fetchBals(
+      final List<BlockHeader> headers, final BooleanSupplier abandoned) {
     final Map<Hash, BlockAccessList> fetched = new HashMap<>();
     int offset = 0;
-    while (offset < headers.size()) {
+    while (offset < headers.size() && !abandoned.getAsBoolean()) {
       final List<BlockHeader> remaining = headers.subList(offset, headers.size());
       final List<Optional<BlockAccessList>> downloaded = requestBals(remaining);
       if (downloaded.isEmpty()) {
@@ -192,7 +220,7 @@ public class BackwardSyncBalImporter {
           context
               .getEthContext()
               .getPeerTaskExecutor()
-              .execute(new GetBlockAccessListsFromPeerTask(headers));
+              .execute(new GetBlockAccessListsFromPeerTask(headers, true));
       if (result.responseCode() != PeerTaskExecutorResponseCode.SUCCESS
           || result.result().isEmpty()) {
         LOG.atDebug()

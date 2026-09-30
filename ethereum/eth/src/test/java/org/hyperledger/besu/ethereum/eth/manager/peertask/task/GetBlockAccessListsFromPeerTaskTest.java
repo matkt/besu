@@ -115,6 +115,21 @@ class GetBlockAccessListsFromPeerTaskTest {
   }
 
   @Test
+  void testSingleAttemptDisablesRetries() {
+    final BlockHeader header = mockBlockHeader(3, new BlockAccessList(List.of()));
+
+    final GetBlockAccessListsFromPeerTask defaultTask =
+        new GetBlockAccessListsFromPeerTask(List.of(header));
+    assertThat(defaultTask.getRetriesWithOtherPeer()).isPositive();
+    assertThat(defaultTask.getRetriesWithSamePeer()).isPositive();
+
+    final GetBlockAccessListsFromPeerTask singleAttemptTask =
+        new GetBlockAccessListsFromPeerTask(List.of(header), true);
+    assertThat(singleAttemptTask.getRetriesWithOtherPeer()).isZero();
+    assertThat(singleAttemptTask.getRetriesWithSamePeer()).isZero();
+  }
+
+  @Test
   void testGetPeerRequirementFilter() {
     final BlockHeader header = mockBlockHeader(3, new BlockAccessList(List.of()));
     final GetBlockAccessListsFromPeerTask task =
