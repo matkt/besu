@@ -16,20 +16,22 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.co
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.DelegationEncoder;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieConstants;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.AscendingCollapseBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotLeaf;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotWriter;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
+import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
+import org.hyperledger.besu.evm.worldstate.WorldState;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -37,10 +39,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -60,9 +62,9 @@ import org.slf4j.LoggerFactory;
  * sorted leaves → snapshot writer + AscendingCollapseBinaryTrie
  * </pre>
  *
- * <p>State reads stay on one thread because {@link Eip8347StateSource} is not required to be
- * thread-safe. CODE_ZONE chunks are content-addressed by {@code code_hash}; shared bytecode is
- * spilled once per referencing account and coalesced by the merge.
+ * <p>State reads stay on one thread because {@link StateSource} is not required to be thread-safe.
+ * CODE_ZONE chunks are content-addressed by {@code code_hash}; shared bytecode is spilled once per
+ * referencing account and coalesced by the merge.
  */
 public final class Eip8347SnapshotGenerator {
 
@@ -70,6 +72,66 @@ public final class Eip8347SnapshotGenerator {
 
   /** Maximum preimage slots carried by one pipeline item. */
   static final int SLOTS_PER_BATCH = 1024;
+
+  /**
+   * Read-only view of the anchor MPT state used by {@link Eip8347SnapshotGenerator}: nonce,
+   * balance, code and storage per preimage address. Production uses {@link #of(WorldState)}; tests
+   * stub it. Called from a single thread, so implementations need not be thread-safe.
+   */
+  @FunctionalInterface
+  public interface StateSource {
+
+    /**
+     * Account fields needed to emit EIP-8297 leaves for one address.
+     *
+     * @param nonce account nonce
+     * @param balance account balance
+     * @param code account code (empty for EOAs; may be an EIP-7702 delegation indicator)
+     */
+    record AccountView(long nonce, Wei balance, Bytes code) {}
+
+    /** Returns the account at {@code address}, or empty if absent from the anchor state. */
+    Optional<AccountView> getAccount(Address address);
+
+    /** Storage value at {@code slotKey} (32-byte big-endian slot), or zero if unset. */
+    default UInt256 getStorage(final Address address, final Bytes32 slotKey) {
+      return UInt256.ZERO;
+    }
+
+    /**
+     * View over a Besu {@link WorldState}. The generator reads an account and then its slots, so
+     * the last resolved account is kept to avoid one world-state lookup per slot.
+     */
+    static StateSource of(final WorldState worldState) {
+      Objects.requireNonNull(worldState, "worldState");
+      return new StateSource() {
+        private Address cachedAddress;
+        private Account cachedAccount;
+
+        @Override
+        public Optional<AccountView> getAccount(final Address address) {
+          return Optional.ofNullable(resolve(address))
+              .map(a -> new AccountView(a.getNonce(), a.getBalance(), a.getCode()));
+        }
+
+        @Override
+        public UInt256 getStorage(final Address address, final Bytes32 slotKey) {
+          final Account account = resolve(address);
+          return account == null
+              ? UInt256.ZERO
+              : account.getStorageValue(UInt256.fromBytes(slotKey));
+        }
+
+        private Account resolve(final Address address) {
+          if (!address.equals(cachedAddress)) {
+            cachedAddress = address;
+            cachedAccount = worldState.get(address);
+          }
+          return cachedAccount;
+        }
+      };
+    }
+  }
 
   private Eip8347SnapshotGenerator() {}
 
@@ -84,7 +146,7 @@ public final class Eip8347SnapshotGenerator {
   /** Anchor-state values of one preimage batch, read in file order. */
   private record StateBatch(
       Address address,
-      Eip8347StateSource.AccountView account,
+      StateSource.AccountView account,
       List<Bytes32> slotKeys,
       List<UInt256> values) {}
 
@@ -94,34 +156,44 @@ public final class Eip8347SnapshotGenerator {
    * @param preimagesPath EIP-8347 preimage artifact (input)
    * @param stateSource account/storage/code view at {@code ANCHOR_BLOCK}
    * @param snapshotPath output path for the snapshot artifact
+   * @param workDir where the external sort and large storage records spill; a subdirectory is
+   *     created and deleted
    * @return claimed root and leaf count
    */
   public static Result generate(
-      final Path preimagesPath, final Eip8347StateSource stateSource, final Path snapshotPath)
+      final Path preimagesPath,
+      final StateSource stateSource,
+      final Path snapshotPath,
+      final Path workDir)
       throws IOException {
     return generate(
-        preimagesPath, stateSource, snapshotPath, Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES);
+        preimagesPath,
+        stateSource,
+        snapshotPath,
+        workDir,
+        Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES);
   }
 
   /**
-   * Same as {@link #generate(Path, Eip8347StateSource, Path)} with an explicit in-heap sort buffer
+   * Same as {@link #generate(Path, StateSource, Path, Path)} with an explicit in-heap sort buffer
    * (tests use a tiny one to force multi-run, multi-pass merges).
    */
-  public static Result generate(
+  static Result generate(
       final Path preimagesPath,
-      final Eip8347StateSource stateSource,
+      final StateSource stateSource,
       final Path snapshotPath,
+      final Path workDir,
       final long sortBufferBytes)
       throws IOException {
     Objects.requireNonNull(preimagesPath, "preimagesPath");
     Objects.requireNonNull(stateSource, "stateSource");
     Objects.requireNonNull(snapshotPath, "snapshotPath");
 
-    final Path snapshotParent = snapshotPath.toAbsolutePath().getParent();
-    Files.createDirectories(snapshotParent);
-    final Path workDir = Files.createTempDirectory(snapshotParent, "eip8347-spill-");
+    Files.createDirectories(snapshotPath.toAbsolutePath().getParent());
+    final Path spillDir =
+        Files.createTempDirectory(Files.createDirectories(workDir), "eip8347-convert-");
     try (final Eip8347ExternalSorter leaves =
-            new Eip8347ExternalSorter(workDir, "leaves", sortBufferBytes);
+            new Eip8347ExternalSorter(spillDir, "leaves", sortBufferBytes);
         final Eip8347PreimageFile preimages = new Eip8347PreimageFile(preimagesPath)) {
       Eip8347Pipelines.run(
           Eip8347Pipelines.from("eip8347-convert-preimages", preimages.batches(SLOTS_PER_BATCH))
@@ -134,7 +206,7 @@ public final class Eip8347SnapshotGenerator {
                   "eip8347-convert-sort-leaves",
                   batch -> {
                     try {
-                      for (final Eip8347SnapshotLeaf leaf : batch) {
+                      for (final Leaf leaf : batch) {
                         leaves.add(leaf.key().toArray(), leaf.value().toArray());
                       }
                     } catch (final IOException e) {
@@ -142,14 +214,14 @@ public final class Eip8347SnapshotGenerator {
                     }
                   }));
       preimages.ensureExhausted();
-      final Result result = writeSnapshot(leaves.sorted(), snapshotPath);
+      final Result result = writeSnapshot(leaves.sorted(), snapshotPath, spillDir);
       LOG.info(
           "EIP-8347 snapshot generated (leaves={}, root={})",
           result.leafCount(),
           result.pbtRoot().toHexString());
       return result;
     } finally {
-      deleteRecursively(workDir);
+      Eip8347ExternalSorter.deleteRecursively(spillDir);
     }
   }
 
@@ -158,11 +230,14 @@ public final class Eip8347SnapshotGenerator {
    * bytecode emitted per account) are coalesced; a key with two values is rejected.
    */
   private static Result writeSnapshot(
-      final Iterator<Eip8347ExternalSorter.Entry> sorted, final Path snapshotPath)
+      final Iterator<Eip8347ExternalSorter.Entry> sorted,
+      final Path snapshotPath,
+      final Path spillDir)
       throws IOException {
     final AscendingCollapseBinaryTrie pbt = new AscendingCollapseBinaryTrie();
     long leafCount = 0;
-    try (final Eip8347SnapshotWriter snapshot = Eip8347SnapshotWriter.open(snapshotPath)) {
+    try (final Eip8347SnapshotWriter snapshot =
+        Eip8347SnapshotWriter.open(snapshotPath, spillDir)) {
       Eip8347ExternalSorter.Entry previous = null;
       while (sorted.hasNext()) {
         final Eip8347ExternalSorter.Entry entry = sorted.next();
@@ -173,23 +248,22 @@ public final class Eip8347SnapshotGenerator {
           }
           continue;
         }
-        final Eip8347SnapshotLeaf leaf =
-            new Eip8347SnapshotLeaf(Bytes.wrap(entry.key()), Bytes32.wrap(entry.value()));
+        final Leaf leaf = new Leaf(Bytes.wrap(entry.key()), Bytes32.wrap(entry.value()));
         pbt.insert(leaf.key(), leaf.value());
         snapshot.accept(leaf);
         leafCount++;
         previous = entry;
       }
-      final Bytes32 pbtRoot = leafCount == 0 ? TrieConstants.EMPTY_TRIE_ROOT : pbt.rootHash();
+      final Bytes32 pbtRoot = pbt.rootHash();
       snapshot.finish(pbtRoot);
       return new Result(pbtRoot, leafCount);
     }
   }
 
   private static StateBatch readState(
-      final Eip8347StateSource stateSource, final Eip8347PreimageFile.Batch batch) {
+      final StateSource stateSource, final Eip8347PreimageFile.Batch batch) {
     final Address address = batch.account().address();
-    Eip8347StateSource.AccountView account = null;
+    StateSource.AccountView account = null;
     if (batch.first()) {
       account =
           stateSource
@@ -218,36 +292,35 @@ public final class Eip8347SnapshotGenerator {
   }
 
   /** PBT leaves of one batch (unsorted; the spill sorts them). CPU-only, thread-safe. */
-  private static List<Eip8347SnapshotLeaf> deriveLeaves(final StateBatch batch) {
+  private static List<Leaf> deriveLeaves(final StateBatch batch) {
     final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(batch.address().getBytes());
-    final List<Eip8347SnapshotLeaf> leaves = new ArrayList<>();
+    final Bytes32 addressKeyHash = TrieKeyDerivation.keyHash(address32);
+    final List<Leaf> leaves = new ArrayList<>();
     if (batch.account() != null) {
       addHeaderAndCodeLeaves(leaves, address32, batch.account());
     }
     for (int i = 0; i < batch.slotKeys().size(); i++) {
       leaves.add(
-          new Eip8347SnapshotLeaf(
+          new Leaf(
               TrieKeyDerivation.getTreeKeyForStorageSlot(
-                  address32, UInt256.fromBytes(batch.slotKeys().get(i))),
+                  address32, addressKeyHash, UInt256.fromBytes(batch.slotKeys().get(i))),
               Bytes32.leftPad(batch.values().get(i))));
     }
     return leaves;
   }
 
   private static void addHeaderAndCodeLeaves(
-      final List<Eip8347SnapshotLeaf> leaves,
-      final Bytes32 address32,
-      final Eip8347StateSource.AccountView account) {
-    final Bytes code = account.code() == null ? Bytes.EMPTY : account.code();
+      final List<Leaf> leaves, final Bytes32 address32, final StateSource.AccountView account) {
+    final Bytes code = account.code();
     final UInt256 balance = account.balance().toUInt256();
     if (CodeDelegationHelper.hasCodeDelegation(code)) {
       leaves.add(
-          new Eip8347SnapshotLeaf(
+          new Leaf(
               TrieKeyDerivation.getTreeKeyForBasicData(address32),
               BasicDataEncoder.encodeBasicData(
                   EmbeddingParameters.DELEGATION_CODE_SIZE, account.nonce(), balance)));
       leaves.add(
-          new Eip8347SnapshotLeaf(
+          new Leaf(
               TrieKeyDerivation.getTreeKeyForDelegation(address32),
               DelegationEncoder.encodeDelegation(
                   CodeDelegationHelper.getTargetAddress(code).getBytes())));
@@ -255,34 +328,15 @@ public final class Eip8347SnapshotGenerator {
     }
     final Bytes32 codeHash = Bytes32.wrap(Hash.hash(code).getBytes());
     leaves.add(
-        new Eip8347SnapshotLeaf(
+        new Leaf(
             TrieKeyDerivation.getTreeKeyForBasicData(address32),
             BasicDataEncoder.encodeBasicData(code.size(), account.nonce(), balance)));
-    leaves.add(
-        new Eip8347SnapshotLeaf(TrieKeyDerivation.getTreeKeyForCodeHash(address32), codeHash));
+    leaves.add(new Leaf(TrieKeyDerivation.getTreeKeyForCodeHash(address32), codeHash));
     final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(code);
     for (int i = 0; i < chunks.size(); i++) {
       if (!chunks.get(i).isZero()) {
-        leaves.add(
-            new Eip8347SnapshotLeaf(
-                TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i), chunks.get(i)));
+        leaves.add(new Leaf(TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i), chunks.get(i)));
       }
-    }
-  }
-
-  private static void deleteRecursively(final Path dir) {
-    try (final var walk = Files.walk(dir)) {
-      walk.sorted(Comparator.reverseOrder())
-          .forEach(
-              p -> {
-                try {
-                  Files.deleteIfExists(p);
-                } catch (final IOException e) {
-                  LOG.debug("failed deleting spill path {}", p, e);
-                }
-              });
-    } catch (final IOException e) {
-      LOG.debug("failed walking spill dir {}", dir, e);
     }
   }
 }

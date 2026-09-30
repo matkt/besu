@@ -17,15 +17,18 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.ar
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Group;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.HeaderRecord;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 
 import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.NoSuchElementException;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -44,7 +47,7 @@ public final class Eip8347SnapshotReader implements Closeable {
   public sealed interface Unit permits HeaderUnit, CodeUnit, StorageUnit {
     Bytes stem();
 
-    List<Eip8347SnapshotLeaf> leaves();
+    List<Leaf> leaves();
 
     int leafCount();
   }
@@ -56,13 +59,13 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
 
     @Override
-    public List<Eip8347SnapshotLeaf> leaves() {
+    public List<Leaf> leaves() {
       return header.leaves();
     }
 
     @Override
     public int leafCount() {
-      return 2 + header.slots().size();
+      return header.leafCount();
     }
   }
 
@@ -75,7 +78,7 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
 
     @Override
-    public List<Eip8347SnapshotLeaf> leaves() {
+    public List<Leaf> leaves() {
       return group.leaves(PREFIX);
     }
 
@@ -94,7 +97,7 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
 
     @Override
-    public List<Eip8347SnapshotLeaf> leaves() {
+    public List<Leaf> leaves() {
       return group.leaves(Eip8347TypedSnapshotCodec.storagePrefix(addressHash));
     }
 
@@ -122,8 +125,10 @@ public final class Eip8347SnapshotReader implements Closeable {
   private long leafCount;
 
   public Eip8347SnapshotReader(final Path path) throws IOException {
-    this.in = new BufferedInputStream(Files.newInputStream(path), 1 << 16);
-    this.claimedRoot = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, 32));
+    this.in =
+        new BufferedInputStream(
+            Files.newInputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
+    this.claimedRoot = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, Bytes32.SIZE));
     this.recordsLeft = Eip8347TypedSnapshotCodec.readCount(in);
   }
 
@@ -177,11 +182,33 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
   }
 
-  /** Streams every derived leaf in PBT key order. */
-  public void forEach(final Consumer<Eip8347SnapshotLeaf> consumer) throws IOException {
-    for (Unit unit = next(); unit != null; unit = next()) {
-      unit.leaves().forEach(consumer);
-    }
+  /** The remaining units as an iterator over {@link #next}; I/O failures are unchecked. */
+  public Iterator<Unit> units() {
+    return new Iterator<>() {
+      private Unit pending;
+
+      @Override
+      public boolean hasNext() {
+        if (pending == null && section != Section.DONE) {
+          try {
+            pending = Eip8347SnapshotReader.this.next();
+          } catch (final IOException e) {
+            throw new UncheckedIOException(e);
+          }
+        }
+        return pending != null;
+      }
+
+      @Override
+      public Unit next() {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+        final Unit unit = pending;
+        pending = null;
+        return unit;
+      }
+    };
   }
 
   /** Fails unless {@link #next} has already returned {@code null}. */
@@ -203,7 +230,7 @@ public final class Eip8347SnapshotReader implements Closeable {
   }
 
   private void beginStorageRecord() throws IOException {
-    final Bytes32 addressHash = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, 32));
+    final Bytes32 addressHash = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, Bytes32.SIZE));
     if (storageAddressHash != null
         && Eip8347TypedSnapshotCodec.compare(storageAddressHash, addressHash) >= 0) {
       throw new Eip8347ArtifactVerificationException(
@@ -211,7 +238,8 @@ public final class Eip8347SnapshotReader implements Closeable {
               + addressHash.toHexString());
     }
     storageAddressHash = addressHash;
-    groupsLeft = Eip8347TypedSnapshotCodec.readUint(in, 8);
+    groupsLeft =
+        Eip8347TypedSnapshotCodec.readUint(in, Eip8347TypedSnapshotCodec.GROUP_COUNT_WIDTH);
     if (groupsLeft == 0L) {
       throw new Eip8347ArtifactVerificationException(
           "storage groupCount must be non-zero for " + addressHash.toHexString());

@@ -25,6 +25,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,7 +33,6 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -45,15 +45,25 @@ import org.apache.tuweni.bytes.Bytes32;
  * * slotCount}. Records strictly ascending by {@code keccak256(address)}; slots strictly ascending
  * by {@code keccak256(slotKey)}; no trailing byte.
  *
- * <p>{@link #nextAccount()} / {@link #nextSlot()} keep one slot in memory, whatever the account's
- * storage size. {@link #iterator()} materializes whole records and is meant for small files.
+ * <p>{@link #nextAccount()} / {@link #nextSlot()} keep one slot in memory, and {@link #batches} at
+ * most a bounded batch, whatever the account's storage size.
+ *
+ * <p>Checking the order costs a keccak per address and slot. A pass that needs neither the keccak
+ * nor the check, because a later pass over the same file makes it, can open the file with {@link
+ * #withoutOrderCheck}.
  */
 public final class Eip8347PreimageFile implements Closeable {
 
-  /** One record header; its {@code slotCount} slots follow via {@link #nextSlot()}. */
+  /**
+   * One record header; its {@code slotCount} slots follow via {@link #nextSlot()}. {@code
+   * addressHash} is null when the file is read {@link #withoutOrderCheck}.
+   */
   public record Account(Address address, Hash addressHash, int slotCount) {}
 
-  /** One storage-slot preimage with its cached MPT path. */
+  /**
+   * One storage-slot preimage with its MPT path. {@code keyHash} is null when the file is read
+   * {@link #withoutOrderCheck}.
+   */
   public record Slot(Bytes32 key, Hash keyHash) {}
 
   /** One whole record: an address and its slot keys (fixtures, genesis, small files). */
@@ -64,6 +74,7 @@ public final class Eip8347PreimageFile implements Closeable {
   }
 
   private final InputStream in;
+  private final boolean checkOrder;
   private Hash previousAddressHash;
   private Hash previousSlotHash;
   private int slotsLeft;
@@ -112,7 +123,19 @@ public final class Eip8347PreimageFile implements Closeable {
   }
 
   public Eip8347PreimageFile(final Path path) throws IOException {
-    this.in = new BufferedInputStream(Files.newInputStream(path), 1 << 16);
+    this(path, true);
+  }
+
+  private Eip8347PreimageFile(final Path path, final boolean checkOrder) throws IOException {
+    this.in =
+        new BufferedInputStream(
+            Files.newInputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
+    this.checkOrder = checkOrder;
+  }
+
+  /** Reads the file without computing keccak hashes, so without checking the keccak order. */
+  public static Eip8347PreimageFile withoutOrderCheck(final Path path) throws IOException {
+    return new Eip8347PreimageFile(path, false);
   }
 
   /** Next record header, or {@code null} at a clean end of file. */
@@ -120,12 +143,12 @@ public final class Eip8347PreimageFile implements Closeable {
     if (slotsLeft != 0) {
       throw new IllegalStateException(slotsLeft + " slot(s) of the previous account left unread");
     }
-    final byte[] addressBytes = in.readNBytes(20);
+    final byte[] addressBytes = in.readNBytes(Address.SIZE);
     if (addressBytes.length == 0) {
       exhausted = true;
       return null;
     }
-    if (addressBytes.length != 20) {
+    if (addressBytes.length != Address.SIZE) {
       throw new Eip8347ArtifactVerificationException(
           "truncated preimage address (got " + addressBytes.length + " bytes)");
     }
@@ -134,6 +157,10 @@ public final class Eip8347PreimageFile implements Closeable {
       throw new Eip8347ArtifactVerificationException("preimage slotCount too large: " + slotCount);
     }
     final Address address = Address.wrap(Bytes.wrap(addressBytes));
+    slotsLeft = (int) slotCount;
+    if (!checkOrder) {
+      return new Account(address, null, slotsLeft);
+    }
     final Hash addressHash = address.addressHash();
     if (previousAddressHash != null && previousAddressHash.compareTo(addressHash) >= 0) {
       throw new Eip8347ArtifactVerificationException(
@@ -141,7 +168,6 @@ public final class Eip8347PreimageFile implements Closeable {
     }
     previousAddressHash = addressHash;
     previousSlotHash = null;
-    slotsLeft = (int) slotCount;
     return new Account(address, addressHash, slotsLeft);
   }
 
@@ -150,19 +176,22 @@ public final class Eip8347PreimageFile implements Closeable {
     if (slotsLeft == 0) {
       throw new IllegalStateException("no slot left for the current account");
     }
-    final byte[] keyBytes = in.readNBytes(32);
-    if (keyBytes.length != 32) {
+    final byte[] keyBytes = in.readNBytes(Bytes32.SIZE);
+    if (keyBytes.length != Bytes32.SIZE) {
       throw new Eip8347ArtifactVerificationException(
           "truncated preimage slot key (got " + keyBytes.length + " bytes)");
     }
     final Bytes32 key = Bytes32.wrap(keyBytes);
+    slotsLeft--;
+    if (!checkOrder) {
+      return new Slot(key, null);
+    }
     final Hash keyHash = Hash.hash(key);
     if (previousSlotHash != null && previousSlotHash.compareTo(keyHash) >= 0) {
       throw new Eip8347ArtifactVerificationException(
           "preimage slot keys are not strictly ascending by keccak256(slotKey)");
     }
     previousSlotHash = keyHash;
-    slotsLeft--;
     return new Slot(key, keyHash);
   }
 
@@ -217,46 +246,6 @@ public final class Eip8347PreimageFile implements Closeable {
     };
   }
 
-  public void forEach(final Consumer<AccountPreimages> consumer) {
-    iterator().forEachRemaining(consumer);
-  }
-
-  /** Whole records, slots included (small files and tests). */
-  public Iterator<AccountPreimages> iterator() {
-    return new Iterator<>() {
-      private AccountPreimages next;
-
-      @Override
-      public boolean hasNext() {
-        if (next == null && !exhausted) {
-          try {
-            final Account account = nextAccount();
-            if (account != null) {
-              final List<Bytes32> slots = new ArrayList<>(account.slotCount());
-              for (int i = 0; i < account.slotCount(); i++) {
-                slots.add(nextSlot().key());
-              }
-              next = new AccountPreimages(account.address(), slots);
-            }
-          } catch (final IOException e) {
-            throw new UncheckedIOException(e);
-          }
-        }
-        return next != null;
-      }
-
-      @Override
-      public AccountPreimages next() {
-        if (!hasNext()) {
-          throw new NoSuchElementException();
-        }
-        final AccountPreimages record = next;
-        next = null;
-        return record;
-      }
-    };
-  }
-
   /** Fails unless every record has been read. */
   public void ensureExhausted() throws IOException {
     if (!exhausted && (slotsLeft != 0 || in.read() != -1)) {
@@ -270,11 +259,11 @@ public final class Eip8347PreimageFile implements Closeable {
   }
 
   private int readInt() throws IOException {
-    final byte[] be = in.readNBytes(4);
-    if (be.length != 4) {
+    final byte[] be = in.readNBytes(Integer.BYTES);
+    if (be.length != Integer.BYTES) {
       throw new Eip8347ArtifactVerificationException(
           "truncated preimage slotCount (got " + be.length + " bytes)");
     }
-    return ((be[0] & 0xFF) << 24) | ((be[1] & 0xFF) << 16) | ((be[2] & 0xFF) << 8) | (be[3] & 0xFF);
+    return ByteBuffer.wrap(be).getInt();
   }
 }

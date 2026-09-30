@@ -21,23 +21,19 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieConstants;
-import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347Fixture;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347Fixture.Artifacts;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile.AccountPreimages;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
-import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -47,238 +43,101 @@ import org.junit.jupiter.api.io.TempDir;
 
 class Eip8347SnapshotGeneratorTest {
 
+  private static final Address EOA =
+      Address.fromHexString("0x00000000000000000000000000000000000000aa");
+
   @TempDir Path tmp;
 
   @Test
-  void generateEmptySnapshotFromEmptyPreimages() throws Exception {
+  void generatesAnEmptySnapshotFromEmptyPreimages() throws Exception {
     final Path preimages = tmp.resolve("empty.pre");
     final Path snapshot = tmp.resolve("empty.snap");
     Eip8347PreimageFile.write(preimages, List.of());
 
     final Eip8347SnapshotGenerator.Result result =
-        Eip8347SnapshotGenerator.generate(preimages, missingAll(), snapshot);
+        Eip8347SnapshotGenerator.generate(preimages, address -> Optional.empty(), snapshot, tmp);
 
     assertThat(result.leafCount()).isZero();
     assertThat(result.pbtRoot()).isEqualTo(TrieConstants.EMPTY_TRIE_ROOT);
     Eip8347DualCheckVerifier.verify(
-        snapshot, preimages, Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes()));
+        snapshot, preimages, Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes()), tmp);
   }
 
   @Test
-  void generateRoundTripsThroughDualCheck() throws Exception {
-    final Address eoa = Address.fromHexString("0x00000000000000000000000000000000000000aa");
-    final Address contract = Address.fromHexString("0x00000000000000000000000000000000000000bb");
-    final Bytes code = Bytes.fromHexString("0x6001600055");
+  void generatesTheCanonicalSnapshotWhateverTheSortBuffer() throws Exception {
+    final Bytes shared = Bytes.fromHexString("0x6001600055");
+    final Bytes delegation =
+        Bytes.concatenate(
+            CodeDelegationHelper.CODE_DELEGATION_PREFIX,
+            Address.fromHexString("0x00000000000000000000000000000000000000dd").getBytes());
+    final Eip8347Fixture fixture =
+        Eip8347Fixture.builder()
+            .eoa(
+                EOA,
+                1L,
+                Wei.of(1000),
+                Map.of(UInt256.ZERO, UInt256.valueOf(7), UInt256.valueOf(64), UInt256.valueOf(9)))
+            .contract(
+                Address.fromHexString("0x00000000000000000000000000000000000000b1"),
+                0L,
+                Wei.ONE,
+                shared,
+                Map.of())
+            .contract(
+                Address.fromHexString("0x00000000000000000000000000000000000000b2"),
+                3L,
+                Wei.of(2),
+                shared,
+                Map.of())
+            .contract(
+                Address.fromHexString("0x00000000000000000000000000000000000000cc"),
+                2L,
+                Wei.of(5),
+                delegation,
+                Map.of())
+            .build();
+    final Artifacts expected = fixture.write(tmp, "expected");
 
-    final Map<Address, Eip8347StateSource.AccountView> accounts = new HashMap<>();
-    accounts.put(eoa, new Eip8347StateSource.AccountView(1L, Wei.of(1000), Bytes.EMPTY));
-    accounts.put(contract, new Eip8347StateSource.AccountView(0L, Wei.of(1), code));
+    // Default buffer (one in-memory sort) and one record per run (multi-pass merge).
+    for (final long sortBuffer : new long[] {64L << 20, 1L}) {
+      final Path snapshot = tmp.resolve("generated-" + sortBuffer + ".snap");
+      final Eip8347SnapshotGenerator.Result result =
+          Eip8347SnapshotGenerator.generate(
+              expected.preimages(), fixture.stateSource(), snapshot, tmp, sortBuffer);
 
-    final Map<Address, Map<Bytes32, UInt256>> storage = new HashMap<>();
-    final Map<Bytes32, UInt256> eoaSlots = new HashMap<>();
-    eoaSlots.put(Bytes32.leftPad(UInt256.ZERO), UInt256.valueOf(7));
-    eoaSlots.put(Bytes32.leftPad(UInt256.valueOf(64)), UInt256.valueOf(9));
-    storage.put(eoa, eoaSlots);
-
-    final List<AccountPreimages> records =
-        List.of(
-            new AccountPreimages(eoa, List.copyOf(eoaSlots.keySet())),
-            new AccountPreimages(contract, List.of()));
-
-    final Path preimages = tmp.resolve("ok.pre");
-    final Path snapshot = tmp.resolve("ok.snap");
-    Eip8347PreimageFile.write(preimages, records);
-
-    final Eip8347StateSource state = mapSource(accounts, storage);
-    final Eip8347SnapshotGenerator.Result result =
-        Eip8347SnapshotGenerator.generate(preimages, state, snapshot);
-
-    assertThat(result.leafCount()).isGreaterThan(0);
-    assertThat(result.pbtRoot()).isNotEqualTo(TrieConstants.EMPTY_TRIE_ROOT);
-
-    // Fixture-equivalent MPT root via dual-check against recomputed leaves path
-    final Bytes32 mptRoot = mptRootOf(accounts, storage);
-    Eip8347DualCheckVerifier.verify(snapshot, preimages, mptRoot);
+      assertThat(result.pbtRoot()).isEqualTo(fixture.pbtRoot());
+      assertThat(result.leafCount()).isEqualTo(fixture.leaves().size());
+      assertThat(Files.readAllBytes(snapshot)).isEqualTo(Files.readAllBytes(expected.snapshot()));
+    }
+    Eip8347DualCheckVerifier.verify(
+        expected.snapshot(), expected.preimages(), fixture.mptRoot(), tmp);
   }
 
   @Test
-  void generateMatchesHandBuiltLeavesForDelegation() throws Exception {
-    final Address delegated = Address.fromHexString("0x00000000000000000000000000000000000000cc");
-    final Address target = Address.fromHexString("0x00000000000000000000000000000000000000dd");
-    final Bytes delegationCode =
-        Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
+  void rejectsPreimageOfAnAbsentAccount() throws Exception {
+    final Path preimages = tmp.resolve("absent.pre");
+    Eip8347PreimageFile.write(preimages, List.of(new AccountPreimages(EOA, List.of())));
 
-    final Map<Address, Eip8347StateSource.AccountView> accounts =
-        Map.of(delegated, new Eip8347StateSource.AccountView(2L, Wei.of(5), delegationCode));
-    final List<AccountPreimages> records = List.of(new AccountPreimages(delegated, List.of()));
-
-    final Path preimages = tmp.resolve("del.pre");
-    final Path snapshot = tmp.resolve("del.snap");
-    Eip8347PreimageFile.write(preimages, records);
-
-    final Eip8347SnapshotGenerator.Result result =
-        Eip8347SnapshotGenerator.generate(preimages, mapSource(accounts, Map.of()), snapshot);
-
-    final Bytes32 mptRoot = mptRootOf(accounts, Map.of());
-    Eip8347DualCheckVerifier.verify(snapshot, preimages, mptRoot);
-    assertThat(result.leafCount()).isEqualTo(2); // basic-data + delegation
-  }
-
-  @Test
-  void generateWithTinyRunCapacityStillRoundTrips() throws Exception {
-    final Address eoa = Address.fromHexString("0x00000000000000000000000000000000000001aa");
-    final Address contract = Address.fromHexString("0x00000000000000000000000000000000000001bb");
-    final Bytes code = Bytes.fromHexString("0x6001600055");
-
-    final Map<Address, Eip8347StateSource.AccountView> accounts = new HashMap<>();
-    accounts.put(eoa, new Eip8347StateSource.AccountView(1L, Wei.of(1000), Bytes.EMPTY));
-    accounts.put(contract, new Eip8347StateSource.AccountView(0L, Wei.of(1), code));
-
-    final Map<Address, Map<Bytes32, UInt256>> storage = new HashMap<>();
-    final Map<Bytes32, UInt256> eoaSlots = new HashMap<>();
-    eoaSlots.put(Bytes32.leftPad(UInt256.ZERO), UInt256.valueOf(7));
-    eoaSlots.put(Bytes32.leftPad(UInt256.valueOf(64)), UInt256.valueOf(9));
-    storage.put(eoa, eoaSlots);
-
-    final List<AccountPreimages> records =
-        List.of(
-            new AccountPreimages(eoa, List.copyOf(eoaSlots.keySet())),
-            new AccountPreimages(contract, List.of()));
-
-    final Path preimages = tmp.resolve("tiny-run.pre");
-    final Path snapshot = tmp.resolve("tiny-run.snap");
-    Eip8347PreimageFile.write(preimages, records);
-
-    // Force many sorted runs so k-way merge is exercised (not a single in-memory flush).
-    final Eip8347SnapshotGenerator.Result result =
-        Eip8347SnapshotGenerator.generate(preimages, mapSource(accounts, storage), snapshot, 1);
-
-    assertThat(result.leafCount()).isGreaterThan(0);
-    Eip8347DualCheckVerifier.verify(snapshot, preimages, mptRootOf(accounts, storage));
-  }
-
-  @Test
-  void sharedBytecodeEmitsCodeZoneOnce() throws Exception {
-    final Bytes code = Bytes.fromHexString("0x6001600055");
-    final Address a = Address.fromHexString("0x00000000000000000000000000000000000002aa");
-    final Address b = Address.fromHexString("0x00000000000000000000000000000000000002bb");
-    final Map<Address, Eip8347StateSource.AccountView> accounts =
-        Map.of(
-            a, new Eip8347StateSource.AccountView(0L, Wei.ONE, code),
-            b, new Eip8347StateSource.AccountView(0L, Wei.of(2), code));
-    final List<AccountPreimages> records =
-        List.of(new AccountPreimages(a, List.of()), new AccountPreimages(b, List.of()));
-
-    final Path preimages = tmp.resolve("shared-code.pre");
-    final Path snapshotDefault = tmp.resolve("shared-code.snap");
-    final Path snapshotTiny = tmp.resolve("shared-code-tiny.snap");
-    Eip8347PreimageFile.write(preimages, records);
-
-    final Eip8347SnapshotGenerator.Result once =
-        Eip8347SnapshotGenerator.generate(
-            preimages, mapSource(accounts, Map.of()), snapshotDefault);
-    final Eip8347SnapshotGenerator.Result tiny =
-        Eip8347SnapshotGenerator.generate(
-            preimages, mapSource(accounts, Map.of()), snapshotTiny, 1);
-
-    assertThat(tiny.leafCount()).isEqualTo(once.leafCount());
-    assertThat(tiny.pbtRoot()).isEqualTo(once.pbtRoot());
-    Eip8347DualCheckVerifier.verify(snapshotDefault, preimages, mptRootOf(accounts, Map.of()));
-  }
-
-  @Test
-  void rejectsPreimageForMissingAccount() throws Exception {
-    final Address missing = Address.fromHexString("0x00000000000000000000000000000000000000ee");
-    final Path preimages = tmp.resolve("miss.pre");
-    final Path snapshot = tmp.resolve("miss.snap");
-    Eip8347PreimageFile.write(preimages, List.of(new AccountPreimages(missing, List.of())));
-
-    assertThatThrownBy(() -> Eip8347SnapshotGenerator.generate(preimages, missingAll(), snapshot))
+    assertThatThrownBy(
+            () ->
+                Eip8347SnapshotGenerator.generate(
+                    preimages, address -> Optional.empty(), tmp.resolve("absent.snap"), tmp))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
         .hasMessageContaining("has no account");
   }
 
   @Test
-  void rejectsPreimageSlotWithZeroValue() throws Exception {
-    final Address eoa = Address.fromHexString("0x00000000000000000000000000000000000000ff");
-    final Map<Address, Eip8347StateSource.AccountView> accounts =
-        Map.of(eoa, new Eip8347StateSource.AccountView(0L, Wei.ONE, Bytes.EMPTY));
+  void rejectsPreimageOfAZeroSlot() throws Exception {
+    final Eip8347Fixture fixture = Eip8347Fixture.builder().eoa(EOA, 0L, Wei.ONE, Map.of()).build();
     final Path preimages = tmp.resolve("zero.pre");
-    final Path snapshot = tmp.resolve("zero.snap");
     Eip8347PreimageFile.write(
-        preimages, List.of(new AccountPreimages(eoa, List.of(Bytes32.leftPad(UInt256.ZERO)))));
+        preimages, List.of(new AccountPreimages(EOA, List.of(Bytes32.leftPad(UInt256.ZERO)))));
 
     assertThatThrownBy(
             () ->
                 Eip8347SnapshotGenerator.generate(
-                    preimages, mapSource(accounts, Map.of()), snapshot))
+                    preimages, fixture.stateSource(), tmp.resolve("zero.snap"), tmp))
         .isInstanceOf(Eip8347ArtifactVerificationException.class)
         .hasMessageContaining("zero value");
-  }
-
-  private static Eip8347StateSource missingAll() {
-    return address -> Optional.empty();
-  }
-
-  private static Eip8347StateSource mapSource(
-      final Map<Address, Eip8347StateSource.AccountView> accounts,
-      final Map<Address, Map<Bytes32, UInt256>> storage) {
-    return new Eip8347StateSource() {
-      @Override
-      public Optional<AccountView> getAccount(final Address address) {
-        return Optional.ofNullable(accounts.get(address));
-      }
-
-      @Override
-      public UInt256 getStorage(final Address address, final Bytes32 slotKey) {
-        final Map<Bytes32, UInt256> slots = storage.get(address);
-        if (slots == null) {
-          return UInt256.ZERO;
-        }
-        return slots.getOrDefault(slotKey, UInt256.ZERO);
-      }
-    };
-  }
-
-  /** Minimal MPT account-trie root for dual-check anchoring in generator tests. */
-  private static Bytes32 mptRootOf(
-      final Map<Address, Eip8347StateSource.AccountView> accounts,
-      final Map<Address, Map<Bytes32, UInt256>> storage)
-      throws Exception {
-    // Reuse fixture path: write generated snapshot+preimages already verified by DualCheckVerifier
-    // with Fixture-built mptRoot is heavy; here compute via the same Patricia helpers as Fixture.
-    final var accountTrie = new SimpleMerklePatriciaTrie<Bytes, Bytes>(Function.identity());
-    final List<Address> ordered = new ArrayList<>(accounts.keySet());
-    ordered.sort(Comparator.comparing(Address::addressHash));
-    for (final Address address : ordered) {
-      final Eip8347StateSource.AccountView state = accounts.get(address);
-      final Hash storageRoot = storageRoot(storage.getOrDefault(address, Map.of()));
-      final Hash codeHash = Hash.hash(state.code());
-      final var accountValue =
-          new PatriciaTrieAccountValue(state.nonce(), state.balance(), storageRoot, codeHash);
-      accountTrie.put(address.addressHash().getBytes(), RLP.encode(accountValue::writeTo));
-    }
-    return accountTrie.getRootHash();
-  }
-
-  private static Hash storageRoot(final Map<Bytes32, UInt256> storage) {
-    if (storage.isEmpty()) {
-      return Hash.EMPTY_TRIE_HASH;
-    }
-    final var storageTrie = new SimpleMerklePatriciaTrie<Bytes, Bytes>(Function.identity());
-    final List<Bytes32> keys = new ArrayList<>(storage.keySet());
-    keys.sort(Comparator.comparing(Hash::hash));
-    boolean any = false;
-    for (final Bytes32 key : keys) {
-      final UInt256 value = storage.get(key);
-      if (UInt256.ZERO.equals(value)) {
-        continue;
-      }
-      any = true;
-      final Bytes encoded =
-          RLP.encode(out -> out.writeBytes(Bytes32.leftPad(value).trimLeadingZeros()));
-      storageTrie.put(Hash.hash(key).getBytes(), encoded);
-    }
-    return any ? Hash.wrap(storageTrie.getRootHash()) : Hash.EMPTY_TRIE_HASH;
   }
 }

@@ -64,6 +64,7 @@ import org.hyperledger.besu.cli.options.NativeLibraryOptions;
 import org.hyperledger.besu.cli.options.NetworkingOptions;
 import org.hyperledger.besu.cli.options.NodePrivateKeyFileOption;
 import org.hyperledger.besu.cli.options.P2PDiscoveryOptions;
+import org.hyperledger.besu.cli.options.PbtMigrationOptions;
 import org.hyperledger.besu.cli.options.PermissionsOptions;
 import org.hyperledger.besu.cli.options.PluginsConfigurationOptions;
 import org.hyperledger.besu.cli.options.RPCOptions;
@@ -639,6 +640,9 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
 
   @CommandLine.ArgGroup(validate = false, heading = "@|bold Block Access List Options|@%n")
   BalConfigurationOptions balConfigurationOptions = new BalConfigurationOptions();
+
+  @CommandLine.ArgGroup(validate = false)
+  PbtMigrationOptions pbtMigrationOptions = new PbtMigrationOptions();
 
   @CommandLine.Option(
       names = {"--static-nodes-file"},
@@ -2151,6 +2155,7 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
             .networkConfiguration(unstableNetworkingOptions.toDomainObject())
             .dataDirectory(dataDir())
             .dataStorageConfiguration(getDataStorageConfiguration())
+            .pbtSnapshotBootstrap(pbtMigrationOptions.toDomainObject(dataDir()))
             .miningParameters(miningParametersSupplier.get())
             .transactionPoolConfiguration(buildTransactionPoolConfiguration())
             .nodeKey(new NodeKey(securityModule()))

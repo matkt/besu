@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtColumnOwnership;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -92,6 +93,9 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
    */
   private final Optional<Long> binaryTrieMilestone;
 
+  /** Who writes the binary-trie column: the PBT migrator before the fork, the chain after. */
+  private final PbtColumnOwnership binaryColumnOwnership;
+
   public BonsaiWorldStateProvider(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
@@ -148,6 +152,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
       final Optional<Long> amsterdamMilestone,
       final Optional<Long> binaryTrieMilestone) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
+    this.binaryColumnOwnership = new PbtColumnOwnership(worldStateKeyValueStorage);
     this.trieLogManager =
         new TrieLogManager(
             blockchain,
@@ -191,6 +196,7 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
       final Supplier<WorldStateHealer> worldStateHealerSupplier,
       final BonsaiCodeCache codeCache) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
+    this.binaryColumnOwnership = new PbtColumnOwnership(worldStateKeyValueStorage);
     this.trieLogManager = trieLogManager;
     this.blockchain = blockchain;
     this.worldStateConfig =
@@ -297,26 +303,25 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
     // Case 1 rolls in MPT; Case 2 (transition) and Case 3 roll in BINARY.
     final TrieBranchType rollBranchType =
         targetIsPbt || isPbtTransition ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+    if (rollBranchType == TrieBranchType.BINARY) {
+      binaryColumnOwnership.claimForChain();
+    }
     return queryParams.shouldWorldStateUpdateHead()
         ? getFullWorldStateFromHead(queryParams.getBlockHash(), rollBranchType, isPbtTransition)
         : getFullWorldStateFromCache(
             targetHeader, queryParams.getBlockAccessListOverlay(), rollBranchType, isPbtTransition);
   }
 
+  public PbtColumnOwnership getBinaryColumnOwnership() {
+    return binaryColumnOwnership;
+  }
+
   /**
-   * Migration-driven world state retrieval. The migrator calls this with {@code isMigration ==
-   * true} to reuse the provider's rolling/reorg mechanism (the same code path PMT uses) while
-   * keeping every non-binary-trie column untouched.
-   *
-   * <p>The returned world state is backed by a {@link MigrationScopedWorldStateKeyValueStorage}
-   * (writes scoped to the binary-trie branch column), its accumulator trusts trie-log priors (no
-   * flat-DB prior reads — the flat DB is PMT's), and state-root verification is skipped for
-   * pre-{@code binaryTime} blocks (whose headers carry a PMT root). The snapshot cache is neither
-   * read nor written: migration builds PBT state asynchronously and a cached snapshot taken before
-   * the binary trie is materialised would be stale.
-   *
-   * <p>Progress is durable: the binary-trie branch column records the last migrated block hash, so
-   * successive calls seed from that point and roll forward incrementally.
+   * World state the PBT migrator rolls: a {@code BINARY} view over the shared storage, without
+   * cached-trie preloading. It reads the binary column and never persists by itself; the migrator
+   * commits its results through a {@link MigrationScopedWorldStateKeyValueStorage} updater, which
+   * keeps the flat DB (the MPT's) untouched. Rolling trusts trie-log priors, so the flat DB is not
+   * consulted either.
    */
   public BonsaiWorldState getMigrationWorldState() {
     return new BonsaiWorldState(

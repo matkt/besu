@@ -482,6 +482,14 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
   }
 
+  /**
+   * Empties the binary-trie column only: its nodes, code reference counts and cursor. Used by the
+   * PBT migrator before a snapshot load and after a rejected one, never once the chain owns it.
+   */
+  public void clearBinaryTrie() {
+    composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
+  }
+
   public boolean pruneTrieLog(final Hash blockHash) {
     try {
       return trieLogStorage.tryDelete(blockHash.getBytes().toArrayUnsafe());

@@ -65,6 +65,7 @@ import org.hyperledger.besu.ethereum.eth.manager.snap.SnapProtocolManager;
 import org.hyperledger.besu.ethereum.eth.peervalidation.PeerValidator;
 import org.hyperledger.besu.ethereum.eth.peervalidation.RequiredBlocksPeerValidator;
 import org.hyperledger.besu.ethereum.eth.sync.DefaultSynchronizer;
+import org.hyperledger.besu.ethereum.eth.sync.PeerBlockAccessListFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.PivotBlockSelector;
 import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
@@ -82,6 +83,7 @@ import org.hyperledger.besu.ethereum.forkid.ForkIdManager;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.p2p.config.NetworkingConfiguration;
 import org.hyperledger.besu.ethereum.p2p.config.SubProtocolConfiguration;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
@@ -129,6 +131,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
@@ -224,6 +227,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
 
   /** Configuration flags related to block access lists. */
   protected BalConfiguration balConfiguration = BalConfiguration.DEFAULT;
+
+  /** EIP-8347 snapshot the PBT migrator starts from, instead of genesis. */
+  protected Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap = Optional.empty();
 
   /** The API configuration */
   protected ApiConfiguration apiConfiguration;
@@ -618,6 +624,18 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   }
 
   /**
+   * Sets the EIP-8347 snapshot the PBT migrator starts from.
+   *
+   * @param pbtSnapshotBootstrap the snapshot, preimages and anchor, or empty to start from genesis
+   * @return the besu controller builder
+   */
+  public BesuControllerBuilder pbtSnapshotBootstrap(
+      final Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap) {
+    this.pbtSnapshotBootstrap = pbtSnapshotBootstrap;
+    return this;
+  }
+
+  /**
    * check if early round change is enabled when f+1 RC messages from higher rounds are received
    *
    * @param isEarlyRoundChangeEnabled whether to enable early round change
@@ -984,7 +1002,11 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final Optional<Long> binaryTrieMilestone = protocolSchedule.milestoneFor(BINARY_TRIE);
       if (binaryTrieMilestone.isPresent()) {
         final PbtMigrator pbtMigrator =
-            createPbtMigrator(bonsaiProvider, blockchain, binaryTrieMilestone);
+            createPbtMigrator(
+                bonsaiProvider,
+                blockchain,
+                binaryTrieMilestone,
+                new PeerBlockAccessListFetcher(ethProtocolManager.ethContext())::fetch);
         additionalJsonRpcMethodFactory =
             withShadowStateRoot(
                 additionalJsonRpcMethodFactory, protocolContext, protocolSchedule, pbtMigrator);
@@ -1042,7 +1064,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   private PbtMigrator createPbtMigrator(
       final BonsaiWorldStateProvider provider,
       final Blockchain blockchain,
-      final Optional<Long> binaryTrieMilestone) {
+      final Optional<Long> binaryTrieMilestone,
+      final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers) {
     final ScheduledExecutorService migrationExecutor =
         MonitoredExecutors.newScheduledThreadPool("pbt-migrator", 1, metricsSystem);
     // Poll every second; the migrator is idle when caught up and bursts when new blocks arrive.
@@ -1051,7 +1074,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         blockchain,
         binaryTrieMilestone,
         migrationExecutor,
-        genesisConfig.streamAllocations(),
+        genesisConfig::streamAllocations,
+        pbtSnapshotBootstrap,
+        balsFromPeers,
         1000L);
   }
 

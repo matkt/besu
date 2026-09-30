@@ -16,9 +16,9 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Optional;
@@ -50,7 +50,6 @@ public final class PbtMigrationIntrospection {
         blockchain
             .getFinalized()
             .flatMap(blockchain::getBlockHeader)
-            .map(BlockHeader.class::cast)
             .filter(
                 h ->
                     BinaryTrieForkSupport.isBinaryTrieActive(h.getTimestamp(), binaryTrieMilestone))
@@ -61,13 +60,12 @@ public final class PbtMigrationIntrospection {
     }
 
     final Optional<Hash> cursorHash = storage.getWorldStateBlockHash(TrieBranchType.BINARY);
-    if (cursorHash.isEmpty() || cursorHash.get().equals(Hash.ZERO)) {
+    if (cursorHash.isEmpty()) {
       return MigrationProgressResult.running(DirectionProgressResult.idle());
     }
 
     final Hash hash = cursorHash.get();
-    final Optional<BlockHeader> cursorHeader =
-        blockchain.getBlockHeader(hash).map(BlockHeader.class::cast);
+    final Optional<BlockHeader> cursorHeader = blockchain.getBlockHeader(hash);
     if (cursorHeader.isEmpty()) {
       return MigrationProgressResult.running(
           new DirectionProgressResult("following", 0L, hash.toHexString(), "", ""));
@@ -103,8 +101,7 @@ public final class PbtMigrationIntrospection {
       final Optional<Long> binaryTrieMilestone,
       final Hash blockHash,
       final Optional<PbtMigrator> migrator) {
-    final Optional<BlockHeader> header =
-        blockchain.getBlockHeader(blockHash).map(BlockHeader.class::cast);
+    final Optional<BlockHeader> header = blockchain.getBlockHeader(blockHash);
     if (header.isEmpty() || binaryTrieMilestone.isEmpty()) {
       return Optional.empty();
     }

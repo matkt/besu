@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.ar
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Group;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.HeaderRecord;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -41,58 +42,65 @@ import org.apache.tuweni.bytes.Bytes32;
  * Canonical writer for EIP-8347 typed snapshots, fed leaves in strictly ascending PBT key order.
  *
  * <p>Heap holds one stem (≤256 leaves) plus at most {@link PendingGroups#MEMORY_LIMIT} bytes of the
- * current storage record; larger storage records spill to a temp file next to the snapshot. The
- * root and section counts are patched in place once the stream is complete.
+ * current storage record; larger storage records spill to a temp file in the given spill directory.
+ * The root and section counts are patched in place once the stream is complete.
  */
 public final class Eip8347SnapshotWriter implements Closeable {
 
   private static final int HEADER = 0;
   private static final int CODE = 1;
   private static final int STORAGE = 2;
+  private static final int SECTIONS = 3;
+
+  /** A key is {@code zone[1] | hash[32] | ...}: the address hash, or a code group's stem hash. */
+  private static final int HASH_OFFSET = 1;
+
+  /** A storage key is {@code zone[1] | addressHash[32] | stemHash[32] | subIndex[1]}. */
+  private static final int STORAGE_STEM_HASH_OFFSET = HASH_OFFSET + Bytes32.SIZE;
 
   private final Path path;
   private final CountingOutputStream out;
   private final PendingGroups pendingGroups;
-  private final long[] countPositions = new long[3];
-  private final long[] counts = new long[3];
+  private final long[] countPositions = new long[SECTIONS];
+  private final long[] counts = new long[SECTIONS];
 
   private int section = HEADER;
-  private long acceptedLeaves;
   private Bytes previousKey;
-  private final List<Eip8347SnapshotLeaf> stem = new ArrayList<>();
+  private final List<Leaf> stem = new ArrayList<>();
   private Bytes32 storageAddressHash;
   private boolean finished;
 
-  private Eip8347SnapshotWriter(final Path path) throws IOException {
+  private Eip8347SnapshotWriter(final Path path, final Path spillDir) throws IOException {
     this.path = path;
     this.out =
-        new CountingOutputStream(new BufferedOutputStream(Files.newOutputStream(path), 1 << 16));
-    final Path parent = path.toAbsolutePath().getParent();
-    this.pendingGroups = new PendingGroups(parent);
-    out.write(new byte[32]); // pbtRoot, patched by finish()
+        new CountingOutputStream(
+            new BufferedOutputStream(
+                Files.newOutputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES));
+    this.pendingGroups = new PendingGroups(spillDir);
+    out.write(new byte[Bytes32.SIZE]); // pbtRoot, patched by finish()
     countPositions[HEADER] = out.getCount();
     Eip8347TypedSnapshotCodec.writeCount(out, 0);
   }
 
-  public static Eip8347SnapshotWriter open(final Path path) throws IOException {
-    return new Eip8347SnapshotWriter(path);
+  public static Eip8347SnapshotWriter open(final Path path, final Path spillDir)
+      throws IOException {
+    return new Eip8347SnapshotWriter(path, spillDir);
   }
 
   /** Writes a whole snapshot from an unsorted, in-memory leaf list (tests and small fixtures). */
-  public static void write(
-      final Path path, final Bytes32 pbtRoot, final List<Eip8347SnapshotLeaf> leaves)
+  public static void write(final Path path, final Bytes32 pbtRoot, final List<Leaf> leaves)
       throws IOException {
-    final List<Eip8347SnapshotLeaf> sorted = new ArrayList<>(leaves);
-    sorted.sort(Comparator.comparing(Eip8347SnapshotLeaf::key, Eip8347TypedSnapshotCodec::compare));
-    try (final Eip8347SnapshotWriter writer = open(path)) {
-      for (final Eip8347SnapshotLeaf leaf : sorted) {
+    final List<Leaf> sorted = new ArrayList<>(leaves);
+    sorted.sort(Comparator.comparing(Leaf::key, Eip8347TypedSnapshotCodec::compare));
+    try (final Eip8347SnapshotWriter writer = open(path, path.toAbsolutePath().getParent())) {
+      for (final Leaf leaf : sorted) {
         writer.accept(leaf);
       }
       writer.finish(pbtRoot);
     }
   }
 
-  public void accept(final Eip8347SnapshotLeaf leaf) throws IOException {
+  public void accept(final Leaf leaf) throws IOException {
     ensureWritable();
     final Bytes key = leaf.key();
     if (previousKey != null && Eip8347TypedSnapshotCodec.compare(previousKey, key) >= 0) {
@@ -107,11 +115,10 @@ public final class Eip8347SnapshotWriter implements Closeable {
       flushStem();
     }
     stem.add(leaf);
-    acceptedLeaves++;
   }
 
-  /** Completes the artifact with {@code pbtRoot}; returns the number of leaves written. */
-  public long finish(final Bytes32 pbtRoot) throws IOException {
+  /** Completes the artifact with {@code pbtRoot}. */
+  public void finish(final Bytes32 pbtRoot) throws IOException {
     ensureWritable();
     advanceTo(STORAGE);
     flushStem();
@@ -121,12 +128,11 @@ public final class Eip8347SnapshotWriter implements Closeable {
     try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.WRITE)) {
       writeAt(channel, 0, pbtRoot.toArrayUnsafe());
       for (int s = HEADER; s <= STORAGE; s++) {
-        final ByteArrayOutputStream count = new ByteArrayOutputStream(8);
+        final ByteArrayOutputStream count = new ByteArrayOutputStream(Long.BYTES);
         Eip8347TypedSnapshotCodec.writeCount(count, counts[s]);
         writeAt(channel, countPositions[s], count.toByteArray());
       }
     }
-    return acceptedLeaves;
   }
 
   @Override
@@ -160,22 +166,25 @@ public final class Eip8347SnapshotWriter implements Closeable {
       return;
     }
     final Bytes key = stem.getFirst().key();
-    final Bytes32 firstHash = Bytes32.wrap(key.slice(1, 32));
+    final Bytes32 firstHash = Bytes32.wrap(key.slice(HASH_OFFSET, Bytes32.SIZE));
     switch (section) {
-      case HEADER ->
-          Eip8347TypedSnapshotCodec.writeHeaderRecord(
-              out, HeaderRecord.fromLeaves(firstHash, stem));
-      case CODE -> Eip8347TypedSnapshotCodec.writeGroup(out, Group.fromLeaves(firstHash, stem));
+      case HEADER -> {
+        Eip8347TypedSnapshotCodec.writeHeaderRecord(out, HeaderRecord.fromLeaves(firstHash, stem));
+        counts[HEADER]++;
+      }
+      case CODE -> {
+        Eip8347TypedSnapshotCodec.writeGroup(out, Group.fromLeaves(firstHash, stem));
+        counts[CODE]++;
+      }
       default -> {
         if (!firstHash.equals(storageAddressHash)) {
           flushStorageRecord();
           storageAddressHash = firstHash;
         }
-        pendingGroups.add(Group.fromLeaves(Bytes32.wrap(key.slice(33, 32)), stem));
+        pendingGroups.add(
+            Group.fromLeaves(
+                Bytes32.wrap(key.slice(STORAGE_STEM_HASH_OFFSET, Bytes32.SIZE)), stem));
       }
-    }
-    if (section != STORAGE) {
-      counts[section]++;
     }
     stem.clear();
   }
@@ -185,7 +194,8 @@ public final class Eip8347SnapshotWriter implements Closeable {
       return;
     }
     out.write(storageAddressHash.toArrayUnsafe());
-    Eip8347TypedSnapshotCodec.writeUint(out, pendingGroups.count(), 8);
+    Eip8347TypedSnapshotCodec.writeUint(
+        out, pendingGroups.count(), Eip8347TypedSnapshotCodec.GROUP_COUNT_WIDTH);
     pendingGroups.drainTo(out);
     counts[STORAGE]++;
   }
@@ -240,7 +250,9 @@ public final class Eip8347SnapshotWriter implements Closeable {
     void add(final Group group) throws IOException {
       if (spill == null && memory.size() >= MEMORY_LIMIT) {
         spillFile = Files.createTempFile(tempDir, "eip8347-storage-record-", ".tmp");
-        spill = new BufferedOutputStream(Files.newOutputStream(spillFile), 1 << 16);
+        spill =
+            new BufferedOutputStream(
+                Files.newOutputStream(spillFile), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
         memory.writeTo(spill);
         memory.reset();
       }

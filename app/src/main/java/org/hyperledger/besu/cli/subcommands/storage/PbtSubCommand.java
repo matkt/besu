@@ -22,10 +22,11 @@ import org.hyperledger.besu.controller.BesuController;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347SnapshotGenerator;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347StateSource;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347SnapshotGenerator.StateSource;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
 import org.hyperledger.besu.evm.worldstate.WorldState;
 
@@ -74,6 +75,10 @@ public class PbtSubCommand implements Runnable {
     spec.commandLine().usage(out);
   }
 
+  private Path workDir() {
+    return PbtMigrator.SnapshotBootstrap.workDir(parentCommand.besuCommand.dataDir());
+  }
+
   /** Dual-check verify of an EIP-8347 snapshot + preimage against an anchor block. */
   @Command(
       name = "verify",
@@ -82,6 +87,9 @@ public class PbtSubCommand implements Runnable {
       mixinStandardHelpOptions = true,
       versionProvider = VersionProvider.class)
   public static class Verify implements Runnable {
+
+    /** Default constructor for picocli. */
+    public Verify() {}
 
     @ParentCommand private PbtSubCommand parentCommand;
 
@@ -126,7 +134,8 @@ public class PbtSubCommand implements Runnable {
             header.getBlockHash(),
             header.getNumber(),
             stateRoot.toHexString());
-        Eip8347DualCheckVerifier.verify(snapshotPath, preimagesPath, stateRoot);
+        Eip8347DualCheckVerifier.verify(
+            snapshotPath, preimagesPath, stateRoot, parentCommand.workDir());
         LOG.info("EIP-8347 dual-check accepted");
         return 0;
       } catch (final Eip8347ArtifactVerificationException e) {
@@ -170,6 +179,9 @@ public class PbtSubCommand implements Runnable {
       mixinStandardHelpOptions = true,
       versionProvider = VersionProvider.class)
   public static class Convert implements Runnable {
+
+    /** Default constructor for picocli. */
+    public Convert() {}
 
     @ParentCommand private PbtSubCommand parentCommand;
 
@@ -233,10 +245,16 @@ public class PbtSubCommand implements Runnable {
             stateRoot);
         final Eip8347SnapshotGenerator.Result result =
             Eip8347SnapshotGenerator.generate(
-                effectivePreimages, Eip8347StateSource.of(worldState.get()), snapshotPath);
+                effectivePreimages,
+                StateSource.of(worldState.get()),
+                snapshotPath,
+                parentCommand.workDir());
         // Dual-check: incomplete / surplus preimages must refuse (converter step 2).
         Eip8347DualCheckVerifier.verify(
-            snapshotPath, effectivePreimages, Bytes32.wrap(stateRoot.getBytes()));
+            snapshotPath,
+            effectivePreimages,
+            Bytes32.wrap(stateRoot.getBytes()),
+            parentCommand.workDir());
         LOG.info(
             "EIP-8347 convert accepted (leaves={}, pbtRoot={})",
             result.leafCount(),

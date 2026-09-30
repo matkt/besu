@@ -18,7 +18,10 @@ import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.Embeddi
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeRefCountEncoder;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.TrieNodeCodec;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
+import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotReader.CodeUnit;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec;
@@ -31,11 +34,14 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -57,9 +63,12 @@ import org.apache.tuweni.bytes.MutableBytes;
  *       and re-chunked on its own, in parallel. Heap holds a few codes, never all of them.
  * </ol>
  *
+ * <p>Folding equal requests also counts the headers that reference each code: that count is the
+ * code's reference count, which {@link #finish} writes when loading.
+ *
  * <pre>
- * request key  CODE_ZONE|stemHash (33 B)      value  codeHash[32] | group[4] | codeSize[4]
- * group key    codeHash[32] | group[4]        value  codeSize[4] | (subIndex[1] | chunk[32])*
+ * request key  CODE_ZONE|stemHash (33 B)   value  {@code GroupRequest}
+ * row key      codeHash[32] | group[4]     value  codeSize[4] | references[8] | (subIndex[1] | chunk[32])*
  * </pre>
  */
 final class Eip8347CodeCheck {
@@ -73,17 +82,62 @@ final class Eip8347CodeCheck {
   private static final int CHUNK_BYTES = 31;
   private static final int CODES_IN_FLIGHT = 16;
 
-  private final Eip8347ExternalSorter requests;
-  private final Eip8347ExternalSorter groups;
+  /** {@code codeSize[4] | references[8]}, before a group row's entries. */
+  private static final int GROUP_ROW_HEADER_BYTES = Integer.BYTES + Long.BYTES;
+
+  /** {@code subIndex[1] | chunk[32]}. */
+  private static final int GROUP_ROW_ENTRY_BYTES = 1 + Bytes32.SIZE;
+
+  private static final NavigableMap<Integer, Bytes32> NO_ENTRIES = Collections.emptyNavigableMap();
+
+  private final Eip8347ExternalSorter codeGroupRequests;
+  private final Eip8347ExternalSorter codeGroupsByCode;
   private PeekingIterator<Entry> sortedRequests;
 
-  /** One code with every group its size spans, in group order (empty map: no leaf there). */
-  private record Code(
-      Bytes32 codeHash, int codeSize, List<NavigableMap<Integer, Bytes32>> groups) {}
+  /** One code group a header needs: {@code codeHash[32] | group[4] | codeSize[4]} when sorted. */
+  private record GroupRequest(Bytes32 codeHash, int group, int codeSize) {
 
-  Eip8347CodeCheck(final Eip8347ExternalSorter requests, final Eip8347ExternalSorter groups) {
-    this.requests = requests;
-    this.groups = groups;
+    byte[] encode() {
+      return ByteBuffer.allocate(Bytes32.SIZE + Integer.BYTES + Integer.BYTES)
+          .put(codeHash.toArrayUnsafe())
+          .putInt(group)
+          .putInt(codeSize)
+          .array();
+    }
+
+    static GroupRequest decode(final byte[] encoded) {
+      final ByteBuffer buffer = ByteBuffer.wrap(encoded);
+      final byte[] codeHash = new byte[Bytes32.SIZE];
+      buffer.get(codeHash);
+      return new GroupRequest(Bytes32.wrap(codeHash), buffer.getInt(), buffer.getInt());
+    }
+
+    /** Key of this group's row once re-sorted by code: {@code codeHash[32] | group[4]}. */
+    byte[] rowKey() {
+      return ByteBuffer.allocate(Bytes32.SIZE + Integer.BYTES)
+          .put(codeHash.toArrayUnsafe())
+          .putInt(group)
+          .array();
+    }
+  }
+
+  /** A group request and how many headers made it (headers sharing a code make the same one). */
+  private record Request(GroupRequest request, long references) {}
+
+  /**
+   * One code, the number of accounts referencing it, and every group its size spans, in group order
+   * (empty map: no leaf there).
+   */
+  private record Code(
+      Bytes32 codeHash,
+      int codeSize,
+      long references,
+      List<NavigableMap<Integer, Bytes32>> groups) {}
+
+  Eip8347CodeCheck(
+      final Eip8347ExternalSorter codeGroupRequests, final Eip8347ExternalSorter codeGroupsByCode) {
+    this.codeGroupRequests = codeGroupRequests;
+    this.codeGroupsByCode = codeGroupsByCode;
   }
 
   /** Registers a {@code kind 0x01} header. Must precede the first {@link #group} call. */
@@ -96,13 +150,8 @@ final class Eip8347CodeCheck {
           "codeSize " + codeSize + " of " + codeHash.toHexString() + " exceeds " + MAX_CODE_SIZE);
     }
     for (int g = 0; g < groupCount(codeSize); g++) {
-      requests.add(
-          stem(codeHash, g).toArray(),
-          ByteBuffer.allocate(40)
-              .put(codeHash.toArrayUnsafe())
-              .putInt(g)
-              .putInt((int) codeSize)
-              .array());
+      codeGroupRequests.add(
+          stem(codeHash, g).toArray(), new GroupRequest(codeHash, g, (int) codeSize).encode());
     }
   }
 
@@ -111,7 +160,7 @@ final class Eip8347CodeCheck {
     final PeekingIterator<Entry> pending = sortedRequests();
     final byte[] stem = unit.stem().toArrayUnsafe();
     while (pending.hasNext() && Arrays.compareUnsigned(pending.peek().key(), stem) < 0) {
-      emit(nextDistinct(pending), null);
+      emit(nextDistinct(pending), NO_ENTRIES);
     }
     if (!pending.hasNext() || Arrays.compareUnsigned(pending.peek().key(), stem) > 0) {
       throw new Eip8347ArtifactVerificationException(
@@ -122,49 +171,79 @@ final class Eip8347CodeCheck {
     emit(nextDistinct(pending), unit.group().entries());
   }
 
-  /** Completes the merge, then verifies every referenced code. */
-  void finish() throws IOException {
+  /**
+   * Completes the merge, then verifies every referenced code. When {@code referenceCounts} is set,
+   * each code's reference count goes there as the code is read.
+   *
+   * @return the number of distinct codes
+   */
+  long finish(final Optional<NodeUpdater> referenceCounts) throws IOException {
     final PeekingIterator<Entry> pending = sortedRequests();
     while (pending.hasNext()) {
-      emit(nextDistinct(pending), null);
+      emit(nextDistinct(pending), NO_ENTRIES);
     }
+    final AtomicLong distinct = new AtomicLong();
+    final Iterator<Code> codes =
+        Iterators.transform(
+            codes(codeGroupsByCode.sorted()),
+            code -> {
+              distinct.incrementAndGet();
+              referenceCounts.ifPresent(nodes -> storeReferenceCount(code, nodes));
+              return code;
+            });
     Eip8347Pipelines.run(
-        Eip8347Pipelines.from("eip8347-verify-codes", codes(groups.sorted()), CODES_IN_FLIGHT)
+        Eip8347Pipelines.from("eip8347-verify-codes", codes, CODES_IN_FLIGHT)
             .thenProcessInParallel(
                 "eip8347-verify-code", Eip8347CodeCheck::verify, Eip8347Pipelines.PARALLELISM)
             .andFinishWith("eip8347-verify-code-done", ok -> {}));
+    return distinct.get();
+  }
+
+  /** How the live trie keeps a shared code: accounts referencing it and its chunk count. */
+  private static void storeReferenceCount(final Code code, final NodeUpdater nodes) {
+    nodes.store(
+        TrieNodeCodec.codeRefCountKey(code.codeHash()),
+        null,
+        CodeRefCountEncoder.encode(
+            code.references(), (code.codeSize() + CHUNK_BYTES - 1) / CHUNK_BYTES));
   }
 
   private PeekingIterator<Entry> sortedRequests() throws IOException {
     if (sortedRequests == null) {
-      sortedRequests = Iterators.peekingIterator(requests.sorted());
+      sortedRequests = Iterators.peekingIterator(codeGroupRequests.sorted());
     }
     return sortedRequests;
   }
 
-  /** Next request, folding identical ones (headers sharing a code) and rejecting size conflicts. */
-  private static Entry nextDistinct(final PeekingIterator<Entry> pending) {
+  /**
+   * Next request, folding identical ones (headers sharing a code) into a count and rejecting size
+   * conflicts.
+   */
+  private static Request nextDistinct(final PeekingIterator<Entry> pending) {
     final Entry first = pending.next();
+    long references = 1;
     while (pending.hasNext() && Arrays.equals(pending.peek().key(), first.key())) {
       if (!Arrays.equals(pending.next().value(), first.value())) {
         throw new Eip8347ArtifactVerificationException(
             "header records disagree on codeSize for code_hash "
-                + Bytes.wrap(first.value(), 0, 32).toHexString());
+                + GroupRequest.decode(first.value()).codeHash().toHexString());
       }
+      references++;
     }
-    return first;
+    return new Request(GroupRequest.decode(first.value()), references);
   }
 
-  /** Re-keys a request (with its group's entries, if present) by {@code codeHash | group}. */
-  private void emit(final Entry request, final NavigableMap<Integer, Bytes32> entries)
+  /**
+   * Re-keys a request, with its group's entries (none: no leaf there), by {@code codeHash | group}.
+   */
+  private void emit(final Request request, final NavigableMap<Integer, Bytes32> entries)
       throws IOException {
     final ByteBuffer value =
-        ByteBuffer.allocate(4 + (entries == null ? 0 : entries.size() * 33))
-            .put(request.value(), 36, 4);
-    if (entries != null) {
-      entries.forEach((sub, chunk) -> value.put(sub.byteValue()).put(chunk.toArrayUnsafe()));
-    }
-    groups.add(Arrays.copyOf(request.value(), 36), value.array());
+        ByteBuffer.allocate(GROUP_ROW_HEADER_BYTES + entries.size() * GROUP_ROW_ENTRY_BYTES)
+            .putInt(request.request().codeSize())
+            .putLong(request.references());
+    entries.forEach((sub, chunk) -> value.put(sub.byteValue()).put(chunk.toArrayUnsafe()));
+    codeGroupsByCode.add(request.request().rowKey(), value.array());
   }
 
   /** Regroups the sorted group rows into one {@link Code} per {@code code_hash}. */
@@ -182,20 +261,23 @@ final class Eip8347CodeCheck {
           throw new NoSuchElementException();
         }
         final Bytes32 codeHash = Bytes32.wrap(it.peek().key(), 0);
-        final int codeSize = ByteBuffer.wrap(it.peek().value()).getInt();
+        final ByteBuffer first = ByteBuffer.wrap(it.peek().value());
+        final int codeSize = first.getInt();
+        final long references = first.getLong();
         final List<NavigableMap<Integer, Bytes32>> codeGroups = new ArrayList<>();
         while (it.hasNext() && Bytes32.wrap(it.peek().key(), 0).equals(codeHash)) {
-          final ByteBuffer row = ByteBuffer.wrap(it.next().value()).position(4);
+          final ByteBuffer row =
+              ByteBuffer.wrap(it.next().value()).position(GROUP_ROW_HEADER_BYTES);
           final NavigableMap<Integer, Bytes32> entries = new TreeMap<>();
           while (row.hasRemaining()) {
             final int sub = row.get() & 0xFF;
-            final byte[] chunk = new byte[32];
+            final byte[] chunk = new byte[Bytes32.SIZE];
             row.get(chunk);
             entries.put(sub, Bytes32.wrap(chunk));
           }
           codeGroups.add(entries);
         }
-        return new Code(codeHash, codeSize, codeGroups);
+        return new Code(codeHash, codeSize, references, codeGroups);
       }
     };
   }

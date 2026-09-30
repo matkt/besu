@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.ar
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.ACCOUNT_ZONE;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.BASIC_DATA_LEAF_KEY;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.CODE_HASH_LEAF_KEY;
-import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.CODE_ZONE;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.DELEGATION_CODE_SIZE;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.DELEGATION_LEAF_KEY;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.HEADER_STORAGE_OFFSET;
@@ -25,10 +24,12 @@ import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.Embeddi
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.STEM_SUBTREE_WIDTH;
 import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters.STORAGE_ZONE;
 
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.DelegationEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
+import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
 import java.io.IOException;
@@ -60,6 +61,70 @@ public final class Eip8347TypedSnapshotCodec {
   public static final int KIND_CODE = 0x01;
   public static final int KIND_DELEGATION = 0x02;
 
+  /** Maximum widths of the {@code [≤w]} integers of the format. */
+  public static final int NONCE_WIDTH = 8;
+
+  public static final int BALANCE_WIDTH = 16;
+  public static final int CODE_SIZE_WIDTH = 4;
+  public static final int VALUE_WIDTH = Bytes32.SIZE;
+  public static final int GROUP_COUNT_WIDTH = 8;
+
+  /** Header-stem leaves besides the slots: basic data, and code hash or delegation. */
+  public static final int HEADER_FIXED_LEAVES = 2;
+
+  /** Buffer of the artifact streams. */
+  public static final int IO_BUFFER_BYTES = 1 << 16;
+
+  /**
+   * One PBT leaf derived from an EIP-8347 typed snapshot: full tree key and left-padded 32-byte
+   * value.
+   *
+   * <p>The on-disk snapshot packs leaves into typed, stem-grouped records (EIP PR 12379); readers
+   * expand those records into {@code Leaf} instances before hashing.
+   */
+  @SuppressWarnings("MethodInputParametersMustBeFinal") // compact record constructor
+  public record Leaf(Bytes key, Bytes32 value) {
+
+    public Leaf {
+      if (key == null || key.isEmpty()) {
+        throw new Eip8347ArtifactVerificationException("snapshot leaf key must be non-empty");
+      }
+      if (value == null) {
+        throw new Eip8347ArtifactVerificationException("snapshot leaf value must be present");
+      }
+      validateKeyLength(key);
+      if (value.isZero()) {
+        throw new Eip8347ArtifactVerificationException(
+            "snapshot must not contain a zero-valued leaf (EIP-8297 absence rule)");
+      }
+    }
+
+    private static void validateKeyLength(final Bytes key) {
+      final int zone = key.get(0) & 0xFF;
+      final int expected =
+          switch (zone) {
+            case EmbeddingParameters.ACCOUNT_ZONE -> EmbeddingParameters.ACCOUNT_KEY_LENGTH;
+            case EmbeddingParameters.CODE_ZONE -> EmbeddingParameters.CODE_KEY_LENGTH;
+            case EmbeddingParameters.STORAGE_ZONE -> EmbeddingParameters.STORAGE_KEY_LENGTH;
+            default -> -1;
+          };
+      if (expected < 0) {
+        throw new Eip8347ArtifactVerificationException(
+            "snapshot leaf has reserved zone byte 0x" + Integer.toHexString(zone));
+      }
+      if (key.size() != expected) {
+        throw new Eip8347ArtifactVerificationException(
+            "snapshot leaf key length "
+                + key.size()
+                + " disagrees with zone 0x"
+                + Integer.toHexString(zone)
+                + " (expected "
+                + expected
+                + ")");
+      }
+    }
+  }
+
   private Eip8347TypedSnapshotCodec() {}
 
   // ---- Integers: fixed name[n], and name[≤w] = length byte | minimal big-endian bytes ----
@@ -67,7 +132,7 @@ public final class Eip8347TypedSnapshotCodec {
   /** Writes {@code value}, read as an unsigned 64-bit integer, as {@code [≤maxWidth]}. */
   public static void writeUint(final OutputStream out, final long value, final int maxWidth)
       throws IOException {
-    final int len = (Long.SIZE - Long.numberOfLeadingZeros(value) + 7) / Byte.SIZE;
+    final int len = (Long.SIZE - Long.numberOfLeadingZeros(value) + Byte.SIZE - 1) / Byte.SIZE;
     if (len > maxWidth) {
       throw new Eip8347ArtifactVerificationException(
           "typed uint does not fit in " + maxWidth + " bytes: " + Long.toUnsignedString(value));
@@ -121,14 +186,14 @@ public final class Eip8347TypedSnapshotCodec {
     if (count < 0) {
       throw new Eip8347ArtifactVerificationException("section count is negative");
     }
-    for (int i = 7; i >= 0; i--) {
+    for (int i = Long.BYTES - 1; i >= 0; i--) {
       out.write((int) (count >>> (i * Byte.SIZE)));
     }
   }
 
   public static long readCount(final InputStream in) throws IOException {
     long count = 0L;
-    for (final byte b : readFully(in, 8)) {
+    for (final byte b : readFully(in, Long.BYTES)) {
       count = (count << Byte.SIZE) | (b & 0xFF);
     }
     if (count < 0) {
@@ -182,7 +247,7 @@ public final class Eip8347TypedSnapshotCodec {
           }
         }
         case KIND_DELEGATION -> {
-          if (target == null || target.size() != 20) {
+          if (target == null || target.size() != Address.SIZE) {
             throw invalid("kind 0x02 needs a 20-byte target", addressHash);
           }
         }
@@ -201,9 +266,13 @@ public final class Eip8347TypedSnapshotCodec {
       return headerStem(addressHash);
     }
 
+    public int leafCount() {
+      return HEADER_FIXED_LEAVES + slots.size();
+    }
+
     /** Header-stem leaves per EIP-8347 leaf derivation, in sub-index order. */
-    public List<Eip8347SnapshotLeaf> leaves() {
-      final List<Eip8347SnapshotLeaf> leaves = new ArrayList<>(2 + slots.size());
+    public List<Leaf> leaves() {
+      final List<Leaf> leaves = new ArrayList<>(leafCount());
       final long basicDataCodeSize =
           switch (kind) {
             case KIND_CODE -> codeSize;
@@ -236,16 +305,15 @@ public final class Eip8347TypedSnapshotCodec {
       };
     }
 
-    private Eip8347SnapshotLeaf leaf(final int subIndex, final Bytes32 value) {
-      return new Eip8347SnapshotLeaf(Bytes.concatenate(stem(), Bytes.of((byte) subIndex)), value);
+    private Leaf leaf(final int subIndex, final Bytes32 value) {
+      return new Leaf(Bytes.concatenate(stem(), Bytes.of((byte) subIndex)), value);
     }
 
     /**
      * Packs one header stem's leaves (convert path). Rejects leaves that would not derive back byte
      * for byte, e.g. a non-zero basic-data version or reserved byte.
      */
-    public static HeaderRecord fromLeaves(
-        final Bytes32 addressHash, final List<Eip8347SnapshotLeaf> stemLeaves) {
+    public static HeaderRecord fromLeaves(final Bytes32 addressHash, final List<Leaf> stemLeaves) {
       final NavigableMap<Integer, Bytes32> bySub = bySubIndex(stemLeaves);
       final Bytes32 basicDataValue = bySub.remove(BASIC_DATA_LEAF_KEY);
       if (basicDataValue == null) {
@@ -270,7 +338,8 @@ public final class Eip8347TypedSnapshotCodec {
 
       final HeaderRecord header;
       if (delegationLeaf != null && codeHashLeaf == null) {
-        final Bytes target = delegationLeaf.slice(3, 20);
+        final Bytes target =
+            delegationLeaf.slice(DelegationEncoder.DESIGNATOR.size(), Address.SIZE);
         header =
             new HeaderRecord(
                 addressHash,
@@ -316,29 +385,22 @@ public final class Eip8347TypedSnapshotCodec {
     }
 
     /** Leaves under {@code stemPrefix || stemHash}, in sub-index order. */
-    public List<Eip8347SnapshotLeaf> leaves(final Bytes stemPrefix) {
+    public List<Leaf> leaves(final Bytes stemPrefix) {
       final Bytes stem = Bytes.concatenate(stemPrefix, stemHash);
-      final List<Eip8347SnapshotLeaf> leaves = new ArrayList<>(entries.size());
+      final List<Leaf> leaves = new ArrayList<>(entries.size());
       entries.forEach(
           (sub, value) ->
-              leaves.add(
-                  new Eip8347SnapshotLeaf(
-                      Bytes.concatenate(stem, Bytes.of(sub.byteValue())), value)));
+              leaves.add(new Leaf(Bytes.concatenate(stem, Bytes.of(sub.byteValue())), value)));
       return leaves;
     }
 
-    public static Group fromLeaves(
-        final Bytes32 stemHash, final List<Eip8347SnapshotLeaf> stemLeaves) {
+    public static Group fromLeaves(final Bytes32 stemHash, final List<Leaf> stemLeaves) {
       return new Group(stemHash, bySubIndex(stemLeaves));
     }
   }
 
   public static Bytes headerStem(final Bytes32 addressHash) {
     return Bytes.concatenate(Bytes.of((byte) ACCOUNT_ZONE), addressHash);
-  }
-
-  public static Bytes codeStem(final Bytes32 stemHash) {
-    return Bytes.concatenate(Bytes.of((byte) CODE_ZONE), stemHash);
   }
 
   /** Prefix of every storage-zone key of one account: {@code STORAGE_ZONE || addressHash}. */
@@ -350,7 +412,7 @@ public final class Eip8347TypedSnapshotCodec {
     return key.slice(0, key.size() - 1);
   }
 
-  public static int subIndexOf(final Bytes key) {
+  private static int subIndexOf(final Bytes key) {
     return key.get(key.size() - 1) & 0xFF;
   }
 
@@ -362,12 +424,12 @@ public final class Eip8347TypedSnapshotCodec {
   public static void writeHeaderRecord(final OutputStream out, final HeaderRecord header)
       throws IOException {
     out.write(header.addressHash().toArrayUnsafe());
-    writeUint(out, header.nonce(), 8);
-    writeUint(out, header.balance(), 16);
+    writeUint(out, header.nonce(), NONCE_WIDTH);
+    writeUint(out, header.balance(), BALANCE_WIDTH);
     out.write(header.kind());
     if (header.kind() == KIND_CODE) {
       out.write(header.codeHash().toArrayUnsafe());
-      writeUint(out, header.codeSize(), 4);
+      writeUint(out, header.codeSize(), CODE_SIZE_WIDTH);
     } else if (header.kind() == KIND_DELEGATION) {
       out.write(header.target().toArrayUnsafe());
     }
@@ -375,18 +437,18 @@ public final class Eip8347TypedSnapshotCodec {
   }
 
   public static HeaderRecord readHeaderRecord(final InputStream in) throws IOException {
-    final Bytes32 addressHash = Bytes32.wrap(readFully(in, 32));
-    final long nonce = readUint(in, 8);
-    final UInt256 balance = UInt256.fromBytes(Bytes.wrap(readUintBytes(in, 16)));
+    final Bytes32 addressHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
+    final long nonce = readUint(in, NONCE_WIDTH);
+    final UInt256 balance = UInt256.fromBytes(Bytes.wrap(readUintBytes(in, BALANCE_WIDTH)));
     final int kind = readByte(in);
     Bytes32 codeHash = null;
     long codeSize = 0L;
     Bytes target = null;
     if (kind == KIND_CODE) {
-      codeHash = Bytes32.wrap(readFully(in, 32));
-      codeSize = readUint(in, 4);
+      codeHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
+      codeSize = readUint(in, CODE_SIZE_WIDTH);
     } else if (kind == KIND_DELEGATION) {
-      target = Bytes.wrap(readFully(in, 20));
+      target = Bytes.wrap(readFully(in, Address.SIZE));
     }
     final int slotCount = readByte(in);
     return new HeaderRecord(
@@ -399,7 +461,7 @@ public final class Eip8347TypedSnapshotCodec {
   }
 
   public static Group readGroup(final InputStream in) throws IOException {
-    final Bytes32 stemHash = Bytes32.wrap(readFully(in, 32));
+    final Bytes32 stemHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
     final int count = readByte(in) + 1;
     return new Group(stemHash, readEntries(in, count));
   }
@@ -411,7 +473,7 @@ public final class Eip8347TypedSnapshotCodec {
     out.write(countByte);
     for (final var entry : entries.entrySet()) {
       out.write(entry.getKey());
-      writeUint(out, entry.getValue(), 32);
+      writeUint(out, entry.getValue(), VALUE_WIDTH);
     }
   }
 
@@ -425,17 +487,16 @@ public final class Eip8347TypedSnapshotCodec {
         throw new Eip8347ArtifactVerificationException(
             "record entries are not strictly ascending by index");
       }
-      entries.put(index, Bytes32.leftPad(Bytes.wrap(readUintBytes(in, 32))));
+      entries.put(index, Bytes32.leftPad(Bytes.wrap(readUintBytes(in, VALUE_WIDTH))));
       previous = index;
     }
     return entries;
   }
 
-  private static NavigableMap<Integer, Bytes32> bySubIndex(
-      final List<Eip8347SnapshotLeaf> stemLeaves) {
+  private static NavigableMap<Integer, Bytes32> bySubIndex(final List<Leaf> stemLeaves) {
     final NavigableMap<Integer, Bytes32> bySub = new TreeMap<>();
     int previous = -1;
-    for (final Eip8347SnapshotLeaf leaf : stemLeaves) {
+    for (final Leaf leaf : stemLeaves) {
       final int sub = subIndexOf(leaf.key());
       if (sub <= previous) {
         throw new Eip8347ArtifactVerificationException(

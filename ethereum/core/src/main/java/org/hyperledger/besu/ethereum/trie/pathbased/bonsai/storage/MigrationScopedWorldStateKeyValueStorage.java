@@ -37,8 +37,8 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
   }
 
   /**
-   * Returns a base {@link Updater} whose composed transaction filters writes to the binary-trie
-   * branch segment and whose trie-log transaction is a no-op.
+   * Returns a base {@link Updater} that drops flat-DB, code and trie-log writes. Trie-node writes
+   * pass through unchanged: the PBT migrator only writes binary-trie nodes and the column cursor.
    *
    * <p>Overridden (rather than reusing {@code CachedUpdater}) to prevent migration-suppressed flat
    * writes from polluting the shared flat-DB cache.

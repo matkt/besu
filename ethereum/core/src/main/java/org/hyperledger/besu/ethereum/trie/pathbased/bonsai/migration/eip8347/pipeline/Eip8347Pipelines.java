@@ -17,15 +17,19 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pi
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.services.pipeline.Pipeline;
 import org.hyperledger.besu.services.pipeline.PipelineBuilder;
+import org.hyperledger.besu.services.pipeline.exception.AsyncOperationException;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Iterator;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * Runs EIP-8347 offline pipelines on Besu's {@code services:pipeline}.
@@ -45,6 +49,14 @@ public final class Eip8347Pipelines {
 
   public static <T> PipelineBuilder<T, T> from(final String name, final Iterator<T> source) {
     return from(name, source, BUFFER_SIZE);
+  }
+
+  /**
+   * {@code function} as an asynchronous step on the common fork-join pool, for {@code
+   * thenProcessAsyncOrdered}: items are processed in parallel and come out in order.
+   */
+  public static <T, O> Function<T, CompletableFuture<O>> async(final Function<T, O> function) {
+    return item -> CompletableFuture.supplyAsync(() -> function.apply(item));
   }
 
   /** Same as {@link #from(String, Iterator)} with {@code bufferSize} items between stages. */
@@ -78,9 +90,20 @@ public final class Eip8347Pipelines {
     }
   }
 
+  /** Waits for {@code future} and rethrows its failure unwrapped, like {@link #run}. */
+  public static <T> T await(final CompletableFuture<T> future) throws IOException {
+    try {
+      return future.join();
+    } catch (final CompletionException | CancellationException e) {
+      throw rethrow(e);
+    }
+  }
+
   private static IOException rethrow(final Throwable failure) {
     Throwable cause = failure;
-    while ((cause instanceof CompletionException || cause instanceof ExecutionException)
+    while ((cause instanceof CompletionException
+            || cause instanceof ExecutionException
+            || cause instanceof AsyncOperationException)
         && cause.getCause() != null) {
       cause = cause.getCause();
     }

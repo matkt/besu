@@ -137,6 +137,10 @@ public class GetBlockAccessListsFromPeerTask implements PeerTask<List<Optional<B
 
   @Override
   public Predicate<EthPeerImmutableAttributes> getPeerRequirementFilter() {
-    return ethPeer -> ethPeer.estimatedChainHeight() >= requiredBlockchainHeight;
+    // Only eth/71 peers serve GetBlockAccessLists.
+    return ethPeer ->
+        ethPeer.estimatedChainHeight() >= requiredBlockchainHeight
+            && ethPeer.ethPeer().getAgreedCapabilities().stream()
+                .anyMatch(EthProtocol::isEth71Compatible);
   }
 }
