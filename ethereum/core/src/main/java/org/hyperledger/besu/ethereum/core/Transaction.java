@@ -54,8 +54,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Longs;
 import org.apache.tuweni.bytes.Bytes;
@@ -84,11 +84,10 @@ public class Transaction
 
   public static final BigInteger TWO = BigInteger.valueOf(2);
 
+  // Caffeine rather than Guava: senders are recovered on several threads at once, and Guava's put
+  // takes a segment lock, which showed up as contention on blocks with many transactions.
   private static final Cache<Hash, Address> senderCache =
-      CacheBuilder.newBuilder()
-          .concurrencyLevel(Runtime.getRuntime().availableProcessors())
-          .maximumSize(100_000L)
-          .build();
+      Caffeine.newBuilder().maximumSize(100_000L).build();
 
   private final long nonce;
 
