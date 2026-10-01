@@ -225,12 +225,42 @@ public class SECP256K1 extends AbstractSECP256 {
     }
   }
 
+  /*
+   * Native structures reused by recoverFromSignatureNative, one per thread. They only carry data
+   * from one native call to the next (parse -> recover -> serialize) and are never read from Java,
+   * so automatic Java <-> native copies are turned off: JNA passes the pointer as is. Each call fully
+   * overwrites a structure before the next call reads it, and a failed call aborts the recovery,
+   * so a previous recovery's content is never used. Reusing them also avoids building a JNA
+   * structure (reflection on its layout, native allocation) twice per recovery.
+   */
+  private static final ThreadLocal<LibSecp256k1.secp256k1_ecdsa_recoverable_signature>
+      RECOVERABLE_SIGNATURE =
+          ThreadLocal.withInitial(
+              () -> {
+                final LibSecp256k1.secp256k1_ecdsa_recoverable_signature signature =
+                    new LibSecp256k1.secp256k1_ecdsa_recoverable_signature();
+                signature.setAutoSynch(false);
+                // Native memory is otherwise allocated lazily on the first Java -> native copy,
+                // which no longer happens: allocate it now so the native calls get a valid pointer.
+                signature.getPointer();
+                return signature;
+              });
+
+  private static final ThreadLocal<LibSecp256k1.secp256k1_pubkey> PUBLIC_KEY =
+      ThreadLocal.withInitial(
+          () -> {
+            final LibSecp256k1.secp256k1_pubkey publicKey = new LibSecp256k1.secp256k1_pubkey();
+            publicKey.setAutoSynch(false);
+            publicKey.getPointer();
+            return publicKey;
+          });
+
   private Optional<SECPPublicKey> recoverFromSignatureNative(
       final Bytes32 dataHash, final SECPSignature signature) {
 
     // parse the sig
     final LibSecp256k1.secp256k1_ecdsa_recoverable_signature parsedSignature =
-        new LibSecp256k1.secp256k1_ecdsa_recoverable_signature();
+        RECOVERABLE_SIGNATURE.get();
     final Bytes encodedSig = signature.encodedBytes();
     if (LibSecp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact(
             LibSecp256k1.CONTEXT,
@@ -242,7 +272,7 @@ public class SECP256K1 extends AbstractSECP256 {
     }
 
     // recover the key
-    final LibSecp256k1.secp256k1_pubkey newPubKey = new LibSecp256k1.secp256k1_pubkey();
+    final LibSecp256k1.secp256k1_pubkey newPubKey = PUBLIC_KEY.get();
     if (LibSecp256k1.secp256k1_ecdsa_recover(
             LibSecp256k1.CONTEXT, newPubKey, parsedSignature, dataHash.toArrayUnsafe())
         == 0) {

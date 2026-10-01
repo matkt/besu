@@ -18,6 +18,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hyperledger.besu.crypto.Hash.keccak256;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
 import java.math.BigInteger;
@@ -25,6 +26,12 @@ import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -91,6 +98,58 @@ public class SECP256K1Test {
     final SECPSignature badSig = new SECPSignature(n, BigInteger.ONE, (byte) 0);
 
     assertThat(secp256K1.recoverPublicKeyFromSignature(dataHash, badSig)).isEmpty();
+  }
+
+  @Test
+  public void nativeRecoveryIsUnaffectedByPreviousRecoveriesOnTheSameThread() {
+    assumeTrue(secp256K1.isNative(), "native secp256k1 not available");
+    final BigInteger n = secp256K1.getHalfCurveOrder().multiply(BigInteger.TWO).add(BigInteger.ONE);
+    for (int i = 0; i < 50; i++) {
+      final KeyPair keyPair = secp256K1.generateKeyPair();
+      final Bytes32 dataHash = keccak256(Bytes.ofUnsignedInt(i));
+      final SECPSignature signature = secp256K1.sign(dataHash, keyPair);
+
+      assertThat(secp256K1.recoverPublicKeyFromSignature(dataHash, signature))
+          .contains(keyPair.getPublicKey());
+      // A failing recovery in between must not leak into the next one.
+      assertThat(
+              secp256K1.recoverPublicKeyFromSignature(
+                  dataHash, new SECPSignature(n, BigInteger.ONE, (byte) 0)))
+          .isEmpty();
+    }
+  }
+
+  @Test
+  public void nativeRecoveryIsThreadSafe() throws Exception {
+    assumeTrue(secp256K1.isNative(), "native secp256k1 not available");
+    final int threads = 8;
+    final ExecutorService executor = Executors.newFixedThreadPool(threads);
+    try {
+      final List<Future<Boolean>> results = new ArrayList<>();
+      for (int t = 0; t < threads; t++) {
+        final int seed = t;
+        results.add(
+            executor.submit(
+                () -> {
+                  for (int i = 0; i < 200; i++) {
+                    final KeyPair keyPair = secp256K1.generateKeyPair();
+                    final Bytes32 dataHash = keccak256(Bytes.ofUnsignedInt(seed * 1_000 + i));
+                    final SECPSignature signature = secp256K1.sign(dataHash, keyPair);
+                    if (!secp256K1
+                        .recoverPublicKeyFromSignature(dataHash, signature)
+                        .equals(Optional.of(keyPair.getPublicKey()))) {
+                      return false;
+                    }
+                  }
+                  return true;
+                }));
+      }
+      for (final Future<Boolean> result : results) {
+        assertThat(result.get()).isTrue();
+      }
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   @Test
