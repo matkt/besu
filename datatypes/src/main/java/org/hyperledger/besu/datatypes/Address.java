@@ -25,8 +25,6 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.jspecify.annotations.Nullable;
@@ -94,8 +92,11 @@ public final class Address extends BytesHolder implements Comparable<Address> {
   /** The constant ZERO. */
   public static final Address ZERO = Address.wrap(Bytes.fromHexStringLenient("0x0", SIZE));
 
-  static final Cache<Address, Hash> hashCache =
-      Caffeine.newBuilder().executor(Runnable::run).maximumSize(4_000).build();
+  /**
+   * Keccak256 of this address, computed on first use. Racy single-check idiom: {@link Hash} is
+   * immutable, so a thread may at worst compute it again.
+   */
+  private @Nullable Hash addressHash;
 
   /**
    * Instantiates a new Address.
@@ -225,12 +226,21 @@ public final class Address extends BytesHolder implements Comparable<Address> {
   }
 
   /**
-   * Returns the hash of the address. Backed by a cache for performance reasons.
+   * Returns the hash of the address, computed once per instance.
+   *
+   * <p>Memoized on the instance rather than in a shared bounded cache: a block touches far more
+   * addresses than such a cache can hold, so it kept missing, and evicting on the calling thread
+   * cost several times the hash itself.
    *
    * @return the hash of the address.
    */
   public Hash addressHash() {
-    return hashCache.get(this, k -> Hash.hash(k.getBytes()));
+    Hash hash = addressHash;
+    if (hash == null) {
+      hash = Hash.hash(getBytes());
+      addressHash = hash;
+    }
+    return hash;
   }
 
   /**
