@@ -23,6 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
 /**
  * Account and storage-slot lookup over a {@link BlockAccessList}, built once per block and shared
  * across all transactions. Does not resolve transaction boundaries; use {@link
@@ -40,7 +43,19 @@ public final class BlockAccessListAccountLookup {
     this.accountChanges = accountChanges;
   }
 
+  /**
+   * Lookups by block access list instance (identity, weakly referenced). Processing a block builds
+   * the lookup for both the parallel execution and the state root computation; this shares one.
+   * Lookups are immutable once built.
+   */
+  private static final Cache<BlockAccessList, BlockAccessListAccountLookup> LOOKUPS =
+      Caffeine.newBuilder().weakKeys().maximumSize(16).build();
+
   public static BlockAccessListAccountLookup of(final BlockAccessList blockAccessList) {
+    return LOOKUPS.get(blockAccessList, BlockAccessListAccountLookup::build);
+  }
+
+  private static BlockAccessListAccountLookup build(final BlockAccessList blockAccessList) {
     final List<BlockAccessList.AccountChanges> accountChanges = blockAccessList.accountChanges();
     final Map<Address, AccountEntry> entries = HashMap.newHashMap(accountChanges.size());
     for (final BlockAccessList.AccountChanges changes : accountChanges) {

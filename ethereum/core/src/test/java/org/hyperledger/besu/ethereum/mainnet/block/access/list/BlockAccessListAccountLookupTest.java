@@ -75,4 +75,19 @@ class BlockAccessListAccountLookupTest {
     assertThat(index.getAddressHash(ABSENT_ADDRESS)).isEmpty();
     assertThat(index.getSlotChanges(ABSENT_ADDRESS, SLOT)).isEmpty();
   }
+
+  @Test
+  void sameBlockAccessListSharesOneLookup() {
+    final BlockAccessList bal =
+        new BlockAccessList(
+            List.of(
+                new AccountChanges(
+                    ADDRESS, List.of(), List.of(), List.of(), List.of(), List.of())));
+    final BlockAccessList equalButDistinct = new BlockAccessList(bal.accountChanges());
+
+    assertThat(BlockAccessListAccountLookup.of(bal)).isSameAs(BlockAccessListAccountLookup.of(bal));
+    // Keyed by identity: an equal but distinct block access list gets its own lookup.
+    assertThat(BlockAccessListAccountLookup.of(equalButDistinct))
+        .isNotSameAs(BlockAccessListAccountLookup.of(bal));
+  }
 }
