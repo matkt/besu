@@ -120,6 +120,39 @@ public class SECP256K1Test {
   }
 
   @Test
+  public void jnaRecoveryIsUnaffectedByPreviousRecoveriesOnTheSameThread() {
+    assumeTrue(secp256K1.isNative(), "native secp256k1 not available");
+    final BigInteger n = secp256K1.getHalfCurveOrder().multiply(BigInteger.TWO).add(BigInteger.ONE);
+    for (int i = 0; i < 50; i++) {
+      final KeyPair keyPair = secp256K1.generateKeyPair();
+      final Bytes32 dataHash = keccak256(Bytes.ofUnsignedInt(i));
+      final SECPSignature signature = secp256K1.sign(dataHash, keyPair);
+
+      assertThat(secp256K1.recoverFromSignatureJna(dataHash, signature))
+          .contains(keyPair.getPublicKey());
+      assertThatThrownBy(
+              () ->
+                  secp256K1.recoverFromSignatureJna(
+                      dataHash, new SECPSignature(n, BigInteger.ONE, (byte) 0)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Test
+  public void nativeRecoveryRejectsZeroSignatureValues() {
+    assumeTrue(secp256K1.isNative(), "native secp256k1 not available");
+    final Bytes32 dataHash = keccak256(Bytes.wrap("test".getBytes(UTF_8)));
+    assertThat(
+            secp256K1.recoverPublicKeyFromSignature(
+                dataHash, new SECPSignature(BigInteger.ZERO, BigInteger.ONE, (byte) 0)))
+        .isEmpty();
+    assertThat(
+            secp256K1.recoverPublicKeyFromSignature(
+                dataHash, new SECPSignature(BigInteger.ONE, BigInteger.ZERO, (byte) 1)))
+        .isEmpty();
+  }
+
+  @Test
   public void nativeRecoveryIsThreadSafe() throws Exception {
     assumeTrue(secp256K1.isNative(), "native secp256k1 not available");
     final int threads = 8;

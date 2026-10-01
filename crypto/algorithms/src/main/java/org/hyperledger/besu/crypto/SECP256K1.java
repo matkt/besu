@@ -20,6 +20,7 @@ import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1;
 import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1.secp256k1_ecdsa_recoverable_signature;
 import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1.secp256k1_ecdsa_signature;
 import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1.secp256k1_pubkey;
+import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1JNI;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -255,7 +256,50 @@ public class SECP256K1 extends AbstractSECP256 {
             return publicKey;
           });
 
+  /*
+   * The JNI ecrecover entry point of besu-native, much cheaper to call than the JNA one: no JNA
+   * structures, argument marshalling or by-reference values. LibSecp256k1 must be loaded first.
+   */
+  private static final boolean JNI_RECOVERY_AVAILABLE = isJniRecoveryAvailable();
+
+  private static boolean isJniRecoveryAvailable() {
+    try {
+      return LibSecp256k1.CONTEXT != null && LibSecp256k1JNI.ENABLED;
+    } catch (final UnsatisfiedLinkError | NoClassDefFoundError e) {
+      LOG.info("secp256k1 JNI ecrecover not available: {}", e.getMessage());
+      return false;
+    }
+  }
+
   private Optional<SECPPublicKey> recoverFromSignatureNative(
+      final Bytes32 dataHash, final SECPSignature signature) {
+    // The JNI entry point only takes recovery ids 0 and 1; 2 and 3 (r >= n, practically never
+    // used) go through JNA.
+    if (JNI_RECOVERY_AVAILABLE && (signature.getRecId() == 0 || signature.getRecId() == 1)) {
+      return recoverFromSignatureJni(dataHash, signature);
+    }
+    return recoverFromSignatureJna(dataHash, signature);
+  }
+
+  /**
+   * Recovers the public key through the JNI entry point. libsecp256k1 rejects r or s out of range
+   * (when parsing) and zero (when recovering), which is reported as a failure, as with JNA.
+   */
+  private Optional<SECPPublicKey> recoverFromSignatureJni(
+      final Bytes32 dataHash, final SECPSignature signature) {
+    final byte[] compactSignature = signature.encodedBytes().slice(0, 64).toArrayUnsafe();
+    final byte[] recovered = new byte[65];
+    if (LibSecp256k1JNI.secp256k1_ecrecover_jni(
+            dataHash.toArrayUnsafe(), compactSignature, signature.getRecId(), recovered)
+        != LibSecp256k1JNI.STATUS_SUCCESS) {
+      return Optional.empty();
+    }
+    // Uncompressed encoding: 0x04 prefix followed by the 64-byte key.
+    return Optional.of(SECPPublicKey.create(Bytes.wrap(recovered, 1, 64), ALGORITHM));
+  }
+
+  /** Recovers the public key through the JNA bindings. Visible for testing. */
+  Optional<SECPPublicKey> recoverFromSignatureJna(
       final Bytes32 dataHash, final SECPSignature signature) {
 
     // parse the sig
