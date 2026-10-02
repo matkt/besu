@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState.StoredRootAndBlockHash;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 
 import org.slf4j.Logger;
@@ -24,6 +25,9 @@ import org.slf4j.LoggerFactory;
 
 public class BonsaiCachedWorldStateView implements StorageSubscriber {
   private BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
+  // Read once: every world state created for this block starts from them (one per transaction
+  // during parallel block execution), and the storage is a point-in-time copy of the block state.
+  private volatile StoredRootAndBlockHash storedRootAndBlockHash;
   private final BlockHeader blockHeader;
   private long worldViewSubscriberId;
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiCachedWorldStateView.class);
@@ -32,11 +36,16 @@ public class BonsaiCachedWorldStateView implements StorageSubscriber {
       final BlockHeader blockHeader, final BonsaiWorldStateKeyValueStorage worldView) {
     this.blockHeader = blockHeader;
     this.worldStateKeyValueStorage = worldView;
+    this.storedRootAndBlockHash = StoredRootAndBlockHash.readFrom(worldView);
     this.worldViewSubscriberId = worldStateKeyValueStorage.subscribe(this);
   }
 
   public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
     return worldStateKeyValueStorage;
+  }
+
+  public StoredRootAndBlockHash getStoredRootAndBlockHash() {
+    return storedRootAndBlockHash;
   }
 
   public long getBlockNumber() {
@@ -62,6 +71,7 @@ public class BonsaiCachedWorldStateView implements StorageSubscriber {
     this.worldStateKeyValueStorage.unSubscribe(this.worldViewSubscriberId);
     final BonsaiWorldStateKeyValueStorage oldWorldStateStorage = this.worldStateKeyValueStorage;
     this.worldStateKeyValueStorage = newWorldStateStorage;
+    this.storedRootAndBlockHash = StoredRootAndBlockHash.readFrom(newWorldStateStorage);
     this.worldViewSubscriberId = newSubscriberId;
     try {
       oldWorldStateStorage.close();
