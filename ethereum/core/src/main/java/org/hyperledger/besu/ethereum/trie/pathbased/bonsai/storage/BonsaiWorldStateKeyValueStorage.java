@@ -420,9 +420,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
    */
   public Optional<Bytes> getAccountStateTrieNodeFromCacheOrStorage(
       final Bytes location, final Bytes32 nodeHash) {
-    if (!FlatDbCacheManager.isCachedAccountTrieNodeLocation(location)) {
-      return getAccountStateTrieNode(location, nodeHash);
-    }
     return cacheManager
         .getAccountTrieNode(nodeHash)
         .or(
@@ -436,9 +433,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   /** Storage trie counterpart of {@link #getAccountStateTrieNodeFromCacheOrStorage}. */
   public Optional<Bytes> getAccountStorageTrieNodeFromCacheOrStorage(
       final Hash accountHash, final Bytes location, final Bytes32 nodeHash) {
-    if (!FlatDbCacheManager.isCachedStorageTrieNodeLocation(location)) {
-      return getAccountStorageTrieNode(accountHash, location, nodeHash);
-    }
     return cacheManager
         .getStorageTrieNode(nodeHash)
         .or(
@@ -715,7 +709,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     /** Single map per segment. Value {@code null} encodes a staged removal (last-write-wins). */
     private final Map<SegmentIdentifier, Map<Bytes, Bytes>> pending = new HashMap<>();
 
-    /** Committed trie nodes near the root, keyed by hash. */
+    /** Committed trie nodes, keyed by hash. */
     private final Map<Bytes32, Bytes> pendingAccountTrieNodes = new HashMap<>();
 
     private final Map<Bytes32, Bytes> pendingStorageTrieNodes = new HashMap<>();
@@ -769,8 +763,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     @Override
     public synchronized Updater putAccountStateTrieNode(
         final Bytes location, final Bytes32 nodeHash, final Bytes node) {
-      if (FlatDbCacheManager.isCachedAccountTrieNodeLocation(location)
-          && !nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      if (!nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         pendingAccountTrieNodes.put(nodeHash, node);
       }
       return super.putAccountStateTrieNode(location, nodeHash, node);
@@ -779,8 +772,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     @Override
     public synchronized Updater putAccountStorageTrieNode(
         final Hash accountHash, final Bytes location, final Bytes32 nodeHash, final Bytes node) {
-      if (FlatDbCacheManager.isCachedStorageTrieNodeLocation(location)
-          && !nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      if (!nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
         pendingStorageTrieNodes.put(nodeHash, node);
       }
       return super.putAccountStorageTrieNode(accountHash, location, nodeHash, node);

@@ -105,7 +105,7 @@ Because the version counter advances on **every commit** along the actually exec
 - `ACCOUNT_INFO_STATE`
 - `ACCOUNT_STORAGE_STORAGE`
 
-It also keeps an unversioned cache of **trie nodes near the root** (account trie locations of at most `MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH` nibbles, storage trie locations of at most `MAX_CACHED_STORAGE_TRIE_NODE_DEPTH`). Trie nodes are keyed by hash, so an entry is valid at every version. Every node on a modified path gets a new hash, so these nodes are filled on commit and on read misses, and served to the trie walks of `BonsaiCachedMerkleTrieLoader`. A hit only says what the node is, not that storage holds it at that location, so presence checks keep going through `getAccountStateTrieNode`.
+It also keeps an unversioned cache of **trie nodes**, at every depth, filled on commit, on read misses and by the block access list prefetch. Trie nodes are keyed by hash, so an entry is valid at every version. Every node on a modified path gets a new hash, so these nodes are filled on commit and on read misses, and served to the trie walks of `BonsaiCachedMerkleTrieLoader`. A hit only says what the node is, not that storage holds it at that location, so presence checks keep going through `getAccountStateTrieNode`.
 
 Code is not covered.
 

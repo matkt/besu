@@ -432,38 +432,27 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
   }
 
   @Test
-  void commitCachesTrieNodesNearTheRootOnly() throws Exception {
+  void commitCachesTrieNodesAtAnyDepth() throws Exception {
     newHead(true);
     final Hash account = Hash.hash(Bytes.of(50));
-    final Bytes shallowAccountNode = Bytes.of(1, 1);
+    final Bytes rootAccountNode = Bytes.of(1, 1);
     final Bytes deepAccountNode = Bytes.of(1, 2);
-    final Bytes shallowStorageNode = Bytes.of(2, 1);
+    final Bytes rootStorageNode = Bytes.of(2, 1);
     final Bytes deepStorageNode = Bytes.of(2, 2);
-    final Bytes shallowAccountLocation =
-        nibbles(FlatDbCacheManager.MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH);
-    final Bytes deepAccountLocation =
-        nibbles(FlatDbCacheManager.MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH + 1);
-    final Bytes shallowStorageLocation =
-        nibbles(FlatDbCacheManager.MAX_CACHED_STORAGE_TRIE_NODE_DEPTH);
-    final Bytes deepStorageLocation =
-        nibbles(FlatDbCacheManager.MAX_CACHED_STORAGE_TRIE_NODE_DEPTH + 1);
 
     final var u = (BonsaiWorldStateKeyValueStorage.CachedUpdater) head.updater();
-    u.putAccountStateTrieNode(
-        shallowAccountLocation, hashOf(shallowAccountNode), shallowAccountNode);
-    u.putAccountStateTrieNode(deepAccountLocation, hashOf(deepAccountNode), deepAccountNode);
-    u.putAccountStorageTrieNode(
-        account, shallowStorageLocation, hashOf(shallowStorageNode), shallowStorageNode);
-    u.putAccountStorageTrieNode(
-        account, deepStorageLocation, hashOf(deepStorageNode), deepStorageNode);
+    u.putAccountStateTrieNode(Bytes.EMPTY, hashOf(rootAccountNode), rootAccountNode);
+    u.putAccountStateTrieNode(nibbles(40), hashOf(deepAccountNode), deepAccountNode);
+    u.putAccountStorageTrieNode(account, Bytes.EMPTY, hashOf(rootStorageNode), rootStorageNode);
+    u.putAccountStorageTrieNode(account, nibbles(40), hashOf(deepStorageNode), deepStorageNode);
     u.commit();
 
     final FlatDbCacheManager cache = head.getCacheManager();
-    assertThat(cache.getAccountTrieNode(hashOf(shallowAccountNode))).contains(shallowAccountNode);
-    assertThat(cache.getAccountTrieNode(hashOf(deepAccountNode))).isEmpty();
-    assertThat(cache.getStorageTrieNode(hashOf(shallowStorageNode))).contains(shallowStorageNode);
-    assertThat(cache.getStorageTrieNode(hashOf(deepStorageNode))).isEmpty();
-    assertThat(head.getCacheSize(TRIE_BRANCH_STORAGE)).isEqualTo(2);
+    assertThat(cache.getAccountTrieNode(hashOf(rootAccountNode))).contains(rootAccountNode);
+    assertThat(cache.getAccountTrieNode(hashOf(deepAccountNode))).contains(deepAccountNode);
+    assertThat(cache.getStorageTrieNode(hashOf(rootStorageNode))).contains(rootStorageNode);
+    assertThat(cache.getStorageTrieNode(hashOf(deepStorageNode))).contains(deepStorageNode);
+    assertThat(head.getCacheSize(TRIE_BRANCH_STORAGE)).isEqualTo(4);
   }
 
   @Test
@@ -478,7 +467,7 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
   }
 
   @Test
-  void trieNodeReadNearTheRootIsServedFromCache() throws Exception {
+  void trieNodeReadIsServedFromCacheAtAnyDepth() throws Exception {
     newHead(true);
     final Bytes node = Bytes.of(4, 1);
     head.getCacheManager().putAccountTrieNode(hashOf(node), node);
@@ -487,14 +476,12 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
     assertThat(head.getAccountStateTrieNode(Bytes.EMPTY, hashOf(node))).isEmpty();
     assertThat(head.getAccountStateTrieNodeFromCacheOrStorage(Bytes.EMPTY, hashOf(node)))
         .contains(node);
-    assertThat(
-            head.getAccountStateTrieNodeFromCacheOrStorage(
-                nibbles(FlatDbCacheManager.MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH + 1), hashOf(node)))
-        .isEmpty();
+    assertThat(head.getAccountStateTrieNodeFromCacheOrStorage(nibbles(40), hashOf(node)))
+        .contains(node);
   }
 
   @Test
-  void trieNodeReadMissNearTheRootPopulatesCache() throws Exception {
+  void trieNodeReadMissPopulatesCache() throws Exception {
     newHead(true);
     final Hash account = Hash.hash(Bytes.of(51));
     final Bytes accountNode = Bytes.of(5, 1);

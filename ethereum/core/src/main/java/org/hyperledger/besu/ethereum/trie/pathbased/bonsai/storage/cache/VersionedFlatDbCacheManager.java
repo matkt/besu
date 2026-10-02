@@ -53,8 +53,14 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Upper bound for {@code initialCapacity} (must fit in a positive int). */
   private static final long MAX_INITIAL_CAPACITY = Integer.MAX_VALUE;
 
-  private static final long ACCOUNT_TRIE_NODE_CACHE_SIZE = 100_000;
-  private static final long STORAGE_TRIE_NODE_CACHE_SIZE = 100_000;
+  /**
+   * Trie nodes are cached at every depth, so the bound must hold the nodes one block walks (e.g. a
+   * 40k-account block on a large state walks about 200k account trie nodes): past 1.5x the bound,
+   * eviction runs before the block ends and may drop nodes of the current block.
+   */
+  private static final long ACCOUNT_TRIE_NODE_CACHE_SIZE = 500_000;
+
+  private static final long STORAGE_TRIE_NODE_CACHE_SIZE = 500_000;
 
   private final AtomicLong globalVersion = new AtomicLong(0);
 
@@ -65,8 +71,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private final BlockLruCache<VersionedValue> storageCache;
 
   /**
-   * Trie nodes near the root, keyed by hash. Every node on a modified path gets a new hash, so
-   * without them the next block's walk would read back from storage the nodes just committed.
+   * Trie nodes, keyed by hash. Every node on a modified path gets a new hash, so without them the
+   * next block's walk would read back from storage the nodes just committed.
    */
   private final BlockLruCache<Bytes> accountTrieNodeCache;
 

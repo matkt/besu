@@ -34,12 +34,6 @@ public interface FlatDbCacheManager {
 
   FlatDbCacheManager NO_OP_CACHE = new FlatDbCacheManager() {};
 
-  /** Deepest account trie node location, in nibbles, kept in the trie node cache. */
-  int MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH = 4;
-
-  /** Deepest storage trie node location, in nibbles, kept in the trie node cache. */
-  int MAX_CACHED_STORAGE_TRIE_NODE_DEPTH = 3;
-
   default long getCurrentVersion() {
     return 0;
   }
@@ -124,19 +118,6 @@ public interface FlatDbCacheManager {
 
   default void putStorageTrieNode(final Bytes32 nodeHash, final Bytes node) {
     // No-op
-  }
-
-  /**
-   * Only nodes near the root are cached: they lie on the paths of most modifications, so the next
-   * block walks them again, while deeper nodes are rarely revisited before being replaced.
-   */
-  static boolean isCachedAccountTrieNodeLocation(final Bytes location) {
-    return location.size() <= MAX_CACHED_ACCOUNT_TRIE_NODE_DEPTH;
-  }
-
-  /** See {@link #isCachedAccountTrieNodeLocation(Bytes)}. */
-  static boolean isCachedStorageTrieNodeLocation(final Bytes location) {
-    return location.size() <= MAX_CACHED_STORAGE_TRIE_NODE_DEPTH;
   }
 
   default long getCacheSize(final SegmentIdentifier segment) {
