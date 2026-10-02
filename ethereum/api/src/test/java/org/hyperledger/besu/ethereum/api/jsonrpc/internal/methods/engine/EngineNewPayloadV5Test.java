@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +44,7 @@ import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
+import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.util.List;
@@ -195,6 +197,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     final BlockProcessor blockProcessor = mock(BlockProcessor.class);
     when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
     when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    when(protocolSpec.getGasCalculator()).thenReturn(mock(GasCalculator.class));
     final BlockHeader header =
         setupPayloadV5(
             getMinSupportedTimestamp(),
@@ -227,6 +230,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     final BlockProcessor blockProcessor = mock(BlockProcessor.class);
     when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
     when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    when(protocolSpec.getGasCalculator()).thenReturn(mock(GasCalculator.class));
     final BlockHeader header =
         setupPayloadV5(
             getMinSupportedTimestamp(),
@@ -241,6 +245,27 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     assertThat(resp.getStatus()).isEqualTo(INVALID);
     assertThat(resp.getError()).startsWith("Failed to decode transactions from block parameter");
     verify(blockProcessor).prefetchBlockAccessList(any(), any(), eq(BLOCK_ACCESS_LIST));
+  }
+
+  @Test
+  public void shouldNotPrefetchABlockAccessListOverTheItemBudget() {
+    final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    final GasCalculator gasCalculator = mock(GasCalculator.class);
+    // no item fits in the gas limit
+    when(gasCalculator.getBlockAccessListItemCost()).thenReturn(Long.MAX_VALUE);
+    when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
+    when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    when(protocolSpec.getGasCalculator()).thenReturn(gasCalculator);
+    final BlockHeader header =
+        setupPayloadV5(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.empty()),
+            BLOCK_ACCESS_LIST,
+            0L);
+
+    respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
+
+    verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
   }
 
   protected BlockHeader setupPayloadV5(

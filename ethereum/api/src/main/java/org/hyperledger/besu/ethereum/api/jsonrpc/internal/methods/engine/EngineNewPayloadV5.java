@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
+import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
@@ -118,18 +119,35 @@ public sealed class EngineNewPayloadV5<
     try {
       final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
       final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
+      final long gasLimit = Long.decode((String) rawPayload.get("gasLimit"));
       protocolContext
           .getBlockchain()
           .getBlockHeader(parentHash)
           .ifPresent(
-              parentHeader ->
-                  protocolSchedule
-                      .getForNextBlockHeader(parentHeader, timestamp)
-                      .getBlockProcessor()
-                      .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList));
+              parentHeader -> {
+                final ProtocolSpec protocolSpec =
+                    protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
+                if (exceedsItemBudget(blockAccessList, gasLimit, protocolSpec)) {
+                  // the block is invalid and will be rejected: do not read for it
+                  return;
+                }
+                protocolSpec
+                    .getBlockProcessor()
+                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList);
+              });
     } catch (final RuntimeException e) {
       LOG.debug("Could not start the state prefetch of a payload", e);
     }
+  }
+
+  /**
+   * The EIP-7928 item budget the block validation enforces later: a block access list over it
+   * belongs to an invalid block, and its size is up to its producer.
+   */
+  private static boolean exceedsItemBudget(
+      final BlockAccessList blockAccessList, final long gasLimit, final ProtocolSpec protocolSpec) {
+    final long itemCost = protocolSpec.getGasCalculator().getBlockAccessListItemCost();
+    return itemCost > 0 && blockAccessList.eip7928ItemCount() > gasLimit / itemCost;
   }
 
   @Override
