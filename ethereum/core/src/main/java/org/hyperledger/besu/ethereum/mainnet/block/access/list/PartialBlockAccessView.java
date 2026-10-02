@@ -14,8 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
+import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 
@@ -29,7 +29,6 @@ import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Represents a partial view of a Block Access List (BAL) for a single transaction within a block.
@@ -96,16 +95,6 @@ public final class PartialBlockAccessView {
     }
   }
 
-  /**
-   * State of an account as the transaction read it, before changing it.
-   *
-   * @param nonce the nonce
-   * @param balance the balance
-   * @param storageRoot the storage root
-   * @param codeHash the code hash
-   */
-  public record PriorAccount(long nonce, Wei balance, Hash storageRoot, Hash codeHash) {}
-
   public static final class AccountChanges {
     private final Address address;
     private Optional<Wei> postBalance;
@@ -114,14 +103,11 @@ public final class PartialBlockAccessView {
     private final List<StorageSlotKey> storageReads;
     private final List<SlotChange> storageChanges;
 
-    /** Whether {@link #priorAccount} was captured. */
-    private final boolean priorKnown;
-
     /**
-     * The account as the transaction read it, before changing it ({@link
-     * SlotChange#previousValue()} for the account itself); {@code null} if it did not exist.
+     * The account as the transaction read it, before changing it: the account counterpart of {@link
+     * SlotChange#previousValue()}. Empty when not captured.
      */
-    private final @Nullable PriorAccount priorAccount;
+    private final Optional<AccountValue> priorAccount;
 
     public AccountChanges(
         final Address address,
@@ -130,7 +116,14 @@ public final class PartialBlockAccessView {
         final Optional<Bytes> newCode,
         final List<StorageSlotKey> storageReads,
         final List<SlotChange> storageChanges) {
-      this(address, postBalance, nonceChange, newCode, storageReads, storageChanges, false, null);
+      this(
+          address,
+          postBalance,
+          nonceChange,
+          newCode,
+          storageReads,
+          storageChanges,
+          Optional.empty());
     }
 
     public AccountChanges(
@@ -140,35 +133,14 @@ public final class PartialBlockAccessView {
         final Optional<Bytes> newCode,
         final List<StorageSlotKey> storageReads,
         final List<SlotChange> storageChanges,
-        final boolean priorKnown,
-        final @Nullable PriorAccount priorAccount) {
+        final Optional<AccountValue> priorAccount) {
       this.address = address;
       this.postBalance = postBalance;
       this.nonceChange = nonceChange;
       this.newCode = newCode;
       this.storageReads = storageReads;
       this.storageChanges = storageChanges;
-      this.priorKnown = priorKnown;
       this.priorAccount = priorAccount;
-    }
-
-    /**
-     * Returns whether the account as the transaction read it was captured.
-     *
-     * @return true if {@link #getPriorAccount()} is known
-     */
-    public boolean isPriorKnown() {
-      return priorKnown;
-    }
-
-    /**
-     * Returns the account as the transaction read it, before changing it. Only meaningful when
-     * {@link #isPriorKnown()}.
-     *
-     * @return the prior account, or empty if the account did not exist
-     */
-    public Optional<PriorAccount> getPriorAccount() {
-      return Optional.ofNullable(priorAccount);
     }
 
     public Address getAddress() {
@@ -197,6 +169,10 @@ public final class PartialBlockAccessView {
 
     public List<SlotChange> getStorageChanges() {
       return storageChanges;
+    }
+
+    public Optional<AccountValue> getPriorAccount() {
+      return priorAccount;
     }
 
     @Override
@@ -253,8 +229,7 @@ public final class PartialBlockAccessView {
     private Optional<Bytes> newCode = Optional.empty();
     private final List<StorageSlotKey> storageReads = new ArrayList<>();
     private final List<SlotChange> storageChanges = new ArrayList<>();
-    private boolean priorKnown;
-    private @Nullable PriorAccount priorAccount;
+    private Optional<AccountValue> priorAccount = Optional.empty();
 
     public AccountChangesBuilder(final Address address) {
       this.address = address;
@@ -275,15 +250,8 @@ public final class PartialBlockAccessView {
       return this;
     }
 
-    /**
-     * Records the account as the transaction read it.
-     *
-     * @param priorAccount the prior account, or {@code null} if the account did not exist
-     * @return this builder
-     */
-    public AccountChangesBuilder withPrior(final @Nullable PriorAccount priorAccount) {
-      this.priorKnown = true;
-      this.priorAccount = priorAccount;
+    public AccountChangesBuilder withPriorAccount(final AccountValue priorAccount) {
+      this.priorAccount = Optional.of(priorAccount);
       return this;
     }
 
@@ -300,14 +268,7 @@ public final class PartialBlockAccessView {
 
     public AccountChanges build() {
       return new AccountChanges(
-          address,
-          postBalance,
-          nonceChange,
-          newCode,
-          storageReads,
-          storageChanges,
-          priorKnown,
-          priorAccount);
+          address, postBalance, nonceChange, newCode, storageReads, storageChanges, priorAccount);
     }
   }
 }

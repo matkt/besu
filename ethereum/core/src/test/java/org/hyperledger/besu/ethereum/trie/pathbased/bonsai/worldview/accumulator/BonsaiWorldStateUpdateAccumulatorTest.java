@@ -25,6 +25,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -92,15 +93,13 @@ class BonsaiWorldStateUpdateAccumulatorTest {
           (BonsaiWorldStateUpdateAccumulator) seeded.updater();
       final BonsaiAccount stored = (BonsaiAccount) seeded.get(ACCOUNT);
 
-      loadingAccumulator.importStateChangesFromPartialView(
-          accountView(0, Wei.of(20), 4L, false, null));
+      loadingAccumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 4L, null));
       seededAccumulator.importStateChangesFromPartialView(
           accountView(
               0,
               Wei.of(20),
               4L,
-              true,
-              new PartialBlockAccessView.PriorAccount(
+              new PmtStateTrieAccountValue(
                   stored.getNonce(),
                   stored.getBalance(),
                   stored.getStorageRoot(),
@@ -124,10 +123,10 @@ class BonsaiWorldStateUpdateAccumulatorTest {
       final BonsaiWorldStateUpdateAccumulator accumulator =
           (BonsaiWorldStateUpdateAccumulator) worldState.updater();
       // Deliberately different from what is stored: proves the account is not read again.
-      final PartialBlockAccessView.PriorAccount prior =
-          new PartialBlockAccessView.PriorAccount(9L, Wei.of(99), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+      final AccountValue prior =
+          new PmtStateTrieAccountValue(9L, Wei.of(99), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
 
-      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 10L, true, prior));
+      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 10L, prior));
 
       accumulator.commit();
 
@@ -140,48 +139,20 @@ class BonsaiWorldStateUpdateAccumulatorTest {
   }
 
   @Test
-  void importPartialView_capturedAbsentPrior_givesSameValuesAsLoadingTheAccount() {
-    try (BonsaiWorldState loading = newEmptyWorldState();
-        BonsaiWorldState seeded = newEmptyWorldState()) {
-      final BonsaiWorldStateUpdateAccumulator loadingAccumulator =
-          (BonsaiWorldStateUpdateAccumulator) loading.updater();
-      final BonsaiWorldStateUpdateAccumulator seededAccumulator =
-          (BonsaiWorldStateUpdateAccumulator) seeded.updater();
-
-      loadingAccumulator.importStateChangesFromPartialView(
-          accountView(0, Wei.of(5), 1L, false, null));
-      seededAccumulator.importStateChangesFromPartialView(
-          accountView(0, Wei.of(5), 1L, true, null));
-
-      loadingAccumulator.commit();
-      seededAccumulator.commit();
-
-      final BonsaiValue<BonsaiAccount> seededValue =
-          seededAccumulator.getAccountsToUpdate().get(ACCOUNT);
-      assertThat(seededValue.getPrior()).isNull();
-      assertSameAccountValue(seededValue, loadingAccumulator.getAccountsToUpdate().get(ACCOUNT));
-      assertSameAccountValue(
-          trieLog(seededAccumulator).getAccountChanges().get(ACCOUNT),
-          trieLog(loadingAccumulator).getAccountChanges().get(ACCOUNT));
-    }
-  }
-
-  @Test
   void importPartialView_capturedPriorOfAnAccountAlreadyChanged_isIgnored() {
     try (BonsaiWorldState worldState = newWorldStateWithAccount()) {
       final BonsaiWorldStateUpdateAccumulator accumulator =
           (BonsaiWorldStateUpdateAccumulator) worldState.updater();
       final BonsaiAccount stored = (BonsaiAccount) worldState.get(ACCOUNT);
 
-      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 4L, false, null));
+      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 4L, null));
       // A later transaction read the account as left by the first one.
       accumulator.importStateChangesFromPartialView(
           accountView(
               1,
               Wei.of(30),
               5L,
-              true,
-              new PartialBlockAccessView.PriorAccount(
+              new PmtStateTrieAccountValue(
                   4L, Wei.of(20), stored.getStorageRoot(), stored.getCodeHash())));
 
       accumulator.commit();
@@ -195,11 +166,7 @@ class BonsaiWorldStateUpdateAccumulatorTest {
   }
 
   private static PartialBlockAccessView accountView(
-      final long txIndex,
-      final Wei postBalance,
-      final long nonce,
-      final boolean priorKnown,
-      final PartialBlockAccessView.PriorAccount prior) {
+      final long txIndex, final Wei postBalance, final long nonce, final AccountValue prior) {
     final PartialBlockAccessView.PartialBlockAccessViewBuilder builder =
         new PartialBlockAccessView.PartialBlockAccessViewBuilder().withTxIndex(txIndex);
     final PartialBlockAccessView.AccountChangesBuilder account =
@@ -207,8 +174,8 @@ class BonsaiWorldStateUpdateAccumulatorTest {
             .getOrCreateAccountBuilder(ACCOUNT)
             .withPostBalance(postBalance)
             .withNonceChange(nonce);
-    if (priorKnown) {
-      account.withPrior(prior);
+    if (prior != null) {
+      account.withPriorAccount(prior);
     }
     return builder.build();
   }

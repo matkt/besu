@@ -53,7 +53,6 @@ import com.google.common.base.Suppliers;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -162,8 +161,18 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         continue;
       }
 
-      if (accountChanges.isPriorKnown()) {
-        loadAccountFromPrior(address, accountChanges.getPriorAccount().orElse(null));
+      // As for slots (SlotChange#previousValue), use the account as the transaction read it rather
+      // than loading it again: changes are imported in block order, so if it is not here yet, no
+      // earlier transaction changed it and the transaction read its state before the block.
+      final Optional<AccountValue> priorAccount = accountChanges.getPriorAccount();
+      if (priorAccount.isPresent()
+          && !accountsToUpdate.containsKey(address)
+          && !(wrappedWorldView() instanceof PathBasedWorldStateUpdateAccumulator<?>)) {
+        final ACCOUNT prior = createAccount(this, address, priorAccount.get(), false);
+        final BonsaiValue<ACCOUNT> loaded =
+            new BonsaiValue<>(prior, copyAccount(prior, this, true));
+        onAccountValueLoaded(address, loaded);
+        accountsToUpdate.put(address, loaded);
       }
       MutableAccount accountValue = getOrCreate(address);
 
@@ -405,46 +414,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       final Address address,
       final StorageSlotKey storageSlotKey,
       final BonsaiValue<UInt256> storageValue) {}
-
-  /**
-   * Loads an account into this accumulator from its state as a transaction read it, instead of
-   * reading it again from the world state (the account counterpart of {@link
-   * PartialBlockAccessView.SlotChange#previousValue()}).
-   *
-   * <p>Only applies to an account not in this accumulator yet. Changes are imported transaction by
-   * transaction in block order, and an account changed by an earlier transaction would already be
-   * here, so the transaction read the account as it was before the block: the same prior value as
-   * {@link #loadAccount} would read. Does nothing when this accumulator stacks on another one.
-   *
-   * @param address the account address
-   * @param prior the account as the transaction read it, or {@code null} if it did not exist
-   */
-  @SuppressWarnings("unchecked")
-  private void loadAccountFromPrior(
-      final Address address, final PartialBlockAccessView.@Nullable PriorAccount prior) {
-    if (accountsToUpdate.containsKey(address)
-        || wrappedWorldView() instanceof PathBasedWorldStateUpdateAccumulator<?>) {
-      return;
-    }
-    final BonsaiValue<ACCOUNT> accountValue;
-    if (prior == null) {
-      accountValue = new BonsaiValue<>(null, null);
-    } else {
-      final ACCOUNT priorAccount =
-          createAccount(
-              this,
-              address,
-              address.addressHash(),
-              prior.nonce(),
-              prior.balance(),
-              prior.storageRoot(),
-              prior.codeHash(),
-              false);
-      accountValue = new BonsaiValue<>(priorAccount, copyAccount(priorAccount, this, true));
-    }
-    onAccountValueLoaded(address, accountValue);
-    accountsToUpdate.put(address, accountValue);
-  }
 
   public ACCOUNT loadAccount(
       final Address address, final Function<BonsaiValue<ACCOUNT>, ACCOUNT> accountFunction) {
