@@ -104,27 +104,10 @@ public final class PartialBlockAccessView {
     private final List<SlotChange> storageChanges;
 
     /**
-     * The account as the transaction read it, before changing it: the account counterpart of {@link
+     * The account at the start of the transaction: the account counterpart of {@link
      * SlotChange#previousValue()}. Empty when not captured.
      */
     private final Optional<AccountValue> priorAccount;
-
-    public AccountChanges(
-        final Address address,
-        final Optional<Wei> postBalance,
-        final Optional<Long> nonceChange,
-        final Optional<Bytes> newCode,
-        final List<StorageSlotKey> storageReads,
-        final List<SlotChange> storageChanges) {
-      this(
-          address,
-          postBalance,
-          nonceChange,
-          newCode,
-          storageReads,
-          storageChanges,
-          Optional.empty());
-    }
 
     public AccountChanges(
         final Address address,
@@ -171,7 +154,6 @@ public final class PartialBlockAccessView {
       return storageChanges;
     }
 
-    /** The account as it was at the start of the transaction, when the tracker captured it. */
     public Optional<AccountValue> getPriorAccount() {
       return priorAccount;
     }

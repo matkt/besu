@@ -161,20 +161,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         continue;
       }
 
-      // As for slots (SlotChange#previousValue), use the account as it was at the start of the
-      // transaction rather than loading it again. Changes are imported in block order, so if it is
-      // not here yet, no earlier transaction changed it: its state at the start of the transaction
-      // is its state before the block.
-      final Optional<AccountValue> priorAccount = accountChanges.getPriorAccount();
-      if (priorAccount.isPresent()
-          && !accountsToUpdate.containsKey(address)
-          && !(wrappedWorldView() instanceof PathBasedWorldStateUpdateAccumulator<?>)) {
-        final ACCOUNT prior = createAccount(this, address, priorAccount.get(), false);
-        final BonsaiValue<ACCOUNT> loaded =
-            new BonsaiValue<>(prior, copyAccount(prior, this, true));
-        onAccountValueLoaded(address, loaded);
-        accountsToUpdate.put(address, loaded);
-      }
+      trackPriorAccount(accountChanges);
       MutableAccount accountValue = getOrCreate(address);
 
       boolean shouldCheckForEmptyAccount = false;
@@ -226,6 +213,25 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       }
     }
     this.isAccumulatorStateChanged = true;
+  }
+
+  /**
+   * Tracks the account as the transaction found it at its start, so that {@link #getOrCreate} does
+   * not load it again: the account counterpart of {@link
+   * PartialBlockAccessView.SlotChange#previousValue()}. Changes are imported in block order, so an
+   * account not tracked yet was not changed by an earlier transaction, and its state at the start
+   * of the transaction is its state before the block.
+   */
+  private void trackPriorAccount(final PartialBlockAccessView.AccountChanges accountChanges) {
+    final Address address = accountChanges.getAddress();
+    final Optional<AccountValue> priorAccount = accountChanges.getPriorAccount();
+    // Stacked on another accumulator, loadAccount takes the prior from it.
+    if (priorAccount.isEmpty()
+        || accountsToUpdate.containsKey(address)
+        || wrappedWorldView() instanceof PathBasedWorldStateUpdateAccumulator<?>) {
+      return;
+    }
+    trackLoadedAccount(address, createAccount(this, address, priorAccount.get(), false));
   }
 
   private enum ImportMode {
@@ -428,12 +434,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         }
         final Account account = wrappedWorldView().get(address);
         if (account instanceof BonsaiAccount pathBasedAccount) {
-          final ACCOUNT updatedAccount = copyAccount((ACCOUNT) pathBasedAccount, this, true);
-          final BonsaiValue<ACCOUNT> accountValue =
-              new BonsaiValue<>((ACCOUNT) pathBasedAccount, updatedAccount);
-          onAccountValueLoaded(address, accountValue);
-          accountsToUpdate.put(address, accountValue);
-          return accountFunction.apply(accountValue);
+          return accountFunction.apply(trackLoadedAccount(address, (ACCOUNT) pathBasedAccount));
         }
         final BonsaiValue<ACCOUNT> accountValue = new BonsaiValue<>(null, null);
         onAccountValueLoaded(address, accountValue);
@@ -450,6 +451,15 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       throw new MerkleTrieException(
           e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
     }
+  }
+
+  /** Tracks an existing account: its stored value as prior and a mutable copy as updated value. */
+  private BonsaiValue<ACCOUNT> trackLoadedAccount(final Address address, final ACCOUNT stored) {
+    final BonsaiValue<ACCOUNT> accountValue =
+        new BonsaiValue<>(stored, copyAccount(stored, this, true));
+    onAccountValueLoaded(address, accountValue);
+    accountsToUpdate.put(address, accountValue);
+    return accountValue;
   }
 
   @Override
