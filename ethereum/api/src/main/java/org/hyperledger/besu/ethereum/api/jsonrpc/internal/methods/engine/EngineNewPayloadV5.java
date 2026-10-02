@@ -15,8 +15,10 @@
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine;
 
 import org.hyperledger.besu.datatypes.HardforkId;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV1;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV4;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.NewPayloadRequestParametersV3;
@@ -27,8 +29,11 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -40,6 +45,7 @@ public sealed class EngineNewPayloadV5<
     extends EngineNewPayloadV4<EP, NPRP> permits EngineNewPayloadWithWitnessV5 {
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV5.class);
+  private static final String BLOCK_ACCESS_LIST = "blockAccessList";
 
   public EngineNewPayloadV5(
       final ConstructorArguments constructorArguments,
@@ -73,26 +79,56 @@ public sealed class EngineNewPayloadV5<
   }
 
   /**
-   * Prefetches the state the block access list touches, so that it is mostly in cache once the
-   * block is executed, after the block hash and the block are validated. A payload that turns out
-   * to be invalid only warmed the cache.
+   * Decodes the block access list first and starts prefetching the state it touches, then decodes
+   * the rest of the payload, mostly its transactions, while the prefetch runs. The block access
+   * list is decoded once, and the payload carries the instance the prefetch was started with.
    */
   @Override
-  protected void startStatePrefetch(final NPRP requestParameters) {
-    final EP payload = requestParameters.payloadParameter();
+  protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
+    if (!(requestContext.getRequest().getParams()[0] instanceof Map<?, ?> rawPayload)
+        || rawPayload.get(BLOCK_ACCESS_LIST) == null) {
+      return super.readPayloadParameter(requestContext);
+    }
+    final BlockAccessList blockAccessList =
+        convertPayloadParameter(
+                Map.of(BLOCK_ACCESS_LIST, rawPayload.get(BLOCK_ACCESS_LIST)),
+                BlockAccessListField.class)
+            .blockAccessList();
+    startStatePrefetch(rawPayload, blockAccessList);
+
+    final Map<Object, Object> payloadWithoutBlockAccessList = new LinkedHashMap<>(rawPayload);
+    payloadWithoutBlockAccessList.remove(BLOCK_ACCESS_LIST);
+    final ExecutionPayloadV4 payload =
+        (ExecutionPayloadV4)
+            convertPayloadParameter(payloadWithoutBlockAccessList, getPayloadParameterClass());
+    payload.setBlockAccessList(blockAccessList);
+    return payload;
+  }
+
+  /** The block access list field of a payload, decoded on its own. */
+  record BlockAccessListField(BlockAccessList blockAccessList) {}
+
+  /**
+   * Prefetches the state the block access list touches, so that it is mostly in cache once the
+   * block is executed. Starts before the payload is validated: a payload that turns out to be
+   * invalid only warmed the cache.
+   */
+  private void startStatePrefetch(
+      final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
     try {
+      final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
+      final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
       protocolContext
           .getBlockchain()
-          .getBlockHeader(payload.getParentHash())
+          .getBlockHeader(parentHash)
           .ifPresent(
               parentHeader ->
                   protocolSchedule
-                      .getForNextBlockHeader(parentHeader, payload.getTimestamp())
+                      .getForNextBlockHeader(parentHeader, timestamp)
                       .getBlockProcessor()
-                      .prefetchBlockAccessList(
-                          protocolContext, parentHeader, payload.getBlockAccessList()));
+                      .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList));
     } catch (final RuntimeException e) {
-      LOG.debug("Could not start the state prefetch of payload {}", payload.getBlockHash(), e);
+      LOG.debug("Could not start the state prefetch of a payload", e);
     }
   }
 
@@ -141,7 +177,7 @@ public sealed class EngineNewPayloadV5<
       if (maybeJsonPath.isPresent()) {
         final String jsonPath = maybeJsonPath.get();
 
-        if (jsonPath.equals("blockAccessList")) {
+        if (jsonPath.equals(BLOCK_ACCESS_LIST)) {
           final String validationError =
               "Failed to decode block access list payload parameter ("
                   + fieldEx.getOriginalMessage()
