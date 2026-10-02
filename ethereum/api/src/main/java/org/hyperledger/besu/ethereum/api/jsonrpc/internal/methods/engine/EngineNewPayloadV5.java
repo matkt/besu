@@ -72,6 +72,30 @@ public sealed class EngineNewPayloadV5<
         .slotNumber(requestParameters.payloadParameter().getSlotNumber());
   }
 
+  /**
+   * Prefetches the state the block access list touches, so that it is mostly in cache once the
+   * block is executed, after the block hash and the block are validated. A payload that turns out
+   * to be invalid only warmed the cache.
+   */
+  @Override
+  protected void startStatePrefetch(final NPRP requestParameters) {
+    final EP payload = requestParameters.payloadParameter();
+    try {
+      protocolContext
+          .getBlockchain()
+          .getBlockHeader(payload.getParentHash())
+          .ifPresent(
+              parentHeader ->
+                  protocolSchedule
+                      .getForNextBlockHeader(parentHeader, payload.getTimestamp())
+                      .getBlockProcessor()
+                      .prefetchBlockAccessList(
+                          protocolContext, parentHeader, payload.getBlockAccessList()));
+    } catch (final RuntimeException e) {
+      LOG.debug("Could not start the state prefetch of payload {}", payload.getBlockHash(), e);
+    }
+  }
+
   @Override
   protected ValidationResult<RpcErrorType> validateParameters(final NPRP requestParameters) {
     final ValidationResult<RpcErrorType> result = super.validateParameters(requestParameters);

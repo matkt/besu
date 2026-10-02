@@ -149,6 +149,8 @@ public sealed class EngineNewPayloadV1<
       return new JsonRpcErrorResponse(reqId, parameterValidationResult.getInvalidReason());
     }
 
+    startStatePrefetch(requestParameters);
+
     // 2. Client software MUST validate blockHash value as being equivalent to
     // Keccak256(RLP(ExecutionBlockHeader)), where ExecutionBlockHeader is the execution layer block
     // header (the former PoW block header structure). Fields of this object are set to the
@@ -316,6 +318,14 @@ public sealed class EngineNewPayloadV1<
     }
     return blockParam;
   }
+
+  /**
+   * Starts reading ahead, in the background, the state that the payload will need, while it is
+   * validated. Does nothing by default.
+   *
+   * @param requestParameters the parsed request parameters
+   */
+  protected void startStatePrefetch(final NPRP requestParameters) {}
 
   @SuppressWarnings("unchecked")
   protected NPRP readRequestParameters(final JsonRpcRequestContext requestContext) {

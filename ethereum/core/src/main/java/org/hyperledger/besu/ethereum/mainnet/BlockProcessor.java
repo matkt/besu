@@ -19,6 +19,7 @@ import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
@@ -52,6 +53,19 @@ public interface BlockProcessor {
       return !isSuccessful();
     }
   }
+
+  /**
+   * Starts reading ahead the state that the access list of an upcoming block touches, before the
+   * block itself is validated and processed. Does nothing by default.
+   *
+   * @param protocolContext the current context of the protocol
+   * @param parentHeader the header of the parent of the upcoming block
+   * @param blockAccessList the block access list of the upcoming block
+   */
+  default void prefetchBlockAccessList(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final BlockAccessList blockAccessList) {}
 
   /**
    * Processes the block.

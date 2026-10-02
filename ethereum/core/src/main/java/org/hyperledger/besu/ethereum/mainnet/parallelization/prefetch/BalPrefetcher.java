@@ -19,8 +19,13 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.ProtocolContext;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 
 import java.util.ArrayList;
@@ -28,6 +33,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -60,6 +66,62 @@ public class BalPrefetcher {
   public BalPrefetcher(final boolean isSortingEnabled, final int batchSize) {
     this.isSortingEnabled = isSortingEnabled;
     this.batchSize = batchSize;
+  }
+
+  /**
+   * Returns the prefetcher configured by {@code balConfiguration}, empty when BAL prefetch is
+   * disabled or the block access list does not drive the parallel execution.
+   *
+   * @param balConfiguration the BAL configuration
+   * @return the configured prefetcher, if enabled
+   */
+  public static Optional<BalPrefetcher> fromConfiguration(final BalConfiguration balConfiguration) {
+    return balConfiguration.isPerfectParallelizationEnabled()
+            && balConfiguration.isBalPreFetchReadingEnabled()
+        ? Optional.of(
+            new BalPrefetcher(
+                balConfiguration.isBalPreFetchSortingEnabled(),
+                balConfiguration.getBalPreFetchBatchSize()))
+        : Optional.empty();
+  }
+
+  /**
+   * Prefetches the state that {@code blockAccessList} touches, as of {@code parentHeader}, on a
+   * world state of its own that is closed once done.
+   *
+   * @param protocolContext the protocol context, for the world state archive
+   * @param parentHeader the header of the parent of the block the access list belongs to
+   * @param blockAccessList the block access list
+   */
+  public void prefetch(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final BlockAccessList blockAccessList) {
+    final Optional<BonsaiWorldState> maybeWorldState =
+        protocolContext
+            .getWorldStateArchive()
+            .getWorldState(
+                WorldStateQueryParams.newBuilder()
+                    .withBlockHeader(parentHeader)
+                    .withShouldWorldStateUpdateHead(false)
+                    .build())
+            .map(BonsaiWorldState.class::cast);
+    if (maybeWorldState.isEmpty()) {
+      LOG.info("Prefetch skipped, world state of block {} not available", parentHeader);
+      return;
+    }
+    final BonsaiWorldState worldState = maybeWorldState.get();
+    prefetch(
+            worldState,
+            blockAccessList,
+            BlockProcessingExecutors.ioExecutor(),
+            BlockProcessingExecutors.ioExecutor())
+        .exceptionally(
+            ex -> {
+              LOG.error("Prefetch failed", ex);
+              return null;
+            })
+        .whenComplete((result, ex) -> worldState.close());
   }
 
   /**
