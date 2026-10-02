@@ -19,6 +19,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.AccountChangesBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.PartialBlockAccessViewBuilder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.Eip7928AccessList;
 import org.hyperledger.besu.evm.worldstate.StackedUpdater;
@@ -135,6 +136,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
       }
 
       final Account wrappedAccount = account.getWrappedAccount();
+      capturePrior(accountBuilder, wrappedAccount);
       final Wei newBalance = account.getBalance();
       final long newNonce = account.getNonce();
       final Bytes newCode = account.getCode();
@@ -186,6 +188,24 @@ public class AccessLocationTracker implements Eip7928AccessList {
       }
     }
     return builder.build();
+  }
+
+  /**
+   * Records the account as the transaction read it, so that importing the changes into the block
+   * does not have to load it again. Only captured when the storage root is known.
+   */
+  private static void capturePrior(
+      final AccountChangesBuilder accountBuilder, final Account wrappedAccount) {
+    if (wrappedAccount == null) {
+      accountBuilder.withPrior(null);
+    } else if (wrappedAccount instanceof BonsaiAccount bonsaiAccount) {
+      accountBuilder.withPrior(
+          new PartialBlockAccessView.PriorAccount(
+              bonsaiAccount.getNonce(),
+              bonsaiAccount.getBalance(),
+              bonsaiAccount.getStorageRoot(),
+              bonsaiAccount.getCodeHash()));
+    }
   }
 
   private Account findOriginalAccount(final WorldUpdater updater, final Address address) {

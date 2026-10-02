@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulato
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 
+import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -24,6 +25,7 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.BonsaiTrieLogFactory;
@@ -78,6 +80,174 @@ class BonsaiWorldStateUpdateAccumulatorTest {
       assertThat(trieLogSlot.getPrior()).isEqualTo(V0);
       assertThat(trieLogSlot.getUpdated()).isEqualTo(V2);
     }
+  }
+
+  @Test
+  void importPartialView_capturedPrior_givesSameValuesAndTrieLogAsLoadingTheAccount() {
+    try (BonsaiWorldState loading = newWorldStateWithAccount();
+        BonsaiWorldState seeded = newWorldStateWithAccount()) {
+      final BonsaiWorldStateUpdateAccumulator loadingAccumulator =
+          (BonsaiWorldStateUpdateAccumulator) loading.updater();
+      final BonsaiWorldStateUpdateAccumulator seededAccumulator =
+          (BonsaiWorldStateUpdateAccumulator) seeded.updater();
+      final BonsaiAccount stored = (BonsaiAccount) seeded.get(ACCOUNT);
+
+      loadingAccumulator.importStateChangesFromPartialView(
+          accountView(0, Wei.of(20), 4L, false, null));
+      seededAccumulator.importStateChangesFromPartialView(
+          accountView(
+              0,
+              Wei.of(20),
+              4L,
+              true,
+              new PartialBlockAccessView.PriorAccount(
+                  stored.getNonce(),
+                  stored.getBalance(),
+                  stored.getStorageRoot(),
+                  stored.getCodeHash())));
+
+      loadingAccumulator.commit();
+      seededAccumulator.commit();
+
+      assertSameAccountValue(
+          seededAccumulator.getAccountsToUpdate().get(ACCOUNT),
+          loadingAccumulator.getAccountsToUpdate().get(ACCOUNT));
+      assertSameAccountValue(
+          trieLog(seededAccumulator).getAccountChanges().get(ACCOUNT),
+          trieLog(loadingAccumulator).getAccountChanges().get(ACCOUNT));
+    }
+  }
+
+  @Test
+  void importPartialView_capturedPrior_isUsedInsteadOfReadingTheWorldState() {
+    try (BonsaiWorldState worldState = newWorldStateWithAccount()) {
+      final BonsaiWorldStateUpdateAccumulator accumulator =
+          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      // Deliberately different from what is stored: proves the account is not read again.
+      final PartialBlockAccessView.PriorAccount prior =
+          new PartialBlockAccessView.PriorAccount(9L, Wei.of(99), Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 10L, true, prior));
+
+      accumulator.commit();
+
+      final BonsaiValue<BonsaiAccount> value = accumulator.getAccountsToUpdate().get(ACCOUNT);
+      assertThat(value.getPrior().getNonce()).isEqualTo(9L);
+      assertThat(value.getPrior().getBalance()).isEqualTo(Wei.of(99));
+      assertThat(value.getUpdated().getNonce()).isEqualTo(10L);
+      assertThat(value.getUpdated().getBalance()).isEqualTo(Wei.of(20));
+    }
+  }
+
+  @Test
+  void importPartialView_capturedAbsentPrior_givesSameValuesAsLoadingTheAccount() {
+    try (BonsaiWorldState loading = newEmptyWorldState();
+        BonsaiWorldState seeded = newEmptyWorldState()) {
+      final BonsaiWorldStateUpdateAccumulator loadingAccumulator =
+          (BonsaiWorldStateUpdateAccumulator) loading.updater();
+      final BonsaiWorldStateUpdateAccumulator seededAccumulator =
+          (BonsaiWorldStateUpdateAccumulator) seeded.updater();
+
+      loadingAccumulator.importStateChangesFromPartialView(
+          accountView(0, Wei.of(5), 1L, false, null));
+      seededAccumulator.importStateChangesFromPartialView(
+          accountView(0, Wei.of(5), 1L, true, null));
+
+      loadingAccumulator.commit();
+      seededAccumulator.commit();
+
+      final BonsaiValue<BonsaiAccount> seededValue =
+          seededAccumulator.getAccountsToUpdate().get(ACCOUNT);
+      assertThat(seededValue.getPrior()).isNull();
+      assertSameAccountValue(seededValue, loadingAccumulator.getAccountsToUpdate().get(ACCOUNT));
+      assertSameAccountValue(
+          trieLog(seededAccumulator).getAccountChanges().get(ACCOUNT),
+          trieLog(loadingAccumulator).getAccountChanges().get(ACCOUNT));
+    }
+  }
+
+  @Test
+  void importPartialView_capturedPriorOfAnAccountAlreadyChanged_isIgnored() {
+    try (BonsaiWorldState worldState = newWorldStateWithAccount()) {
+      final BonsaiWorldStateUpdateAccumulator accumulator =
+          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+      final BonsaiAccount stored = (BonsaiAccount) worldState.get(ACCOUNT);
+
+      accumulator.importStateChangesFromPartialView(accountView(0, Wei.of(20), 4L, false, null));
+      // A later transaction read the account as left by the first one.
+      accumulator.importStateChangesFromPartialView(
+          accountView(
+              1,
+              Wei.of(30),
+              5L,
+              true,
+              new PartialBlockAccessView.PriorAccount(
+                  4L, Wei.of(20), stored.getStorageRoot(), stored.getCodeHash())));
+
+      accumulator.commit();
+
+      final BonsaiValue<BonsaiAccount> value = accumulator.getAccountsToUpdate().get(ACCOUNT);
+      assertThat(value.getPrior().getNonce()).isEqualTo(stored.getNonce());
+      assertThat(value.getPrior().getBalance()).isEqualTo(stored.getBalance());
+      assertThat(value.getUpdated().getNonce()).isEqualTo(5L);
+      assertThat(value.getUpdated().getBalance()).isEqualTo(Wei.of(30));
+    }
+  }
+
+  private static PartialBlockAccessView accountView(
+      final long txIndex,
+      final Wei postBalance,
+      final long nonce,
+      final boolean priorKnown,
+      final PartialBlockAccessView.PriorAccount prior) {
+    final PartialBlockAccessView.PartialBlockAccessViewBuilder builder =
+        new PartialBlockAccessView.PartialBlockAccessViewBuilder().withTxIndex(txIndex);
+    final PartialBlockAccessView.AccountChangesBuilder account =
+        builder
+            .getOrCreateAccountBuilder(ACCOUNT)
+            .withPostBalance(postBalance)
+            .withNonceChange(nonce);
+    if (priorKnown) {
+      account.withPrior(prior);
+    }
+    return builder.build();
+  }
+
+  private static void assertSameAccountValue(
+      final BonsaiValue<? extends AccountValue> actual,
+      final BonsaiValue<? extends AccountValue> expected) {
+    assertSameAccount(actual.getPrior(), expected.getPrior());
+    assertSameAccount(actual.getUpdated(), expected.getUpdated());
+  }
+
+  private static void assertSameAccount(final AccountValue actual, final AccountValue expected) {
+    if (expected == null) {
+      assertThat(actual).isNull();
+      return;
+    }
+    assertThat(actual).isNotNull();
+    assertThat(actual.getNonce()).isEqualTo(expected.getNonce());
+    assertThat(actual.getBalance()).isEqualTo(expected.getBalance());
+    assertThat(actual.getStorageRoot()).isEqualTo(expected.getStorageRoot());
+    assertThat(actual.getCodeHash()).isEqualTo(expected.getCodeHash());
+  }
+
+  private static TrieLogLayer trieLog(final BonsaiWorldStateUpdateAccumulator accumulator) {
+    return new BonsaiTrieLogFactory()
+        .create(
+            accumulator,
+            new BlockHeaderTestFixture().number(1).stateRoot(Hash.EMPTY).buildHeader());
+  }
+
+  private static BonsaiWorldState newWorldStateWithAccount() {
+    final BonsaiWorldState worldState = newEmptyWorldState();
+    final BonsaiWorldStateUpdateAccumulator accumulator =
+        (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+    accumulator.createAccount(ACCOUNT, 3L, Wei.of(10));
+    accumulator.getAccount(ACCOUNT).setStorageValue(SLOT.getSlotKey().orElseThrow(), V0);
+    accumulator.commit();
+    worldState.persist(null);
+    return worldState;
   }
 
   private static PartialBlockAccessView partialView(
