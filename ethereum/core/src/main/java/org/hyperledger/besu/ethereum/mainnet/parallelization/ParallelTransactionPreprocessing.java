@@ -22,8 +22,8 @@ import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.AbstractBlockProcessor.PreprocessingFunction;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 
@@ -55,7 +55,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       final BlockHashLookup blockHashLookup,
       final Wei blobGasPrice,
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
-      final Optional<BlockAccessList> maybeBlockBal,
+      final Optional<BlockAccessListAccountLookup> maybeBlockAccessListLookup,
       final Optional<BlockHeader> maybeParentHeader) {
     if (!(protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider)) {
       return Optional.empty();
@@ -63,10 +63,11 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
 
     final ParallelBlockTransactionProcessor parallelProcessor;
 
-    if (balConfiguration.isPerfectParallelizationEnabled() && maybeBlockBal.isPresent()) {
+    if (balConfiguration.isPerfectParallelizationEnabled()
+        && maybeBlockAccessListLookup.isPresent()) {
       parallelProcessor =
           new BalConcurrentTransactionProcessor(
-              transactionProcessor, maybeBlockBal.get(), balConfiguration);
+              transactionProcessor, maybeBlockAccessListLookup.get(), balConfiguration);
     } else {
       parallelProcessor = new OptimisticConcurrentTransactionProcessor(transactionProcessor);
     }

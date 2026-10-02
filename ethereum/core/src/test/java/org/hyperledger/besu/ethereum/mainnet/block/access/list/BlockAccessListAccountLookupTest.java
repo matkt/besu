@@ -77,17 +77,16 @@ class BlockAccessListAccountLookupTest {
   }
 
   @Test
-  void sameBlockAccessListSharesOneLookup() {
+  void exposesTheBlockAccessListItIndexes() {
     final BlockAccessList bal =
         new BlockAccessList(
             List.of(
                 new AccountChanges(
                     ADDRESS, List.of(), List.of(), List.of(), List.of(), List.of())));
-    final BlockAccessList equalButDistinct = new BlockAccessList(bal.accountChanges());
 
-    assertThat(BlockAccessListAccountLookup.of(bal)).isSameAs(BlockAccessListAccountLookup.of(bal));
-    // Keyed by identity: an equal but distinct block access list gets its own lookup.
-    assertThat(BlockAccessListAccountLookup.of(equalButDistinct))
-        .isNotSameAs(BlockAccessListAccountLookup.of(bal));
+    final BlockAccessListAccountLookup index = BlockAccessListAccountLookup.of(bal);
+
+    assertThat(index.blockAccessList()).isSameAs(bal);
+    assertThat(index.accountChanges()).isEqualTo(bal.accountChanges());
   }
 }

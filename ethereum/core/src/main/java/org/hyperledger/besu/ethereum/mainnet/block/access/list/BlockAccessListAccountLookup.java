@@ -23,9 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-
 /**
  * Account and storage-slot lookup over a {@link BlockAccessList}, built once per block and shared
  * across all transactions. Does not resolve transaction boundaries; use {@link
@@ -33,43 +30,34 @@ import com.github.benmanes.caffeine.cache.Caffeine;
  */
 public final class BlockAccessListAccountLookup {
 
+  private final BlockAccessList blockAccessList;
   private final Map<Address, AccountEntry> accountEntries;
-  private final List<BlockAccessList.AccountChanges> accountChanges;
 
   private BlockAccessListAccountLookup(
-      final Map<Address, AccountEntry> accountEntries,
-      final List<BlockAccessList.AccountChanges> accountChanges) {
+      final BlockAccessList blockAccessList, final Map<Address, AccountEntry> accountEntries) {
+    this.blockAccessList = blockAccessList;
     this.accountEntries = accountEntries;
-    this.accountChanges = accountChanges;
   }
-
-  /**
-   * Lookups by block access list instance (identity, weakly referenced). Processing a block builds
-   * the lookup for both the parallel execution and the state root computation; this shares one.
-   * Lookups are immutable once built.
-   */
-  private static final Cache<BlockAccessList, BlockAccessListAccountLookup> LOOKUPS =
-      Caffeine.newBuilder().weakKeys().maximumSize(16).build();
 
   public static BlockAccessListAccountLookup of(final BlockAccessList blockAccessList) {
-    return LOOKUPS.get(blockAccessList, BlockAccessListAccountLookup::build);
-  }
-
-  private static BlockAccessListAccountLookup build(final BlockAccessList blockAccessList) {
     final List<BlockAccessList.AccountChanges> accountChanges = blockAccessList.accountChanges();
     final Map<Address, AccountEntry> entries = HashMap.newHashMap(accountChanges.size());
     for (final BlockAccessList.AccountChanges changes : accountChanges) {
       entries.put(changes.address(), new AccountEntry(changes));
     }
-    return new BlockAccessListAccountLookup(entries, accountChanges);
+    return new BlockAccessListAccountLookup(blockAccessList, entries);
+  }
+
+  public BlockAccessList blockAccessList() {
+    return blockAccessList;
   }
 
   public List<BlockAccessList.AccountChanges> accountChanges() {
-    return accountChanges;
+    return blockAccessList.accountChanges();
   }
 
   public boolean isEmpty() {
-    return accountChanges.isEmpty();
+    return blockAccessList.accountChanges().isEmpty();
   }
 
   public Optional<BlockAccessList.AccountChanges> getAccountChanges(final Address address) {
