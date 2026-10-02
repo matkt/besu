@@ -161,9 +161,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
         continue;
       }
 
-      // As for slots (SlotChange#previousValue), use the account as the transaction read it rather
-      // than loading it again: changes are imported in block order, so if it is not here yet, no
-      // earlier transaction changed it and the transaction read its state before the block.
+      // As for slots (SlotChange#previousValue), use the account as it was at the start of the
+      // transaction rather than loading it again. Changes are imported in block order, so if it is
+      // not here yet, no earlier transaction changed it: its state at the start of the transaction
+      // is its state before the block.
       final Optional<AccountValue> priorAccount = accountChanges.getPriorAccount();
       if (priorAccount.isPresent()
           && !accountsToUpdate.containsKey(address)

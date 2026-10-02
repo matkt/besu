@@ -141,14 +141,12 @@ public class AccessLocationTracker implements Eip7928AccessList {
       final long newNonce = account.getNonce();
       final Bytes newCode = account.getCode();
 
-      if (wrappedAccount instanceof BonsaiAccount priorAccount) {
-        // Snapshot: lets the block import skip loading the account again.
+      // The account as it was at the start of the transaction, so that the block import does not
+      // load it again (it only uses it for an account no earlier transaction changed).
+      if (accountAtTransactionStart(wrappedAccount) instanceof BonsaiAccount start) {
         accountBuilder.withPriorAccount(
             new PmtStateTrieAccountValue(
-                priorAccount.getNonce(),
-                priorAccount.getBalance(),
-                priorAccount.getStorageRoot(),
-                priorAccount.getCodeHash()));
+                start.getNonce(), start.getBalance(), start.getStorageRoot(), start.getCodeHash()));
       }
 
       if (wrappedAccount != null) {
@@ -210,5 +208,18 @@ public class AccessLocationTracker implements Eip7928AccessList {
       current = current.parentUpdater().orElse(null);
     }
     return null;
+  }
+
+  /**
+   * Unwraps the account a transaction read (one UpdateTrackingAccount per updater level) down to
+   * the BonsaiAccount of the accumulator under the transaction: the stored account plus the changes
+   * of earlier transactions of the block (BAL overlay), i.e. the state at transaction start.
+   */
+  private static Account accountAtTransactionStart(final Account readAccount) {
+    Account account = readAccount;
+    while (account instanceof UpdateTrackingAccount<?> tracked) {
+      account = tracked.getWrappedAccount();
+    }
+    return account;
   }
 }

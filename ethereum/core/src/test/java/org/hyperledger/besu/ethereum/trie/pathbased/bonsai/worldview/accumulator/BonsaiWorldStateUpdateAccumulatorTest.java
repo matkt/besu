@@ -24,6 +24,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
@@ -36,7 +37,9 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpBonsaiWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
+import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
+import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import org.apache.tuweni.units.bigints.UInt256;
@@ -162,6 +165,38 @@ class BonsaiWorldStateUpdateAccumulatorTest {
       assertThat(value.getPrior().getBalance()).isEqualTo(stored.getBalance());
       assertThat(value.getUpdated().getNonce()).isEqualTo(5L);
       assertThat(value.getUpdated().getBalance()).isEqualTo(Wei.of(30));
+    }
+  }
+
+  @Test
+  void trackedTransaction_capturesThePriorThroughTheUpdaterStack_andTheImportUsesIt() {
+    try (BonsaiWorldState txWorldState = newWorldStateWithAccount();
+        BonsaiWorldState blockWorldState = newWorldStateWithAccount()) {
+      final BonsaiAccount stored = (BonsaiAccount) txWorldState.get(ACCOUNT);
+      // As a parallel worker runs a transaction: an updater on the accumulator, and a frame
+      // updater on top of it committed into it.
+      final WorldUpdater txUpdater = txWorldState.updater().updater();
+      final WorldUpdater frameUpdater = txUpdater.updater();
+      final MutableAccount account = frameUpdater.getAccount(ACCOUNT);
+      account.setBalance(Wei.of(20));
+      account.setNonce(4L);
+      frameUpdater.commit();
+      final AccessLocationTracker tracker = new AccessLocationTracker(0);
+      tracker.addTouchedAccount(ACCOUNT);
+
+      final PartialBlockAccessView view = tracker.createPartialBlockAccessView(txUpdater);
+
+      final AccountValue prior = view.accountChanges().getFirst().getPriorAccount().orElseThrow();
+      assertSameAccount(prior, stored);
+
+      final BonsaiWorldStateUpdateAccumulator blockAccumulator =
+          (BonsaiWorldStateUpdateAccumulator) blockWorldState.updater();
+      blockAccumulator.importStateChangesFromPartialView(view);
+      blockAccumulator.commit();
+      final BonsaiValue<BonsaiAccount> value = blockAccumulator.getAccountsToUpdate().get(ACCOUNT);
+      assertSameAccount(value.getPrior(), stored);
+      assertThat(value.getUpdated().getNonce()).isEqualTo(4L);
+      assertThat(value.getUpdated().getBalance()).isEqualTo(Wei.of(20));
     }
   }
 

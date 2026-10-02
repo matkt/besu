@@ -171,6 +171,7 @@ public final class PartialBlockAccessView {
       return storageChanges;
     }
 
+    /** The account as it was at the start of the transaction, when the tracker captured it. */
     public Optional<AccountValue> getPriorAccount() {
       return priorAccount;
     }
