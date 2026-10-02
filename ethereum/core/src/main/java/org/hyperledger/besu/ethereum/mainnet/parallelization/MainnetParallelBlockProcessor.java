@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetcher;
 import org.hyperledger.besu.ethereum.mainnet.systemcall.BlockProcessingContext;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
@@ -104,14 +105,14 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
    * same access list instance) then does not prefetch it again.
    */
   @Override
-  public void prefetchBlockAccessList(
+  public Optional<BalPrefetch> prefetchBlockAccessList(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
       final BlockAccessList blockAccessList) {
-    maybePrefetcher.ifPresent(
+    return maybePrefetcher.map(
         prefetcher -> {
           prefetchedAhead.set(blockAccessList);
-          prefetcher.prefetch(protocolContext, parentHeader, blockAccessList);
+          return prefetcher.prefetch(protocolContext, parentHeader, blockAccessList);
         });
   }
 

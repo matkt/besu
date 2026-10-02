@@ -92,11 +92,13 @@ public class BalPrefetcher {
    * @param protocolContext the protocol context, for the world state archive
    * @param parentHeader the header of the parent of the block the access list belongs to
    * @param blockAccessList the block access list
+   * @return the prefetch, to cancel once its block is processed or rejected
    */
-  public void prefetch(
+  public BalPrefetch prefetch(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
       final BlockAccessList blockAccessList) {
+    final BalPrefetch prefetch = new BalPrefetch();
     final Optional<BonsaiWorldState> maybeWorldState =
         protocolContext
             .getWorldStateArchive()
@@ -108,20 +110,22 @@ public class BalPrefetcher {
             .map(BonsaiWorldState.class::cast);
     if (maybeWorldState.isEmpty()) {
       LOG.info("Prefetch skipped, world state of block {} not available", parentHeader);
-      return;
+      return prefetch;
     }
     final BonsaiWorldState worldState = maybeWorldState.get();
     prefetch(
             worldState,
             blockAccessList,
             BlockProcessingExecutors.ioExecutor(),
-            BlockProcessingExecutors.ioExecutor())
+            BlockProcessingExecutors.ioExecutor(),
+            prefetch)
         .exceptionally(
             ex -> {
               LOG.error("Prefetch failed", ex);
               return null;
             })
         .whenComplete((result, ex) -> worldState.close());
+    return prefetch;
   }
 
   /**
@@ -138,6 +142,16 @@ public class BalPrefetcher {
       final BlockAccessList blockAccessList,
       final Executor orchestrationExecutor,
       final Executor fetchExecutor) {
+    return prefetch(
+        worldState, blockAccessList, orchestrationExecutor, fetchExecutor, new BalPrefetch());
+  }
+
+  CompletableFuture<Void> prefetch(
+      final BonsaiWorldState worldState,
+      final BlockAccessList blockAccessList,
+      final Executor orchestrationExecutor,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     return CompletableFuture.supplyAsync(
             () -> {
@@ -157,11 +171,12 @@ public class BalPrefetcher {
         .thenCompose(
             keys -> {
               final CompletableFuture<Void> flatValues =
-                  fetchKeysAsync(worldState, keys, fetchExecutor)
+                  fetchKeysAsync(worldState, keys, fetchExecutor, prefetch)
                       .thenRun(
                           () ->
                               LOG.info(
-                                  "Prefetch completed: {} accounts + {} storage slots{}",
+                                  "Prefetch {}: {} accounts + {} storage slots{}",
+                                  prefetch.isCancelled() ? "cancelled" : "completed",
                                   keys.accountKeys.size(),
                                   keys.storageKeys.size(),
                                   shouldBatch()
@@ -174,8 +189,14 @@ public class BalPrefetcher {
                           worldState.getWorldStateRootHash(),
                           blockAccessList,
                           fetchExecutor,
-                          batchSize)
-                      .thenAccept(summary -> LOG.info("Trie node prefetch completed: {}", summary));
+                          batchSize,
+                          prefetch)
+                      .thenAccept(
+                          summary ->
+                              LOG.info(
+                                  "Trie node prefetch {}: {}",
+                                  prefetch.isCancelled() ? "cancelled" : "completed",
+                                  summary));
               return CompletableFuture.allOf(flatValues, trieNodes);
             })
         .whenComplete(
@@ -233,19 +254,32 @@ public class BalPrefetcher {
    * @return a future that completes when all fetch operations finish
    */
   private CompletableFuture<Void> fetchKeysAsync(
-      final BonsaiWorldState worldState, final PrefetchKeys keys, final Executor fetchExecutor) {
+      final BonsaiWorldState worldState,
+      final PrefetchKeys keys,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     // Fetch accounts (with optional batching)
     final List<CompletableFuture<Void>> futures =
         new ArrayList<>(
             fetchSegmentKeys(
-                worldState, ACCOUNT_INFO_STATE, keys.accountKeys, "account", fetchExecutor));
+                worldState,
+                ACCOUNT_INFO_STATE,
+                keys.accountKeys,
+                "account",
+                fetchExecutor,
+                prefetch));
 
     // Fetch storage (with optional batching)
     if (!keys.storageKeys.isEmpty()) {
       futures.addAll(
           fetchSegmentKeys(
-              worldState, ACCOUNT_STORAGE_STORAGE, keys.storageKeys, "storage", fetchExecutor));
+              worldState,
+              ACCOUNT_STORAGE_STORAGE,
+              keys.storageKeys,
+              "storage",
+              fetchExecutor,
+              prefetch));
     }
 
     return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
@@ -266,7 +300,8 @@ public class BalPrefetcher {
       final SegmentIdentifier segment,
       final List<byte[]> keys,
       final String segmentName,
-      final Executor fetchExecutor) {
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     final List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -275,7 +310,7 @@ public class BalPrefetcher {
       futures.add(
           CompletableFuture.runAsync(
               () -> {
-                prefetchKeys(worldState, segment, keys);
+                prefetchKeys(worldState, segment, keys, prefetch);
                 LOG.debug("Prefetch: fetched {} {} keys in single batch", keys.size(), segmentName);
               },
               fetchExecutor));
@@ -289,7 +324,7 @@ public class BalPrefetcher {
         futures.add(
             CompletableFuture.runAsync(
                 () -> {
-                  prefetchKeys(worldState, segment, batch);
+                  prefetchKeys(worldState, segment, batch, prefetch);
                   LOG.trace(
                       "Prefetch: fetched {} batch {}/{} ({} keys)",
                       segmentName,
@@ -307,8 +342,13 @@ public class BalPrefetcher {
   }
 
   private void prefetchKeys(
-      final BonsaiWorldState worldState, final SegmentIdentifier segment, final List<byte[]> keys) {
-    worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
+      final BonsaiWorldState worldState,
+      final SegmentIdentifier segment,
+      final List<byte[]> keys,
+      final BalPrefetch prefetch) {
+    if (!prefetch.isCancelled()) {
+      worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
+    }
   }
 
   private boolean shouldBatch() {

@@ -15,6 +15,8 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 
@@ -53,6 +55,7 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -94,8 +97,10 @@ class TrieNodePrefetcherTest {
     }
     updater.commit();
     worldState.persist(null);
-    // committing caches the trie nodes it writes: start from a cold cache
+    // committing caches what it writes: start from a cold cache
     cache().clear(TRIE_BRANCH_STORAGE);
+    cache().clear(ACCOUNT_INFO_STATE);
+    cache().clear(ACCOUNT_STORAGE_STORAGE);
   }
 
   @AfterEach
@@ -124,7 +129,8 @@ class TrieNodePrefetcherTest {
                 worldState.getWorldStateRootHash(),
                 new BlockAccessList(accountChanges),
                 SYNC_EXECUTOR,
-                batchSize)
+                batchSize,
+                new BalPrefetch())
             .join();
 
     assertThat(summary).contains("trie nodes read");
@@ -151,7 +157,12 @@ class TrieNodePrefetcherTest {
     final BlockAccessList blockAccessList =
         new BlockAccessList(List.of(accountChanges(address(10), List.of(1, 2))));
     TrieNodePrefetcher.prefetch(
-            storage, worldState.getWorldStateRootHash(), blockAccessList, SYNC_EXECUTOR, batchSize)
+            storage,
+            worldState.getWorldStateRootHash(),
+            blockAccessList,
+            SYNC_EXECUTOR,
+            batchSize,
+            new BalPrefetch())
         .join();
 
     final String summary =
@@ -160,11 +171,57 @@ class TrieNodePrefetcherTest {
                 worldState.getWorldStateRootHash(),
                 blockAccessList,
                 SYNC_EXECUTOR,
-                batchSize)
+                batchSize,
+                new BalPrefetch())
             .join();
 
     // only the storage trie root, whose hash is not known before reading it, is read again
     assertThat(summary).startsWith("1 trie nodes read");
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 256})
+  void aCancelledPrefetchReadsNothing(final int batchSize) {
+    final BlockAccessList blockAccessList =
+        new BlockAccessList(List.of(accountChanges(address(10), List.of(1, 2))));
+    final BalPrefetch prefetch = new BalPrefetch();
+    prefetch.cancel();
+
+    new BalPrefetcher(true, batchSize)
+        .prefetch(worldState, blockAccessList, SYNC_EXECUTOR, SYNC_EXECUTOR, prefetch)
+        .join();
+
+    assertThat(storage.isCached(ACCOUNT_INFO_STATE, address(10).addressHash().getBytes()))
+        .isFalse();
+    assertThat(cache().getAccountTrieNode(accountPath(address(10)).getFirst())).isEmpty();
+  }
+
+  @Test
+  void aPrefetchCancelledDuringALevelDoesNotReadTheNextOnes() {
+    final BlockAccessList blockAccessList =
+        new BlockAccessList(List.of(accountChanges(address(10), List.of())));
+    final BalPrefetch prefetch = new BalPrefetch();
+    // e.g. the block turns out to be invalid while the first level is being read
+    final Executor cancelAfterTheFirstBatch =
+        task -> {
+          task.run();
+          prefetch.cancel();
+        };
+
+    final String summary =
+        TrieNodePrefetcher.prefetch(
+                storage,
+                worldState.getWorldStateRootHash(),
+                blockAccessList,
+                cancelAfterTheFirstBatch,
+                256,
+                prefetch)
+            .join();
+
+    assertThat(summary).startsWith("1 trie nodes read");
+    final List<Bytes32> path = accountPath(address(10));
+    assertThat(cache().getAccountTrieNode(path.getFirst())).isPresent();
+    assertThat(cache().getAccountTrieNode(path.get(1))).isEmpty();
   }
 
   /** The hashes of the account trie nodes on the path of an account, root first. */

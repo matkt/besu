@@ -80,17 +80,20 @@ final class TrieNodePrefetcher {
   private final FlatDbCacheManager cache;
   private final Executor fetchExecutor;
   private final int batchSize;
+  private final BalPrefetch prefetch;
   private final AtomicInteger readNodes = new AtomicInteger();
   private final AtomicInteger cachedNodes = new AtomicInteger();
 
   private TrieNodePrefetcher(
       final BonsaiWorldStateKeyValueStorage storage,
       final Executor fetchExecutor,
-      final int batchSize) {
+      final int batchSize,
+      final BalPrefetch prefetch) {
     this.storage = storage;
     this.cache = storage.getCacheManager();
     this.fetchExecutor = fetchExecutor;
     this.batchSize = batchSize;
+    this.prefetch = prefetch;
   }
 
   /**
@@ -101,6 +104,7 @@ final class TrieNodePrefetcher {
    * @param blockAccessList the block access list
    * @param fetchExecutor the executor for the reads
    * @param batchSize the number of nodes per MultiGet, all of a level at once if not positive
+   * @param prefetch the prefetch this is part of, which stops reading once cancelled
    * @return a future that completes with a summary once every level is read
    */
   static CompletableFuture<String> prefetch(
@@ -108,12 +112,14 @@ final class TrieNodePrefetcher {
       final Hash stateRoot,
       final BlockAccessList blockAccessList,
       final Executor fetchExecutor,
-      final int batchSize) {
+      final int batchSize,
+      final BalPrefetch prefetch) {
     final Bytes32 rootHash = Bytes32.wrap(stateRoot.getBytes());
     if (rootHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
       return CompletableFuture.completedFuture("empty state");
     }
-    final TrieNodePrefetcher prefetcher = new TrieNodePrefetcher(storage, fetchExecutor, batchSize);
+    final TrieNodePrefetcher prefetcher =
+        new TrieNodePrefetcher(storage, fetchExecutor, batchSize, prefetch);
     return prefetcher
         .prefetchLevel(roots(rootHash, blockAccessList))
         .thenApply(
@@ -151,7 +157,7 @@ final class TrieNodePrefetcher {
   }
 
   private CompletableFuture<Void> prefetchLevel(final List<PendingNode> level) {
-    if (level.isEmpty()) {
+    if (level.isEmpty() || prefetch.isCancelled()) {
       return CompletableFuture.completedFuture(null);
     }
     final List<List<PendingNode>> batches =
@@ -171,6 +177,9 @@ final class TrieNodePrefetcher {
 
   /** Reads the nodes of a batch that are not cached yet and returns their children to read. */
   private List<PendingNode> readBatch(final List<PendingNode> batch) {
+    if (prefetch.isCancelled()) {
+      return List.of();
+    }
     final List<PendingNode> children = new ArrayList<>();
     final List<PendingNode> toRead = new ArrayList<>(batch.size());
     for (final PendingNode pending : batch) {

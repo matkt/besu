@@ -43,6 +43,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -195,6 +196,9 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
   @SuppressWarnings("unchecked")
   public void shouldStartPrefetchingTheBlockAccessListStateBeforeProcessingTheBlock() {
     final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    final BalPrefetch prefetch = new BalPrefetch();
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+        .thenReturn(Optional.of(prefetch));
     when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
     when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
     when(protocolSpec.getGasCalculator()).thenReturn(mock(GasCalculator.class));
@@ -223,11 +227,16 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     assertThat(prefetched.getValue()).isEqualTo(BLOCK_ACCESS_LIST);
     // The same instance: the block processor does not prefetch that block access list again.
     assertThat(processed.getValue()).containsSame(prefetched.getValue());
+    // the block is processed: what is left to read is of no use
+    assertThat(prefetch.isCancelled()).isTrue();
   }
 
   @Test
   public void shouldStartPrefetchingBeforeDecodingTheTransactions() {
     final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    final BalPrefetch prefetch = new BalPrefetch();
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+        .thenReturn(Optional.of(prefetch));
     when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
     when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
     when(protocolSpec.getGasCalculator()).thenReturn(mock(GasCalculator.class));
@@ -245,6 +254,8 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     assertThat(resp.getStatus()).isEqualTo(INVALID);
     assertThat(resp.getError()).startsWith("Failed to decode transactions from block parameter");
     verify(blockProcessor).prefetchBlockAccessList(any(), any(), eq(BLOCK_ACCESS_LIST));
+    // the payload is invalid: its prefetch stops
+    assertThat(prefetch.isCancelled()).isTrue();
   }
 
   @Test

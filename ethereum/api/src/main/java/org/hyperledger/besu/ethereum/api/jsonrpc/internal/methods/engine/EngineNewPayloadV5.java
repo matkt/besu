@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
 import java.util.LinkedHashMap;
@@ -48,11 +49,31 @@ public sealed class EngineNewPayloadV5<
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV5.class);
   private static final String BLOCK_ACCESS_LIST = "blockAccessList";
 
+  /** The state prefetch started for the payload being handled on this thread, if any. */
+  private static final ThreadLocal<BalPrefetch> STATE_PREFETCH = new ThreadLocal<>();
+
   public EngineNewPayloadV5(
       final ConstructorArguments constructorArguments,
       final HardforkId minSupportedFork,
       final HardforkId firstUnsupportedFork) {
     super(constructorArguments, minSupportedFork, firstUnsupportedFork);
+  }
+
+  /**
+   * Once the payload is handled, its block is processed or rejected: what its state prefetch still
+   * has to read is of no use, so it is cancelled.
+   */
+  @Override
+  public JsonRpcResponse syncResponse(final JsonRpcRequestContext requestContext) {
+    try {
+      return super.syncResponse(requestContext);
+    } finally {
+      final BalPrefetch prefetch = STATE_PREFETCH.get();
+      if (prefetch != null) {
+        STATE_PREFETCH.remove();
+        prefetch.cancel();
+      }
+    }
   }
 
   @Override
@@ -133,7 +154,8 @@ public sealed class EngineNewPayloadV5<
                 }
                 protocolSpec
                     .getBlockProcessor()
-                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList);
+                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList)
+                    .ifPresent(STATE_PREFETCH::set);
               });
     } catch (final RuntimeException e) {
       LOG.debug("Could not start the state prefetch of a payload", e);

@@ -22,6 +22,7 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
@@ -61,11 +62,14 @@ public interface BlockProcessor {
    * @param protocolContext the current context of the protocol
    * @param parentHeader the header of the parent of the upcoming block
    * @param blockAccessList the block access list of the upcoming block
+   * @return the prefetch, to cancel once the block is processed or rejected; empty if none started
    */
-  default void prefetchBlockAccessList(
+  default Optional<BalPrefetch> prefetchBlockAccessList(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
-      final BlockAccessList blockAccessList) {}
+      final BlockAccessList blockAccessList) {
+    return Optional.empty();
+  }
 
   /**
    * Processes the block.
