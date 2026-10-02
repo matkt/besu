@@ -155,17 +155,29 @@ public class BalPrefetcher {
             },
             orchestrationExecutor)
         .thenCompose(
-            keys ->
-                fetchKeysAsync(worldState, keys, fetchExecutor)
-                    .thenRun(
-                        () ->
-                            LOG.info(
-                                "Prefetch completed: {} accounts + {} storage slots{}",
-                                keys.accountKeys.size(),
-                                keys.storageKeys.size(),
-                                shouldBatch()
-                                    ? " in batches of " + batchSize
-                                    : " in single batch")))
+            keys -> {
+              final CompletableFuture<Void> flatValues =
+                  fetchKeysAsync(worldState, keys, fetchExecutor)
+                      .thenRun(
+                          () ->
+                              LOG.info(
+                                  "Prefetch completed: {} accounts + {} storage slots{}",
+                                  keys.accountKeys.size(),
+                                  keys.storageKeys.size(),
+                                  shouldBatch()
+                                      ? " in batches of " + batchSize
+                                      : " in single batch"));
+              // the trie nodes the state root computation walks, read alongside the flat values
+              final CompletableFuture<Void> trieNodes =
+                  TrieNodePrefetcher.prefetch(
+                          worldState.getWorldStateStorage(),
+                          worldState.getWorldStateRootHash(),
+                          blockAccessList,
+                          fetchExecutor,
+                          batchSize)
+                      .thenAccept(summary -> LOG.info("Trie node prefetch completed: {}", summary));
+              return CompletableFuture.allOf(flatValues, trieNodes);
+            })
         .whenComplete(
             (result, ex) -> {
               if (ex != null) {
