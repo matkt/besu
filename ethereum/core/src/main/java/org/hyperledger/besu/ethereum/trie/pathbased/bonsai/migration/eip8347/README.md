@@ -1,7 +1,8 @@
 # EIP-8347 migration artifacts
 
 Besu's implementation of the [EIP-8347](https://eips.ethereum.org/EIPS/eip-8347) artifacts, with
-the typed, stem-grouped snapshot format of EIP PR 12379.
+the typed, stem-grouped snapshot format of EIP PR 12379, `pbtRoot` at the end (EIP PR 12403), and
+tagged records instead of section counts (EIP PR 12404).
 
 - [What it is for](#what-it-is-for)
 - [The two files](#the-two-files)
@@ -60,18 +61,24 @@ order matters later (see [the rank](#the-rank)).
 ### Snapshot
 
 ```text
-pbtRoot[32]                                      the root the snapshot claims
-headerCount[8]  | headerRecord × headerCount     ACCOUNT_ZONE
-codeCount[8]    | group × codeCount              CODE_ZONE
-storageCount[8] | storageRecord × storageCount   STORAGE_ZONE
+record × | end | pbtRoot[32]          every record opens with a one-byte tag; the root comes last
 ```
 
-- A **header record** is one account's whole header stem: `addressHash`, nonce, balance, `kind`,
-  and storage slots 0–63. `kind` is `0x00` (no code), `0x01` (code: `codeHash`, `codeSize`) or
-  `0x02` (EIP-7702 delegation: 20-byte `target`).
-- A **group** is one stem's leaves: `stemHash` then `(subIndex, value)` pairs. Code groups hold code
-  chunks.
-- A **storage record** is one account's storage outside the header: `addressHash` and its groups.
+| Tag | Record |
+|---|---|
+| `0x00`, `0x01`, `0x02` | **header record**: one account's whole header stem. The tag is the account `kind`: no code, code (`codeHash`, `codeSize`), or EIP-7702 delegation (20-byte `target`). Then `addressHash`, nonce, balance, and storage slots 0–63 |
+| `0x03` | **code group**: one stem of code chunks, `stemHash` then `(subIndex, value)` pairs |
+| `0x04` | **storage account**: the `addressHash` the storage groups after it belong to |
+| `0x05` | **storage group with one leaf** |
+| `0x06` | **storage group with more than one leaf** |
+| `0x07` | **end**, followed by `pbtRoot` |
+
+Records come in PBT key order, so in zone order: headers, then code groups, then storage. Most
+storage slots sit alone in their stem, hence the shorter one-leaf group.
+
+With tags and the root at the end, nothing in the file depends on what comes after it: a producer
+writes it in the same single pass that hashes the PBT, with no section count to patch and no
+storage record to buffer, and can hash the bytes (`snapshotDigest`) as they go out.
 
 The records hold typed fields (nonce, balance, code reference…) rather than raw leaves. The PBT
 leaves are **derived** from them deterministically. This makes the file smaller and
@@ -82,9 +89,10 @@ non-canonical:
 - non-minimal integers (a leading zero byte);
 - zero values;
 - empty accounts (excluded by EIP-7523);
-- an invalid `kind`;
-- wrong section counts;
-- trailing bytes.
+- an unknown tag;
+- a storage account with no storage group after it, or a storage group with none before it;
+- a one-leaf storage group in the multi-leaf encoding;
+- a missing end tag, or trailing bytes after the root.
 
 The exact layouts are in [File layouts](#file-layouts).
 
@@ -150,7 +158,8 @@ reader ──► hash stems (N threads, order kept) ──► attach to the PBT 
 ```
 
 1. **Reader.** Returns units: a header, a code group, or a storage group. Each unit is **one whole
-   stem**. The reader enforces the canonical rules above.
+   stem**. The reader enforces the canonical rules above, and reads the claimed root after the end
+   tag.
 2. **Hash stems**, in parallel. `AscendingCollapseBinaryTrie.prepare` builds the stem's small
    subtree, hashes every leaf and inner node, encodes the nodes to write, and replaces the subtree by
    hash stubs.
@@ -252,11 +261,12 @@ Alice | 2 slots | slot 1000 | slot 5         (1000 first: 0x44 < 0xc1)
 **Snapshot:**
 
 ```text
-pbtRoot R
-headers:  [Alice: nonce 1, balance 50, kind 0, slots {5: 7}]
-          [Bob:   nonce 0, balance 9,  kind 1 (H, size 5)]
-code:     [group stem(H,0): {0: chunk0}]
-storage:  [Alice: one group {232: 3}]
+0x00 [Alice: nonce 1, balance 50, slots {5: 7}]
+0x01 [Bob:   nonce 0, balance 9, H, size 5]
+0x03 [code group stem(H,0): {0: chunk0}]
+0x04 [storage account Alice]
+0x05 [one-leaf group {232: 3}]
+0x07 R
 ```
 
 **Step 1, ranks and requests.** Ranks in file order, slots before their account:
@@ -410,7 +420,7 @@ Memory stays bounded whatever the state size:
 |---|---|
 | Each sort | two 64 MiB buffers (one filling, one being written) + up to 512 open files while merging |
 | Between pipeline stages | 256 items (batches of ≤ 1024 slots) |
-| Snapshot reader / writer | one record; a writer's storage record over 8 MiB goes to disk |
+| Snapshot reader / writer | one record |
 | Tries | their right edge only |
 | Code check | one code per thread, ≤ 1 MiB |
 
@@ -477,19 +487,21 @@ To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-f
 Snapshot (`x[≤w]` = one length byte, then the minimal big-endian bytes of `x`, at most `w`):
 
 ```text
-pbtRoot[32]
-  | headerCount[8]  | headerRecord * headerCount      ACCOUNT_ZONE
-  | codeCount[8]    | group * codeCount               CODE_ZONE
-  | storageCount[8] | storageRecord * storageCount    STORAGE_ZONE
+snapshot           = record * | 0x07 | pbtRoot[32]
 
-headerRecord  = addressHash[32] | nonce[≤8] | balance[≤16] | kind[1] | codeRef
-              | slotCount[1] | (slot[1] | value[≤32]) * slotCount
-storageRecord = addressHash[32] | groupCount[≤8] | group * groupCount
-group         = stemHash[32] | n[1] | (subIndex[1] | value[≤32]) * (n + 1)
+headerRecord       = kind[1] | addressHash[32] | nonce[≤8] | balance[≤16] | codeRef
+                   | slotCount[1] | (slot[1] | value[≤32]) * slotCount
+codeGroup          = 0x03 | group
+storageAccount     = 0x04 | addressHash[32]
+singleStorageGroup = 0x05 | stemHash[32] | subIndex[1] | value[≤32]
+storageGroup       = 0x06 | group                         (more than one leaf)
+
+group              = stemHash[32] | n[1] | (subIndex[1] | value[≤32]) * (n + 1)
 ```
 
 `kind`: `0x00` no code; `0x01` code, `codeRef = codeHash[32] | codeSize[≤4]`; `0x02` EIP-7702
-delegation, `codeRef = target[20]`.
+delegation, `codeRef = target[20]`. An account's storage is one `storageAccount` followed by one
+or more storage groups.
 
 Preimages: `address[20] | slotCount[4] | slotKey[32] * slotCount` per account, accounts sorted by
 `keccak256(address)`, slots by `keccak256(slotKey)`.
@@ -501,8 +513,8 @@ under test, what EIP-8347 derives from it: PBT leaves and root, preimages, MPT r
 
 | Test | Covers |
 |---|---|
-| `verify/Eip8347DualCheckVerifierTest` | Accepted snapshots; `verifyAndLoad` output; every kind of rejection (roots, layout, preimage mismatches, code) |
+| `verify/Eip8347DualCheckVerifierTest` | Accepted snapshots; `verifyAndLoad` output; every kind of rejection (roots, preimage mismatches, code) |
 | `convert/Eip8347SnapshotGeneratorTest` | Generated snapshot byte-equal to the fixture's, whatever the sort buffer; convert rejections |
-| `artifact/Eip8347SnapshotFormatTest` | Write → read round trip; non-canonical records and leaves |
+| `artifact/Eip8347SnapshotFormatTest` | Write → read round trip; byte layout (end tag, trailing bytes, unknown tag, record order, storage accounts and groups); non-canonical records and leaves |
 | `artifact/Eip8347PreimageFileTest` | Genesis preimages; unsorted or truncated files |
 | `pipeline/Eip8347ExternalSorterTest` | Sort order, multi-pass merges, on-disk encoding, cleanup |

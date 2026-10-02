@@ -49,17 +49,30 @@ import org.apache.tuweni.units.bigints.UInt256;
  * Typed, stem-grouped records of the EIP-8347 PBT snapshot and their leaf derivation.
  *
  * <pre>
- * headerRecord  = addressHash[32] | nonce[≤8] | balance[≤16] | kind[1] | codeRef
- *               | slotCount[1] | (slot[1] | value[≤32]) * slotCount
- * group         = stemHash[32] | n[1] | (subIndex[1] | value[≤32]) * (n + 1)
- * storageRecord = addressHash[32] | groupCount[≤8] | group * groupCount
+ * snapshot           = record * | end[1] | pbtRoot[32]
+ * headerRecord       = kind[1] | addressHash[32] | nonce[≤8] | balance[≤16] | codeRef
+ *                    | slotCount[1] | (slot[1] | value[≤32]) * slotCount
+ * codeGroup          = 0x03 | group
+ * storageAccount     = 0x04 | addressHash[32]
+ * singleStorageGroup = 0x05 | stemHash[32] | subIndex[1] | value[≤32]
+ * storageGroup       = 0x06 | group                                     (more than one leaf)
+ * group              = stemHash[32] | n[1] | (subIndex[1] | value[≤32]) * (n + 1)
  * </pre>
+ *
+ * <p>Every record opens with its tag; a header record's tag is the account {@code kind}.
  */
 public final class Eip8347TypedSnapshotCodec {
 
+  /** Record tags. A header record's tag is its account {@code kind}. */
   public static final int KIND_NONE = 0x00;
+
   public static final int KIND_CODE = 0x01;
   public static final int KIND_DELEGATION = 0x02;
+  public static final int TAG_CODE_GROUP = 0x03;
+  public static final int TAG_STORAGE_ACCOUNT = 0x04;
+  public static final int TAG_SINGLE_STORAGE_GROUP = 0x05;
+  public static final int TAG_STORAGE_GROUP = 0x06;
+  public static final int TAG_END = 0x07;
 
   /** Maximum widths of the {@code [≤w]} integers of the format. */
   public static final int NONCE_WIDTH = 8;
@@ -67,7 +80,6 @@ public final class Eip8347TypedSnapshotCodec {
   public static final int BALANCE_WIDTH = 16;
   public static final int CODE_SIZE_WIDTH = 4;
   public static final int VALUE_WIDTH = Bytes32.SIZE;
-  public static final int GROUP_COUNT_WIDTH = 8;
 
   /** Header-stem leaves besides the slots: basic data, and code hash or delegation. */
   public static final int HEADER_FIXED_LEAVES = 2;
@@ -179,27 +191,6 @@ public final class Eip8347TypedSnapshotCodec {
       throw new Eip8347ArtifactVerificationException("typed uint has a leading zero byte");
     }
     return be;
-  }
-
-  /** Writes a fixed 8-byte big-endian section count. */
-  public static void writeCount(final OutputStream out, final long count) throws IOException {
-    if (count < 0) {
-      throw new Eip8347ArtifactVerificationException("section count is negative");
-    }
-    for (int i = Long.BYTES - 1; i >= 0; i--) {
-      out.write((int) (count >>> (i * Byte.SIZE)));
-    }
-  }
-
-  public static long readCount(final InputStream in) throws IOException {
-    long count = 0L;
-    for (final byte b : readFully(in, Long.BYTES)) {
-      count = (count << Byte.SIZE) | (b & 0xFF);
-    }
-    if (count < 0) {
-      throw new Eip8347ArtifactVerificationException("section count is negative");
-    }
-    return count;
   }
 
   public static int readByte(final InputStream in) throws IOException {
@@ -423,10 +414,10 @@ public final class Eip8347TypedSnapshotCodec {
 
   public static void writeHeaderRecord(final OutputStream out, final HeaderRecord header)
       throws IOException {
+    out.write(header.kind());
     out.write(header.addressHash().toArrayUnsafe());
     writeUint(out, header.nonce(), NONCE_WIDTH);
     writeUint(out, header.balance(), BALANCE_WIDTH);
-    out.write(header.kind());
     if (header.kind() == KIND_CODE) {
       out.write(header.codeHash().toArrayUnsafe());
       writeUint(out, header.codeSize(), CODE_SIZE_WIDTH);
@@ -436,11 +427,12 @@ public final class Eip8347TypedSnapshotCodec {
     writeEntries(out, header.slots(), header.slots().size());
   }
 
-  public static HeaderRecord readHeaderRecord(final InputStream in) throws IOException {
+  /** Reads a header record whose tag, {@code kind}, has already been read. */
+  public static HeaderRecord readHeaderRecord(final InputStream in, final int kind)
+      throws IOException {
     final Bytes32 addressHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
     final long nonce = readUint(in, NONCE_WIDTH);
     final UInt256 balance = UInt256.fromBytes(Bytes.wrap(readUintBytes(in, BALANCE_WIDTH)));
-    final int kind = readByte(in);
     Bytes32 codeHash = null;
     long codeSize = 0L;
     Bytes target = null;
@@ -455,15 +447,48 @@ public final class Eip8347TypedSnapshotCodec {
         addressHash, nonce, balance, kind, codeHash, codeSize, target, readEntries(in, slotCount));
   }
 
-  public static void writeGroup(final OutputStream out, final Group group) throws IOException {
-    out.write(group.stemHash().toArrayUnsafe());
-    writeEntries(out, group.entries(), group.entries().size() - 1);
+  public static void writeCodeGroup(final OutputStream out, final Group group) throws IOException {
+    out.write(TAG_CODE_GROUP);
+    writeGroup(out, group);
   }
 
+  public static void writeStorageAccount(final OutputStream out, final Bytes32 addressHash)
+      throws IOException {
+    out.write(TAG_STORAGE_ACCOUNT);
+    out.write(addressHash.toArrayUnsafe());
+  }
+
+  /** A one-leaf storage group has its own, shorter encoding; any other uses {@code group}. */
+  public static void writeStorageGroup(final OutputStream out, final Group group)
+      throws IOException {
+    if (group.entries().size() == 1) {
+      final var entry = group.entries().firstEntry();
+      out.write(TAG_SINGLE_STORAGE_GROUP);
+      out.write(group.stemHash().toArrayUnsafe());
+      out.write(entry.getKey());
+      writeUint(out, entry.getValue(), VALUE_WIDTH);
+    } else {
+      out.write(TAG_STORAGE_GROUP);
+      writeGroup(out, group);
+    }
+  }
+
+  /** Reads a {@code group} whose tag has already been read. */
   public static Group readGroup(final InputStream in) throws IOException {
     final Bytes32 stemHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
     final int count = readByte(in) + 1;
     return new Group(stemHash, readEntries(in, count));
+  }
+
+  /** Reads a one-leaf storage group whose tag has already been read. */
+  public static Group readSingleGroup(final InputStream in) throws IOException {
+    final Bytes32 stemHash = Bytes32.wrap(readFully(in, Bytes32.SIZE));
+    return new Group(stemHash, readEntries(in, 1));
+  }
+
+  private static void writeGroup(final OutputStream out, final Group group) throws IOException {
+    out.write(group.stemHash().toArrayUnsafe());
+    writeEntries(out, group.entries(), group.entries().size() - 1);
   }
 
   /** {@code countByte | (index[1] | value[≤32]) * entries}; map order keeps indices ascending. */

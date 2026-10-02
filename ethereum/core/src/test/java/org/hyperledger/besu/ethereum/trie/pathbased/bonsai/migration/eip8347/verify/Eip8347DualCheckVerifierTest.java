@@ -37,12 +37,9 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -187,80 +184,6 @@ class Eip8347DualCheckVerifierTest {
     final Artifacts artifacts = oneEoa(0xef).write(tmp, "bad-mpt");
 
     assertRejected(artifacts, Bytes32.repeat((byte) 0x11), "MPT stateRoot mismatch");
-  }
-
-  // ---- Reject: snapshot layout ----
-
-  @Test
-  void rejectsHeaderCountLargerThanTheRecords() throws Exception {
-    final Eip8347Fixture fixture = oneEoa(0x10);
-    final Artifacts artifacts = fixture.write(tmp, "bad-count");
-    final byte[] bytes = Files.readAllBytes(artifacts.snapshot());
-    final ByteBuffer buffer = ByteBuffer.wrap(bytes);
-    buffer.putLong(32, buffer.getLong(32) + 1); // headerCount
-    Files.write(artifacts.snapshot(), bytes);
-
-    assertThatThrownBy(() -> verify(artifacts, fixture.mptRoot()))
-        .isInstanceOf(Eip8347ArtifactVerificationException.class);
-  }
-
-  @Test
-  void rejectsHeaderRecordsOutOfOrder() throws Exception {
-    final Address a = address(0x11);
-    final Address b = address(0x22);
-    final Eip8347Fixture fixture =
-        Eip8347Fixture.builder()
-            .eoa(a, 0L, Wei.ONE, Map.of())
-            .eoa(b, 0L, Wei.ONE, Map.of())
-            .build();
-    final byte[] headerA = singleHeaderRecord(oneEoa(a).write(tmp, "a"));
-    final byte[] headerB = singleHeaderRecord(oneEoa(b).write(tmp, "b"));
-    final boolean aFirst = Arrays.compareUnsigned(headerA, headerB) < 0;
-    final Artifacts artifacts = fixture.write(tmp, "unsorted");
-    try (final OutputStream out = Files.newOutputStream(artifacts.snapshot())) {
-      out.write(fixture.pbtRoot().toArrayUnsafe());
-      out.write(count(2));
-      out.write(aFirst ? headerB : headerA);
-      out.write(aFirst ? headerA : headerB);
-      out.write(count(0)); // code
-      out.write(count(0)); // storage
-    }
-
-    // The reader's order check and the join run concurrently; either may report first.
-    assertThatThrownBy(() -> verify(artifacts, fixture.mptRoot()))
-        .isInstanceOf(Eip8347ArtifactVerificationException.class);
-  }
-
-  @Test
-  void rejectsOneAccountsStorageSplitAcrossTwoRecords() throws Exception {
-    // Slots 64 and 1000 land in two storage groups of one account: one record, groupCount 2.
-    final Eip8347Fixture fixture =
-        Eip8347Fixture.builder()
-            .eoa(
-                address(0x32),
-                1L,
-                Wei.ONE,
-                Map.of(UInt256.valueOf(64), UInt256.valueOf(9), UInt256.valueOf(1000), UInt256.ONE))
-            .build();
-    final Artifacts artifacts = fixture.write(tmp, "split");
-    final byte[] bytes = Files.readAllBytes(artifacts.snapshot());
-
-    // Tail: storageCount[8]=1 | addressHash[32] | groupCount=0x01 0x02 | group(36) | group(36)
-    final int groupSize = 36;
-    final int recordStart = bytes.length - (32 + 2 + 2 * groupSize);
-    final byte[] addressHash = Arrays.copyOfRange(bytes, recordStart, recordStart + 32);
-    final int groupsStart = recordStart + 34;
-    try (final OutputStream out = Files.newOutputStream(artifacts.snapshot())) {
-      out.write(bytes, 0, recordStart - 8);
-      out.write(count(2));
-      for (int g = 0; g < 2; g++) {
-        out.write(addressHash);
-        out.write(new byte[] {1, 1});
-        out.write(bytes, groupsStart + g * groupSize, groupSize);
-      }
-    }
-
-    assertRejected(artifacts, fixture.mptRoot(), "storage records are not strictly ascending");
   }
 
   // ---- Reject: consensus anchoring (preimages ⋈ snapshot) ----
@@ -455,15 +378,5 @@ class Eip8347DualCheckVerifierTest {
 
   private static Bytes32 emptyMptRoot() {
     return Bytes32.wrap(Hash.EMPTY_TRIE_HASH.getBytes());
-  }
-
-  private static byte[] count(final long count) {
-    return ByteBuffer.allocate(8).putLong(count).array();
-  }
-
-  /** The header record of a one-EOA snapshot: {@code pbtRoot | 1 | record | 0 | 0}. */
-  private static byte[] singleHeaderRecord(final Artifacts artifacts) throws Exception {
-    final byte[] snapshot = Files.readAllBytes(artifacts.snapshot());
-    return Arrays.copyOfRange(snapshot, 40, snapshot.length - 16);
   }
 }

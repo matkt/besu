@@ -36,10 +36,12 @@ import org.apache.tuweni.bytes.Bytes32;
 /**
  * Sequential reader of an EIP-8347 typed snapshot, one record ("unit") at a time.
  *
- * <p>{@code pbtRoot[32] | headerCount[8] | headers | codeCount[8] | code groups | storageCount[8] |
- * storage records}. Enforces the byte-canonical layout: units strictly ascending by stem (so
- * derived leaves are strictly ascending in PBT key order), storage records strictly ascending by
- * {@code addressHash} with a non-zero {@code groupCount}, and no trailing byte. Memory is one unit.
+ * <p>{@code record * | end | pbtRoot[32]}, each record opening with its tag (see {@link
+ * Eip8347TypedSnapshotCodec}). Enforces the byte-canonical layout: units strictly ascending by
+ * stem, so derived leaves are strictly ascending in PBT key order and records come in zone order
+ * (account {@code 0x00…}, code {@code 0x01…}, storage {@code 0xff…}); storage accounts strictly
+ * ascending by {@code addressHash} and each followed by at least one storage group, the one-leaf
+ * storage group encoding for exactly the one-leaf groups, and no trailing byte. Memory is one unit.
  */
 public final class Eip8347SnapshotReader implements Closeable {
 
@@ -107,32 +109,31 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
   }
 
-  private enum Section {
-    HEADER,
-    CODE,
-    STORAGE,
-    DONE
-  }
-
   private final InputStream in;
-  private final Bytes32 claimedRoot;
 
-  private Section section = Section.HEADER;
-  private long recordsLeft;
-  private long groupsLeft;
+  /** The storage account the next storage groups belong to, and whether one has been read yet. */
   private Bytes32 storageAddressHash;
+
+  private boolean storageAccountHasGroup = true;
   private Bytes previousStem;
   private long leafCount;
+  private Bytes32 claimedRoot;
 
   public Eip8347SnapshotReader(final Path path) throws IOException {
     this.in =
         new BufferedInputStream(
             Files.newInputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
-    this.claimedRoot = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, Bytes32.SIZE));
-    this.recordsLeft = Eip8347TypedSnapshotCodec.readCount(in);
   }
 
+  /**
+   * The PBT root the snapshot claims, read after its last record.
+   *
+   * @throws IllegalStateException before {@link #next} has returned {@code null}
+   */
   public Bytes32 claimedRoot() {
+    if (claimedRoot == null) {
+      throw new IllegalStateException("the claimed root follows the last record");
+    }
     return claimedRoot;
   }
 
@@ -143,41 +144,45 @@ public final class Eip8347SnapshotReader implements Closeable {
 
   /** Next unit in file order, or {@code null} once the snapshot is fully and validly consumed. */
   public Unit next() throws IOException {
+    if (claimedRoot != null) {
+      return null;
+    }
     while (true) {
-      switch (section) {
-        case HEADER -> {
-          if (recordsLeft > 0) {
-            recordsLeft--;
-            return accept(new HeaderUnit(Eip8347TypedSnapshotCodec.readHeaderRecord(in)));
-          }
-          enter(Section.CODE);
+      final int tag = Eip8347TypedSnapshotCodec.readByte(in);
+      switch (tag) {
+        case Eip8347TypedSnapshotCodec.KIND_NONE,
+            Eip8347TypedSnapshotCodec.KIND_CODE,
+            Eip8347TypedSnapshotCodec.KIND_DELEGATION -> {
+          requireStorageAccountHasGroup();
+          return accept(new HeaderUnit(Eip8347TypedSnapshotCodec.readHeaderRecord(in, tag)));
         }
-        case CODE -> {
-          if (recordsLeft > 0) {
-            recordsLeft--;
-            return accept(new CodeUnit(Eip8347TypedSnapshotCodec.readGroup(in)));
-          }
-          enter(Section.STORAGE);
+        case Eip8347TypedSnapshotCodec.TAG_CODE_GROUP -> {
+          requireStorageAccountHasGroup();
+          return accept(new CodeUnit(Eip8347TypedSnapshotCodec.readGroup(in)));
         }
-        case STORAGE -> {
-          if (groupsLeft > 0) {
-            groupsLeft--;
-            return accept(
-                new StorageUnit(storageAddressHash, Eip8347TypedSnapshotCodec.readGroup(in)));
-          }
-          if (recordsLeft > 0) {
-            recordsLeft--;
-            beginStorageRecord();
-          } else {
-            section = Section.DONE;
-            if (in.read() != -1) {
-              throw new Eip8347ArtifactVerificationException("trailing bytes after snapshot");
-            }
-          }
+        case Eip8347TypedSnapshotCodec.TAG_STORAGE_ACCOUNT -> beginStorageAccount();
+        case Eip8347TypedSnapshotCodec.TAG_SINGLE_STORAGE_GROUP -> {
+          return accept(storageGroup(Eip8347TypedSnapshotCodec.readSingleGroup(in)));
         }
-        case DONE -> {
+        case Eip8347TypedSnapshotCodec.TAG_STORAGE_GROUP -> {
+          final Group group = Eip8347TypedSnapshotCodec.readGroup(in);
+          if (group.entries().size() == 1) {
+            throw new Eip8347ArtifactVerificationException(
+                "a one-leaf storage group must use the single-group encoding");
+          }
+          return accept(storageGroup(group));
+        }
+        case Eip8347TypedSnapshotCodec.TAG_END -> {
+          requireStorageAccountHasGroup();
+          claimedRoot = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, Bytes32.SIZE));
+          if (in.read() != -1) {
+            throw new Eip8347ArtifactVerificationException("trailing bytes after snapshot");
+          }
           return null;
         }
+        default ->
+            throw new Eip8347ArtifactVerificationException(
+                "invalid snapshot record tag 0x" + Integer.toHexString(tag));
       }
     }
   }
@@ -189,7 +194,7 @@ public final class Eip8347SnapshotReader implements Closeable {
 
       @Override
       public boolean hasNext() {
-        if (pending == null && section != Section.DONE) {
+        if (pending == null && claimedRoot == null) {
           try {
             pending = Eip8347SnapshotReader.this.next();
           } catch (final IOException e) {
@@ -213,9 +218,8 @@ public final class Eip8347SnapshotReader implements Closeable {
 
   /** Fails unless {@link #next} has already returned {@code null}. */
   public void ensureExhausted() {
-    if (section != Section.DONE) {
-      throw new Eip8347ArtifactVerificationException(
-          "snapshot has unread records in section " + section);
+    if (claimedRoot == null) {
+      throw new Eip8347ArtifactVerificationException("snapshot has unread records");
     }
   }
 
@@ -224,12 +228,8 @@ public final class Eip8347SnapshotReader implements Closeable {
     in.close();
   }
 
-  private void enter(final Section next) throws IOException {
-    section = next;
-    recordsLeft = Eip8347TypedSnapshotCodec.readCount(in);
-  }
-
-  private void beginStorageRecord() throws IOException {
+  private void beginStorageAccount() throws IOException {
+    requireStorageAccountHasGroup();
     final Bytes32 addressHash = Bytes32.wrap(Eip8347TypedSnapshotCodec.readFully(in, Bytes32.SIZE));
     if (storageAddressHash != null
         && Eip8347TypedSnapshotCodec.compare(storageAddressHash, addressHash) >= 0) {
@@ -238,11 +238,24 @@ public final class Eip8347SnapshotReader implements Closeable {
               + addressHash.toHexString());
     }
     storageAddressHash = addressHash;
-    groupsLeft =
-        Eip8347TypedSnapshotCodec.readUint(in, Eip8347TypedSnapshotCodec.GROUP_COUNT_WIDTH);
-    if (groupsLeft == 0L) {
+    storageAccountHasGroup = false;
+  }
+
+  private StorageUnit storageGroup(final Group group) {
+    if (storageAddressHash == null) {
       throw new Eip8347ArtifactVerificationException(
-          "storage groupCount must be non-zero for " + addressHash.toHexString());
+          "storage group without a storage account before it");
+    }
+    storageAccountHasGroup = true;
+    return new StorageUnit(storageAddressHash, group);
+  }
+
+  private void requireStorageAccountHasGroup() {
+    if (!storageAccountHasGroup) {
+      throw new Eip8347ArtifactVerificationException(
+          "storage account "
+              + storageAddressHash.toHexString()
+              + " is not followed by a storage group");
     }
   }
 

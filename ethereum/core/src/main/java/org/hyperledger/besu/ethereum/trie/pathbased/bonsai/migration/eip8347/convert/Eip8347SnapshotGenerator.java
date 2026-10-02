@@ -156,8 +156,7 @@ public final class Eip8347SnapshotGenerator {
    * @param preimagesPath EIP-8347 preimage artifact (input)
    * @param stateSource account/storage/code view at {@code ANCHOR_BLOCK}
    * @param snapshotPath output path for the snapshot artifact
-   * @param workDir where the external sort and large storage records spill; a subdirectory is
-   *     created and deleted
+   * @param workDir where the external sort spills; a subdirectory is created and deleted
    * @return claimed root and leaf count
    */
   public static Result generate(
@@ -214,7 +213,7 @@ public final class Eip8347SnapshotGenerator {
                     }
                   }));
       preimages.ensureExhausted();
-      final Result result = writeSnapshot(leaves.sorted(), snapshotPath, spillDir);
+      final Result result = writeSnapshot(leaves.sorted(), snapshotPath);
       LOG.info(
           "EIP-8347 snapshot generated (leaves={}, root={})",
           result.leafCount(),
@@ -230,14 +229,11 @@ public final class Eip8347SnapshotGenerator {
    * bytecode emitted per account) are coalesced; a key with two values is rejected.
    */
   private static Result writeSnapshot(
-      final Iterator<Eip8347ExternalSorter.Entry> sorted,
-      final Path snapshotPath,
-      final Path spillDir)
+      final Iterator<Eip8347ExternalSorter.Entry> sorted, final Path snapshotPath)
       throws IOException {
     final AscendingCollapseBinaryTrie pbt = new AscendingCollapseBinaryTrie();
     long leafCount = 0;
-    try (final Eip8347SnapshotWriter snapshot =
-        Eip8347SnapshotWriter.open(snapshotPath, spillDir)) {
+    try (final Eip8347SnapshotWriter snapshot = Eip8347SnapshotWriter.open(snapshotPath)) {
       Eip8347ExternalSorter.Entry previous = null;
       while (sorted.hasNext()) {
         final Eip8347ExternalSorter.Entry entry = sorted.next();
