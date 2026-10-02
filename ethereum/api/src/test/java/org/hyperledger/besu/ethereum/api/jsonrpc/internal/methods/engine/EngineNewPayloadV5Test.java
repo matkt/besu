@@ -21,8 +21,13 @@ import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BOGOTA
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.ExecutionEngineJsonRpcMethod.EngineStatus.INVALID;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineTestSupport.fromErrorResp;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType.INVALID_BLOCK_ACCESS_LIST_PARAMS;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.BlobGas;
@@ -33,6 +38,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.ConstructorArg
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
@@ -49,6 +55,7 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
@@ -178,6 +185,31 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
         respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
     assertValidResponse(header, resp);
+  }
+
+  @Test
+  public void shouldStartPrefetchingTheBlockAccessListStateBeforeProcessingTheBlock() {
+    final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
+    when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    final BlockHeader header =
+        setupPayloadV5(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.empty()),
+            BLOCK_ACCESS_LIST,
+            0L);
+    final BlockHeader parentHeader = mock(BlockHeader.class);
+    when(blockchain.getBlockHeader(header.getParentHash())).thenReturn(Optional.of(parentHeader));
+
+    final JsonRpcResponse resp =
+        respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
+
+    assertValidResponse(header, resp);
+    final InOrder inOrder = inOrder(blockProcessor, mergeCoordinator);
+    inOrder
+        .verify(blockProcessor)
+        .prefetchBlockAccessList(protocolContext, parentHeader, BLOCK_ACCESS_LIST);
+    inOrder.verify(mergeCoordinator).rememberBlock(any(), any());
   }
 
   protected BlockHeader setupPayloadV5(

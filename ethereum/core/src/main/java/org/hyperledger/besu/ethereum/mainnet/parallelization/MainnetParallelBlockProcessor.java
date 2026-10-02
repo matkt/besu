@@ -20,6 +20,7 @@ import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
@@ -30,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpecBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetcher;
 import org.hyperledger.besu.ethereum.mainnet.systemcall.BlockProcessingContext;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -43,6 +45,7 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +58,11 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
   private final Optional<Counter> conflictingButCachedTransactionCounter;
 
   private static final Executor executor = BlockProcessingExecutors.cpuExecutor();
+
+  private final Optional<BalPrefetcher> maybePrefetcher;
+
+  /** Block access list whose state is being prefetched ahead of the processing of its block. */
+  private final AtomicReference<BlockAccessList> prefetchedAhead = new AtomicReference<>();
 
   public MainnetParallelBlockProcessor(
       final MainnetTransactionProcessor transactionProcessor,
@@ -81,12 +89,30 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
                 "parallelized_transactions_counter",
                 "Counter for the number of parallelized transactions during block processing"));
 
+    this.maybePrefetcher = BalPrefetcher.fromConfiguration(balConfiguration);
     this.conflictingButCachedTransactionCounter =
         Optional.of(
             metricsSystem.createCounter(
                 BesuMetricCategory.BLOCK_PROCESSING,
                 "conflicted_transactions_counter",
                 "Counter for the number of conflicted transactions during block processing"));
+  }
+
+  /**
+   * Starts prefetching the state of a block from its access list as soon as the payload is
+   * received, so that it is mostly in cache when the block is executed. Processing that block (the
+   * same access list instance) then does not prefetch it again.
+   */
+  @Override
+  public void prefetchBlockAccessList(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final BlockAccessList blockAccessList) {
+    maybePrefetcher.ifPresent(
+        prefetcher -> {
+          prefetchedAhead.set(blockAccessList);
+          prefetcher.prefetch(protocolContext, parentHeader, blockAccessList);
+        });
   }
 
   @Override
@@ -141,6 +167,8 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
       final MutableWorldState worldState,
       final Block block,
       final Optional<BlockAccessList> blockAccessList) {
+    final boolean isPrefetchedAhead =
+        blockAccessList.isPresent() && prefetchedAhead.compareAndSet(blockAccessList.get(), null);
     final BlockProcessingResult blockProcessingResult =
         super.processBlock(
             protocolContext,
@@ -148,7 +176,11 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
             worldState,
             block,
             blockAccessList,
-            new ParallelTransactionPreprocessing(transactionProcessor, executor, balConfiguration));
+            new ParallelTransactionPreprocessing(
+                transactionProcessor,
+                executor,
+                balConfiguration,
+                isPrefetchedAhead ? Optional.empty() : maybePrefetcher));
     if (blockProcessingResult.isFailed()) {
       // Fallback to non-parallel processing if there is a block processing exception .
       LOG.info(
