@@ -34,7 +34,6 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTra
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListFactory;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.PreprocessingContext;
 import org.hyperledger.besu.ethereum.mainnet.requests.RequestProcessingContext;
@@ -251,10 +250,13 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 protocolContext, blockHeader, blockAccessListLookup, worldState.isStorageFrozen())
             .timed(blockProcessingMetrics.stateRootCalculationTimer());
 
+    // Sized for the block access list being validated, which it rebuilds, when there is one.
+    final int expectedBalAccounts =
+        blockAccessListLookup.map(lookup -> lookup.accountChanges().size()).orElse(0);
     final Optional<BlockAccessListBuilder> blockAccessListBuilder =
         protocolSpec
             .getBlockAccessListFactory()
-            .map(BlockAccessListFactory::newBlockAccessListBuilder);
+            .map(factory -> factory.newBlockAccessListBuilder(expectedBalAccounts));
 
     Optional<PreprocessingContext> preProcessingContext = Optional.empty();
     try {

@@ -29,4 +29,9 @@ public class BlockAccessListFactory {
   public BlockAccessListBuilder newBlockAccessListBuilder() {
     return BlockAccessList.builder();
   }
+
+  /** Returns a new builder sized for {@code expectedAccounts} accounts. */
+  public BlockAccessListBuilder newBlockAccessListBuilder(final int expectedAccounts) {
+    return BlockAccessList.builder(expectedAccounts);
+  }
 }

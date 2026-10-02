@@ -96,7 +96,15 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
   }
 
   public static BlockAccessListBuilder builder() {
-    return new BlockAccessListBuilder();
+    return new BlockAccessListBuilder(0);
+  }
+
+  /**
+   * Returns a builder sized for {@code expectedAccounts} accounts, e.g. those of the block access
+   * list being validated, so that it does not grow while transactions are applied.
+   */
+  public static BlockAccessListBuilder builder(final int expectedAccounts) {
+    return new BlockAccessListBuilder(expectedAccounts);
   }
 
   @Override
@@ -185,7 +193,13 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
   private record SortableSlotRead(byte[] sortKey, StorageSlotKey value) {}
 
   public static class BlockAccessListBuilder {
-    final Map<Address, AccountBuilder> accountChangesBuilders = new HashMap<>();
+    final Map<Address, AccountBuilder> accountChangesBuilders;
+
+    BlockAccessListBuilder(final int expectedAccounts) {
+      // Without an expected size, let the map grow from its default capacity.
+      this.accountChangesBuilders =
+          expectedAccounts > 0 ? HashMap.newHashMap(expectedAccounts) : new HashMap<>();
+    }
 
     public static AccessLocationTracker createPreExecutionAccessLocationTracker() {
       return new AccessLocationTracker(0);
@@ -304,11 +318,13 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
 
     public static class AccountBuilder {
       final Address address;
-      final Map<StorageSlotKey, List<StorageChange>> slotWrites = new HashMap<>();
-      final Set<StorageSlotKey> slotReads = new HashSet<>();
-      final List<BalanceChange> balances = new ArrayList<>();
-      final List<NonceChange> nonces = new ArrayList<>();
-      final List<CodeChange> codes = new ArrayList<>();
+      // Created on first add: most accounts of a block only have a balance or nonce change, or are
+      // only read. An empty collection is therefore immutable, so check emptiness before mutating.
+      Map<StorageSlotKey, List<StorageChange>> slotWrites = Map.of();
+      Set<StorageSlotKey> slotReads = Set.of();
+      List<BalanceChange> balances = List.of();
+      List<NonceChange> nonces = List.of();
+      List<CodeChange> codes = List.of();
 
       AccountBuilder(final Address address) {
         this.address = address;
@@ -361,27 +377,44 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
       }
 
       void addStorageWrite(final StorageSlotKey slot, final long txIndex, final UInt256 value) {
-        final List<StorageChange> changes =
-            slotWrites.computeIfAbsent(slot, __ -> new ArrayList<>());
-        slotReads.remove(slot);
-        changes.add(new StorageChange(txIndex, value));
+        if (slotWrites.isEmpty()) {
+          slotWrites = new HashMap<>();
+        }
+        if (!slotReads.isEmpty()) {
+          slotReads.remove(slot);
+        }
+        slotWrites
+            .computeIfAbsent(slot, __ -> new ArrayList<>())
+            .add(new StorageChange(txIndex, value));
       }
 
       void addStorageRead(final StorageSlotKey slot) {
         if (!slotWrites.containsKey(slot)) {
+          if (slotReads.isEmpty()) {
+            slotReads = new HashSet<>();
+          }
           slotReads.add(slot);
         }
       }
 
       void addBalanceChange(final long txIndex, final Wei postBalance) {
+        if (balances.isEmpty()) {
+          balances = new ArrayList<>();
+        }
         balances.add(new BalanceChange(txIndex, postBalance));
       }
 
       void addNonceChange(final long txIndex, final long newNonce) {
+        if (nonces.isEmpty()) {
+          nonces = new ArrayList<>();
+        }
         nonces.add(new NonceChange(txIndex, newNonce));
       }
 
       void addCodeChange(final long txIndex, final Bytes code) {
+        if (codes.isEmpty()) {
+          codes = new ArrayList<>();
+        }
         codes.add(new CodeChange(txIndex, code));
       }
 
