@@ -415,27 +415,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   /**
-   * Reads trie nodes in one batch, by storage key: the location for an account trie node, the
-   * account hash followed by the location for a storage trie node. The nodes are not checked
-   * against a hash. Empty when trie nodes are not stored by location (archive).
-   *
-   * @param keys the storage keys of the trie nodes
-   * @return the nodes, in the order of the keys, if trie nodes are stored by location
-   */
-  public Optional<List<Optional<Bytes>>> getMultipleTrieNodesByLocation(final List<byte[]> keys) {
-    if (!(trieNodeStrategy instanceof BonsaiTrieNodeStrategy)) {
-      return Optional.empty();
-    }
-    final List<Optional<byte[]>> values =
-        composedWorldStateStorage.multiget(TRIE_BRANCH_STORAGE, keys);
-    final List<Optional<Bytes>> nodes = new ArrayList<>(values.size());
-    for (final Optional<byte[]> value : values) {
-      nodes.add(value.map(Bytes::wrap));
-    }
-    return Optional.of(nodes);
-  }
-
-  /**
    * Account trie node for a walk that only needs the node's content. A trie node cache hit does not
    * show that storage holds the node at this location; {@link #getAccountStateTrieNode} does.
    */

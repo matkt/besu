@@ -16,7 +16,7 @@ package org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch;
 
 /**
  * A block access list prefetch in progress. Once cancelled it reads nothing more: the batches that
- * have not started yet are skipped, as are the trie levels not reached yet.
+ * have not started yet are skipped.
  */
 public final class BalPrefetch {
 

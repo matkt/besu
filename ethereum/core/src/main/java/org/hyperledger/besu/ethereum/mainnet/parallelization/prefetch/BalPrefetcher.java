@@ -169,36 +169,18 @@ public class BalPrefetcher {
             },
             orchestrationExecutor)
         .thenCompose(
-            keys -> {
-              final CompletableFuture<Void> flatValues =
-                  fetchKeysAsync(worldState, keys, fetchExecutor, prefetch)
-                      .thenRun(
-                          () ->
-                              LOG.info(
-                                  "Prefetch {}: {} accounts + {} storage slots{}",
-                                  prefetch.isCancelled() ? "cancelled" : "completed",
-                                  keys.accountKeys.size(),
-                                  keys.storageKeys.size(),
-                                  shouldBatch()
-                                      ? " in batches of " + batchSize
-                                      : " in single batch"));
-              // the trie nodes the state root computation walks, read alongside the flat values
-              final CompletableFuture<Void> trieNodes =
-                  TrieNodePrefetcher.prefetch(
-                          worldState.getWorldStateStorage(),
-                          worldState.getWorldStateRootHash(),
-                          blockAccessList,
-                          fetchExecutor,
-                          batchSize,
-                          prefetch)
-                      .thenAccept(
-                          summary ->
-                              LOG.info(
-                                  "Trie node prefetch {}: {}",
-                                  prefetch.isCancelled() ? "cancelled" : "completed",
-                                  summary));
-              return CompletableFuture.allOf(flatValues, trieNodes);
-            })
+            keys ->
+                fetchKeysAsync(worldState, keys, fetchExecutor, prefetch)
+                    .thenRun(
+                        () ->
+                            LOG.info(
+                                "Prefetch {}: {} accounts + {} storage slots{}",
+                                prefetch.isCancelled() ? "cancelled" : "completed",
+                                keys.accountKeys.size(),
+                                keys.storageKeys.size(),
+                                shouldBatch()
+                                    ? " in batches of " + batchSize
+                                    : " in single batch")))
         .whenComplete(
             (result, ex) -> {
               if (ex != null) {
