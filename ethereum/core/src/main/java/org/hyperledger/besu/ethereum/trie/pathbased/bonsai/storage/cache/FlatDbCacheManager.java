@@ -60,13 +60,14 @@ public interface FlatDbCacheManager {
   }
 
   /**
-   * Commits storage and publishes the matching cache writes as one step with respect to other
-   * publishes and {@link #invalidateAll(LongConsumer)}.
+   * Commits storage and publishes the matching cache writes.
    *
    * <p>The storage commit runs first, then a new version is allocated and handed to {@code
    * publisher}, which must publish the committed writes at exactly that version. Readers bypass the
-   * cache for the whole sequence. Concurrent calls are serialized, so version order always matches
-   * storage commit order.
+   * cache for the whole sequence. While the cache is enabled, concurrent calls (and {@link
+   * #invalidateAll(LongConsumer)}) are serialized, so version order matches storage commit order.
+   * While it is disabled they are not, and versions may be handed to publishers out of order:
+   * callers tracking the latest version must only move it forward.
    *
    * @param storageCommit commits the underlying storage transaction
    * @param publisher receives the new version; publishes the committed writes at that version

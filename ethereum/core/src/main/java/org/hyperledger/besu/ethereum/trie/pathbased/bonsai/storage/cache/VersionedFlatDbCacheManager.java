@@ -62,9 +62,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   private final AtomicInteger commitCacheBypassCount = new AtomicInteger(0);
 
   /**
-   * Serializes {@link #commitAndPublish} and {@link #invalidateAll} across every storage sharing
-   * this cache (e.g. concurrent snap sync pipelines), so version order matches storage commit
-   * order.
+   * While the cache is enabled, serializes {@link #commitAndPublish} and {@link #invalidateAll}
+   * across every storage sharing this cache, so version order matches storage commit order.
    */
   private final Object publishLock = new Object();
 

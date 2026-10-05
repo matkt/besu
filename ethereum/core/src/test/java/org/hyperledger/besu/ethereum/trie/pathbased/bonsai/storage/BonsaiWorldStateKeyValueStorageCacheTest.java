@@ -30,6 +30,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.io.Closeable;
 import java.util.Optional;
+import java.util.function.LongConsumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -467,6 +468,57 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
     commitAccount(account, Bytes.of(2));
     assertThat(head.getCachedValue(ACCOUNT_INFO_STATE, account.getBytes()))
         .hasValueSatisfying(cv -> assertThat(cv.getValue()).isEqualTo(Bytes.of(2)));
+  }
+
+  @Test
+  void headVersionNeverMovesBackwardsWhenCommitVersionsArriveOutOfOrder() throws Exception {
+    disposeHead();
+    final OutOfOrderPublishCacheManager cacheManager = new OutOfOrderPublishCacheManager();
+    head =
+        new BonsaiWorldStateKeyValueStorage(
+            new InMemoryKeyValueStorageProvider(),
+            new NoOpMetricsSystem(),
+            dataConfigBuilder(true).build(),
+            cacheManager);
+    cacheManager.disable();
+
+    // commit A gets v1 but its publish is delayed until after commit B (v2) has published,
+    // as two unserialized commits (cache disabled) can do
+    cacheManager.deferNextPublish();
+    commitAccount(Hash.hash(Bytes.of(49)), Bytes.of(1));
+    commitAccount(Hash.hash(Bytes.of(50)), Bytes.of(2));
+    cacheManager.runDeferredPublish();
+
+    assertThat(head.getCurrentVersion()).isEqualTo(cacheManager.getCurrentVersion()).isEqualTo(2);
+  }
+
+  /** Delays one publish callback so that commit versions reach the storage out of order. */
+  private static final class OutOfOrderPublishCacheManager extends VersionedFlatDbCacheManager {
+    private boolean deferNext;
+    private Runnable deferredPublish;
+
+    OutOfOrderPublishCacheManager() {
+      super(100, 100, new NoOpMetricsSystem());
+    }
+
+    void deferNextPublish() {
+      deferNext = true;
+    }
+
+    void runDeferredPublish() {
+      deferredPublish.run();
+    }
+
+    @Override
+    public void commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
+      if (!deferNext) {
+        super.commitAndPublish(storageCommit, publisher);
+        return;
+      }
+      deferNext = false;
+      super.commitAndPublish(
+          storageCommit, version -> deferredPublish = () -> publisher.accept(version));
+    }
   }
 
   private void commitAccount(final Hash accountHash, final Bytes value) {

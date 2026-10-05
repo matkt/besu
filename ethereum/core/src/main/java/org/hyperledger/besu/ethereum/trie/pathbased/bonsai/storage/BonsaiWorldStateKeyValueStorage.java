@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -83,7 +84,13 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
   protected final FlatDbCacheManager cacheManager;
-  private volatile long cacheVersion;
+
+  /**
+   * Cache version this storage reads at. Only ever moves forward: commits that are not serialized
+   * (cross-block cache disabled) can hand out their versions out of order.
+   */
+  private final AtomicLong cacheVersion;
+
   protected volatile TrieNodeStrategy trieNodeStrategy;
 
   public BonsaiWorldStateKeyValueStorage(
@@ -113,7 +120,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
 
     this.cacheManager = cacheManager;
-    this.cacheVersion = cacheManager.getCurrentVersion();
+    this.cacheVersion = new AtomicLong(cacheManager.getCurrentVersion());
     this.trieNodeStrategy = new BonsaiTrieNodeStrategy();
   }
 
@@ -143,7 +150,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     this.trieLogStorage = trieLogStorage;
     this.flatDbStrategyProvider = flatDbStrategyProvider;
     this.cacheManager = cacheManager;
-    this.cacheVersion = cacheVersion;
+    this.cacheVersion = new AtomicLong(cacheVersion);
     this.trieNodeStrategy = trieNodeStrategy;
   }
 
@@ -153,7 +160,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         composedWorldStateStorage,
         trieLogStorage,
         cacheManager,
-        cacheVersion,
+        cacheVersion.get(),
         strategy);
   }
 
@@ -460,7 +467,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   /** Drops all cross-block flat-db cache entries without touching RocksDB. */
   public void clearCrossBlockCache() {
-    cacheManager.invalidateAll(newVersion -> cacheVersion = newVersion);
+    cacheManager.invalidateAll(this::advanceCacheVersion);
   }
 
   public BonsaiFlatDbStrategy getFlatDbStrategy() {
@@ -496,7 +503,11 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   public long getCurrentVersion() {
-    return cacheVersion;
+    return cacheVersion.get();
+  }
+
+  private void advanceCacheVersion(final long newVersion) {
+    cacheVersion.accumulateAndGet(newVersion, Math::max);
   }
 
   public BonsaiFlatDbStrategyProvider getFlatDbStrategyProvider() {
@@ -761,7 +772,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       cacheManager.commitAndPublish(
           storageCommit,
           newVersion -> {
-            cacheVersion = newVersion;
+            advanceCacheVersion(newVersion);
             updateCache(newVersion);
           });
       // no-op when published; drops staged writes when the cache is disabled

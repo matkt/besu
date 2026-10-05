@@ -122,9 +122,10 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Commit publish and concurrency
 
-`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`, which holds the cache's publish lock, enables the commit cache bypass, commits storage, allocates the next version and hands it to the updater, which publishes its staged writes at exactly that version:
+`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`, which enables the commit cache bypass, commits storage, allocates the next version and hands it to the updater, which publishes its staged writes at exactly that version. While the cache is enabled, this whole sequence runs under the cache's publish lock (see the next section for the disabled case):
 
-- **Serialized publishes**: concurrent updaters (e.g. snap sync pipelines) commit one at a time, so the cache version order matches the storage commit order and the head `cacheVersion` never moves backwards. Each updater publishes at the version it obtained itself.
+- **Serialized publishes (cache enabled)**: concurrent updaters commit one at a time, so the cache version order matches the storage commit order. Each updater publishes at the version it obtained itself.
+- **Monotonic head version**: the storage only moves its `cacheVersion` forward (`max`), so it never goes backwards even when versions are handed out of order by unserialized commits (cache disabled).
 - **Read-path inserts re-check under the key lock**: a reader inserts a value it loaded from storage only if, inside `compute`, no bypass is active and its pinned version is still `globalVersion`. A read that overlapped a commit therefore cannot shadow the published value, even if that entry was evicted in between.
 - **Clearing bumps the version**: `clearCrossBlockCache()` calls `FlatDbCacheManager.invalidateAll()`, which (under the same lock) advances the version before invalidating, so a read that loaded a pre-clear value cannot repopulate the cache after the clear.
 
@@ -132,7 +133,7 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Disabled during the initial sync
 
-`BesuControllerBuilder` disables the cache while the initial (snap) sync runs and enables it on `onInitialSyncCompleted()` (disabling it again on `onInitialSyncRestart()`). While disabled, reads go straight to storage, nothing is inserted or published, and `commitAndPublish()` does not take the publish lock, so concurrent sync pipelines are never serialized. Commits still advance the version under the bypass, so a read that loaded a value around a disable → commit → enable sequence cannot insert it afterwards. Managers built directly (tests, tools) start enabled.
+`BesuControllerBuilder` disables the cache while the initial (snap) sync runs and enables it on `onInitialSyncCompleted()` (disabling it again on `onInitialSyncRestart()`). While disabled, reads go straight to storage, nothing is inserted or published, and `commitAndPublish()` does not take the publish lock, so concurrent sync pipelines are never serialized; their versions may reach the storage out of order, which only keeps the highest one. Commits still advance the version under the bypass, so a read that loaded a value around a disable → commit → enable sequence cannot insert it afterwards. Managers built directly (tests, tools) start enabled.
 
 ---
 
