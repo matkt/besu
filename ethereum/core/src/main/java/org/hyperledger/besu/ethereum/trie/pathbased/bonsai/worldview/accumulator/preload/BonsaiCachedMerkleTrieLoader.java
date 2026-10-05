@@ -19,8 +19,10 @@ import static org.hyperledger.besu.metrics.BesuMetricCategory.BLOCKCHAIN;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
@@ -31,6 +33,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.Cache;
@@ -44,10 +47,23 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
 
   private static final int ACCOUNT_CACHE_SIZE = 100_000;
   private static final int STORAGE_CACHE_SIZE = 200_000;
+
+  // Guava locks a segment per write, and the preload walks write from many threads at once
+  private static final int CACHE_CONCURRENCY =
+      Math.max(4, Runtime.getRuntime().availableProcessors());
+
   private final Cache<Bytes, Bytes> accountNodes =
-      CacheBuilder.newBuilder().recordStats().maximumSize(ACCOUNT_CACHE_SIZE).build();
+      CacheBuilder.newBuilder()
+          .concurrencyLevel(CACHE_CONCURRENCY)
+          .recordStats()
+          .maximumSize(ACCOUNT_CACHE_SIZE)
+          .build();
   private final Cache<Bytes, Bytes> storageNodes =
-      CacheBuilder.newBuilder().recordStats().maximumSize(STORAGE_CACHE_SIZE).build();
+      CacheBuilder.newBuilder()
+          .concurrencyLevel(CACHE_CONCURRENCY)
+          .recordStats()
+          .maximumSize(STORAGE_CACHE_SIZE)
+          .build();
 
   public BonsaiCachedMerkleTrieLoader(final ObservableMetricsSystem metricsSystem) {
     metricsSystem.createGuavaCacheCollector(BLOCKCHAIN, "accountsNodes", accountNodes);
@@ -72,12 +88,13 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
     try {
       final StoredMerklePatriciaTrie<Bytes, Bytes> accountTrie =
           new StoredMerklePatriciaTrie<>(
-              (location, hash) -> {
-                Optional<Bytes> node =
-                    getAccountStateTrieNode(worldStateKeyValueStorage, location, hash);
-                node.ifPresent(bytes -> accountNodes.put(Hash.hash(bytes).getBytes(), bytes));
-                return node;
-              },
+              (location, hash) ->
+                  getOrLoad(
+                      accountNodes,
+                      hash,
+                      () ->
+                          worldStateKeyValueStorage.getAccountStateTrieNodeFromCacheOrStorage(
+                              location, hash)),
               Bytes32.wrap(worldStateRootHash.getBytes()),
               Function.identity(),
               Function.identity());
@@ -105,22 +122,25 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
     final Hash accountHash = account.addressHash();
     final long storageSubscriberId = worldStateKeyValueStorage.subscribe(this);
     try {
+      // the account holds the storage root hash, so the root node needn't be read and hashed
       worldStateKeyValueStorage
-          .getStateTrieNode(Bytes.concatenate(accountHash.getBytes(), Bytes.EMPTY))
+          .getAccount(accountHash)
+          .map(rlp -> PmtStateTrieAccountValue.readFrom(RLP.input(rlp)).getStorageRoot())
+          .filter(storageRoot -> !storageRoot.equals(Hash.EMPTY_TRIE_HASH))
           .ifPresent(
               storageRoot -> {
                 try {
                   final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
                       new StoredMerklePatriciaTrie<Bytes, Bytes>(
-                          (location, hash) -> {
-                            Optional<Bytes> node =
-                                getAccountStorageTrieNode(
-                                    worldStateKeyValueStorage, accountHash, location, hash);
-                            node.ifPresent(
-                                bytes -> storageNodes.put(Hash.hash(bytes).getBytes(), bytes));
-                            return node;
-                          },
-                          Bytes32.wrap(Hash.hash(storageRoot).getBytes()),
+                          (location, hash) ->
+                              getOrLoad(
+                                  storageNodes,
+                                  hash,
+                                  () ->
+                                      worldStateKeyValueStorage
+                                          .getAccountStorageTrieNodeFromCacheOrStorage(
+                                              accountHash, location, hash)),
+                          Bytes32.wrap(storageRoot.getBytes()),
                           Function.identity(),
                           Function.identity());
                   storageTrie.get(slotKey.getSlotHash().getBytes());
@@ -131,6 +151,28 @@ public class BonsaiCachedMerkleTrieLoader implements StorageSubscriber {
     } finally {
       worldStateKeyValueStorage.unSubscribe(storageSubscriberId);
     }
+  }
+
+  /**
+   * Returns the node from the cache, or loads it and caches it under the hash it was requested by:
+   * storage only returns nodes matching that hash and the other caches are keyed by it, so the node
+   * needn't be hashed again. A cache hit is not written back.
+   */
+  private static Optional<Bytes> getOrLoad(
+      final Cache<Bytes, Bytes> cache,
+      final Bytes32 nodeHash,
+      final Supplier<Optional<Bytes>> loader) {
+    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
+    }
+    final Bytes cached = cache.getIfPresent(nodeHash);
+    if (cached != null) {
+      return Optional.of(cached);
+    }
+    final Optional<Bytes> node = loader.get();
+    // the hash may be a slice of the parent node's RLP; copy it so the key doesn't pin that
+    node.ifPresent(bytes -> cache.put(nodeHash.copy(), bytes));
+    return node;
   }
 
   public Optional<Bytes> getAccountStateTrieNode(

@@ -15,6 +15,10 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -191,5 +195,65 @@ class BonsaiCachedMerkleTrieLoaderTest {
           return TrieIterator.State.CONTINUE;
         });
     assertThat(originalSlots).isNotEmpty().isEqualTo(cachedSlots);
+  }
+
+  @Test
+  void shouldTakeStorageRootFromAccountInsteadOfReadingRootNode() {
+    final Hash hashAccountZero = accounts.get(0).addressHash();
+    final PmtStateTrieAccountValue stateTrieAccountValue =
+        PmtStateTrieAccountValue.readFrom(
+            RLP.input(trie.get(hashAccountZero.getBytes()).orElseThrow()));
+    final Bytes32 storageRoot = Bytes32.wrap(stateTrieAccountValue.getStorageRoot().getBytes());
+    final StoredMerklePatriciaTrie<Bytes, Bytes> storageTrie =
+        new StoredMerklePatriciaTrie<>(
+            (Bytes location, Bytes32 hash) ->
+                inMemoryWorldState.getAccountStorageTrieNode(hashAccountZero, location, hash),
+            storageRoot,
+            Function.identity(),
+            Function.identity());
+    final List<Bytes32> slotHashes = new ArrayList<>();
+    storageTrie.visitLeafs(
+        (keyHash, node) -> {
+          slotHashes.add(keyHash);
+          return TrieIterator.State.CONTINUE;
+        });
+    clearInvocations(inMemoryWorldState);
+
+    slotHashes.forEach(
+        slotHash ->
+            merkleTrieLoader.cacheStorageNodes(
+                inMemoryWorldState,
+                accounts.get(0),
+                new StorageSlotKey(Hash.wrap(slotHash), Optional.empty())));
+
+    verify(inMemoryWorldState, never()).getStateTrieNode(any());
+    final BonsaiWorldStateKeyValueStorage emptyStorage =
+        new BonsaiWorldStateKeyValueStorage(
+            new InMemoryKeyValueStorageProvider(),
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    final StoredMerklePatriciaTrie<Bytes, Bytes> cachedTrie =
+        new StoredMerklePatriciaTrie<>(
+            (Bytes location, Bytes32 hash) ->
+                merkleTrieLoader.getAccountStorageTrieNode(
+                    emptyStorage, hashAccountZero, location, Bytes32.wrap(hash)),
+            storageRoot,
+            Function.identity(),
+            Function.identity());
+    slotHashes.forEach(
+        slotHash -> assertThat(cachedTrie.get(slotHash)).isEqualTo(storageTrie.get(slotHash)));
+  }
+
+  @Test
+  void shouldSkipStoragePreloadOfUnknownAccount() {
+    clearInvocations(inMemoryWorldState);
+
+    merkleTrieLoader.cacheStorageNodes(
+        inMemoryWorldState,
+        Address.fromHexString("0x1234"),
+        new StorageSlotKey(Hash.hash(Bytes.of(1)), Optional.empty()));
+
+    verify(inMemoryWorldState, never())
+        .getAccountStorageTrieNodeFromCacheOrStorage(any(), any(), any());
   }
 }
