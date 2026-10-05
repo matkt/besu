@@ -245,6 +245,49 @@ class VersionedFlatDbCacheManagerTest {
     }
   }
 
+  @Test
+  void enable_waitsForEnabledCommitBlockedOnPublishLock() throws Exception {
+    // a clear holds the publish lock, so an enabled commit blocks waiting for it
+    final CountDownLatch insideClear = new CountDownLatch(1);
+    final CountDownLatch releaseClear = new CountDownLatch(1);
+    final CompletableFuture<Void> clearing =
+        CompletableFuture.runAsync(
+            () ->
+                cacheManager.invalidateAll(
+                    v -> {
+                      insideClear.countDown();
+                      awaitQuietly(releaseClear);
+                    }),
+            committers);
+    try {
+      assertThat(insideClear.await(5, TimeUnit.SECONDS)).isTrue();
+      final AtomicReference<Thread> committer = new AtomicReference<>();
+      final CompletableFuture<Void> commit =
+          CompletableFuture.runAsync(
+              () -> {
+                committer.set(Thread.currentThread());
+                cacheManager.commitAndPublish(() -> {}, v -> {});
+              },
+              committers);
+      Awaitility.await()
+          .atMost(5, TimeUnit.SECONDS)
+          .until(
+              () -> committer.get() != null && committer.get().getState() == Thread.State.BLOCKED);
+
+      cacheManager.disable();
+      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
+      assertThat(enabling).isNotDone();
+
+      releaseClear.countDown();
+      clearing.get(5, TimeUnit.SECONDS);
+      commit.get(5, TimeUnit.SECONDS);
+      enabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isTrue();
+    } finally {
+      releaseClear.countDown();
+    }
+  }
+
   /** Calls enable() on another thread; returns once it waits. */
   private CompletableFuture<Void> enableAsyncAndAwaitParked() {
     final AtomicReference<Thread> enablingThread = new AtomicReference<>();
@@ -323,6 +366,14 @@ class VersionedFlatDbCacheManagerTest {
     first.get(5, TimeUnit.SECONDS);
   }
 
+  private static void awaitQuietly(final CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   /** Starts a commit whose storage commit blocks until {@code release}; returns once inside it. */
   private CompletableFuture<Void> holdCommitUntil(final CountDownLatch release)
       throws InterruptedException {
@@ -333,11 +384,7 @@ class VersionedFlatDbCacheManagerTest {
                 cacheManager.commitAndPublish(
                     () -> {
                       inStorageCommit.countDown();
-                      try {
-                        release.await();
-                      } catch (final InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                      }
+                      awaitQuietly(release);
                     },
                     v -> {}),
             committers);
@@ -356,6 +403,22 @@ class VersionedFlatDbCacheManagerTest {
 
     assertThat(newVersion.get()).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
     assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
+  }
+
+  @Test
+  void invalidateAll_readsDuringTheClearGoToStorage() {
+    final Bytes key = Bytes.of(13);
+    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), cacheManager.getCurrentVersion());
+    final AtomicReference<Optional<Bytes>> readDuringClear = new AtomicReference<>();
+
+    // a read at the new version, before the old entries are dropped
+    cacheManager.invalidateAll(
+        v ->
+            readDuringClear.set(
+                cacheManager.getFromCacheOrStorage(
+                    ACCOUNT_INFO_STATE, key, v, () -> Optional.of(Bytes.of(2)))));
+
+    assertThat(readDuringClear.get()).contains(Bytes.of(2));
   }
 
   @Test

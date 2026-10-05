@@ -133,12 +133,17 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Disabled during the initial sync
 
-The cache is disabled during the initial sync and enabled on `onInitialSyncCompleted()` (disabled again on `onInitialSyncRestart()`). While disabled, reads go to storage, nothing is cached, and commits never publish. They are not serialized: they only share a read lock, so sync pipelines never block each other.
+The cache is disabled during the initial sync and enabled on `onInitialSyncCompleted()` (disabled again on `onInitialSyncRestart()`). While disabled, reads go to storage, nothing is cached, and commits never publish. They are not serialized: commits only share the read side of `enableBarrier`, so sync pipelines never block each other.
 
-`enable()` waits until no commit is in flight, clears the cache, then enables it.
+`enable()` takes the write side: it waits until no commit is in flight, clears the cache, then enables it.
 
 ---
 
 ## Operational note
 
-Cache cleanup (evictions) is deferred until after each commit, so it never runs during block processing: `ThresholdDrainExecutor` holds Caffeine's cleanup task and `scheduleAsyncMaintenance()` runs it after each commit. Exception: if a block inserts more new keys than Caffeine's write buffer holds (`128 × NCPU`, rounded up to a power of two), the inserting thread runs the cleanup itself.
+Caffeine cleanup (evictions) runs on a background thread (`scheduleAsyncMaintenance()`), triggered:
+
+- after each published commit;
+- when `ThresholdDrainExecutor` has queued 1000 cleanup tasks, which can happen while a block is processed.
+
+If a block inserts more new keys than Caffeine's write buffer holds (`128 × NCPU`, rounded up to a power of two), the inserting thread runs the cleanup itself.

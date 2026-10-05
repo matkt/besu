@@ -66,7 +66,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Serializes enabled commits and clears, so version order matches storage commit order. */
   private final Object publishLock = new Object();
 
-  /** Disabled commits pass through together; {@link #enable()} waits until none is inside. */
+  /** Commits pass through together; {@link #enable()} waits until none is inside. */
   private final ReentrantReadWriteLock enableBarrier = new ReentrantReadWriteLock();
 
   /** {@code false} during the initial sync: the cache is bypassed entirely. */
@@ -290,14 +290,14 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
           storageCommit.run();
           return incrementAndGetVersion();
         }
+        synchronized (publishLock) {
+          storageCommit.run();
+          final long version = incrementAndGetVersion();
+          publisher.accept(version);
+          return version;
+        }
       } finally {
         passThrough.unlock();
-      }
-      synchronized (publishLock) {
-        storageCommit.run();
-        final long version = incrementAndGetVersion();
-        publisher.accept(version);
-        return version;
       }
     } finally {
       endCommitCacheBypass();
@@ -306,17 +306,14 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void enable() {
-    // wait for in-flight disabled (write lock) and enabled (publish lock) commits
-    final Lock waitForDisabledCommits = enableBarrier.writeLock();
-    waitForDisabledCommits.lock();
+    final Lock noCommitInFlight = enableBarrier.writeLock();
+    noCommitInFlight.lock();
     try {
-      synchronized (publishLock) {
-        accountCache.invalidateAll();
-        storageCache.invalidateAll();
-        enabled = true;
-      }
+      accountCache.invalidateAll();
+      storageCache.invalidateAll();
+      enabled = true;
     } finally {
-      waitForDisabledCommits.unlock();
+      noCommitInFlight.unlock();
     }
     LOG.info("Bonsai cross-block cache enabled");
   }
@@ -336,10 +333,16 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void invalidateAll(final LongConsumer onNewVersion) {
-    synchronized (publishLock) {
-      onNewVersion.accept(incrementAndGetVersion());
-      accountCache.invalidateAll();
-      storageCache.invalidateAll();
+    // bypass: readers at the new version must not hit entries that are about to be dropped
+    beginCommitCacheBypass();
+    try {
+      synchronized (publishLock) {
+        onNewVersion.accept(incrementAndGetVersion());
+        accountCache.invalidateAll();
+        storageCache.invalidateAll();
+      }
+    } finally {
+      endCommitCacheBypass();
     }
   }
 
