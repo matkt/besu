@@ -526,24 +526,6 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
-  void invalidateAll_entryThatEscapedTheClearIsIgnored() {
-    final Bytes key = Bytes.of(14);
-    final long versionBeforeClear = cacheManager.getCurrentVersion();
-    cacheManager.invalidateAll(v -> {});
-
-    // an insert that was already running when the clear iterated the cache can survive it
-    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), versionBeforeClear);
-
-    assertThat(
-            cacheManager.getFromCacheOrStorage(
-                ACCOUNT_INFO_STATE,
-                key,
-                cacheManager.getCurrentVersion(),
-                () -> Optional.of(Bytes.of(2))))
-        .contains(Bytes.of(2));
-  }
-
-  @Test
   void disabled_readsGoToStorageAndNothingIsCached() {
     final Bytes key = Bytes.of(9);
     final Bytes removedKey = Bytes.of(10);

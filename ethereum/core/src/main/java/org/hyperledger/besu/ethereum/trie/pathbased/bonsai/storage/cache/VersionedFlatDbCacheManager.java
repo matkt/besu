@@ -77,9 +77,6 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** {@code false} during the initial sync: the cache is bypassed entirely. */
   private volatile boolean enabled = true;
 
-  /** Entries older than the last clear are ignored, even if the clear missed them. */
-  private volatile long minValidVersion = 0;
-
   private final Cache<CacheKey, VersionedValue> accountCache;
   private final Cache<CacheKey, VersionedValue> storageCache;
   private final ThresholdDrainExecutor drainExecutor;
@@ -334,7 +331,6 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     try {
       // nothing can be inserted while disabled: clear before enabling, disable before clearing
       if (enable) {
-        minValidVersion = globalVersion.get();
         invalidateBothCaches();
         enabled = true;
       } else {
@@ -344,10 +340,6 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     } finally {
       exclusiveCommit.unlock();
     }
-  }
-
-  private boolean isValidFor(final VersionedValue value, final long readerVersion) {
-    return value != null && value.version >= minValidVersion && value.version <= readerVersion;
   }
 
   private void invalidateBothCaches() {
@@ -366,9 +358,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     beginCommitCacheBypass();
     exclusiveCommit.lock();
     try {
-      final long newVersion = incrementAndGetVersion();
-      minValidVersion = newVersion;
-      onNewVersion.accept(newVersion);
+      onNewVersion.accept(incrementAndGetVersion());
       invalidateBothCaches();
     } finally {
       exclusiveCommit.unlock();
@@ -413,7 +403,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     final CacheKey cacheKey = CacheKey.of(key);
     final VersionedValue versionedValue = cache.getIfPresent(cacheKey);
 
-    if (isValidFor(versionedValue, version)) {
+    if (versionedValue != null && versionedValue.version <= version) {
       cacheHitCounter.inc();
       return versionedValue.isRemoval ? Optional.empty() : Optional.of(versionedValue.getValue());
     }
@@ -498,7 +488,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final CacheKey cacheKey = CacheKey.of(key);
       final VersionedValue versionedValue = cache.getIfPresent(cacheKey);
 
-      if (isValidFor(versionedValue, version)) {
+      if (versionedValue != null && versionedValue.version <= version) {
         cacheHitCounter.inc();
         results.add(
             versionedValue.isRemoval ? Optional.empty() : Optional.of(versionedValue.getValue()));

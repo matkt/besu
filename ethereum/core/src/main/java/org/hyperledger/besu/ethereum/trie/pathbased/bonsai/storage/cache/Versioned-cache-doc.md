@@ -136,7 +136,7 @@ A single fair read/write lock (`commitLock`) coordinates commits, clears and mod
 - **Head version**: the storage only moves its `cacheVersion` forward.
 - **Snapshots** read the head version before taking the storage snapshot, so they are never pinned to a version newer than their data.
 - **Read inserts** are re-checked inside `compute`, so a read delayed past a commit cannot insert a stale value.
-- **Clear**: `invalidateAll()` runs under the bypass and advances the version; entries older than the last clear are ignored even if the clear missed them.
+- **Clear**: `invalidateAll()` runs under the bypass and advances the version. While enabled, an insert already racing the clear may survive it, so storage wipes (`clear()`, `clearFlatDatabase()`) only happen while the cache is disabled (they are all part of the snap sync).
 
 ---
 

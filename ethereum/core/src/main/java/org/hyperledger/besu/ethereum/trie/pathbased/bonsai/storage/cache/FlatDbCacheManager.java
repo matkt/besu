@@ -91,6 +91,8 @@ public interface FlatDbCacheManager {
 
   /**
    * Drops every entry, advancing the version first so in-flight reads cannot repopulate the cache.
+   * While enabled, an insert already racing the clear may survive it: storage wipes must happen
+   * while the cache is disabled.
    *
    * @param onNewVersion receives the new version
    */
