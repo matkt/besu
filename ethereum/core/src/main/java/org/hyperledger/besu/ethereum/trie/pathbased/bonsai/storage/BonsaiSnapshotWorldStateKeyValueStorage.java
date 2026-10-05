@@ -39,7 +39,11 @@ public class BonsaiSnapshotWorldStateKeyValueStorage extends BonsaiWorldStateKey
       LoggerFactory.getLogger(BonsaiSnapshotWorldStateKeyValueStorage.class);
   private final long subscribeParentId;
 
-  public BonsaiSnapshotWorldStateKeyValueStorage(
+  /**
+   * For layers: {@code segmentedWorldStateStorage} must be a live view of the parent, not a
+   * point-in-time snapshot, since the version is read here, after the view was created.
+   */
+  protected BonsaiSnapshotWorldStateKeyValueStorage(
       final BonsaiWorldStateKeyValueStorage parentWorldStateStorage,
       final SnappedKeyValueStorage segmentedWorldStateStorage,
       final KeyValueStorage trieLogStorage) {
