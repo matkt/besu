@@ -52,9 +52,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -278,14 +283,14 @@ public class PbtMigrator {
     // No cursor yet: whatever the column and the work dir hold is a previous, interrupted attempt.
     storage.clearBinaryTrie();
     Eip8347ExternalSorter.deleteRecursively(bootstrap.workDir());
-    try {
+    // The writer is closed, its pending commits done, before a catch below empties the column.
+    try (final ColumnWriter writer = new ColumnWriter(storage)) {
       LOG.info(
           "PBT migrator verifying and loading snapshot {} against anchor {} ({}, stateRoot={})",
           bootstrap.snapshotPath(),
           anchor.getNumber(),
           anchor.getBlockHash(),
           anchor.getStateRoot());
-      final ColumnWriter writer = new ColumnWriter(storage);
       final Eip8347DualCheckVerifier.Loaded loaded =
           Eip8347DualCheckVerifier.verifyAndLoad(
               bootstrap.snapshotPath(),
@@ -618,43 +623,109 @@ public class PbtMigrator {
    * transaction.
    *
    * <p>Writes go through {@link MigrationScopedWorldStateKeyValueStorage}, so nothing but
-   * binary-trie nodes is written (the flat DB belongs to the MPT). The transaction is committed
-   * every {@link #NODES_PER_TRANSACTION} nodes; {@link #finish} writes the column cursor last, so
-   * an interrupted load leaves no cursor and is simply redone.
+   * binary-trie nodes is written (the flat DB belongs to the MPT). Nodes are collected in batches
+   * of {@link #NODES_PER_TRANSACTION}; a background thread writes and commits each batch, in order,
+   * while the next one fills, so database writes overlap with the hashing that produces the nodes.
+   * {@link #finish} writes the column cursor last, so an interrupted load leaves no cursor and is
+   * simply redone.
    */
-  private static final class ColumnWriter implements NodeUpdater {
+  private static final class ColumnWriter implements NodeUpdater, AutoCloseable {
 
     static final int NODES_PER_TRANSACTION = 100_000;
 
+    /** Batches written or waiting to be: the one filling plus at most this many. */
+    private static final int BATCHES_IN_FLIGHT = 2;
+
+    private record Write(Bytes location, Bytes32 hash, Bytes value) {}
+
     private final MigrationScopedWorldStateKeyValueStorage storage;
-    private BonsaiWorldStateKeyValueStorage.Updater updater;
-    private int pending;
+    private final ExecutorService committer =
+        Executors.newSingleThreadExecutor(
+            task -> {
+              final Thread thread = new Thread(task, "pbt-column-writer");
+              thread.setDaemon(true);
+              return thread;
+            });
+    private final Semaphore inFlight = new Semaphore(BATCHES_IN_FLIGHT);
+    private final AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    private List<Write> batch = new ArrayList<>(NODES_PER_TRANSACTION);
 
     ColumnWriter(final BonsaiWorldStateKeyValueStorage worldStateStorage) {
       this.storage = new MigrationScopedWorldStateKeyValueStorage(worldStateStorage);
-      this.updater = storage.updater();
     }
 
     @Override
     public void store(final Bytes location, final Bytes32 hash, final Bytes value) {
-      if (value == null) {
-        updater.removeTrieNode(TrieBranchType.BINARY, location);
-      } else {
-        updater.putTrieNode(TrieBranchType.BINARY, location, hash, value);
-      }
-      if (++pending >= NODES_PER_TRANSACTION) {
-        updater.commit();
-        updater = storage.updater();
-        pending = 0;
+      batch.add(new Write(location, hash, value));
+      if (batch.size() >= NODES_PER_TRANSACTION) {
+        submit(batch, Optional.empty());
+        batch = new ArrayList<>(NODES_PER_TRANSACTION);
       }
     }
 
-    /** Commits the remaining nodes, then points the binary column at {@code (root, blockHash)}. */
+    /**
+     * Commits the remaining nodes, then points the binary column at {@code (root, blockHash)}, and
+     * waits for both.
+     */
     void finish(final Bytes32 root, final Hash blockHash) {
-      updater.commit();
-      updater = storage.updater();
-      putCursor(updater, root, blockHash);
-      updater.commit();
+      submit(batch, Optional.of(updater -> putCursor(updater, root, blockHash)));
+      batch = new ArrayList<>();
+      inFlight.acquireUninterruptibly(BATCHES_IN_FLIGHT);
+      inFlight.release(BATCHES_IN_FLIGHT);
+      throwIfFailed();
+    }
+
+    /** Stops the writer once its pending commits are done. */
+    @Override
+    public void close() {
+      committer.shutdown();
+      try {
+        if (!committer.awaitTermination(1, TimeUnit.HOURS)) {
+          LOG.warn("PBT column writer still busy after an hour");
+        }
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    /**
+     * Hands {@code writes}, and an optional last step, to the committer thread: one transaction per
+     * batch, in order. Blocks while {@link #BATCHES_IN_FLIGHT} batches are pending.
+     */
+    private void submit(
+        final List<Write> writes,
+        final Optional<Consumer<BonsaiWorldStateKeyValueStorage.Updater>> last) {
+      throwIfFailed();
+      inFlight.acquireUninterruptibly();
+      committer.execute(
+          () -> {
+            try {
+              if (failure.get() == null) {
+                final BonsaiWorldStateKeyValueStorage.Updater updater = storage.updater();
+                for (final Write write : writes) {
+                  if (write.value() == null) {
+                    updater.removeTrieNode(TrieBranchType.BINARY, write.location());
+                  } else {
+                    updater.putTrieNode(
+                        TrieBranchType.BINARY, write.location(), write.hash(), write.value());
+                  }
+                }
+                last.ifPresent(step -> step.accept(updater));
+                updater.commit();
+              }
+            } catch (final RuntimeException e) {
+              failure.compareAndSet(null, e);
+            } finally {
+              inFlight.release();
+            }
+          });
+    }
+
+    private void throwIfFailed() {
+      final RuntimeException e = failure.get();
+      if (e != null) {
+        throw e;
+      }
     }
 
     /**

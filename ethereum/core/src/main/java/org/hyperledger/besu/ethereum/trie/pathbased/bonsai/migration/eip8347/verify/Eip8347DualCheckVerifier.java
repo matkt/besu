@@ -206,15 +206,22 @@ public final class Eip8347DualCheckVerifier {
       final long leafCount;
       try (final Eip8347SnapshotReader snapshot = new Eip8347SnapshotReader(snapshotPath)) {
         // A unit is one whole stem: its leaves are hashed (and encoded) in parallel, and only the
-        // stem's top node is attached on the PBT thread.
+        // stem's top node is attached on the PBT thread. Units travel in lists of about
+        // LIST_WEIGHT leaves.
         Eip8347Pipelines.run(
-            Eip8347Pipelines.from("eip8347-verify-snapshot", snapshot.units())
+            Eip8347Pipelines.fromLists("eip8347-verify-snapshot", snapshot.units(), Unit::leafCount)
                 .thenProcessAsyncOrdered(
                     "eip8347-verify-hash-stems",
-                    Eip8347Pipelines.async(unit -> new HashedUnit(unit, prepare(pbt, unit))),
+                    Eip8347Pipelines.async(
+                        units ->
+                            units.stream()
+                                .map(unit -> new HashedUnit(unit, prepare(pbt, unit)))
+                                .toList()),
                     Eip8347Pipelines.PARALLELISM)
                 .thenProcess("eip8347-verify-pbt", hashed -> attach(pbt, hashed))
-                .andFinishWith("eip8347-verify-join", unit -> join(unit, anchorJoin, codeCheck)));
+                .andFinishWith(
+                    "eip8347-verify-join",
+                    units -> units.forEach(unit -> join(unit, anchorJoin, codeCheck))));
         snapshot.ensureExhausted();
         claimedRoot = snapshot.claimedRoot();
         leafCount = snapshot.leafCount();
@@ -284,13 +291,14 @@ public final class Eip8347DualCheckVerifier {
     }
   }
 
-  private static Unit attach(final AscendingCollapseBinaryTrie pbt, final HashedUnit hashed) {
+  private static List<Unit> attach(
+      final AscendingCollapseBinaryTrie pbt, final List<HashedUnit> hashed) {
     try {
-      pbt.insert(hashed.stem());
+      hashed.forEach(unit -> pbt.insert(unit.stem()));
     } catch (final IllegalArgumentException e) {
       throw new Eip8347ArtifactVerificationException(e.getMessage(), e);
     }
-    return hashed.unit();
+    return hashed.stream().map(HashedUnit::unit).toList();
   }
 
   private static void join(

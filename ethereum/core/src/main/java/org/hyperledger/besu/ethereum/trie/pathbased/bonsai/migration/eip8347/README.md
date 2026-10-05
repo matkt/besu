@@ -408,9 +408,17 @@ live Besu trie uses. The column therefore reads back like any stored PBT. Writes
 ## How convert works
 
 It streams the preimages, reads each account and slot from the anchor state (one thread: the state
-view need not be thread-safe), derives the PBT leaves in parallel, sorts them by PBT key on disk,
-then writes the snapshot and hashes the PBT root in one pass. Leaves emitted twice (a code shared by
-several accounts) are merged. The CLI then runs verify on the result.
+view need not be thread-safe), derives the header and storage leaves in parallel, and sorts them by
+PBT key on disk.
+
+Code is handled apart, because codes are widely shared: thousands of contracts can run the same
+bytecode. Each contract only records `codeHash → address` in a small sort; each distinct code is
+then read once, from the first account that holds it, and chunked in parallel. Emitting the chunks
+once per contract instead would multiply the sort by the number of contracts sharing each code (10×
+the snapshot on the benchmark below).
+
+The sorted leaves are then written and the PBT root hashed in one pass, with each stem hashed in
+parallel. The CLI runs verify on the result.
 
 ## Resources
 
@@ -419,24 +427,37 @@ Memory stays bounded whatever the state size:
 | Piece | Bound |
 |---|---|
 | Each sort | two 64 MiB buffers (one filling, one being written) + up to 512 open files while merging |
-| Between pipeline stages | 256 items (batches of ≤ 1024 slots) |
+| Between pipeline stages | 4 × threads lists of about 1024 entries (accounts, slots, stems) |
 | Snapshot reader / writer | one record |
 | Tries | their right edge only |
 | Code check | one code per thread, ≤ 1 MiB |
 
 Disk: the sorts write temporary files under `<data-path>/pbt-migration` (next to `database`, so on
 the same disk). They are deleted at the end, and the migrator empties the directory before each
-bootstrap attempt. Verify needs about **1.3× the snapshot size** of free space at its peak, convert
-about 1.5×. Two things keep this low:
+bootstrap attempt. Verify needs about **1.3–1.5× the snapshot size** of free space at its peak,
+convert about 1.25×. Three things keep this low:
 
 - Sorted records carry a rank (8 bytes), never a 32-byte keccak.
 - Sorted files store each key as the part that differs from the previous one. Slots of one
   contract share their first 33 bytes.
+- Convert sorts each distinct code's chunks once, not once per contract.
 
-These figures are estimates from the record sizes, not mainnet measurements.
+Parallel: PBT keys of the preimages, stem hashing, code chunking and checks, and the code check
+alongside the MPT rebuild. Sequential: attaching stems to the PBT, writing the snapshot, and the
+MPT rebuild. When loading, database writes run on a background thread, overlapping the hashing.
 
-Parallel: PBT keys of the preimages, stem hashing, code checks, and the code check alongside the
-MPT rebuild. Sequential: attaching stems to the PBT, the MPT rebuild, and database writes.
+Items move between pipeline stages in lists of about 1024 entries: one item per account or per
+stem would cost more in hand-offs between threads than the work itself.
+
+Measured on a synthetic state with mainnet-like proportions (1.5% of accounts hold storage, heavy
+tail, shared bytecode), 14 cores, 2 GiB heap:
+
+| State | Snapshot | Convert | Verify | Verify + load into RocksDB |
+|---|---|---|---|---|
+| 1M accounts, 2.3M slots | 172 MB | 8 s, 214 MB of temp files | 10 s, 217 MB | 13 s |
+| 5M accounts, 13M slots | 872 MB | 34 s, 1.1 GB | 53 s, 1.3 GB | 88 s |
+
+At scale, loading is bound by RocksDB's write rate: the PBT stores about two nodes per leaf.
 
 ## Code map
 

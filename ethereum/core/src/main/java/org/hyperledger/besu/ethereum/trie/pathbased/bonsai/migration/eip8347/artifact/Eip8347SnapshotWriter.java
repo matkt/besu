@@ -26,6 +26,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -83,9 +84,7 @@ public final class Eip8347SnapshotWriter implements Closeable {
           "duplicate or non-ascending snapshot leaf key " + key.toHexString());
     }
     previousKey = key;
-    if (!stem.isEmpty()
-        && !Eip8347TypedSnapshotCodec.stemOf(stem.getFirst().key())
-            .equals(Eip8347TypedSnapshotCodec.stemOf(key))) {
+    if (!stem.isEmpty() && !sameStem(stem.getFirst().key(), key)) {
       flushStem();
     }
     stem.add(leaf);
@@ -140,6 +139,13 @@ public final class Eip8347SnapshotWriter implements Closeable {
               "unexpected zone 0x" + Integer.toHexString(key.get(0) & 0xFF));
     }
     stem.clear();
+  }
+
+  /** Whether two keys share their stem: every byte but the last. */
+  private static boolean sameStem(final Bytes a, final Bytes b) {
+    final byte[] x = a.toArrayUnsafe();
+    final byte[] y = b.toArrayUnsafe();
+    return x.length == y.length && Arrays.equals(x, 0, x.length - 1, y, 0, y.length - 1);
   }
 
   private void ensureWritable() {

@@ -106,7 +106,7 @@ public record Eip8347Fixture(
       @Override
       public Optional<AccountView> getAccount(final Address address) {
         return Optional.ofNullable(accounts.get(address))
-            .map(a -> new AccountView(a.nonce(), a.balance(), a.code()));
+            .map(a -> new AccountView(a.nonce(), a.balance(), Hash.hash(a.code()), a.code()));
       }
 
       @Override

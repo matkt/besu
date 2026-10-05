@@ -111,6 +111,19 @@ public final class Eip8347TypedSnapshotCodec {
       }
     }
 
+    /** Compares the bytes directly: tuweni's {@code Bytes.equals} reads them one at a time. */
+    @Override
+    public boolean equals(final Object other) {
+      return other instanceof Leaf leaf
+          && Arrays.equals(key.toArrayUnsafe(), leaf.key.toArrayUnsafe())
+          && Arrays.equals(value.toArrayUnsafe(), leaf.value.toArrayUnsafe());
+    }
+
+    @Override
+    public int hashCode() {
+      return 31 * key.hashCode() + value.hashCode();
+    }
+
     private static void validateKeyLength(final Bytes key) {
       final int zone = key.get(0) & 0xFF;
       final int expected =

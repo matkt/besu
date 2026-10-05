@@ -43,7 +43,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -53,25 +56,25 @@ import org.slf4j.LoggerFactory;
 /**
  * EIP-8347 converter (snapshot half): preimages + anchor MPT state → byte-canonical PBT snapshot.
  *
- * <p>Bounded memory end to end: preimages stream in batches of at most {@link #SLOTS_PER_BATCH}
- * slots, leaves go through an external sort ({@link Eip8347ExternalSorter}), and the sorted leaves
- * are written and hashed in one pass. Pipeline stages ({@code services:pipeline}):
+ * <p>Bounded memory end to end: preimages stream in lists of about {@link
+ * Eip8347Pipelines#LIST_WEIGHT} slots, leaves go through an external sort ({@link
+ * Eip8347ExternalSorter}), and the sorted leaves are written and hashed in one pass. Pipeline
+ * stages ({@code services:pipeline}):
  *
  * <pre>
- * preimage batches → read anchor state (1 thread) → derive PBT leaves (N threads) → sort
- * sorted leaves → snapshot writer + AscendingCollapseBinaryTrie
+ * preimages → read anchor state (1 thread) → derive header and storage leaves (N threads) → sort
+ *                                          → code references (codeHash → address)       → sort
+ * distinct codes → read code (1 thread) → chunk (N threads)                               → sort
+ * sorted leaves, by stem → hash stems (N threads) → PBT + snapshot writer (1 thread)
  * </pre>
  *
  * <p>State reads stay on one thread because {@link StateSource} is not required to be thread-safe.
- * CODE_ZONE chunks are content-addressed by {@code code_hash}; shared bytecode is spilled once per
- * referencing account and coalesced by the merge.
+ * CODE_ZONE chunks are content-addressed by {@code code_hash} and codes are widely shared, so each
+ * distinct code is chunked once, from one account that references it.
  */
 public final class Eip8347SnapshotGenerator {
 
   private static final Logger LOG = LoggerFactory.getLogger(Eip8347SnapshotGenerator.class);
-
-  /** Maximum preimage slots carried by one pipeline item. */
-  static final int SLOTS_PER_BATCH = 1024;
 
   /**
    * Read-only view of the anchor MPT state used by {@link Eip8347SnapshotGenerator}: nonce,
@@ -86,9 +89,10 @@ public final class Eip8347SnapshotGenerator {
      *
      * @param nonce account nonce
      * @param balance account balance
+     * @param codeHash the {@code code_hash} the MPT commits
      * @param code account code (empty for EOAs; may be an EIP-7702 delegation indicator)
      */
-    record AccountView(long nonce, Wei balance, Bytes code) {}
+    record AccountView(long nonce, Wei balance, Hash codeHash, Bytes code) {}
 
     /** Returns the account at {@code address}, or empty if absent from the anchor state. */
     Optional<AccountView> getAccount(Address address);
@@ -111,7 +115,8 @@ public final class Eip8347SnapshotGenerator {
         @Override
         public Optional<AccountView> getAccount(final Address address) {
           return Optional.ofNullable(resolve(address))
-              .map(a -> new AccountView(a.getNonce(), a.getBalance(), a.getCode()));
+              .map(
+                  a -> new AccountView(a.getNonce(), a.getBalance(), a.getCodeHash(), a.getCode()));
         }
 
         @Override
@@ -149,6 +154,15 @@ public final class Eip8347SnapshotGenerator {
       StateSource.AccountView account,
       List<Bytes32> slotKeys,
       List<UInt256> values) {}
+
+  /** Leaves derived from state batches, and the codes their accounts reference. */
+  private record Derived(List<Leaf> leaves, List<CodeRef> codes) {}
+
+  /** An account holding the code with {@code codeHash}. */
+  private record CodeRef(Bytes32 codeHash, Address address) {}
+
+  /** One distinct code, read from the state. */
+  private record Code(Bytes32 codeHash, Bytes bytes) {}
 
   /**
    * Generates a PBT snapshot from a preimage file and an anchor-state view.
@@ -193,26 +207,40 @@ public final class Eip8347SnapshotGenerator {
         Files.createTempDirectory(Files.createDirectories(workDir), "eip8347-convert-");
     try (final Eip8347ExternalSorter leaves =
             new Eip8347ExternalSorter(spillDir, "leaves", sortBufferBytes);
+        final Eip8347ExternalSorter codeRefs =
+            new Eip8347ExternalSorter(spillDir, "code-refs", sortBufferBytes);
         final Eip8347PreimageFile preimages = new Eip8347PreimageFile(preimagesPath)) {
       Eip8347Pipelines.run(
-          Eip8347Pipelines.from("eip8347-convert-preimages", preimages.batches(SLOTS_PER_BATCH))
-              .thenProcess("eip8347-convert-read-state", batch -> readState(stateSource, batch))
+          Eip8347Pipelines.fromLists(
+                  "eip8347-convert-preimages",
+                  preimages.batches(Eip8347Pipelines.LIST_WEIGHT),
+                  batch -> 1 + batch.slots().size())
+              .thenProcess(
+                  "eip8347-convert-read-state",
+                  batches -> batches.stream().map(batch -> readState(stateSource, batch)).toList())
               .thenProcessInParallel(
                   "eip8347-convert-derive-leaves",
                   Eip8347SnapshotGenerator::deriveLeaves,
                   Eip8347Pipelines.PARALLELISM)
               .andFinishWith(
                   "eip8347-convert-sort-leaves",
-                  batch -> {
+                  derived -> {
                     try {
-                      for (final Leaf leaf : batch) {
-                        leaves.add(leaf.key().toArray(), leaf.value().toArray());
+                      for (final Leaf leaf : derived.leaves()) {
+                        addLeaf(leaves, leaf);
+                      }
+                      for (final CodeRef code : derived.codes()) {
+                        codeRefs.add(
+                            code.codeHash().toArrayUnsafe(),
+                            code.address().getBytes().toArrayUnsafe());
                       }
                     } catch (final IOException e) {
                       throw new UncheckedIOException(e);
                     }
                   }));
       preimages.ensureExhausted();
+      addCodeLeaves(codeRefs.sorted(), stateSource, leaves);
+      codeRefs.close();
       final Result result = writeSnapshot(leaves.sorted(), snapshotPath);
       LOG.info(
           "EIP-8347 snapshot generated (leaves={}, root={})",
@@ -224,36 +252,152 @@ public final class Eip8347SnapshotGenerator {
     }
   }
 
+  /** Sorts a leaf by key; its value is stored without leading zeros. */
+  private static void addLeaf(final Eip8347ExternalSorter leaves, final Leaf leaf)
+      throws IOException {
+    leaves.add(leaf.key().toArrayUnsafe(), leaf.value().trimLeadingZeros().toArrayUnsafe());
+  }
+
   /**
-   * Writes sorted leaves and hashes the PBT root in the same pass. Identical duplicates (shared
-   * bytecode emitted per account) are coalesced; a key with two values is rejected.
+   * Chunks every distinct referenced code once: references are sorted by {@code codeHash}, and the
+   * code is read from the first account of each run.
+   */
+  private static void addCodeLeaves(
+      final Iterator<Eip8347ExternalSorter.Entry> sortedRefs,
+      final StateSource stateSource,
+      final Eip8347ExternalSorter leaves)
+      throws IOException {
+    final PeekingIterator<Eip8347ExternalSorter.Entry> refs = Iterators.peekingIterator(sortedRefs);
+    final Iterator<CodeRef> distinct =
+        new Iterator<>() {
+          @Override
+          public boolean hasNext() {
+            return refs.hasNext();
+          }
+
+          @Override
+          public CodeRef next() {
+            final Eip8347ExternalSorter.Entry first = refs.next();
+            while (refs.hasNext() && Arrays.equals(refs.peek().key(), first.key())) {
+              refs.next();
+            }
+            return new CodeRef(Bytes32.wrap(first.key()), Address.wrap(Bytes.wrap(first.value())));
+          }
+        };
+    Eip8347Pipelines.run(
+        Eip8347Pipelines.from("eip8347-convert-codes", distinct)
+            .thenProcess("eip8347-convert-read-code", code -> readCode(stateSource, code))
+            .thenProcessInParallel(
+                "eip8347-convert-chunk-code",
+                Eip8347SnapshotGenerator::codeLeaves,
+                Eip8347Pipelines.PARALLELISM)
+            .andFinishWith(
+                "eip8347-convert-sort-code",
+                codeLeaves -> {
+                  try {
+                    for (final Leaf leaf : codeLeaves) {
+                      addLeaf(leaves, leaf);
+                    }
+                  } catch (final IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                }));
+  }
+
+  private static Code readCode(final StateSource stateSource, final CodeRef code) {
+    final StateSource.AccountView account =
+        stateSource
+            .getAccount(code.address())
+            .orElseThrow(
+                () -> new IllegalStateException("account " + code.address() + " disappeared"));
+    return new Code(code.codeHash(), account.code());
+  }
+
+  /** CODE_ZONE leaves of one code: its non-zero chunks. CPU-only, thread-safe. */
+  private static List<Leaf> codeLeaves(final Code code) {
+    final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(code.bytes());
+    final List<Leaf> leaves = new ArrayList<>(chunks.size());
+    for (int i = 0; i < chunks.size(); i++) {
+      if (!chunks.get(i).isZero()) {
+        leaves.add(
+            new Leaf(TrieKeyDerivation.getTreeKeyForCodeChunk(code.codeHash(), i), chunks.get(i)));
+      }
+    }
+    return leaves;
+  }
+
+  /** The leaves of one stem, with their subtree hashed for the PBT. */
+  private record HashedStem(List<Leaf> leaves, AscendingCollapseBinaryTrie.Subtree subtree) {}
+
+  /**
+   * Writes the sorted leaves and hashes the PBT root in the same pass. Each stem's subtree is
+   * hashed in parallel; stems are attached to the PBT and written in order on one thread.
    */
   private static Result writeSnapshot(
       final Iterator<Eip8347ExternalSorter.Entry> sorted, final Path snapshotPath)
       throws IOException {
     final AscendingCollapseBinaryTrie pbt = new AscendingCollapseBinaryTrie();
-    long leafCount = 0;
+    final AtomicLong leafCount = new AtomicLong();
     try (final Eip8347SnapshotWriter snapshot = Eip8347SnapshotWriter.open(snapshotPath)) {
-      Eip8347ExternalSorter.Entry previous = null;
-      while (sorted.hasNext()) {
-        final Eip8347ExternalSorter.Entry entry = sorted.next();
-        if (previous != null && Arrays.equals(previous.key(), entry.key())) {
-          if (!Arrays.equals(previous.value(), entry.value())) {
-            throw new Eip8347ArtifactVerificationException(
-                "duplicate PBT key with conflicting values: " + Bytes.wrap(entry.key()));
-          }
-          continue;
-        }
-        final Leaf leaf = new Leaf(Bytes.wrap(entry.key()), Bytes32.wrap(entry.value()));
-        pbt.insert(leaf.key(), leaf.value());
-        snapshot.accept(leaf);
-        leafCount++;
-        previous = entry;
-      }
+      Eip8347Pipelines.run(
+          Eip8347Pipelines.fromLists("eip8347-convert-stems", stems(sorted), List::size)
+              .thenProcessAsyncOrdered(
+                  "eip8347-convert-hash-stems",
+                  Eip8347Pipelines.async(
+                      stems -> stems.stream().map(stem -> hashStem(pbt, stem)).toList()),
+                  Eip8347Pipelines.PARALLELISM)
+              .andFinishWith(
+                  "eip8347-convert-write",
+                  stems -> {
+                    try {
+                      for (final HashedStem stem : stems) {
+                        pbt.insert(stem.subtree());
+                        for (final Leaf leaf : stem.leaves()) {
+                          snapshot.accept(leaf);
+                        }
+                        leafCount.addAndGet(stem.leaves().size());
+                      }
+                    } catch (final IOException e) {
+                      throw new UncheckedIOException(e);
+                    }
+                  }));
       final Bytes32 pbtRoot = pbt.rootHash();
       snapshot.finish(pbtRoot);
-      return new Result(pbtRoot, leafCount);
+      return new Result(pbtRoot, leafCount.get());
     }
+  }
+
+  private static HashedStem hashStem(final AscendingCollapseBinaryTrie pbt, final List<Leaf> stem) {
+    return new HashedStem(
+        stem,
+        pbt.prepare(
+            stem.stream().map(Leaf::key).toList(), stem.stream().<Bytes>map(Leaf::value).toList()));
+  }
+
+  /** Groups sorted leaves by stem (every key but its last byte). */
+  private static Iterator<List<Leaf>> stems(final Iterator<Eip8347ExternalSorter.Entry> sorted) {
+    final PeekingIterator<Eip8347ExternalSorter.Entry> leaves = Iterators.peekingIterator(sorted);
+    return new Iterator<>() {
+      @Override
+      public boolean hasNext() {
+        return leaves.hasNext();
+      }
+
+      @Override
+      public List<Leaf> next() {
+        final List<Leaf> stem = new ArrayList<>();
+        final byte[] first = leaves.peek().key();
+        while (leaves.hasNext() && sameStem(first, leaves.peek().key())) {
+          final Eip8347ExternalSorter.Entry entry = leaves.next();
+          stem.add(new Leaf(Bytes.wrap(entry.key()), Bytes32.leftPad(Bytes.wrap(entry.value()))));
+        }
+        return stem;
+      }
+    };
+  }
+
+  private static boolean sameStem(final byte[] a, final byte[] b) {
+    return a.length == b.length && Arrays.equals(a, 0, a.length - 1, b, 0, b.length - 1);
   }
 
   private static StateBatch readState(
@@ -287,25 +431,33 @@ public final class Eip8347SnapshotGenerator {
     return new StateBatch(address, account, slotKeys, values);
   }
 
-  /** PBT leaves of one batch (unsorted; the spill sorts them). CPU-only, thread-safe. */
-  private static List<Leaf> deriveLeaves(final StateBatch batch) {
-    final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(batch.address().getBytes());
-    final Bytes32 addressKeyHash = TrieKeyDerivation.keyHash(address32);
+  /** PBT leaves of state batches (unsorted; the sort orders them). CPU-only, thread-safe. */
+  private static Derived deriveLeaves(final List<StateBatch> batches) {
     final List<Leaf> leaves = new ArrayList<>();
-    if (batch.account() != null) {
-      addHeaderAndCodeLeaves(leaves, address32, batch.account());
+    final List<CodeRef> codes = new ArrayList<>();
+    for (final StateBatch batch : batches) {
+      final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(batch.address().getBytes());
+      final Bytes32 addressKeyHash = TrieKeyDerivation.keyHash(address32);
+      if (batch.account() != null) {
+        addHeaderLeaves(leaves, address32, batch.account());
+        if (!batch.account().code().isEmpty()
+            && !CodeDelegationHelper.hasCodeDelegation(batch.account().code())) {
+          codes.add(
+              new CodeRef(Bytes32.wrap(batch.account().codeHash().getBytes()), batch.address()));
+        }
+      }
+      for (int i = 0; i < batch.slotKeys().size(); i++) {
+        leaves.add(
+            new Leaf(
+                TrieKeyDerivation.getTreeKeyForStorageSlot(
+                    address32, addressKeyHash, UInt256.fromBytes(batch.slotKeys().get(i))),
+                Bytes32.leftPad(batch.values().get(i))));
+      }
     }
-    for (int i = 0; i < batch.slotKeys().size(); i++) {
-      leaves.add(
-          new Leaf(
-              TrieKeyDerivation.getTreeKeyForStorageSlot(
-                  address32, addressKeyHash, UInt256.fromBytes(batch.slotKeys().get(i))),
-              Bytes32.leftPad(batch.values().get(i))));
-    }
-    return leaves;
+    return new Derived(leaves, codes);
   }
 
-  private static void addHeaderAndCodeLeaves(
+  private static void addHeaderLeaves(
       final List<Leaf> leaves, final Bytes32 address32, final StateSource.AccountView account) {
     final Bytes code = account.code();
     final UInt256 balance = account.balance().toUInt256();
@@ -322,17 +474,13 @@ public final class Eip8347SnapshotGenerator {
                   CodeDelegationHelper.getTargetAddress(code).getBytes())));
       return;
     }
-    final Bytes32 codeHash = Bytes32.wrap(Hash.hash(code).getBytes());
     leaves.add(
         new Leaf(
             TrieKeyDerivation.getTreeKeyForBasicData(address32),
             BasicDataEncoder.encodeBasicData(code.size(), account.nonce(), balance)));
-    leaves.add(new Leaf(TrieKeyDerivation.getTreeKeyForCodeHash(address32), codeHash));
-    final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(code);
-    for (int i = 0; i < chunks.size(); i++) {
-      if (!chunks.get(i).isZero()) {
-        leaves.add(new Leaf(TrieKeyDerivation.getTreeKeyForCodeChunk(codeHash, i), chunks.get(i)));
-      }
-    }
+    leaves.add(
+        new Leaf(
+            TrieKeyDerivation.getTreeKeyForCodeHash(address32),
+            Bytes32.wrap(account.codeHash().getBytes())));
   }
 }

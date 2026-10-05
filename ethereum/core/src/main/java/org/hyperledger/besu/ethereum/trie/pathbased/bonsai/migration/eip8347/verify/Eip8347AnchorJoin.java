@@ -123,16 +123,19 @@ final class Eip8347AnchorJoin {
     try (final Eip8347PreimageFile preimages =
         Eip8347PreimageFile.withoutOrderCheck(preimagesPath)) {
       Eip8347Pipelines.run(
-          Eip8347Pipelines.from("eip8347-verify-preimages", numbered(preimages.batches(1024)))
+          Eip8347Pipelines.fromLists(
+                  "eip8347-verify-preimages",
+                  numbered(preimages.batches(Eip8347Pipelines.LIST_WEIGHT)),
+                  numbered -> 1 + numbered.batch().slots().size())
               .thenProcessInParallel(
                   "eip8347-verify-preimage-requests",
-                  Eip8347AnchorJoin::requestsOf,
+                  batches -> batches.stream().flatMap(batch -> requestsOf(batch).stream()).toList(),
                   Eip8347Pipelines.PARALLELISM)
               .andFinishWith(
                   "eip8347-verify-sort-preimage-requests",
-                  batch -> {
+                  requests -> {
                     try {
-                      for (final Entry entry : batch) {
+                      for (final Entry entry : requests) {
                         preimageRequests.add(entry.key(), entry.value());
                       }
                     } catch (final IOException e) {

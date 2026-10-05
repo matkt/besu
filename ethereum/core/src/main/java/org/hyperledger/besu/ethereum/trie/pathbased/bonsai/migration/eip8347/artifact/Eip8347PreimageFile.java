@@ -161,7 +161,8 @@ public final class Eip8347PreimageFile implements Closeable {
     if (!checkOrder) {
       return new Account(address, null, slotsLeft);
     }
-    final Hash addressHash = address.addressHash();
+    // Not address.addressHash(): its shared cache only costs here, every address comes once.
+    final Hash addressHash = Hash.hash(address.getBytes());
     if (previousAddressHash != null && previousAddressHash.compareTo(addressHash) >= 0) {
       throw new Eip8347ArtifactVerificationException(
           "preimage records are not strictly ascending by keccak256(address)");
