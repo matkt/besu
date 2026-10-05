@@ -1102,7 +1102,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             }
           }
         };
-    applySyncState.run();
     syncState.subscribeCompletionReached(
         new BesuEvents.InitialSyncCompletionListener() {
           @Override
@@ -1115,7 +1114,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             applySyncState.run();
           }
         });
-    // the sync state may have changed before the listener was registered
+    // applied after registering, so no event can be missed in between
     applySyncState.run();
   }
 

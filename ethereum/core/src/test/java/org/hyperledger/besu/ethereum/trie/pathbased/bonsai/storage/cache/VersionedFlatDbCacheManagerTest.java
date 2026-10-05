@@ -37,6 +37,7 @@ import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -290,7 +291,9 @@ class VersionedFlatDbCacheManagerTest {
     final CountDownLatch releaseCommit = new CountDownLatch(1);
     final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
     try {
-      // e.g. sync completion, then a resync restart while the enable is still waiting
+      // e.g. sync completion, then a resync restart while the enable is still waiting. Covers the
+      // queued case; a disable barging in right when the barrier frees up is ordered by the
+      // transition lock, which cannot be timed deterministically here.
       final CompletableFuture<Void> enabling = switchModeAsyncAndAwaitParked(true);
       final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
 
@@ -305,6 +308,7 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
+  @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
   void modeSwitch_fromInsideACommitFailsInsteadOfDeadlocking() {
     cacheManager.commitAndPublish(
         () -> {
@@ -357,6 +361,9 @@ class VersionedFlatDbCacheManagerTest {
     assertThat(published).isFalse();
     assertThat(cacheManager.getCurrentVersion()).isEqualTo(before);
     assertThat(cacheManager.isCommitCacheBypassActive()).isFalse();
+    // the mode barrier was released too, otherwise this would be rejected as "inside a commit"
+    cacheManager.disable();
+    assertThat(cacheManager.isEnabled()).isFalse();
   }
 
   @Test
