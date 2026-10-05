@@ -72,12 +72,15 @@ public interface FlatDbCacheManager {
     return getCurrentVersion();
   }
 
-  /** Enables the cache once no commit is in flight, starting from an empty cache. */
+  /**
+   * Enables the cache once no commit is in flight, starting from an empty cache. Not callable from
+   * inside a commit.
+   */
   default void enable() {
     // No-op
   }
 
-  /** Disables the cache: reads go to storage and nothing is cached. */
+  /** Disables the cache once no commit is in flight. Not callable from inside a commit. */
   default void disable() {
     // No-op
   }

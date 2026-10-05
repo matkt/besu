@@ -17,19 +17,26 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.FlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.VersionedFlatDbCacheManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
+import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
+import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
 
 import java.io.Closeable;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongConsumer;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -466,6 +473,48 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
     commitAccount(account, Bytes.of(2));
     assertThat(head.getCachedValue(ACCOUNT_INFO_STATE, account.getBytes()))
         .hasValueSatisfying(cv -> assertThat(cv.getValue()).isEqualTo(Bytes.of(2)));
+  }
+
+  @Test
+  void snapshotTakenRightBeforeAHeadCommitIsPinnedToTheOlderVersion() throws Exception {
+    disposeHead();
+    final AtomicReference<Runnable> afterStorageSnapshot = new AtomicReference<>();
+    final SegmentedInMemoryKeyValueStorage composedStorage =
+        new SegmentedInMemoryKeyValueStorage(
+            List.of(
+                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE)) {
+          @Override
+          public SegmentedInMemoryKeyValueStorage takeSnapshot() {
+            final SegmentedInMemoryKeyValueStorage snapshot = super.takeSnapshot();
+            final Runnable action = afterStorageSnapshot.getAndSet(null);
+            if (action != null) {
+              action.run();
+            }
+            return snapshot;
+          }
+        };
+    final BonsaiFlatDbStrategyProvider flatDbStrategyProvider =
+        new BonsaiFlatDbStrategyProvider(new NoOpMetricsSystem(), dataConfigBuilder(true).build());
+    flatDbStrategyProvider.loadFlatDbStrategy(composedStorage);
+    head =
+        new BonsaiWorldStateKeyValueStorage(
+            flatDbStrategyProvider,
+            composedStorage,
+            new InMemoryKeyValueStorage(),
+            new VersionedFlatDbCacheManager(100, 100, new NoOpMetricsSystem()),
+            0);
+    final Hash account = Hash.hash(Bytes.of(51));
+    commitAccount(account, Bytes.of(1));
+    final long versionOfSnapshotData = head.getCurrentVersion();
+
+    // the head commits right after the storage snapshot was taken
+    afterStorageSnapshot.set(() -> commitAccount(account, Bytes.of(2)));
+    try (BonsaiSnapshotWorldStateKeyValueStorage snapshot =
+        new BonsaiSnapshotWorldStateKeyValueStorage(head)) {
+      assertThat(snapshot.getCurrentVersion()).isEqualTo(versionOfSnapshotData);
+      assertThat(snapshot.getAccount(account)).contains(Bytes.of(1));
+    }
+    assertThat(head.getAccount(account)).contains(Bytes.of(2));
   }
 
   @Test

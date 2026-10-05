@@ -66,11 +66,20 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Serializes enabled commits and clears, so version order matches storage commit order. */
   private final Object publishLock = new Object();
 
-  /** Commits pass through together; {@link #enable()} waits until none is inside. */
-  private final ReentrantReadWriteLock enableBarrier = new ReentrantReadWriteLock();
+  /**
+   * Commits hold it shared; enable/disable hold it exclusively, so the mode never changes
+   * mid-commit.
+   */
+  private final ReentrantReadWriteLock modeBarrier = new ReentrantReadWriteLock();
+
+  /** Runs enable/disable one after the other, so the latest call wins. */
+  private final Object modeTransitionLock = new Object();
 
   /** {@code false} during the initial sync: the cache is bypassed entirely. */
   private volatile boolean enabled = true;
+
+  /** Entries older than the last clear are ignored, even if the clear missed them. */
+  private volatile long minValidVersion = 0;
 
   private final Cache<CacheKey, VersionedValue> accountCache;
   private final Cache<CacheKey, VersionedValue> storageCache;
@@ -282,7 +291,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     // bypass first: a read that inserted before this commit did so while enabled
     beginCommitCacheBypass();
     try {
-      final Lock passThrough = enableBarrier.readLock();
+      final Lock passThrough = modeBarrier.readLock();
       passThrough.lock();
       try {
         if (!enabled) {
@@ -306,24 +315,47 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void enable() {
-    final Lock noCommitInFlight = enableBarrier.writeLock();
-    noCommitInFlight.lock();
-    try {
-      accountCache.invalidateAll();
-      storageCache.invalidateAll();
-      enabled = true;
-    } finally {
-      noCommitInFlight.unlock();
-    }
+    switchMode(true);
     LOG.info("Bonsai cross-block cache enabled");
   }
 
   @Override
   public void disable() {
-    enabled = false;
+    switchMode(false);
+    LOG.info("Bonsai cross-block cache disabled");
+  }
+
+  /** Waits until no commit is in flight, then empties the cache and switches the mode. */
+  private void switchMode(final boolean enable) {
+    if (modeBarrier.getReadHoldCount() > 0) {
+      throw new IllegalStateException("Cannot enable or disable the cache from inside a commit");
+    }
+    synchronized (modeTransitionLock) {
+      final Lock noCommitInFlight = modeBarrier.writeLock();
+      noCommitInFlight.lock();
+      try {
+        // nothing can be inserted while disabled: clear before enabling, disable before clearing
+        if (enable) {
+          minValidVersion = globalVersion.get();
+          invalidateBothCaches();
+          enabled = true;
+        } else {
+          enabled = false;
+          invalidateBothCaches();
+        }
+      } finally {
+        noCommitInFlight.unlock();
+      }
+    }
+  }
+
+  private boolean isValidFor(final VersionedValue value, final long readerVersion) {
+    return value != null && value.version >= minValidVersion && value.version <= readerVersion;
+  }
+
+  private void invalidateBothCaches() {
     accountCache.invalidateAll();
     storageCache.invalidateAll();
-    LOG.info("Bonsai cross-block cache disabled");
   }
 
   @Override
@@ -337,9 +369,10 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     beginCommitCacheBypass();
     try {
       synchronized (publishLock) {
-        onNewVersion.accept(incrementAndGetVersion());
-        accountCache.invalidateAll();
-        storageCache.invalidateAll();
+        final long newVersion = incrementAndGetVersion();
+        minValidVersion = newVersion;
+        onNewVersion.accept(newVersion);
+        invalidateBothCaches();
       }
     } finally {
       endCommitCacheBypass();
@@ -383,7 +416,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     final CacheKey cacheKey = CacheKey.of(key);
     final VersionedValue versionedValue = cache.getIfPresent(cacheKey);
 
-    if (versionedValue != null && versionedValue.version <= version) {
+    if (isValidFor(versionedValue, version)) {
       cacheHitCounter.inc();
       return versionedValue.isRemoval ? Optional.empty() : Optional.of(versionedValue.getValue());
     }
@@ -468,7 +501,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final CacheKey cacheKey = CacheKey.of(key);
       final VersionedValue versionedValue = cache.getIfPresent(cacheKey);
 
-      if (versionedValue != null && versionedValue.version <= version) {
+      if (isValidFor(versionedValue, version)) {
         cacheHitCounter.inc();
         results.add(
             versionedValue.isRemoval ? Optional.empty() : Optional.of(versionedValue.getValue()));

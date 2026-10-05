@@ -1090,21 +1090,33 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     if (cacheManager == FlatDbCacheManager.NO_OP_CACHE) {
       return;
     }
-    if (!syncState.isInitialSyncPhaseDone()) {
-      cacheManager.disable();
-    }
+    // events may arrive on different threads: always apply the current sync state, one at a time
+    final Object applyLock = new Object();
+    final Runnable applySyncState =
+        () -> {
+          synchronized (applyLock) {
+            if (syncState.isInitialSyncPhaseDone()) {
+              cacheManager.enable();
+            } else {
+              cacheManager.disable();
+            }
+          }
+        };
+    applySyncState.run();
     syncState.subscribeCompletionReached(
         new BesuEvents.InitialSyncCompletionListener() {
           @Override
           public void onInitialSyncCompleted() {
-            cacheManager.enable();
+            applySyncState.run();
           }
 
           @Override
           public void onInitialSyncRestart() {
-            cacheManager.disable();
+            applySyncState.run();
           }
         });
+    // the sync state may have changed before the listener was registered
+    applySyncState.run();
   }
 
   private TrieLogPruner createTrieLogPruner(

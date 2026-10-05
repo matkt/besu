@@ -122,20 +122,22 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Commit publish and concurrency
 
-`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`: readers bypass the cache, storage is committed, a new version is allocated and the staged writes are published at that version.
+`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`: readers bypass the cache, storage is committed, a new version is allocated and, if the cache is enabled, the staged writes are published at that version.
 
-- **Enabled cache**: commits are serialized by the publish lock, so version order matches storage commit order.
+- **Enabled commits** are serialized by the publish lock, so version order matches storage commit order.
 - **Head version**: the storage only moves its `cacheVersion` forward.
-- **Read inserts**: re-checked inside `compute`, so a read delayed past a commit cannot insert a stale value.
-- **Clear**: `invalidateAll()` advances the version first, so in-flight reads cannot repopulate the cache.
+- **Snapshots** read the head version before taking the storage snapshot, so they are never pinned to a version newer than their data.
+- **Read inserts** are re-checked inside `compute`, so a read delayed past a commit cannot insert a stale value.
+- **Clear**: `invalidateAll()` runs under the bypass and advances the version; entries older than the last clear are ignored even if the clear missed them.
 
 ---
 
 ## Disabled during the initial sync
 
-The cache is disabled during the initial sync and enabled on `onInitialSyncCompleted()` (disabled again on `onInitialSyncRestart()`). While disabled, reads go to storage, nothing is cached, and commits never publish. They are not serialized: commits only share the read side of `enableBarrier`, so sync pipelines never block each other.
+The cache is disabled while the initial sync runs. On each sync event, `BesuControllerBuilder` reads the current sync state and enables or disables the cache accordingly. While disabled, reads go to storage, nothing is cached and commits never publish.
 
-`enable()` takes the write side: it waits until no commit is in flight, clears the cache, then enables it.
+- **Mode never changes mid-commit**: every commit holds the read side of `modeBarrier`; `enable()` / `disable()` take the write side, so they wait until no commit is in flight. Commits never block each other.
+- **Latest call wins**: `enable()` / `disable()` run one after the other.
 
 ---
 

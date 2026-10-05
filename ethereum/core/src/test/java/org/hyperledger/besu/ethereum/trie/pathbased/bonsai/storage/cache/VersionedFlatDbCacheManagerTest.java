@@ -211,8 +211,7 @@ class VersionedFlatDbCacheManagerTest {
     final CountDownLatch releaseCommit = new CountDownLatch(1);
     final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
     try {
-      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
-
+      final CompletableFuture<Void> enabling = switchModeAsyncAndAwaitParked(true);
       assertThat(cacheManager.isEnabled()).isFalse();
       assertThat(enabling).isNotDone();
 
@@ -226,27 +225,25 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
-  void enable_waitsForInFlightEnabledCommitAcrossDisableEnableCycle() throws Exception {
+  void disable_waitsForInFlightEnabledCommit() throws Exception {
     final CountDownLatch releaseCommit = new CountDownLatch(1);
     final CompletableFuture<Void> enabledCommit = holdCommitUntil(releaseCommit);
     try {
-      cacheManager.disable();
-      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
-
-      assertThat(cacheManager.isEnabled()).isFalse();
-      assertThat(enabling).isNotDone();
+      final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
+      assertThat(cacheManager.isEnabled()).isTrue();
+      assertThat(disabling).isNotDone();
 
       releaseCommit.countDown();
       enabledCommit.get(5, TimeUnit.SECONDS);
-      enabling.get(5, TimeUnit.SECONDS);
-      assertThat(cacheManager.isEnabled()).isTrue();
+      disabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isFalse();
     } finally {
       releaseCommit.countDown();
     }
   }
 
   @Test
-  void enable_waitsForEnabledCommitBlockedOnPublishLock() throws Exception {
+  void modeSwitch_waitsForEnabledCommitBlockedOnPublishLock() throws Exception {
     // a clear holds the publish lock, so an enabled commit blocks waiting for it
     final CountDownLatch insideClear = new CountDownLatch(1);
     final CountDownLatch releaseClear = new CountDownLatch(1);
@@ -274,38 +271,73 @@ class VersionedFlatDbCacheManagerTest {
           .until(
               () -> committer.get() != null && committer.get().getState() == Thread.State.BLOCKED);
 
-      cacheManager.disable();
-      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
-      assertThat(enabling).isNotDone();
+      final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
+      assertThat(disabling).isNotDone();
 
       releaseClear.countDown();
       clearing.get(5, TimeUnit.SECONDS);
       commit.get(5, TimeUnit.SECONDS);
-      enabling.get(5, TimeUnit.SECONDS);
-      assertThat(cacheManager.isEnabled()).isTrue();
+      disabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isFalse();
     } finally {
       releaseClear.countDown();
     }
   }
 
-  /** Calls enable() on another thread; returns once it waits. */
-  private CompletableFuture<Void> enableAsyncAndAwaitParked() {
-    final AtomicReference<Thread> enablingThread = new AtomicReference<>();
-    final CompletableFuture<Void> enabling =
+  @Test
+  void enableWaitingForACommit_doesNotOverrideALaterDisable() throws Exception {
+    cacheManager.disable();
+    final CountDownLatch releaseCommit = new CountDownLatch(1);
+    final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
+    try {
+      // e.g. sync completion, then a resync restart while the enable is still waiting
+      final CompletableFuture<Void> enabling = switchModeAsyncAndAwaitParked(true);
+      final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
+
+      releaseCommit.countDown();
+      disabledCommit.get(5, TimeUnit.SECONDS);
+      enabling.get(5, TimeUnit.SECONDS);
+      disabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isFalse();
+    } finally {
+      releaseCommit.countDown();
+    }
+  }
+
+  @Test
+  void modeSwitch_fromInsideACommitFailsInsteadOfDeadlocking() {
+    cacheManager.commitAndPublish(
+        () -> {
+          assertThatThrownBy(cacheManager::disable).isInstanceOf(IllegalStateException.class);
+          assertThatThrownBy(cacheManager::enable).isInstanceOf(IllegalStateException.class);
+        },
+        v -> {});
+
+    assertThat(cacheManager.isEnabled()).isTrue();
+  }
+
+  /** Calls enable() or disable() on another thread; returns once it waits. */
+  private CompletableFuture<Void> switchModeAsyncAndAwaitParked(final boolean enable) {
+    final AtomicReference<Thread> switchingThread = new AtomicReference<>();
+    final CompletableFuture<Void> switching =
         CompletableFuture.runAsync(
             () -> {
-              enablingThread.set(Thread.currentThread());
-              cacheManager.enable();
+              switchingThread.set(Thread.currentThread());
+              if (enable) {
+                cacheManager.enable();
+              } else {
+                cacheManager.disable();
+              }
             },
             committers);
     Awaitility.await()
         .atMost(5, TimeUnit.SECONDS)
         .until(
             () ->
-                enablingThread.get() != null
-                    && (enablingThread.get().getState() == Thread.State.WAITING
-                        || enablingThread.get().getState() == Thread.State.BLOCKED));
-    return enabling;
+                switchingThread.get() != null
+                    && (switchingThread.get().getState() == Thread.State.WAITING
+                        || switchingThread.get().getState() == Thread.State.BLOCKED));
+    return switching;
   }
 
   @Test
@@ -419,6 +451,24 @@ class VersionedFlatDbCacheManagerTest {
                     ACCOUNT_INFO_STATE, key, v, () -> Optional.of(Bytes.of(2)))));
 
     assertThat(readDuringClear.get()).contains(Bytes.of(2));
+  }
+
+  @Test
+  void invalidateAll_entryThatEscapedTheClearIsIgnored() {
+    final Bytes key = Bytes.of(14);
+    final long versionBeforeClear = cacheManager.getCurrentVersion();
+    cacheManager.invalidateAll(v -> {});
+
+    // an insert that was already running when the clear iterated the cache can survive it
+    cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), versionBeforeClear);
+
+    assertThat(
+            cacheManager.getFromCacheOrStorage(
+                ACCOUNT_INFO_STATE,
+                key,
+                cacheManager.getCurrentVersion(),
+                () -> Optional.of(Bytes.of(2))))
+        .contains(Bytes.of(2));
   }
 
   @Test
