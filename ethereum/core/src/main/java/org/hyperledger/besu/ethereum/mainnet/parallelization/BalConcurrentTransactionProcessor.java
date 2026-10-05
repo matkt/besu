@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
@@ -39,7 +40,6 @@ import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -92,25 +92,24 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
   }
 
   @Override
-  public void runAsyncBlock(
+  public void start(
       final ProtocolContext protocolContext,
-      final BlockHeader blockHeader,
-      final List<Transaction> transactions,
+      final ProcessableBlockHeader blockHeader,
+      final int transactionCount,
       final Address miningBeneficiary,
       final BlockHashLookup blockHashLookup,
       final Wei blobGasPrice,
       final Executor executor,
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockHeader> maybeParentHeader) {
-
     maybeParentHeader.ifPresent(
         parentHeader ->
             maybePrefetcher.ifPresent(
                 prefetcher -> prefetcher.prefetch(protocolContext, parentHeader, blockAccessList)));
-    super.runAsyncBlock(
+    super.start(
         protocolContext,
         blockHeader,
-        transactions,
+        transactionCount,
         miningBeneficiary,
         blockHashLookup,
         blobGasPrice,
@@ -122,7 +121,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
   @Override
   protected ParallelizedTransactionContext runTransaction(
       final ProtocolContext protocolContext,
-      final BlockHeader blockHeader,
+      final ProcessableBlockHeader blockHeader,
       final int transactionLocation,
       final Transaction transaction,
       final Address miningBeneficiary,

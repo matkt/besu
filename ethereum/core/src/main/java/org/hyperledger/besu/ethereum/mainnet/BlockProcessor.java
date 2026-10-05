@@ -20,8 +20,10 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.EarlyBlockExecution;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
@@ -68,6 +70,28 @@ public interface BlockProcessor {
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
       final BlockAccessList blockAccessList) {
+    return Optional.empty();
+  }
+
+  /**
+   * Starts running the transactions of an upcoming block in the background, before the block is
+   * validated and processed, so that the block processing finds their results. The transactions are
+   * then handed over one at a time, e.g. as the payload is decoded. Does nothing by default.
+   *
+   * @param protocolContext the current context of the protocol
+   * @param parentHeader the header of the parent of the upcoming block
+   * @param blockHeader the execution context of the upcoming block (its header without roots)
+   * @param blockAccessList the block access list of the upcoming block, if any
+   * @param transactionCount the number of transactions of the upcoming block
+   * @return the execution, to hand transactions to and to cancel once the block is processed or
+   *     rejected; empty if none started
+   */
+  default Optional<EarlyBlockExecution> startBlockExecution(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final ProcessableBlockHeader blockHeader,
+      final Optional<BlockAccessList> blockAccessList,
+      final int transactionCount) {
     return Optional.empty();
   }
 

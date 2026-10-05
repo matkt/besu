@@ -15,10 +15,8 @@
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine;
 
 import org.hyperledger.besu.datatypes.HardforkId;
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV1;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV4;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.NewPayloadRequestParametersV3;
@@ -26,16 +24,15 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorR
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
-import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -48,34 +45,12 @@ public sealed class EngineNewPayloadV5<
     extends EngineNewPayloadV4<EP, NPRP> permits EngineNewPayloadWithWitnessV5 {
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV5.class);
-  private static final String BLOCK_ACCESS_LIST = "blockAccessList";
-
-  /** Cancels what was started ahead for the payload handled on this thread, if anything. */
-  private static final ThreadLocal<Runnable> CANCEL_STARTED_AHEAD = new ThreadLocal<>();
 
   public EngineNewPayloadV5(
       final ConstructorArguments constructorArguments,
       final HardforkId minSupportedFork,
       final HardforkId firstUnsupportedFork) {
     super(constructorArguments, minSupportedFork, firstUnsupportedFork);
-  }
-
-  /**
-   * Once the payload is handled, its block is processed or rejected: what its state prefetch still
-   * has to read is of no use, and a state root computation its block did not take is not either, so
-   * they are cancelled.
-   */
-  @Override
-  public JsonRpcResponse syncResponse(final JsonRpcRequestContext requestContext) {
-    try {
-      return super.syncResponse(requestContext);
-    } finally {
-      final Runnable cancelStartedAhead = CANCEL_STARTED_AHEAD.get();
-      if (cancelStartedAhead != null) {
-        CANCEL_STARTED_AHEAD.remove();
-        cancelStartedAhead.run();
-      }
-    }
   }
 
   @Override
@@ -102,78 +77,53 @@ public sealed class EngineNewPayloadV5<
         .slotNumber(requestParameters.payloadParameter().getSlotNumber());
   }
 
-  /**
-   * Decodes the block access list first and starts prefetching the state it touches, then decodes
-   * the rest of the payload, mostly its transactions, while the prefetch runs. The block access
-   * list is decoded once, and the payload carries the instance the prefetch was started with.
-   */
+  /** The block access list comes first: the prefetch, the state root and the execution use it. */
   @Override
-  protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
-    if (!(requestContext.getRequest().getParams()[0] instanceof Map<?, ?> rawPayload)
-        || rawPayload.get(BLOCK_ACCESS_LIST) == null) {
-      return super.readPayloadParameter(requestContext);
+  protected Optional<BlockAccessList> decodeBlockAccessListFirst(final Map<?, ?> rawPayload) {
+    if (rawPayload.get(BLOCK_ACCESS_LIST_FIELD) == null) {
+      return Optional.empty();
     }
-    final BlockAccessList blockAccessList =
+    return Optional.of(
         convertPayloadParameter(
-                Map.of(BLOCK_ACCESS_LIST, rawPayload.get(BLOCK_ACCESS_LIST)),
+                Map.of(BLOCK_ACCESS_LIST_FIELD, rawPayload.get(BLOCK_ACCESS_LIST_FIELD)),
                 BlockAccessListField.class)
-            .blockAccessList();
-    startAhead(rawPayload, blockAccessList);
-
-    final Map<Object, Object> payloadWithoutBlockAccessList = new LinkedHashMap<>(rawPayload);
-    payloadWithoutBlockAccessList.remove(BLOCK_ACCESS_LIST);
-    final ExecutionPayloadV4 payload =
-        (ExecutionPayloadV4)
-            convertPayloadParameter(payloadWithoutBlockAccessList, getPayloadParameterClass());
-    payload.setBlockAccessList(blockAccessList);
-    return payload;
+            .blockAccessList());
   }
 
   /** The block access list field of a payload, decoded on its own. */
   record BlockAccessListField(BlockAccessList blockAccessList) {}
 
+  @Override
+  protected void setBlockAccessList(
+      final ExecutionPayloadV1 payload, final BlockAccessList blockAccessList) {
+    ((ExecutionPayloadV4) payload).setBlockAccessList(blockAccessList);
+  }
+
   /**
    * Starts what only needs the parent state and the block access list: prefetching the state it
    * touches, so that it is mostly in cache once the block is executed, and computing the state root
-   * from it. Starts before the payload is validated: for a payload that turns out to be invalid, it
-   * is cancelled once the payload is handled.
+   * from it. A block access list over the EIP-7928 item budget belongs to an invalid block: nothing
+   * is started for it.
    */
-  private void startAhead(final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
-    try {
-      final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
-      final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
-      final long gasLimit = Long.decode((String) rawPayload.get("gasLimit"));
-      protocolContext
-          .getBlockchain()
-          .getBlockHeader(parentHash)
-          .ifPresent(
-              parentHeader -> {
-                final ProtocolSpec protocolSpec =
-                    protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
-                if (exceedsItemBudget(blockAccessList, gasLimit, protocolSpec)) {
-                  // the block is invalid and will be rejected: do not read for it
-                  return;
-                }
-                final Optional<BalPrefetch> prefetch =
-                    protocolSpec
-                        .getBlockProcessor()
-                        .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList);
-                prefetch.ifPresent(started -> CANCEL_STARTED_AHEAD.set(started::cancel));
-                // the state root only needs the parent state and the access list
-                final StateRootCommitterFactory stateRootCommitters =
-                    protocolSpec.getStateRootCommitterFactory();
-                // a payload is validated on a frozen world state: newPayload does not move the head
-                stateRootCommitters.startAhead(
-                    protocolContext, parentHeader, blockAccessList, true);
-                CANCEL_STARTED_AHEAD.set(
-                    () -> {
-                      prefetch.ifPresent(BalPrefetch::cancel);
-                      stateRootCommitters.cancelAhead(blockAccessList);
-                    });
-              });
-    } catch (final RuntimeException e) {
-      LOG.debug("Could not start the state prefetch or state root of a payload", e);
+  @Override
+  protected boolean startBlockAccessListWorkAhead(
+      final BlockHeader parentHeader,
+      final ProtocolSpec protocolSpec,
+      final long gasLimit,
+      final BlockAccessList blockAccessList) {
+    if (exceedsItemBudget(blockAccessList, gasLimit, protocolSpec)) {
+      return false;
     }
+    protocolSpec
+        .getBlockProcessor()
+        .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList)
+        .ifPresent(prefetch -> cancelOncePayloadHandled(prefetch::cancel));
+    final StateRootCommitterFactory stateRootCommitters =
+        protocolSpec.getStateRootCommitterFactory();
+    // a payload is validated on a frozen world state: newPayload does not move the head
+    stateRootCommitters.startAhead(protocolContext, parentHeader, blockAccessList, true);
+    cancelOncePayloadHandled(() -> stateRootCommitters.cancelAhead(blockAccessList));
+    return true;
   }
 
   /**
@@ -231,7 +181,7 @@ public sealed class EngineNewPayloadV5<
       if (maybeJsonPath.isPresent()) {
         final String jsonPath = maybeJsonPath.get();
 
-        if (jsonPath.equals(BLOCK_ACCESS_LIST)) {
+        if (jsonPath.equals(BLOCK_ACCESS_LIST_FIELD)) {
           final String validationError =
               "Failed to decode block access list payload parameter ("
                   + fieldEx.getOriginalMessage()

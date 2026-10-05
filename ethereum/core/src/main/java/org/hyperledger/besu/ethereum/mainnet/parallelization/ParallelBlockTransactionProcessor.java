@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
 import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
@@ -31,10 +32,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 
 public abstract class ParallelBlockTransactionProcessor {
 
   protected CompletableFuture<ParallelizedTransactionContext>[] futures;
+
+  /** Runs a transaction of the block started by {@link #start}, in the background. */
+  private BiFunction<Integer, Transaction, CompletableFuture<ParallelizedTransactionContext>>
+      transactionRunner;
 
   protected CompletableFuture<ParallelizedTransactionContext> removeFuture(final int txIndex) {
     final CompletableFuture<ParallelizedTransactionContext> future = futures[txIndex];
@@ -42,10 +48,9 @@ public abstract class ParallelBlockTransactionProcessor {
     return future;
   }
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
   public void runAsyncBlock(
       final ProtocolContext protocolContext,
-      final BlockHeader blockHeader,
+      final ProcessableBlockHeader blockHeader,
       final List<Transaction> transactions,
       final Address miningBeneficiary,
       final BlockHashLookup blockHashLookup,
@@ -53,28 +58,58 @@ public abstract class ParallelBlockTransactionProcessor {
       final Executor executor,
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockHeader> maybeParentHeader) {
-
-    futures = new CompletableFuture[transactions.size()];
-
+    start(
+        protocolContext,
+        blockHeader,
+        transactions.size(),
+        miningBeneficiary,
+        blockHashLookup,
+        blobGasPrice,
+        executor,
+        blockAccessListBuilder,
+        maybeParentHeader);
     for (int i = 0; i < transactions.size(); i++) {
-      final int txIndex = i;
-      final Transaction transaction = transactions.get(i);
-
-      futures[i] =
-          CompletableFuture.supplyAsync(
-              () ->
-                  runTransaction(
-                      protocolContext,
-                      blockHeader,
-                      txIndex,
-                      transaction,
-                      miningBeneficiary,
-                      blockHashLookup,
-                      blobGasPrice,
-                      blockAccessListBuilder,
-                      maybeParentHeader),
-              executor);
+      submit(i, transactions.get(i));
     }
+  }
+
+  /**
+   * Prepares running the transactions of a block, which {@link #submit} then hands over one at a
+   * time, e.g. as they are decoded. A transaction not submitted has no result: the block processing
+   * runs it itself.
+   */
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  public void start(
+      final ProtocolContext protocolContext,
+      final ProcessableBlockHeader blockHeader,
+      final int transactionCount,
+      final Address miningBeneficiary,
+      final BlockHashLookup blockHashLookup,
+      final Wei blobGasPrice,
+      final Executor executor,
+      final Optional<BlockAccessListBuilder> blockAccessListBuilder,
+      final Optional<BlockHeader> maybeParentHeader) {
+    futures = new CompletableFuture[transactionCount];
+    transactionRunner =
+        (txIndex, transaction) ->
+            CompletableFuture.supplyAsync(
+                () ->
+                    runTransaction(
+                        protocolContext,
+                        blockHeader,
+                        txIndex,
+                        transaction,
+                        miningBeneficiary,
+                        blockHashLookup,
+                        blobGasPrice,
+                        blockAccessListBuilder,
+                        maybeParentHeader),
+                executor);
+  }
+
+  /** Starts running the transaction at {@code txIndex} of the block prepared by {@link #start}. */
+  public void submit(final int txIndex, final Transaction transaction) {
+    futures[txIndex] = transactionRunner.apply(txIndex, transaction);
   }
 
   /**
@@ -105,7 +140,7 @@ public abstract class ParallelBlockTransactionProcessor {
 
   protected abstract ParallelizedTransactionContext runTransaction(
       ProtocolContext protocolContext,
-      BlockHeader blockHeader,
+      ProcessableBlockHeader blockHeader,
       int transactionLocation,
       Transaction transaction,
       Address miningBeneficiary,

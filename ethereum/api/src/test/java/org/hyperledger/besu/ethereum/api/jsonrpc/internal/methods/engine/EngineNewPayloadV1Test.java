@@ -26,6 +26,11 @@ import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType.INVALID_PARAMS;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType.UNSUPPORTED_FORK;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -35,6 +40,7 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.consensus.merge.MergeContext;
 import org.hyperledger.besu.consensus.merge.blockcreation.MergeMiningCoordinator;
+import org.hyperledger.besu.crypto.SignatureAlgorithmFactory;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
@@ -55,11 +61,20 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
+import org.hyperledger.besu.ethereum.core.Transaction;
+import org.hyperledger.besu.ethereum.core.TransactionTestFixture;
+import org.hyperledger.besu.ethereum.core.encoding.EncodingContext;
+import org.hyperledger.besu.ethereum.core.encoding.TransactionEncoder;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
+import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.EarlyBlockExecution;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
+import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.rpc.RpcResponseType;
@@ -79,6 +94,8 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -352,6 +369,83 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
     assertThat(res.getStatus()).isEqualTo(INVALID);
     assertThat(res.getError()).startsWith("Failed to decode transactions from block parameter");
     verify(engineCallListener, times(1)).executionEngineCalled();
+  }
+
+  @Test
+  public void shouldHandTheTransactionsToTheEarlyExecutionAsTheyAreDecoded() {
+    final EarlyBlockExecution execution = mock(EarlyBlockExecution.class);
+    final BlockProcessor blockProcessor = mockWorkAhead(execution);
+    final BlockHeader header = setupPayloadV1(getMinSupportedTimestamp());
+    final List<Transaction> transactions = List.of(transaction(0), transaction(1));
+
+    resp(requestParams(mockEnginePayloadParam(header, encoded(transactions))));
+
+    final ArgumentCaptor<ProcessableBlockHeader> executionContext =
+        ArgumentCaptor.forClass(ProcessableBlockHeader.class);
+    verify(blockProcessor)
+        .startBlockExecution(any(), any(), executionContext.capture(), any(), eq(2));
+    assertThat(executionContext.getValue().getParentHash()).isEqualTo(header.getParentHash());
+    assertThat(executionContext.getValue().getCoinbase()).isEqualTo(header.getCoinbase());
+    assertThat(executionContext.getValue().getNumber()).isEqualTo(header.getNumber());
+    assertThat(executionContext.getValue().getTimestamp()).isEqualTo(header.getTimestamp());
+    assertThat(executionContext.getValue().getGasLimit()).isEqualTo(header.getGasLimit());
+    assertThat(executionContext.getValue().getBaseFee()).isEqualTo(header.getBaseFee());
+    assertThat(executionContext.getValue().getPrevRandao()).isEqualTo(header.getPrevRandao());
+
+    final ArgumentCaptor<Transaction> submitted = ArgumentCaptor.forClass(Transaction.class);
+    final InOrder inOrder = inOrder(execution);
+    inOrder.verify(execution).submit(eq(0), submitted.capture());
+    inOrder.verify(execution).submit(eq(1), submitted.capture());
+    // the payload is handled: what was started for its block stops
+    inOrder.verify(execution).cancel();
+    assertThat(submitted.getAllValues().stream().map(Transaction::getHash))
+        .containsExactly(transactions.get(0).getHash(), transactions.get(1).getHash());
+  }
+
+  @Test
+  public void shouldCancelTheEarlyExecutionWhenATransactionDoesNotDecode() {
+    final EarlyBlockExecution execution = mock(EarlyBlockExecution.class);
+    mockWorkAhead(execution);
+    final BlockHeader header = setupPayloadV1(getMinSupportedTimestamp());
+    final List<String> transactions =
+        List.of(encoded(List.of(transaction(0))).getFirst(), "0xDEAD");
+
+    final PayloadStatusV1 res =
+        fromSuccessResp(resp(requestParams(mockEnginePayloadParam(header, transactions))));
+
+    assertThat(res.getStatus()).isEqualTo(INVALID);
+    assertThat(res.getError()).startsWith("Failed to decode transactions from block parameter");
+    verify(execution).submit(eq(0), any());
+    verify(execution, never()).submit(eq(1), any());
+    verify(execution, atLeastOnce()).cancel();
+  }
+
+  /** Lets the work ahead of a payload start, the execution of its block being {@code execution}. */
+  private BlockProcessor mockWorkAhead(final EarlyBlockExecution execution) {
+    final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
+    when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    when(protocolSpec.getGasCalculator()).thenReturn(mock(GasCalculator.class));
+    when(protocolSpec.getStateRootCommitterFactory())
+        .thenReturn(mock(StateRootCommitterFactory.class));
+    when(blockProcessor.startBlockExecution(any(), any(), any(), any(), anyInt()))
+        .thenReturn(Optional.of(execution));
+    return blockProcessor;
+  }
+
+  private static Transaction transaction(final long nonce) {
+    return new TransactionTestFixture()
+        .nonce(nonce)
+        .createTransaction(SignatureAlgorithmFactory.getInstance().generateKeyPair());
+  }
+
+  private static List<String> encoded(final List<Transaction> transactions) {
+    return transactions.stream()
+        .map(
+            transaction ->
+                TransactionEncoder.encodeOpaqueBytes(transaction, EncodingContext.BLOCK_BODY)
+                    .toHexString())
+        .toList();
   }
 
   @Test

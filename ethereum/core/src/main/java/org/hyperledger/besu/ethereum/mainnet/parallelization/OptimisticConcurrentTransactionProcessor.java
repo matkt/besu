@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
@@ -77,7 +78,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
   @VisibleForTesting
   protected ParallelizedTransactionContext runTransaction(
       final ProtocolContext protocolContext,
-      final BlockHeader blockHeader,
+      final ProcessableBlockHeader blockHeader,
       final int transactionLocation,
       final Transaction transaction,
       final Address miningBeneficiary,

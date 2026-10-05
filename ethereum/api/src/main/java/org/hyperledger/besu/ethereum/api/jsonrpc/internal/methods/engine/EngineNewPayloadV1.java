@@ -23,6 +23,7 @@ import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.Json
 import static org.hyperledger.besu.metrics.BesuMetricCategory.BLOCK_PROCESSING;
 
 import org.hyperledger.besu.consensus.merge.blockcreation.MergeMiningCoordinator;
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.HardforkId;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
@@ -47,20 +48,29 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.ProcessableBlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
+import org.hyperledger.besu.ethereum.core.encoding.EncodingContext;
+import org.hyperledger.besu.ethereum.core.encoding.TransactionDecoder;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.EarlyBlockExecution;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -78,6 +88,13 @@ public sealed class EngineNewPayloadV1<
     extends OrderedExecutionJsonRpcMethod permits EngineNewPayloadV2 {
 
   private static final JsonRpcParameter PAYLOAD_PARAMETER = new JsonRpcParameter();
+
+  protected static final String BLOCK_ACCESS_LIST_FIELD = "blockAccessList";
+  private static final String TRANSACTIONS_FIELD = "transactions";
+
+  /** Cancels what was started ahead for the payload handled on this thread. */
+  private static final ThreadLocal<List<Runnable>> STARTED_AHEAD =
+      ThreadLocal.withInitial(ArrayList::new);
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV1.class);
   private static final Hash OMMERS_HASH_CONSTANT = Hash.EMPTY_LIST_HASH;
@@ -115,8 +132,32 @@ public sealed class EngineNewPayloadV1<
     return RpcMethod.ENGINE_NEW_PAYLOAD_V1.getMethodName();
   }
 
+  /**
+   * Once the payload is handled, its block is processed or rejected: what was started ahead for it
+   * (its transactions, the prefetch of its state, its state root) is of no use any more and is
+   * cancelled.
+   */
   @Override
   public JsonRpcResponse syncResponse(final JsonRpcRequestContext requestContext) {
+    try {
+      return handlePayload(requestContext);
+    } finally {
+      final List<Runnable> cancellations = STARTED_AHEAD.get();
+      STARTED_AHEAD.remove();
+      cancellations.forEach(Runnable::run);
+    }
+  }
+
+  /**
+   * Cancels {@code cancellation} once the payload handled on this thread is handled.
+   *
+   * @param cancellation what cancels something started ahead for the payload
+   */
+  protected static void cancelOncePayloadHandled(final Runnable cancellation) {
+    STARTED_AHEAD.get().add(cancellation);
+  }
+
+  private JsonRpcResponse handlePayload(final JsonRpcRequestContext requestContext) {
     engineCallListener.executionEngineCalled();
 
     final Object reqId = requestContext.getRequest().getId();
@@ -299,9 +340,181 @@ public sealed class EngineNewPayloadV1<
     }
   }
 
+  /**
+   * Reads the payload so that its block can start running before the payload is fully read and
+   * validated: the fields that work needs come first (the block access list, see {@link
+   * #decodeBlockAccessListFirst}), then the transactions are decoded one at a time, each handed
+   * over to the early execution of the block as soon as it is decoded, and the rest of the payload
+   * last. Decoding errors are reported as before: a payload whose transactions do not decode is
+   * converted as a whole again, which fails the same way.
+   */
   protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
-    return convertPayloadParameter(
-        requestContext.getRequest().getParams()[0], getPayloadParameterClass());
+    final Object rawParameter = requestContext.getRequest().getParams()[0];
+    if (!(rawParameter instanceof Map<?, ?> rawPayload)) {
+      return convertPayloadParameter(rawParameter, getPayloadParameterClass());
+    }
+    final Optional<BlockAccessList> blockAccessList = decodeBlockAccessListFirst(rawPayload);
+    final Optional<List<Transaction>> transactions =
+        startAhead(requestContext, rawPayload, blockAccessList)
+            .flatMap(execution -> decodeTransactions(rawPayload, execution));
+
+    final Map<Object, Object> rest = new LinkedHashMap<>(rawPayload);
+    if (blockAccessList.isPresent()) {
+      rest.remove(BLOCK_ACCESS_LIST_FIELD);
+    }
+    if (transactions.isPresent()) {
+      rest.remove(TRANSACTIONS_FIELD);
+    }
+    final ExecutionPayloadV1 payload = convertPayloadParameter(rest, getPayloadParameterClass());
+    transactions.ifPresent(payload::setTransactions);
+    blockAccessList.ifPresent(decoded -> setBlockAccessList(payload, decoded));
+    return payload;
+  }
+
+  /**
+   * Decodes the block access list of the payload before anything else, so that the work it allows
+   * starts early. None by default.
+   *
+   * @param rawPayload the raw payload parameter
+   * @return the decoded block access list, if the payload has one
+   */
+  protected Optional<BlockAccessList> decodeBlockAccessListFirst(final Map<?, ?> rawPayload) {
+    return Optional.empty();
+  }
+
+  /**
+   * Sets on the payload the block access list decoded first. Nothing by default.
+   *
+   * @param payload the payload converted without it
+   * @param blockAccessList the block access list decoded first
+   */
+  protected void setBlockAccessList(
+      final ExecutionPayloadV1 payload, final BlockAccessList blockAccessList) {}
+
+  /**
+   * Starts the work on the block access list that only needs the parent state, before the block is
+   * processed. Nothing by default.
+   *
+   * @param parentHeader the header of the parent of the block
+   * @param protocolSpec the protocol spec of the block
+   * @param gasLimit the gas limit of the block
+   * @param blockAccessList the block access list of the block
+   * @return whether the block may be valid: false if its block access list cannot belong to a valid
+   *     block, in which case nothing is started for it
+   */
+  protected boolean startBlockAccessListWorkAhead(
+      final BlockHeader parentHeader,
+      final ProtocolSpec protocolSpec,
+      final long gasLimit,
+      final BlockAccessList blockAccessList) {
+    return true;
+  }
+
+  /**
+   * Starts, before the payload is fully read and validated, what only needs its parent state and
+   * the first fields of the payload: the work on its block access list and the execution of its
+   * transactions, which are then handed over as they are decoded. Whatever is started is cancelled
+   * once the payload is handled; a payload that turns out to be invalid only cost that work.
+   */
+  private Optional<EarlyBlockExecution> startAhead(
+      final JsonRpcRequestContext requestContext,
+      final Map<?, ?> rawPayload,
+      final Optional<BlockAccessList> blockAccessList) {
+    try {
+      final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
+      final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
+      final long gasLimit = Long.decode((String) rawPayload.get("gasLimit"));
+      final Optional<BlockHeader> maybeParentHeader =
+          protocolContext.getBlockchain().getBlockHeader(parentHash);
+      if (maybeParentHeader.isEmpty()) {
+        return Optional.empty();
+      }
+      final BlockHeader parentHeader = maybeParentHeader.get();
+      final ProtocolSpec protocolSpec =
+          protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
+      if (blockAccessList.isPresent()
+          && !startBlockAccessListWorkAhead(
+              parentHeader, protocolSpec, gasLimit, blockAccessList.get())) {
+        return Optional.empty();
+      }
+      if (!(rawPayload.get(TRANSACTIONS_FIELD) instanceof List<?> rawTransactions)) {
+        return Optional.empty();
+      }
+      final Optional<EarlyBlockExecution> execution =
+          protocolSpec
+              .getBlockProcessor()
+              .startBlockExecution(
+                  protocolContext,
+                  parentHeader,
+                  executionContext(requestContext, rawPayload, parentHash, timestamp, gasLimit),
+                  blockAccessList,
+                  rawTransactions.size());
+      execution.ifPresent(started -> cancelOncePayloadHandled(started::cancel));
+      return execution;
+    } catch (final RuntimeException e) {
+      logger().debug("Could not start the work ahead of a payload", e);
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * The header fields the transactions of the block run with, from the raw payload: its header
+   * without roots.
+   */
+  private static ProcessableBlockHeader executionContext(
+      final JsonRpcRequestContext requestContext,
+      final Map<?, ?> rawPayload,
+      final Hash parentHash,
+      final long timestamp,
+      final long gasLimit) {
+    final BlockHeaderBuilder header =
+        BlockHeaderBuilder.create()
+            .parentHash(parentHash)
+            .coinbase(Address.fromHexString((String) rawPayload.get("feeRecipient")))
+            .difficulty(Difficulty.ZERO)
+            .number(Long.decode((String) rawPayload.get("blockNumber")))
+            .gasLimit(gasLimit)
+            .timestamp(timestamp)
+            .prevRandao(Bytes32.fromHexString((String) rawPayload.get("prevRandao")));
+    if (rawPayload.get("baseFeePerGas") instanceof String baseFee) {
+      header.baseFee(Wei.fromHexString(baseFee));
+    }
+    if (rawPayload.get("slotNumber") instanceof String slotNumber) {
+      header.slotNumber(Long.decode(slotNumber));
+    }
+    // from engine_newPayloadV3 on, the parent beacon block root is the third parameter
+    final Object[] params = requestContext.getRequest().getParams();
+    if (params.length > 2 && params[2] instanceof String parentBeaconBlockRoot) {
+      header.parentBeaconBlockRoot(Bytes32.fromHexString(parentBeaconBlockRoot));
+    }
+    return header.buildProcessableBlockHeader();
+  }
+
+  /**
+   * Decodes the transactions of the payload one at a time, handing each over to the early execution
+   * as soon as it is decoded. Empty, with the execution cancelled, if one does not decode: the
+   * payload is then converted as a whole, which reports the error as before.
+   */
+  private static Optional<List<Transaction>> decodeTransactions(
+      final Map<?, ?> rawPayload, final EarlyBlockExecution execution) {
+    if (!(rawPayload.get(TRANSACTIONS_FIELD) instanceof List<?> rawTransactions)) {
+      execution.cancel();
+      return Optional.empty();
+    }
+    final List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
+    try {
+      for (final Object rawTransaction : rawTransactions) {
+        final Transaction transaction =
+            TransactionDecoder.decodeOpaqueBytes(
+                Bytes.fromHexString((String) rawTransaction), EncodingContext.BLOCK_BODY);
+        execution.submit(transactions.size(), transaction);
+        transactions.add(transaction);
+      }
+    } catch (final RuntimeException e) {
+      execution.cancel();
+      return Optional.empty();
+    }
+    return Optional.of(transactions);
   }
 
   /**

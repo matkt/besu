@@ -38,6 +38,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
   private final Executor executor;
   private final BalConfiguration balConfiguration;
   private final Optional<BalPrefetcher> maybePrefetcher;
+  private final Optional<ParallelBlockTransactionProcessor> startedEarly;
 
   public ParallelTransactionPreprocessing(
       final MainnetTransactionProcessor transactionProcessor,
@@ -47,7 +48,8 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
         transactionProcessor,
         executor,
         balConfiguration,
-        BalPrefetcher.fromConfiguration(balConfiguration));
+        BalPrefetcher.fromConfiguration(balConfiguration),
+        Optional.empty());
   }
 
   /**
@@ -59,10 +61,24 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       final Executor executor,
       final BalConfiguration balConfiguration,
       final Optional<BalPrefetcher> maybePrefetcher) {
+    this(transactionProcessor, executor, balConfiguration, maybePrefetcher, Optional.empty());
+  }
+
+  /**
+   * @param startedEarly the processor already running the transactions of the block, started before
+   *     the block was processed (see {@link EarlyBlockExecution})
+   */
+  public ParallelTransactionPreprocessing(
+      final MainnetTransactionProcessor transactionProcessor,
+      final Executor executor,
+      final BalConfiguration balConfiguration,
+      final Optional<BalPrefetcher> maybePrefetcher,
+      final Optional<ParallelBlockTransactionProcessor> startedEarly) {
     this.transactionProcessor = transactionProcessor;
     this.executor = executor;
     this.balConfiguration = balConfiguration;
     this.maybePrefetcher = maybePrefetcher;
+    this.startedEarly = startedEarly;
   }
 
   @Override
@@ -78,6 +94,9 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       final Optional<BlockHeader> maybeParentHeader) {
     if (!(protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider)) {
       return Optional.empty();
+    }
+    if (startedEarly.isPresent()) {
+      return Optional.of(new PreprocessingContext(startedEarly.get()));
     }
 
     final ParallelBlockTransactionProcessor parallelProcessor;
