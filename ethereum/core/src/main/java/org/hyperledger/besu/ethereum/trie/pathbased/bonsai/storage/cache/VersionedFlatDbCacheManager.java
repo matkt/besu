@@ -35,6 +35,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
@@ -66,6 +68,13 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
    * across every storage sharing this cache, so version order matches storage commit order.
    */
   private final Object publishLock = new Object();
+
+  /**
+   * Commits running while the cache is disabled hold the (shared) read lock for their whole
+   * duration; {@link #enable()} takes the write lock. Disabled commits never block each other, and
+   * once {@link #enable()} returns no commit started while disabled can still be running.
+   */
+  private final ReentrantReadWriteLock disabledCommitsLock = new ReentrantReadWriteLock();
 
   /**
    * When {@code false} (e.g. during the initial snap sync) the cache is bypassed entirely: reads go
@@ -285,20 +294,24 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     // did so while enabled, so this commit necessarily takes the publishing path below.
     beginCommitCacheBypass();
     try {
-      if (enabled) {
-        synchronized (publishLock) {
+      final Lock disabledCommit = disabledCommitsLock.readLock();
+      disabledCommit.lock();
+      try {
+        if (!enabled) {
+          // Not serialized and never published. enable() cannot complete while this runs. The
+          // version still advances so that reads overlapping this commit cannot insert.
           storageCommit.run();
-          final long version = incrementAndGetVersion();
-          publisher.accept(version);
-          return version;
+          return incrementAndGetVersion();
         }
+      } finally {
+        disabledCommit.unlock();
       }
-      // Started while disabled: not serialized and never published, even if the cache gets enabled
-      // before this commit completes. Publishing then could let two such commits on the same key
-      // publish in a different order than they committed, leaving the cache out of sync with the
-      // DB. The version still advances so that reads overlapping this commit cannot insert.
-      storageCommit.run();
-      return incrementAndGetVersion();
+      synchronized (publishLock) {
+        storageCommit.run();
+        final long version = incrementAndGetVersion();
+        publisher.accept(version);
+        return version;
+      }
     } finally {
       endCommitCacheBypass();
     }
@@ -306,10 +319,20 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void enable() {
-    // entries inserted by reads racing the previous disable() are dropped before re-enabling
-    accountCache.invalidateAll();
-    storageCache.invalidateAll();
-    enabled = true;
+    // Wait until no commit is in flight, disabled (write lock) or enabled (publish lock): a
+    // disabled commit overwrites storage without publishing, and an enabled commit started before
+    // a disable/enable cycle could publish over such a write. Then drop anything left in the cache.
+    final Lock noDisabledCommits = disabledCommitsLock.writeLock();
+    noDisabledCommits.lock();
+    try {
+      synchronized (publishLock) {
+        accountCache.invalidateAll();
+        storageCache.invalidateAll();
+        enabled = true;
+      }
+    } finally {
+      noDisabledCommits.unlock();
+    }
     LOG.info("Bonsai cross-block cache enabled");
   }
 

@@ -66,10 +66,9 @@ public interface FlatDbCacheManager {
    * the whole sequence. If the cache was enabled when the commit started, the version is handed to
    * {@code publisher}, which must publish the committed writes at exactly that version; such calls
    * (and {@link #invalidateAll(LongConsumer)}) are serialized, so version order matches storage
-   * commit order. A commit that started while the cache was disabled never publishes, even if the
-   * cache is enabled before it completes, and is not serialized: the returned versions of such
-   * commits may reach callers out of order, so callers tracking the latest version must only move
-   * it forward.
+   * commit order. A commit running while the cache is disabled never publishes and is not
+   * serialized with other such commits: their returned versions may reach callers out of order, so
+   * callers tracking the latest version must only move it forward.
    *
    * @param storageCommit commits the underlying storage transaction
    * @param publisher receives the new version; publishes the committed writes at that version
@@ -82,7 +81,8 @@ public interface FlatDbCacheManager {
   }
 
   /**
-   * Turns the cache on (e.g. once the initial sync is done). Any leftover entry is dropped first.
+   * Turns the cache on (e.g. once the initial sync is done). Waits until no commit is in flight,
+   * then drops any leftover entry before enabling.
    */
   default void enable() {
     // No-op

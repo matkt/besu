@@ -30,6 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.awaitility.Awaitility;
@@ -213,18 +214,69 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
-  void commitStartedWhileDisabled_doesNotPublishEvenIfEnabledBeforeItCompletes() {
+  void enable_waitsForInFlightDisabledCommit() throws Exception {
     cacheManager.disable();
-    final AtomicBoolean published = new AtomicBoolean();
+    final CountDownLatch releaseCommit = new CountDownLatch(1);
+    final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
+    try {
+      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
 
-    // enable() lands between this commit's storage write and its publish step: publishing now
-    // could let two such commits on the same key publish out of their storage commit order
-    final long version =
-        cacheManager.commitAndPublish(cacheManager::enable, v -> published.set(true));
+      // a disabled commit overwrites storage without publishing: it must not overlap the
+      // enabled period, otherwise an enabled commit could publish a value it then overwrites
+      assertThat(cacheManager.isEnabled()).isFalse();
+      assertThat(enabling).isNotDone();
 
-    assertThat(cacheManager.isEnabled()).isTrue();
-    assertThat(published).isFalse();
-    assertThat(version).isEqualTo(cacheManager.getCurrentVersion());
+      releaseCommit.countDown();
+      disabledCommit.get(5, TimeUnit.SECONDS);
+      enabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isTrue();
+    } finally {
+      releaseCommit.countDown();
+    }
+  }
+
+  @Test
+  void enable_waitsForInFlightEnabledCommitAcrossDisableEnableCycle() throws Exception {
+    final CountDownLatch releaseCommit = new CountDownLatch(1);
+    final CompletableFuture<Void> enabledCommit = holdCommitUntil(releaseCommit);
+    try {
+      cacheManager.disable();
+      final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
+
+      // the enabled commit would otherwise publish after the re-enable, possibly over a value a
+      // disabled commit wrote to storage in between
+      assertThat(cacheManager.isEnabled()).isFalse();
+      assertThat(enabling).isNotDone();
+
+      releaseCommit.countDown();
+      enabledCommit.get(5, TimeUnit.SECONDS);
+      enabling.get(5, TimeUnit.SECONDS);
+      assertThat(cacheManager.isEnabled()).isTrue();
+    } finally {
+      releaseCommit.countDown();
+    }
+  }
+
+  /**
+   * Calls {@link VersionedFlatDbCacheManager#enable()} on another thread; returns once it waits.
+   */
+  private CompletableFuture<Void> enableAsyncAndAwaitParked() {
+    final AtomicReference<Thread> enablingThread = new AtomicReference<>();
+    final CompletableFuture<Void> enabling =
+        CompletableFuture.runAsync(
+            () -> {
+              enablingThread.set(Thread.currentThread());
+              cacheManager.enable();
+            },
+            committers);
+    Awaitility.await()
+        .atMost(5, TimeUnit.SECONDS)
+        .until(
+            () ->
+                enablingThread.get() != null
+                    && (enablingThread.get().getState() == Thread.State.WAITING
+                        || enablingThread.get().getState() == Thread.State.BLOCKED));
+    return enabling;
   }
 
   @Test
