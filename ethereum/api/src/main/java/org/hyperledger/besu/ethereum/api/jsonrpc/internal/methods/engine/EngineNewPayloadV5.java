@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
 import java.util.LinkedHashMap;
@@ -49,8 +50,8 @@ public sealed class EngineNewPayloadV5<
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV5.class);
   private static final String BLOCK_ACCESS_LIST = "blockAccessList";
 
-  /** The state prefetch started for the payload being handled on this thread, if any. */
-  private static final ThreadLocal<BalPrefetch> STATE_PREFETCH = new ThreadLocal<>();
+  /** Cancels what was started ahead for the payload handled on this thread, if anything. */
+  private static final ThreadLocal<Runnable> CANCEL_STARTED_AHEAD = new ThreadLocal<>();
 
   public EngineNewPayloadV5(
       final ConstructorArguments constructorArguments,
@@ -61,17 +62,18 @@ public sealed class EngineNewPayloadV5<
 
   /**
    * Once the payload is handled, its block is processed or rejected: what its state prefetch still
-   * has to read is of no use, so it is cancelled.
+   * has to read is of no use, and a state root computation its block did not take is not either, so
+   * they are cancelled.
    */
   @Override
   public JsonRpcResponse syncResponse(final JsonRpcRequestContext requestContext) {
     try {
       return super.syncResponse(requestContext);
     } finally {
-      final BalPrefetch prefetch = STATE_PREFETCH.get();
-      if (prefetch != null) {
-        STATE_PREFETCH.remove();
-        prefetch.cancel();
+      final Runnable cancelStartedAhead = CANCEL_STARTED_AHEAD.get();
+      if (cancelStartedAhead != null) {
+        CANCEL_STARTED_AHEAD.remove();
+        cancelStartedAhead.run();
       }
     }
   }
@@ -116,7 +118,7 @@ public sealed class EngineNewPayloadV5<
                 Map.of(BLOCK_ACCESS_LIST, rawPayload.get(BLOCK_ACCESS_LIST)),
                 BlockAccessListField.class)
             .blockAccessList();
-    startStatePrefetch(rawPayload, blockAccessList);
+    startAhead(rawPayload, blockAccessList);
 
     final Map<Object, Object> payloadWithoutBlockAccessList = new LinkedHashMap<>(rawPayload);
     payloadWithoutBlockAccessList.remove(BLOCK_ACCESS_LIST);
@@ -131,12 +133,12 @@ public sealed class EngineNewPayloadV5<
   record BlockAccessListField(BlockAccessList blockAccessList) {}
 
   /**
-   * Prefetches the state the block access list touches, so that it is mostly in cache once the
-   * block is executed. Starts before the payload is validated: a payload that turns out to be
-   * invalid only warmed the cache.
+   * Starts what only needs the parent state and the block access list: prefetching the state it
+   * touches, so that it is mostly in cache once the block is executed, and computing the state root
+   * from it. Starts before the payload is validated: for a payload that turns out to be invalid, it
+   * is cancelled once the payload is handled.
    */
-  private void startStatePrefetch(
-      final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
+  private void startAhead(final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
     try {
       final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
       final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
@@ -152,13 +154,23 @@ public sealed class EngineNewPayloadV5<
                   // the block is invalid and will be rejected: do not read for it
                   return;
                 }
-                protocolSpec
-                    .getBlockProcessor()
-                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList)
-                    .ifPresent(STATE_PREFETCH::set);
+                final Optional<BalPrefetch> prefetch =
+                    protocolSpec
+                        .getBlockProcessor()
+                        .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList);
+                prefetch.ifPresent(started -> CANCEL_STARTED_AHEAD.set(started::cancel));
+                // the state root only needs the parent state and the access list
+                final StateRootCommitterFactory stateRootCommitters =
+                    protocolSpec.getStateRootCommitterFactory();
+                stateRootCommitters.startAhead(protocolContext, parentHeader, blockAccessList);
+                CANCEL_STARTED_AHEAD.set(
+                    () -> {
+                      prefetch.ifPresent(BalPrefetch::cancel);
+                      stateRootCommitters.cancelAhead(blockAccessList);
+                    });
               });
     } catch (final RuntimeException e) {
-      LOG.debug("Could not start the state prefetch of a payload", e);
+      LOG.debug("Could not start the state prefetch or state root of a payload", e);
     }
   }
 

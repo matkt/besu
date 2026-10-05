@@ -17,13 +17,15 @@ package org.hyperledger.besu.ethereum.mainnet.staterootcommitter;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Picks one committer per block:
@@ -44,10 +46,50 @@ public final class StateRootCommitterFactory {
     TRIE_DISABLED
   }
 
+  /** A BAL state root computation started before its block is processed. */
+  private record StartedAhead(BlockAccessList blockAccessList, BalStateRootCommitter committer) {}
+
   private final BalConfiguration balConfiguration;
+  private final AtomicReference<StartedAhead> startedAhead = new AtomicReference<>();
 
   public StateRootCommitterFactory(final BalConfiguration balConfiguration) {
     this.balConfiguration = balConfiguration;
+  }
+
+  /**
+   * Starts the BAL state root computation of an upcoming block as soon as its access list is known:
+   * it only needs the parent state and the access list. Processing that block (the same access list
+   * instance) then picks it up in {@link #forBlock}.
+   *
+   * @param protocolContext the protocol context
+   * @param parentHeader the header of the parent of the upcoming block
+   * @param blockAccessList the block access list of the upcoming block
+   */
+  public void startAhead(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final BlockAccessList blockAccessList) {
+    if (resolveMode(protocolContext, Optional.of(blockAccessList)) != Mode.BAL) {
+      return;
+    }
+    // a payload is imported on top of the head, which is not frozen
+    final BalStateRootCommitter committer =
+        BalStateRootCommitter.forParent(protocolContext, parentHeader, blockAccessList, false)
+            .start();
+    final StartedAhead previous =
+        startedAhead.getAndSet(new StartedAhead(blockAccessList, committer));
+    if (previous != null) {
+      previous.committer().cancel();
+    }
+  }
+
+  /**
+   * Cancels the computation started ahead for {@code blockAccessList}, unless its block took it.
+   *
+   * @param blockAccessList the block access list it was started for
+   */
+  public void cancelAhead(final BlockAccessList blockAccessList) {
+    takeStartedAhead(blockAccessList).ifPresent(BalStateRootCommitter::cancel);
   }
 
   public StateRootCommitter forBlock(
@@ -56,17 +98,38 @@ public final class StateRootCommitterFactory {
       final Optional<BlockAccessList> maybeBal,
       final boolean storageFrozen) {
     return switch (resolveMode(protocolContext, maybeBal)) {
-      case BAL ->
-          new BalStateRootCommitter(
-                  protocolContext,
-                  blockHeader,
-                  BlockAccessListAccountLookup.of(maybeBal.get()),
-                  storageFrozen)
-              .start();
+      case BAL -> {
+        final Optional<BalStateRootCommitter> ahead = takeStartedAhead(maybeBal.get());
+        if (ahead.isPresent() && !storageFrozen) {
+          yield ahead.get();
+        }
+        // started for a world state that is not frozen: its writes are not the ones wanted here
+        ahead.ifPresent(BalStateRootCommitter::cancel);
+        yield BalStateRootCommitter.forBlock(
+                protocolContext, blockHeader, maybeBal.get(), storageFrozen)
+            .start();
+      }
       case DEFAULT -> new DefaultStateRootCommitter();
       case FOREST -> ForestStateRootCommitter.INSTANCE;
       case TRIE_DISABLED -> TrieDisabledStateRootCommitter.INSTANCE;
     };
+  }
+
+  @VisibleForTesting
+  boolean hasStartedAhead() {
+    return startedAhead.get() != null;
+  }
+
+  // the very instance decoded from the payload reaches the block processing: compare identities,
+  // not the content of two possibly large lists
+  @SuppressWarnings("ReferenceEquality")
+  private Optional<BalStateRootCommitter> takeStartedAhead(final BlockAccessList blockAccessList) {
+    final StartedAhead started = startedAhead.get();
+    return started != null
+            && started.blockAccessList() == blockAccessList
+            && startedAhead.compareAndSet(started, null)
+        ? Optional.of(started.committer())
+        : Optional.empty();
   }
 
   private Mode resolveMode(

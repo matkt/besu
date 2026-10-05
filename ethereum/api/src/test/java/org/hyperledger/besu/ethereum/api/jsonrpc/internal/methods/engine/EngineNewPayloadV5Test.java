@@ -44,6 +44,7 @@ import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -65,6 +66,9 @@ import org.mockito.InOrder;
 public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
   private static final BlockAccessList BLOCK_ACCESS_LIST = createSampleBlockAccessList();
+
+  private final StateRootCommitterFactory stateRootCommitterFactory =
+      mock(StateRootCommitterFactory.class);
   private static final String INVALID_BLOCK_ACCESS_LIST_ENCODING = "0xzz";
   private static final String INVALID_BLOCK_ACCESS_LIST_RLP = "0x01";
   private static final Address BALANCE_CHANGE_ADDRESS =
@@ -224,8 +228,15 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     assertThat(prefetched.getValue()).isEqualTo(BLOCK_ACCESS_LIST);
     // The same instance: the block processor does not prefetch that block access list again.
     assertThat(processed.getValue()).containsSame(prefetched.getValue());
-    // the block is processed: what is left to read is of no use
+    // the state root computation starts with the prefetch, before the block is processed
+    final InOrder stateRootOrder = inOrder(stateRootCommitterFactory, mergeCoordinator);
+    stateRootOrder
+        .verify(stateRootCommitterFactory)
+        .startAhead(protocolContext, parentHeader, processed.getValue().orElseThrow());
+    stateRootOrder.verify(mergeCoordinator).rememberBlock(any(), any());
+    // the block is processed: what is left to read is of no use, nor is a computation not taken
     assertThat(prefetch.isCancelled()).isTrue();
+    verify(stateRootCommitterFactory).cancelAhead(processed.getValue().orElseThrow());
   }
 
   @Test
@@ -268,6 +279,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
     verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
+    verify(stateRootCommitterFactory, never()).startAhead(any(), any(), any());
   }
 
   /** The block processor the payload's state prefetch is started with. */
@@ -276,6 +288,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
     when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
     when(protocolSpec.getGasCalculator()).thenReturn(gasCalculator);
+    when(protocolSpec.getStateRootCommitterFactory()).thenReturn(stateRootCommitterFactory);
     return blockProcessor;
   }
 

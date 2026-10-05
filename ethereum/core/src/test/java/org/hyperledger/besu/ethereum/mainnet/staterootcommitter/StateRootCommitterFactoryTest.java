@@ -318,6 +318,99 @@ class StateRootCommitterFactoryTest {
   }
 
   @Nested
+  class StartedAhead {
+
+    @Test
+    void blockTakesTheComputationStartedAheadForItsBlockAccessList() {
+      final Address address = testAddress("c1");
+      final Wei newBalance = Wei.of(123_456L);
+      final BlockAccessList bal = balanceAndNonceBal(address, newBalance, 3L);
+      final BlockHeader blockHeader =
+          childHeader(computeRootFromAccumulator(address, newBalance, 3L));
+
+      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      assertThat(factory.hasStartedAhead()).isTrue();
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        applyBalanceAndNonce(worldState, address, newBalance, 3L);
+        final StateRootCommitter committer =
+            factory.forBlock(protocolContext, blockHeader, Optional.of(bal), false);
+        assertThat(factory.hasStartedAhead()).isFalse();
+        worldState.persist(blockHeader, committer);
+        assertThat(worldState.rootHash()).isEqualTo(blockHeader.getStateRoot());
+      }
+    }
+
+    @Test
+    void anotherBlockAccessListDoesNotTakeIt() {
+      final Address address = testAddress("c2");
+      final Wei newBalance = Wei.of(654_321L);
+      final BlockAccessList bal = balanceOnlyBal(address, newBalance);
+      final BlockHeader blockHeader =
+          childHeader(computeRootFromAccumulator(address, newBalance, 0L));
+
+      factory.startAhead(protocolContext, chainHeadHeader, bal);
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        applyBalanceAndNonce(worldState, address, newBalance, 0L);
+        // equal content, another instance: not the payload the computation was started for
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext,
+                blockHeader,
+                Optional.of(balanceOnlyBal(address, newBalance)),
+                false);
+        assertThat(factory.hasStartedAhead()).isTrue();
+        worldState.persist(blockHeader, committer);
+        assertThat(worldState.rootHash()).isEqualTo(blockHeader.getStateRoot());
+      }
+      factory.cancelAhead(bal);
+      assertThat(factory.hasStartedAhead()).isFalse();
+    }
+
+    @Test
+    void aBlockOnAFrozenWorldStateComputesItsOwnRoot() {
+      final Address address = testAddress("c3");
+      final Wei newBalance = Wei.of(777L);
+      final BlockAccessList bal = balanceOnlyBal(address, newBalance);
+      final BlockHeader blockHeader =
+          childHeader(computeRootFromAccumulator(address, newBalance, 0L));
+
+      factory.startAhead(protocolContext, chainHeadHeader, bal);
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        applyBalanceAndNonce(worldState, address, newBalance, 0L);
+        final StateRootCommitter committer =
+            factory.forBlock(protocolContext, blockHeader, Optional.of(bal), true);
+        assertThat(factory.hasStartedAhead()).isFalse();
+        assertThat(committer.compute(worldState, blockHeader, worldState.updater()).root())
+            .isEqualTo(blockHeader.getStateRoot());
+      }
+    }
+
+    @Test
+    void aCancelledComputationIsNotTaken() {
+      final Address address = testAddress("c4");
+      final Wei newBalance = Wei.of(888L);
+      final BlockAccessList bal = balanceOnlyBal(address, newBalance);
+      final BlockHeader blockHeader =
+          childHeader(computeRootFromAccumulator(address, newBalance, 0L));
+
+      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      factory.cancelAhead(bal);
+      assertThat(factory.hasStartedAhead()).isFalse();
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        applyBalanceAndNonce(worldState, address, newBalance, 0L);
+        final StateRootCommitter committer =
+            factory.forBlock(protocolContext, blockHeader, Optional.of(bal), false);
+        worldState.persist(blockHeader, committer);
+        assertThat(worldState.rootHash()).isEqualTo(blockHeader.getStateRoot());
+      }
+    }
+  }
+
+  @Nested
   class BalOverlayMerge {
 
     @Test
