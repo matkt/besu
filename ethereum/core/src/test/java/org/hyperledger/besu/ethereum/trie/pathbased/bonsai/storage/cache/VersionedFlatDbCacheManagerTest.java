@@ -29,8 +29,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongConsumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.awaitility.Awaitility;
@@ -244,8 +246,8 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
-  void modeSwitch_waitsForEnabledCommitBlockedOnPublishLock() throws Exception {
-    // a clear holds the publish lock, so an enabled commit blocks waiting for it
+  void modeSwitch_runsAfterACommitQueuedBeforeIt() throws Exception {
+    // a clear holds the commit lock, so an enabled commit queues behind it
     final CountDownLatch insideClear = new CountDownLatch(1);
     final CountDownLatch releaseClear = new CountDownLatch(1);
     final CompletableFuture<Void> clearing =
@@ -270,7 +272,7 @@ class VersionedFlatDbCacheManagerTest {
       Awaitility.await()
           .atMost(5, TimeUnit.SECONDS)
           .until(
-              () -> committer.get() != null && committer.get().getState() == Thread.State.BLOCKED);
+              () -> committer.get() != null && committer.get().getState() == Thread.State.WAITING);
 
       final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
       assertThat(disabling).isNotDone();
@@ -286,14 +288,73 @@ class VersionedFlatDbCacheManagerTest {
   }
 
   @Test
+  void commitsQueuedBehindAnEnable_areSerializedAndPublish() throws Exception {
+    cacheManager.disable();
+    final CountDownLatch releaseCommit = new CountDownLatch(1);
+    final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
+    final CountDownLatch releaseQueued = new CountDownLatch(1);
+    try {
+      final CompletableFuture<Void> enabling = switchModeAsyncAndAwaitParked(true);
+      // both commits still see the cache disabled, but queue behind the enable
+      final AtomicInteger inStorageCommit = new AtomicInteger();
+      final AtomicInteger published = new AtomicInteger();
+      final List<CompletableFuture<Void>> queued = new ArrayList<>();
+      for (int i = 0; i < 2; i++) {
+        queued.add(
+            commitAsyncAndAwaitParked(
+                () -> {
+                  inStorageCommit.incrementAndGet();
+                  awaitQuietly(releaseQueued);
+                },
+                v -> published.incrementAndGet()));
+      }
+
+      releaseCommit.countDown();
+      disabledCommit.get(5, TimeUnit.SECONDS);
+      enabling.get(5, TimeUnit.SECONDS);
+
+      // enabled commits are exclusive: only one may be inside its storage commit at a time
+      Awaitility.await().atMost(5, TimeUnit.SECONDS).until(() -> inStorageCommit.get() == 1);
+      Awaitility.await()
+          .during(200, TimeUnit.MILLISECONDS)
+          .atMost(5, TimeUnit.SECONDS)
+          .until(() -> inStorageCommit.get() == 1);
+
+      releaseQueued.countDown();
+      for (final CompletableFuture<Void> commit : queued) {
+        commit.get(5, TimeUnit.SECONDS);
+      }
+      assertThat(published).hasValue(2);
+    } finally {
+      releaseCommit.countDown();
+      releaseQueued.countDown();
+    }
+  }
+
+  /** Starts a commit on another thread; returns once it waits for the commit lock. */
+  private CompletableFuture<Void> commitAsyncAndAwaitParked(
+      final Runnable storageCommit, final LongConsumer publisher) {
+    final AtomicReference<Thread> committer = new AtomicReference<>();
+    final CompletableFuture<Void> commit =
+        CompletableFuture.runAsync(
+            () -> {
+              committer.set(Thread.currentThread());
+              cacheManager.commitAndPublish(storageCommit, publisher);
+            },
+            committers);
+    Awaitility.await()
+        .atMost(5, TimeUnit.SECONDS)
+        .until(() -> committer.get() != null && committer.get().getState() == Thread.State.WAITING);
+    return commit;
+  }
+
+  @Test
   void enableWaitingForACommit_doesNotOverrideALaterDisable() throws Exception {
     cacheManager.disable();
     final CountDownLatch releaseCommit = new CountDownLatch(1);
     final CompletableFuture<Void> disabledCommit = holdCommitUntil(releaseCommit);
     try {
-      // e.g. sync completion, then a resync restart while the enable is still waiting. Covers the
-      // queued case; a disable barging in right when the barrier frees up is ordered by the
-      // transition lock, which cannot be timed deterministically here.
+      // e.g. sync completion, then a resync restart while the enable is still waiting
       final CompletableFuture<Void> enabling = switchModeAsyncAndAwaitParked(true);
       final CompletableFuture<Void> disabling = switchModeAsyncAndAwaitParked(false);
 
@@ -307,9 +368,13 @@ class VersionedFlatDbCacheManagerTest {
     }
   }
 
-  @Test
+  @ParameterizedTest(name = "enabled={0}")
+  @ValueSource(booleans = {true, false})
   @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-  void modeSwitch_fromInsideACommitFailsInsteadOfDeadlocking() {
+  void modeSwitch_fromInsideACommitFailsInsteadOfDeadlocking(final boolean enabled) {
+    if (!enabled) {
+      cacheManager.disable();
+    }
     cacheManager.commitAndPublish(
         () -> {
           assertThatThrownBy(cacheManager::disable).isInstanceOf(IllegalStateException.class);
@@ -317,7 +382,7 @@ class VersionedFlatDbCacheManagerTest {
         },
         v -> {});
 
-    assertThat(cacheManager.isEnabled()).isTrue();
+    assertThat(cacheManager.isEnabled()).isEqualTo(enabled);
   }
 
   /** Calls enable() or disable() on another thread; returns once it waits. */
@@ -378,7 +443,7 @@ class VersionedFlatDbCacheManagerTest {
 
       Awaitility.await()
           .atMost(5, TimeUnit.SECONDS)
-          .until(() -> second.getState() == Thread.State.BLOCKED);
+          .until(() -> second.getState() == Thread.State.WAITING);
       assertThat(secondCommitted).isFalse();
 
       releaseFirst.countDown();

@@ -757,21 +757,12 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                       cacheManager.putInCache(segment, key, value, publishVersion);
                     }
                   }));
-      clearStaged();
       cacheManager.scheduleAsyncMaintenance();
     }
 
     /** Commits storage, then publishes the staged writes if the cache is enabled. */
     private void commitAndPublishCache(final Runnable storageCommit) {
-      final long version =
-          cacheManager.commitAndPublish(
-              storageCommit,
-              newVersion -> {
-                advanceCacheVersion(newVersion);
-                updateCache(newVersion);
-              });
-      advanceCacheVersion(version);
-      // drops staged writes that were not published (cache disabled)
+      advanceCacheVersion(cacheManager.commitAndPublish(storageCommit, this::updateCache));
       clearStaged();
     }
 

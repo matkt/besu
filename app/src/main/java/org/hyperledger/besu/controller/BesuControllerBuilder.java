@@ -1090,32 +1090,37 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     if (cacheManager == FlatDbCacheManager.NO_OP_CACHE) {
       return;
     }
-    // events may arrive on different threads: always apply the current sync state, one at a time
-    final Object applyLock = new Object();
-    final Runnable applySyncState =
-        () -> {
-          synchronized (applyLock) {
-            if (syncState.isInitialSyncPhaseDone()) {
-              cacheManager.enable();
-            } else {
-              cacheManager.disable();
-            }
-          }
-        };
-    syncState.subscribeCompletionReached(
-        new BesuEvents.InitialSyncCompletionListener() {
-          @Override
-          public void onInitialSyncCompleted() {
-            applySyncState.run();
-          }
-
-          @Override
-          public void onInitialSyncRestart() {
-            applySyncState.run();
-          }
-        });
+    final CrossBlockCacheSyncBinding binding =
+        new CrossBlockCacheSyncBinding(cacheManager, syncState);
+    syncState.subscribeCompletionReached(binding);
     // applied after registering, so no event can be missed in between
-    applySyncState.run();
+    binding.apply();
+  }
+
+  /**
+   * Applies the current sync state on every event, one at a time: events may arrive out of order on
+   * different threads.
+   */
+  private record CrossBlockCacheSyncBinding(FlatDbCacheManager cacheManager, SyncState syncState)
+      implements BesuEvents.InitialSyncCompletionListener {
+
+    synchronized void apply() {
+      if (syncState.isInitialSyncPhaseDone()) {
+        cacheManager.enable();
+      } else {
+        cacheManager.disable();
+      }
+    }
+
+    @Override
+    public void onInitialSyncCompleted() {
+      apply();
+    }
+
+    @Override
+    public void onInitialSyncRestart() {
+      apply();
+    }
   }
 
   private TrieLogPruner createTrieLogPruner(

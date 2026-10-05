@@ -63,17 +63,16 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Nested commit-bypass count; when readers ignore the cache entirely. */
   private final AtomicInteger commitCacheBypassCount = new AtomicInteger(0);
 
-  /** Serializes enabled commits and clears, so version order matches storage commit order. */
-  private final Object publishLock = new Object();
-
   /**
-   * Commits hold it shared; enable/disable hold it exclusively, so the mode never changes
-   * mid-commit.
+   * Disabled commits hold it shared, so sync pipelines never wait for each other. Enabled commits,
+   * clears and mode switches hold it exclusively: enabled commits are serialized (version order
+   * matches storage commit order) and the mode never changes mid-commit. Fair, so mode switches
+   * apply in call order.
    */
-  private final ReentrantReadWriteLock modeBarrier = new ReentrantReadWriteLock();
+  private final ReentrantReadWriteLock commitLock = new ReentrantReadWriteLock(true);
 
-  /** Runs enable/disable one after the other, so the latest call wins. */
-  private final Object modeTransitionLock = new Object();
+  private final Lock sharedCommit = commitLock.readLock();
+  private final Lock exclusiveCommit = commitLock.writeLock();
 
   /** {@code false} during the initial sync: the cache is bypassed entirely. */
   private volatile boolean enabled = true;
@@ -291,22 +290,23 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     // bypass first: a read that inserted before this commit did so while enabled
     beginCommitCacheBypass();
     try {
-      final Lock passThrough = modeBarrier.readLock();
-      passThrough.lock();
-      try {
-        if (!enabled) {
-          // never published; the version still advances to reject overlapping reads
-          storageCommit.run();
-          return incrementAndGetVersion();
+      Lock lock = enabled ? exclusiveCommit : sharedCommit;
+      while (true) {
+        lock.lock();
+        try {
+          // shared only while still disabled; the mode cannot change while either is held
+          if (lock == exclusiveCommit || !enabled) {
+            storageCommit.run();
+            final long version = incrementAndGetVersion();
+            if (enabled) {
+              publisher.accept(version);
+            }
+            return version;
+          }
+        } finally {
+          lock.unlock();
         }
-        synchronized (publishLock) {
-          storageCommit.run();
-          final long version = incrementAndGetVersion();
-          publisher.accept(version);
-          return version;
-        }
-      } finally {
-        passThrough.unlock();
+        lock = exclusiveCommit; // enabled meanwhile
       }
     } finally {
       endCommitCacheBypass();
@@ -327,25 +327,22 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   /** Waits until no commit is in flight, then empties the cache and switches the mode. */
   private void switchMode(final boolean enable) {
-    if (modeBarrier.getReadHoldCount() > 0) {
+    if (commitLock.getReadHoldCount() > 0 || commitLock.isWriteLockedByCurrentThread()) {
       throw new IllegalStateException("Cannot enable or disable the cache from inside a commit");
     }
-    synchronized (modeTransitionLock) {
-      final Lock noCommitInFlight = modeBarrier.writeLock();
-      noCommitInFlight.lock();
-      try {
-        // nothing can be inserted while disabled: clear before enabling, disable before clearing
-        if (enable) {
-          minValidVersion = globalVersion.get();
-          invalidateBothCaches();
-          enabled = true;
-        } else {
-          enabled = false;
-          invalidateBothCaches();
-        }
-      } finally {
-        noCommitInFlight.unlock();
+    exclusiveCommit.lock();
+    try {
+      // nothing can be inserted while disabled: clear before enabling, disable before clearing
+      if (enable) {
+        minValidVersion = globalVersion.get();
+        invalidateBothCaches();
+        enabled = true;
+      } else {
+        enabled = false;
+        invalidateBothCaches();
       }
+    } finally {
+      exclusiveCommit.unlock();
     }
   }
 
@@ -367,14 +364,14 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   public void invalidateAll(final LongConsumer onNewVersion) {
     // bypass: readers at the new version must not hit entries that are about to be dropped
     beginCommitCacheBypass();
+    exclusiveCommit.lock();
     try {
-      synchronized (publishLock) {
-        final long newVersion = incrementAndGetVersion();
-        minValidVersion = newVersion;
-        onNewVersion.accept(newVersion);
-        invalidateBothCaches();
-      }
+      final long newVersion = incrementAndGetVersion();
+      minValidVersion = newVersion;
+      onNewVersion.accept(newVersion);
+      invalidateBothCaches();
     } finally {
+      exclusiveCommit.unlock();
       endCommitCacheBypass();
     }
   }
