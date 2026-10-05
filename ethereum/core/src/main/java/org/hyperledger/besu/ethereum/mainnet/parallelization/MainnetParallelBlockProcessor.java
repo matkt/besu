@@ -75,8 +75,6 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
   /** Transactions of an upcoming block running ahead of the processing of the block. */
   private final AtomicReference<EarlyBlockExecution> startedEarly = new AtomicReference<>();
 
-  private final ProtocolSchedule protocolSchedule;
-
   public MainnetParallelBlockProcessor(
       final MainnetTransactionProcessor transactionProcessor,
       final TransactionReceiptFactory transactionReceiptFactory,
@@ -102,7 +100,6 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
                 "parallelized_transactions_counter",
                 "Counter for the number of parallelized transactions during block processing"));
 
-    this.protocolSchedule = protocolSchedule;
     this.maybePrefetcher = BalPrefetcher.fromConfiguration(balConfiguration);
     this.conflictingButCachedTransactionCounter =
         Optional.of(
@@ -130,11 +127,10 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
   }
 
   /**
-   * Starts running the transactions of an upcoming block before it is validated and processed: with
-   * its block access list (as {@link BalConcurrentTransactionProcessor} does) when the
-   * configuration uses it, optimistically otherwise. Processing that block takes their results if
-   * they ran for it (see {@link EarlyBlockExecution}); the prefetch of the block access list is
-   * started separately ({@link #prefetchBlockAccessList}).
+   * Starts running the transactions of an upcoming block before it is validated and processed, the
+   * way the block processing would run them. Processing that block takes their results if they ran
+   * for it (see {@link EarlyBlockExecution}); the prefetch of the block access list is started
+   * separately ({@link #prefetchBlockAccessList}).
    */
   @Override
   public Optional<EarlyBlockExecution> startBlockExecution(
@@ -148,10 +144,8 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
     }
     final ProtocolSpec protocolSpec = protocolSchedule.getByBlockHeader(blockHeader);
     final ParallelBlockTransactionProcessor processor =
-        balConfiguration.isPerfectParallelizationEnabled() && blockAccessList.isPresent()
-            ? new BalConcurrentTransactionProcessor(
-                transactionProcessor, blockAccessList.get(), Optional.empty())
-            : new OptimisticConcurrentTransactionProcessor(transactionProcessor);
+        ParallelTransactionPreprocessing.createProcessor(
+            transactionProcessor, balConfiguration, blockAccessList, Optional.empty());
     // a payload's beneficiary is its fee recipient; the block processing checks it is the one
     final Address miningBeneficiary = blockHeader.getCoinbase();
     processor.start(
@@ -166,6 +160,7 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
             .getFeeMarket()
             .blobGasPricePerGas(calculateExcessBlobGasForParent(protocolSpec, parentHeader)),
         executor,
+        // only whether the fork has block access lists matters: the accesses are then tracked
         protocolSpec
             .getBlockAccessListFactory()
             .map(BlockAccessListFactory::newBlockAccessListBuilder),

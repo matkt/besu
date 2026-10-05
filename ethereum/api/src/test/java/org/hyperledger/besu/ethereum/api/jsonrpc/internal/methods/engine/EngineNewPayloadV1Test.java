@@ -67,8 +67,10 @@ import org.hyperledger.besu.ethereum.core.TransactionTestFixture;
 import org.hyperledger.besu.ethereum.core.encoding.EncodingContext;
 import org.hyperledger.besu.ethereum.core.encoding.TransactionEncoder;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.manager.EthScheduler;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
 import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
+import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.EarlyBlockExecution;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
@@ -375,31 +377,86 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
   public void shouldHandTheTransactionsToTheEarlyExecutionAsTheyAreDecoded() {
     final EarlyBlockExecution execution = mock(EarlyBlockExecution.class);
     final BlockProcessor blockProcessor = mockWorkAhead(execution);
-    final BlockHeader header = setupPayloadV1(getMinSupportedTimestamp());
     final List<Transaction> transactions = List.of(transaction(0), transaction(1));
+    final BlockHeader header =
+        setupPayloadCarrying(
+            transactions,
+            new BlockProcessingResult(Optional.of(new BlockProcessingOutputs(null, List.of()))));
 
-    resp(requestParams(mockEnginePayloadParam(header, encoded(transactions))));
+    assertValidResponse(
+        header, resp(requestParams(mockEnginePayloadParam(header, encoded(transactions)))));
 
+    final ArgumentCaptor<Transaction> submitted = ArgumentCaptor.forClass(Transaction.class);
+    final ArgumentCaptor<Block> processed = ArgumentCaptor.forClass(Block.class);
+    final InOrder inOrder = inOrder(execution, mergeCoordinator);
+    inOrder.verify(execution).submit(eq(0), submitted.capture());
+    inOrder.verify(execution).submit(eq(1), submitted.capture());
+    inOrder.verify(mergeCoordinator).rememberBlock(processed.capture(), any());
+    // the payload is handled: what was started for its block stops
+    inOrder.verify(execution).cancel();
+
+    // the block is processed with the very transactions that started running, in the execution
+    // context they ran with: the block processing takes their results
+    final List<Transaction> blockTransactions = processed.getValue().getBody().getTransactions();
+    assertThat(submitted.getAllValues().get(0)).isSameAs(blockTransactions.get(0));
+    assertThat(submitted.getAllValues().get(1)).isSameAs(blockTransactions.get(1));
     final ArgumentCaptor<ProcessableBlockHeader> executionContext =
         ArgumentCaptor.forClass(ProcessableBlockHeader.class);
     verify(blockProcessor)
         .startBlockExecution(any(), any(), executionContext.capture(), any(), eq(2));
-    assertThat(executionContext.getValue().getParentHash()).isEqualTo(header.getParentHash());
-    assertThat(executionContext.getValue().getCoinbase()).isEqualTo(header.getCoinbase());
-    assertThat(executionContext.getValue().getNumber()).isEqualTo(header.getNumber());
-    assertThat(executionContext.getValue().getTimestamp()).isEqualTo(header.getTimestamp());
-    assertThat(executionContext.getValue().getGasLimit()).isEqualTo(header.getGasLimit());
-    assertThat(executionContext.getValue().getBaseFee()).isEqualTo(header.getBaseFee());
-    assertThat(executionContext.getValue().getPrevRandao()).isEqualTo(header.getPrevRandao());
+    assertSameExecutionContext(executionContext.getValue(), processed.getValue().getHeader());
+  }
 
-    final ArgumentCaptor<Transaction> submitted = ArgumentCaptor.forClass(Transaction.class);
-    final InOrder inOrder = inOrder(execution);
-    inOrder.verify(execution).submit(eq(0), submitted.capture());
-    inOrder.verify(execution).submit(eq(1), submitted.capture());
-    // the payload is handled: what was started for its block stops
-    inOrder.verify(execution).cancel();
-    assertThat(submitted.getAllValues().stream().map(Transaction::getHash))
-        .containsExactly(transactions.get(0).getHash(), transactions.get(1).getHash());
+  @Test
+  public void shouldCancelTheEarlyExecutionWhenTheBlockProcessingThrows() {
+    final EarlyBlockExecution execution = mock(EarlyBlockExecution.class);
+    mockWorkAhead(execution);
+    final List<Transaction> transactions = List.of(transaction(0));
+    final BlockHeader header = setupPayloadCarrying(transactions, null);
+    when(mergeCoordinator.rememberBlock(any(), any()))
+        .thenThrow(new MerkleTrieException("missing leaf"));
+
+    fromErrorResp(resp(requestParams(mockEnginePayloadParam(header, encoded(transactions)))));
+
+    verify(mergeCoordinator).rememberBlock(any(), any());
+    verify(execution).cancel();
+  }
+
+  @Test
+  public void shouldStartNothingAheadOfAnImportedBlock() {
+    final BlockProcessor blockProcessor = mockWorkAhead(mock(EarlyBlockExecution.class));
+    final BlockHeader header = setupPayloadV1(getMinSupportedTimestamp());
+    when(blockchain.getBlockHeader(header.getHash())).thenReturn(Optional.of(header));
+
+    resp(requestParams(mockEnginePayloadParam(header, encoded(List.of(transaction(0))))));
+
+    verify(blockProcessor, never()).startBlockExecution(any(), any(), any(), any(), anyInt());
+    verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
+  }
+
+  @Test
+  public void shouldStartNothingAheadOfAKnownBadBlock() {
+    final BlockProcessor blockProcessor = mockWorkAhead(mock(EarlyBlockExecution.class));
+    final BlockHeader header = setupPayloadV1(getMinSupportedTimestamp());
+    badBlockManager.addBadHeader(header, BadBlockCause.fromValidationFailure("error 42"));
+
+    resp(requestParams(mockEnginePayloadParam(header, encoded(List.of(transaction(0))))));
+
+    verify(blockProcessor, never()).startBlockExecution(any(), any(), any(), any(), anyInt());
+    verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
+  }
+
+  @Test
+  public void shouldNotStartTheExecutionOfABlockWithoutTransactions() {
+    final BlockProcessor blockProcessor = mockWorkAhead(mock(EarlyBlockExecution.class));
+    final BlockHeader header =
+        setupPayloadV1(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.of(new BlockProcessingOutputs(null, List.of()))));
+
+    assertValidResponse(header, resp(requestParams(mockEnginePayloadParam(header, emptyList()))));
+
+    verify(blockProcessor, never()).startBlockExecution(any(), any(), any(), any(), anyInt());
   }
 
   @Test
@@ -431,6 +488,34 @@ public class EngineNewPayloadV1Test extends AbstractScheduledApiTest {
     when(blockProcessor.startBlockExecution(any(), any(), any(), any(), anyInt()))
         .thenReturn(Optional.of(execution));
     return blockProcessor;
+  }
+
+  /**
+   * A valid payload carrying {@code transactions}, its block processing yielding {@code result}.
+   */
+  private BlockHeader setupPayloadCarrying(
+      final List<Transaction> transactions, final BlockProcessingResult result) {
+    // the senders are recovered in the background before the block is processed
+    when(mergeCoordinator.getEthScheduler()).thenReturn(mock(EthScheduler.class));
+    return setupPayloadV1(
+        getMinSupportedTimestamp(),
+        result,
+        fixture -> fixture.transactionsRoot(BodyValidation.transactionsRoot(transactions)));
+  }
+
+  /** The header fields a transaction execution reads are the ones the transactions ran with. */
+  private static void assertSameExecutionContext(
+      final ProcessableBlockHeader ranWith, final BlockHeader header) {
+    assertThat(ranWith.getParentHash()).isEqualTo(header.getParentHash());
+    assertThat(ranWith.getCoinbase()).isEqualTo(header.getCoinbase());
+    assertThat(ranWith.getDifficulty()).isEqualTo(header.getDifficulty());
+    assertThat(ranWith.getNumber()).isEqualTo(header.getNumber());
+    assertThat(ranWith.getGasLimit()).isEqualTo(header.getGasLimit());
+    assertThat(ranWith.getTimestamp()).isEqualTo(header.getTimestamp());
+    assertThat(ranWith.getBaseFee()).isEqualTo(header.getBaseFee());
+    assertThat(ranWith.getMixHashOrPrevRandao()).isEqualTo(header.getMixHashOrPrevRandao());
+    assertThat(ranWith.getParentBeaconBlockRoot()).isEqualTo(header.getParentBeaconBlockRoot());
+    assertThat(ranWith.getOptionalSlotNumber()).isEqualTo(header.getOptionalSlotNumber());
   }
 
   private static Transaction transaction(final long nonce) {

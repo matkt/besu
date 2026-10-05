@@ -58,7 +58,9 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -88,7 +90,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
   final Wei blockReward;
 
   protected final boolean skipZeroBlockRewards;
-  private final ProtocolSchedule protocolSchedule;
+  protected final ProtocolSchedule protocolSchedule;
   protected final BalConfiguration balConfiguration;
   private final BlockProcessingMetrics blockProcessingMetrics;
 
@@ -569,7 +571,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                   maybeRequests,
                   maybeBlockAccessList,
                   gasMetered,
-                  blockHashLookup.getAccessedAncestors())),
+                  accessedAncestors(blockHashLookup, preProcessingContext))),
           parallelizedTxFound ? Optional.of(nbParallelTx) : Optional.empty());
     } finally {
       stateRootCommitter.cancel();
@@ -672,6 +674,21 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       final BlockHeader header,
       final List<BlockHeader> ommers,
       final boolean skipZeroBlockRewards);
+
+  /**
+   * The ancestors whose hash the block read: through its own lookup, and through the one its
+   * transactions ran with, which is another one when they started before the block processing.
+   */
+  private static Map<Long, Hash> accessedAncestors(
+      final BlockHashLookup blockHashLookup,
+      final Optional<PreprocessingContext> preProcessingContext) {
+    if (preProcessingContext.isEmpty()) {
+      return blockHashLookup.getAccessedAncestors();
+    }
+    final Map<Long, Hash> accessedAncestors = new HashMap<>(blockHashLookup.getAccessedAncestors());
+    accessedAncestors.putAll(preProcessingContext.get().processor().getAccessedAncestors());
+    return accessedAncestors;
+  }
 
   public interface PreprocessingFunction {
     Optional<PreprocessingContext> run(

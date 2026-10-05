@@ -30,9 +30,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * The transactions of an upcoming block, run in the background before the block is validated and
  * processed: they are handed over one at a time as the payload is decoded. The block processing
  * then takes their results, provided the block is the one they ran for: same execution context in
- * the header, same transaction instances and same block access list instance.
+ * the header, same beneficiary, the same instances of all its transactions and the same block
+ * access list instance.
  *
- * <p>Once cancelled, it runs nothing more and the block processing does not take it.
+ * <p>Once cancelled, it starts no transaction any more (those already running finish, their results
+ * are dropped) and the block processing does not take it.
  */
 public final class EarlyBlockExecution {
 
@@ -90,8 +92,8 @@ public final class EarlyBlockExecution {
 
   /**
    * Whether the transactions ran for this very block: the header carries the execution context they
-   * ran with, the same transaction instances at the indices submitted, and the same block access
-   * list instance.
+   * ran with and the same beneficiary, every transaction of the block was handed over (the same
+   * instance at each index), and the block access list is the same instance.
    */
   // the very instances decoded from the payload reach the block processing: compare identities
   @SuppressWarnings("ReferenceEquality")
@@ -109,7 +111,7 @@ public final class EarlyBlockExecution {
       return false;
     }
     for (int i = 0; i < submitted.length; i++) {
-      if (submitted[i] != null && submitted[i] != transactions.get(i)) {
+      if (submitted[i] != transactions.get(i)) {
         return false;
       }
     }

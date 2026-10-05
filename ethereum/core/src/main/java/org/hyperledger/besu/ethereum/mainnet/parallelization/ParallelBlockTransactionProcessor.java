@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -29,6 +30,7 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -41,6 +43,9 @@ public abstract class ParallelBlockTransactionProcessor {
   /** Runs a transaction of the block started by {@link #start}, in the background. */
   private BiFunction<Integer, Transaction, CompletableFuture<ParallelizedTransactionContext>>
       transactionRunner;
+
+  /** The block hash lookup the transactions run with, set by {@link #start}. */
+  private BlockHashLookup blockHashLookup;
 
   protected CompletableFuture<ParallelizedTransactionContext> removeFuture(final int txIndex) {
     final CompletableFuture<ParallelizedTransactionContext> future = futures[txIndex];
@@ -75,8 +80,8 @@ public abstract class ParallelBlockTransactionProcessor {
 
   /**
    * Prepares running the transactions of a block, which {@link #submit} then hands over one at a
-   * time, e.g. as they are decoded. A transaction not submitted has no result: the block processing
-   * runs it itself.
+   * time, e.g. as they are decoded. Every transaction is expected to be submitted before the block
+   * processing collects the results.
    */
   @SuppressWarnings({"unchecked", "rawtypes"})
   public void start(
@@ -90,6 +95,7 @@ public abstract class ParallelBlockTransactionProcessor {
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockHeader> maybeParentHeader) {
     futures = new CompletableFuture[transactionCount];
+    this.blockHashLookup = blockHashLookup;
     transactionRunner =
         (txIndex, transaction) ->
             CompletableFuture.supplyAsync(
@@ -105,6 +111,16 @@ public abstract class ParallelBlockTransactionProcessor {
                         blockAccessListBuilder,
                         maybeParentHeader),
                 executor);
+  }
+
+  /**
+   * The ancestors whose hash the transactions read. The workers share the lookup of {@link #start},
+   * which is the one of the block processing unless the transactions started before it.
+   *
+   * @return the accessed ancestors, by block number
+   */
+  public Map<Long, Hash> getAccessedAncestors() {
+    return blockHashLookup == null ? Map.of() : blockHashLookup.getAccessedAncestors();
   }
 
   /** Starts running the transaction at {@code txIndex} of the block prepared by {@link #start}. */

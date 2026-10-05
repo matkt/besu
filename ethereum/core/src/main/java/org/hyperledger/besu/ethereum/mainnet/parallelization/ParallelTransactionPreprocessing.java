@@ -55,16 +55,6 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
   /**
    * @param maybePrefetcher prefetches the block state when execution starts; empty when disabled or
    *     already started ahead of the block processing
-   */
-  public ParallelTransactionPreprocessing(
-      final MainnetTransactionProcessor transactionProcessor,
-      final Executor executor,
-      final BalConfiguration balConfiguration,
-      final Optional<BalPrefetcher> maybePrefetcher) {
-    this(transactionProcessor, executor, balConfiguration, maybePrefetcher, Optional.empty());
-  }
-
-  /**
    * @param startedEarly the processor already running the transactions of the block, started before
    *     the block was processed (see {@link EarlyBlockExecution})
    */
@@ -79,6 +69,21 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
     this.balConfiguration = balConfiguration;
     this.maybePrefetcher = maybePrefetcher;
     this.startedEarly = startedEarly;
+  }
+
+  /**
+   * The processor running the transactions of a block in parallel: with its block access list when
+   * the configuration uses it, optimistically otherwise.
+   */
+  static ParallelBlockTransactionProcessor createProcessor(
+      final MainnetTransactionProcessor transactionProcessor,
+      final BalConfiguration balConfiguration,
+      final Optional<BlockAccessList> maybeBlockAccessList,
+      final Optional<BalPrefetcher> maybePrefetcher) {
+    return balConfiguration.isPerfectParallelizationEnabled() && maybeBlockAccessList.isPresent()
+        ? new BalConcurrentTransactionProcessor(
+            transactionProcessor, maybeBlockAccessList.get(), maybePrefetcher)
+        : new OptimisticConcurrentTransactionProcessor(transactionProcessor);
   }
 
   @Override
@@ -99,15 +104,8 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       return Optional.of(new PreprocessingContext(startedEarly.get()));
     }
 
-    final ParallelBlockTransactionProcessor parallelProcessor;
-
-    if (balConfiguration.isPerfectParallelizationEnabled() && maybeBlockBal.isPresent()) {
-      parallelProcessor =
-          new BalConcurrentTransactionProcessor(
-              transactionProcessor, maybeBlockBal.get(), maybePrefetcher);
-    } else {
-      parallelProcessor = new OptimisticConcurrentTransactionProcessor(transactionProcessor);
-    }
+    final ParallelBlockTransactionProcessor parallelProcessor =
+        createProcessor(transactionProcessor, balConfiguration, maybeBlockBal, maybePrefetcher);
 
     parallelProcessor.runAsyncBlock(
         protocolContext,

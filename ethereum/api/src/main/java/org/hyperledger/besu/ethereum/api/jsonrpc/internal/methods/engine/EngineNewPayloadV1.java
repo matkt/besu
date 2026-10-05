@@ -92,8 +92,12 @@ public sealed class EngineNewPayloadV1<
   protected static final String BLOCK_ACCESS_LIST_FIELD = "blockAccessList";
   private static final String TRANSACTIONS_FIELD = "transactions";
 
-  /** Cancels what was started ahead for the payload handled on this thread. */
-  private static final ThreadLocal<List<Runnable>> STARTED_AHEAD =
+  /**
+   * What cancels the work started ahead of the payload handled on this thread, run by {@link
+   * #syncResponse} once the payload is handled: a payload is handled from start to end on one
+   * thread.
+   */
+  private static final ThreadLocal<List<Runnable>> CANCELLATIONS =
       ThreadLocal.withInitial(ArrayList::new);
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV1.class);
@@ -142,9 +146,15 @@ public sealed class EngineNewPayloadV1<
     try {
       return handlePayload(requestContext);
     } finally {
-      final List<Runnable> cancellations = STARTED_AHEAD.get();
-      STARTED_AHEAD.remove();
-      cancellations.forEach(Runnable::run);
+      final List<Runnable> cancellations = CANCELLATIONS.get();
+      CANCELLATIONS.remove();
+      for (final Runnable cancellation : cancellations) {
+        try {
+          cancellation.run();
+        } catch (final RuntimeException e) {
+          logger().warn("Could not cancel what was started ahead of a payload", e);
+        }
+      }
     }
   }
 
@@ -154,7 +164,7 @@ public sealed class EngineNewPayloadV1<
    * @param cancellation what cancels something started ahead for the payload
    */
   protected static void cancelOncePayloadHandled(final Runnable cancellation) {
-    STARTED_AHEAD.get().add(cancellation);
+    CANCELLATIONS.get().add(cancellation);
   }
 
   private JsonRpcResponse handlePayload(final JsonRpcRequestContext requestContext) {
@@ -354,9 +364,12 @@ public sealed class EngineNewPayloadV1<
       return convertPayloadParameter(rawParameter, getPayloadParameterClass());
     }
     final Optional<BlockAccessList> blockAccessList = decodeBlockAccessListFirst(rawPayload);
+    // without a list of transactions, the payload is invalid: nothing is started for it
     final Optional<List<Transaction>> transactions =
-        startAhead(requestContext, rawPayload, blockAccessList)
-            .flatMap(execution -> decodeTransactions(rawPayload, execution));
+        rawPayload.get(TRANSACTIONS_FIELD) instanceof List<?> rawTransactions
+            ? startAhead(requestContext, rawPayload, blockAccessList, rawTransactions.size())
+                .flatMap(execution -> decodeTransactions(rawTransactions, execution))
+            : Optional.empty();
 
     final Map<Object, Object> rest = new LinkedHashMap<>(rawPayload);
     if (blockAccessList.isPresent()) {
@@ -415,12 +428,20 @@ public sealed class EngineNewPayloadV1<
    * the first fields of the payload: the work on its block access list and the execution of its
    * transactions, which are then handed over as they are decoded. Whatever is started is cancelled
    * once the payload is handled; a payload that turns out to be invalid only cost that work.
+   * Nothing is started for a block answered without being processed: one already imported or known
+   * to be bad.
    */
   private Optional<EarlyBlockExecution> startAhead(
       final JsonRpcRequestContext requestContext,
       final Map<?, ?> rawPayload,
-      final Optional<BlockAccessList> blockAccessList) {
+      final Optional<BlockAccessList> blockAccessList,
+      final int transactionCount) {
     try {
+      final Hash blockHash = Hash.fromHexString((String) rawPayload.get("blockHash"));
+      if (mergeCoordinator.isBadBlock(blockHash)
+          || protocolContext.getBlockchain().getBlockHeader(blockHash).isPresent()) {
+        return Optional.empty();
+      }
       final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
       final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
       final long gasLimit = Long.decode((String) rawPayload.get("gasLimit"));
@@ -437,7 +458,7 @@ public sealed class EngineNewPayloadV1<
               parentHeader, protocolSpec, gasLimit, blockAccessList.get())) {
         return Optional.empty();
       }
-      if (!(rawPayload.get(TRANSACTIONS_FIELD) instanceof List<?> rawTransactions)) {
+      if (transactionCount == 0) {
         return Optional.empty();
       }
       final Optional<EarlyBlockExecution> execution =
@@ -448,7 +469,7 @@ public sealed class EngineNewPayloadV1<
                   parentHeader,
                   executionContext(requestContext, rawPayload, parentHash, timestamp, gasLimit),
                   blockAccessList,
-                  rawTransactions.size());
+                  transactionCount);
       execution.ifPresent(started -> cancelOncePayloadHandled(started::cancel));
       return execution;
     } catch (final RuntimeException e) {
@@ -496,11 +517,7 @@ public sealed class EngineNewPayloadV1<
    * payload is then converted as a whole, which reports the error as before.
    */
   private static Optional<List<Transaction>> decodeTransactions(
-      final Map<?, ?> rawPayload, final EarlyBlockExecution execution) {
-    if (!(rawPayload.get(TRANSACTIONS_FIELD) instanceof List<?> rawTransactions)) {
-      execution.cancel();
-      return Optional.empty();
-    }
+      final List<?> rawTransactions, final EarlyBlockExecution execution) {
     final List<Transaction> transactions = new ArrayList<>(rawTransactions.size());
     try {
       for (final Object rawTransaction : rawTransactions) {
