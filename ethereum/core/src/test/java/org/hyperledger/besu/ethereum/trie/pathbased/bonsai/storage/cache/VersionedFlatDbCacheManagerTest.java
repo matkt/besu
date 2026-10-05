@@ -44,7 +44,7 @@ class VersionedFlatDbCacheManagerTest {
 
   private VersionedFlatDbCacheManager cacheManager;
 
-  /** Dedicated threads: the common pool may be too small to run two blocking commits at once. */
+  /** The common pool may be too small to run two blocking commits at once. */
   private final ExecutorService committers = Executors.newCachedThreadPool();
 
   @BeforeEach
@@ -116,16 +116,12 @@ class VersionedFlatDbCacheManagerTest {
         .hasValueSatisfying(cv -> assertThat(cv.getValue()).isEqualTo(valueC));
   }
 
-  // --- read-path inserts racing a commit, a clear or a disable/enable ---
-
   @Test
   void readThatOverlapsCommitPublish_doesNotInsertItsValue() {
     final Bytes key = Bytes.of(4);
     final long readerVersion = cacheManager.getCurrentVersion();
 
-    // The reader passed the bypass check, then a commit started while it was loading from storage
-    // (storage not yet committed, version not yet bumped): the value it loaded may be stale and
-    // must not be cached, otherwise it can survive the publish if the new entry is evicted.
+    // a commit starts while the reader loads from storage
     try {
       final Optional<Bytes> result =
           cacheManager.getFromCacheOrStorage(
@@ -172,8 +168,7 @@ class VersionedFlatDbCacheManagerTest {
     final Bytes key = Bytes.of(6);
     final long readerVersion = cacheManager.getCurrentVersion();
 
-    // the reader starts while enabled; while it loads, the cache is disabled, a commit lands
-    // (nothing published) and the cache is enabled again before the reader tries to insert
+    // disable, commit and enable happen while the reader loads from storage
     cacheManager.getFromCacheOrStorage(
         ACCOUNT_INFO_STATE,
         key,
@@ -187,8 +182,6 @@ class VersionedFlatDbCacheManagerTest {
 
     assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isFalse();
   }
-
-  // --- commitAndPublish ---
 
   @ParameterizedTest(name = "enabled={0}")
   @ValueSource(booleans = {true, false})
@@ -208,7 +201,6 @@ class VersionedFlatDbCacheManagerTest {
             });
 
     assertThat(cacheManager.isCommitCacheBypassActive()).isFalse();
-    // the version advances even when disabled, so reads spanning an enable are still rejected
     assertThat(version).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
     assertThat(published.get()).isEqualTo(enabled ? version : -1);
   }
@@ -221,8 +213,6 @@ class VersionedFlatDbCacheManagerTest {
     try {
       final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
 
-      // a disabled commit overwrites storage without publishing: it must not overlap the
-      // enabled period, otherwise an enabled commit could publish a value it then overwrites
       assertThat(cacheManager.isEnabled()).isFalse();
       assertThat(enabling).isNotDone();
 
@@ -243,8 +233,6 @@ class VersionedFlatDbCacheManagerTest {
       cacheManager.disable();
       final CompletableFuture<Void> enabling = enableAsyncAndAwaitParked();
 
-      // the enabled commit would otherwise publish after the re-enable, possibly over a value a
-      // disabled commit wrote to storage in between
       assertThat(cacheManager.isEnabled()).isFalse();
       assertThat(enabling).isNotDone();
 
@@ -257,9 +245,7 @@ class VersionedFlatDbCacheManagerTest {
     }
   }
 
-  /**
-   * Calls {@link VersionedFlatDbCacheManager#enable()} on another thread; returns once it waits.
-   */
+  /** Calls enable() on another thread; returns once it waits. */
   private CompletableFuture<Void> enableAsyncAndAwaitParked() {
     final AtomicReference<Thread> enablingThread = new AtomicReference<>();
     final CompletableFuture<Void> enabling =
@@ -328,7 +314,6 @@ class VersionedFlatDbCacheManagerTest {
     final CountDownLatch releaseFirst = new CountDownLatch(1);
     final CompletableFuture<Void> first = holdCommitUntil(releaseFirst);
     try {
-      // completes while the first commit is still inside its storage commit
       CompletableFuture.runAsync(() -> cacheManager.commitAndPublish(() -> {}, v -> {}), committers)
           .get(5, TimeUnit.SECONDS);
       assertThat(first).isNotDone();
@@ -359,8 +344,6 @@ class VersionedFlatDbCacheManagerTest {
     assertThat(inStorageCommit.await(5, TimeUnit.SECONDS)).isTrue();
     return commit;
   }
-
-  // --- invalidateAll / enable / disable ---
 
   @Test
   void invalidateAll_advancesVersionAndDropsEntries() {

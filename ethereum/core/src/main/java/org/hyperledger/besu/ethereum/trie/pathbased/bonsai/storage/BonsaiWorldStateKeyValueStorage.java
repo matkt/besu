@@ -85,10 +85,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   protected final BonsaiFlatDbStrategyProvider flatDbStrategyProvider;
   protected final FlatDbCacheManager cacheManager;
 
-  /**
-   * Cache version this storage reads at. Only ever moves forward: commits that are not serialized
-   * (cross-block cache disabled) can hand out their versions out of order.
-   */
+  /** Only moves forward: versions of unserialized commits (cache disabled) can arrive reordered. */
   private final AtomicLong cacheVersion;
 
   protected volatile TrieNodeStrategy trieNodeStrategy;
@@ -748,7 +745,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       pending.clear();
     }
 
-    /** Publishes the staged writes at {@code publishVersion}, the version this commit obtained. */
+    /** Publishes the staged writes at the version allocated for this commit. */
     protected void updateCache(final long publishVersion) {
       pending.forEach(
           (segment, updates) ->
@@ -764,12 +761,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       cacheManager.scheduleAsyncMaintenance();
     }
 
-    /**
-     * Write storage first, then publish the staged writes at the version the cache manager
-     * allocated for this commit (see {@link FlatDbCacheManager#commitAndPublish}). The publisher is
-     * not called for commits that started while the cache was disabled; the storage still follows
-     * their version.
-     */
+    /** Commits storage, then publishes the staged writes if the cache is enabled. */
     private void commitAndPublishCache(final Runnable storageCommit) {
       final long version =
           cacheManager.commitAndPublish(
@@ -779,7 +771,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                 updateCache(newVersion);
               });
       advanceCacheVersion(version);
-      // no-op when published; drops staged writes when the cache is disabled
+      // drops staged writes that were not published (cache disabled)
       clearStaged();
     }
 

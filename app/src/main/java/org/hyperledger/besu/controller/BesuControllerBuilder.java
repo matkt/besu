@@ -1083,12 +1083,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
                     dataStorageConfiguration, genesisConfig, protocolSchedule, codeCache));
   }
 
-  /**
-   * Keeps the Bonsai cross-block cache off while the initial (snap) sync is running: the flat db is
-   * being rebuilt, concurrent pipelines would serialize on the cache publish lock and every
-   * inserted entry would be thrown away when the flat db is reset or upgraded at the end. The cache
-   * is turned on once the initial sync completes, and off again if it restarts.
-   */
+  /** Disables the cross-block cache during the initial sync and enables it once it completes. */
   @VisibleForTesting
   static void bindCrossBlockCacheToInitialSync(
       final FlatDbCacheManager cacheManager, final SyncState syncState) {

@@ -434,16 +434,14 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
 
     assertThat(head.getCacheSize(ACCOUNT_INFO_STATE)).isZero();
     assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
-    // the clear advances the version and the head follows it
     assertThat(head.getCurrentVersion())
         .isGreaterThan(versionBeforeClear)
         .isEqualTo(head.getCacheManager().getCurrentVersion());
-    // a read still pinned to the pre-clear version must not repopulate the cache
+    // a read pinned before the clear must not repopulate the cache
     head.getCacheManager()
         .getFromCacheOrStorage(
             ACCOUNT_INFO_STATE, account.getBytes(), versionBeforeClear, () -> Optional.of(value));
     assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isFalse();
-    // a head read repopulates it from storage
     assertThat(head.getAccount(account)).contains(value);
     assertThat(head.isCached(ACCOUNT_INFO_STATE, account.getBytes())).isTrue();
   }
@@ -482,15 +480,14 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
             cacheManager);
     cacheManager.disable();
 
-    // commit A gets v1 but only hands it back after commit B has got (and applied) v2, as two
-    // unserialized commits (cache disabled) can do
+    // commit A (v1) returns only after commit B (v2) has been applied
     cacheManager.beforeNextReturn(() -> commitAccount(Hash.hash(Bytes.of(50)), Bytes.of(2)));
     commitAccount(Hash.hash(Bytes.of(49)), Bytes.of(1));
 
     assertThat(head.getCurrentVersion()).isEqualTo(cacheManager.getCurrentVersion()).isEqualTo(2);
   }
 
-  /** Runs another commit before handing a commit's version back, so versions arrive reordered. */
+  /** Runs another commit before returning, so versions arrive reordered. */
   private static final class OutOfOrderCommitCacheManager extends VersionedFlatDbCacheManager {
     private Runnable beforeNextReturn;
 

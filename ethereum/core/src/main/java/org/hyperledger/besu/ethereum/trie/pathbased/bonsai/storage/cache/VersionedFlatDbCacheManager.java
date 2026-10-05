@@ -63,24 +63,13 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   /** Nested commit-bypass count; when readers ignore the cache entirely. */
   private final AtomicInteger commitCacheBypassCount = new AtomicInteger(0);
 
-  /**
-   * While the cache is enabled, serializes {@link #commitAndPublish} and {@link #invalidateAll}
-   * across every storage sharing this cache, so version order matches storage commit order.
-   */
+  /** Serializes enabled commits and clears, so version order matches storage commit order. */
   private final Object publishLock = new Object();
 
-  /**
-   * Commits running while the cache is disabled hold the (shared) read lock for their whole
-   * duration; {@link #enable()} takes the write lock. Disabled commits never block each other, and
-   * once {@link #enable()} returns no commit started while disabled can still be running.
-   */
-  private final ReentrantReadWriteLock disabledCommitsLock = new ReentrantReadWriteLock();
+  /** Disabled commits pass through together; {@link #enable()} waits until none is inside. */
+  private final ReentrantReadWriteLock enableBarrier = new ReentrantReadWriteLock();
 
-  /**
-   * When {@code false} (e.g. during the initial snap sync) the cache is bypassed entirely: reads go
-   * to storage, nothing is inserted and commits are not serialized. Versions keep advancing on
-   * every commit so that a read which loaded a value while disabled cannot insert it once enabled.
-   */
+  /** {@code false} during the initial sync: the cache is bypassed entirely. */
   private volatile boolean enabled = true;
 
   private final Cache<CacheKey, VersionedValue> accountCache;
@@ -290,21 +279,19 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public long commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
-    // The bypass is started before reading `enabled`: a reader that inserted before this commit
-    // did so while enabled, so this commit necessarily takes the publishing path below.
+    // bypass first: a read that inserted before this commit did so while enabled
     beginCommitCacheBypass();
     try {
-      final Lock disabledCommit = disabledCommitsLock.readLock();
-      disabledCommit.lock();
+      final Lock passThrough = enableBarrier.readLock();
+      passThrough.lock();
       try {
         if (!enabled) {
-          // Not serialized and never published. enable() cannot complete while this runs. The
-          // version still advances so that reads overlapping this commit cannot insert.
+          // never published; the version still advances to reject overlapping reads
           storageCommit.run();
           return incrementAndGetVersion();
         }
       } finally {
-        disabledCommit.unlock();
+        passThrough.unlock();
       }
       synchronized (publishLock) {
         storageCommit.run();
@@ -319,11 +306,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   @Override
   public void enable() {
-    // Wait until no commit is in flight, disabled (write lock) or enabled (publish lock): a
-    // disabled commit overwrites storage without publishing, and an enabled commit started before
-    // a disable/enable cycle could publish over such a write. Then drop anything left in the cache.
-    final Lock noDisabledCommits = disabledCommitsLock.writeLock();
-    noDisabledCommits.lock();
+    // wait for in-flight disabled (write lock) and enabled (publish lock) commits
+    final Lock waitForDisabledCommits = enableBarrier.writeLock();
+    waitForDisabledCommits.lock();
     try {
       synchronized (publishLock) {
         accountCache.invalidateAll();
@@ -331,7 +316,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
         enabled = true;
       }
     } finally {
-      noDisabledCommits.unlock();
+      waitForDisabledCommits.unlock();
     }
     LOG.info("Bonsai cross-block cache enabled");
   }
@@ -411,13 +396,8 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   }
 
   /**
-   * Caches a value read from storage by a reader pinned at {@code version}.
-   *
-   * <p>The bypass/version check is repeated inside {@code compute} (under the key's bin lock)
-   * because the reader may have passed the checks at the top of the read, then been delayed while a
-   * commit started, published and even had its entry evicted. Re-checking here guarantees that a
-   * value is only inserted while no commit is publishing and the reader's version is still the
-   * current one, so it can never shadow a newer committed value.
+   * Caches a read result. The checks are repeated under the key lock: the reader may have been
+   * delayed past a commit since it read storage.
    */
   private void insertReadResult(
       final Cache<CacheKey, VersionedValue> cache,

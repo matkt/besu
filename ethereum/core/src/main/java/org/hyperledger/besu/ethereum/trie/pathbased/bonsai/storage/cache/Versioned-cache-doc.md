@@ -122,27 +122,23 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Commit publish and concurrency
 
-`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`, which enables the commit cache bypass, commits storage, allocates the next version and hands it to the updater, which publishes its staged writes at exactly that version. While the cache is enabled, this whole sequence runs under the cache's publish lock (see the next section for the disabled case):
+`CachedUpdater.commit()` goes through `FlatDbCacheManager.commitAndPublish()`: readers bypass the cache, storage is committed, a new version is allocated and the staged writes are published at that version.
 
-- **Serialized publishes (cache enabled)**: concurrent updaters commit one at a time, so the cache version order matches the storage commit order. Each updater publishes at the version it obtained itself.
-- **Monotonic head version**: the storage only moves its `cacheVersion` forward (`max`), so it never goes backwards even when versions are handed out of order by unserialized commits (cache disabled).
-- **Read-path inserts re-check under the key lock**: a reader inserts a value it loaded from storage only if, inside `compute`, no bypass is active and its pinned version is still `globalVersion`. A read that overlapped a commit therefore cannot shadow the published value, even if that entry was evicted in between.
-- **Clearing bumps the version**: `clearCrossBlockCache()` calls `FlatDbCacheManager.invalidateAll()`, which (under the same lock) advances the version before invalidating, so a read that loaded a pre-clear value cannot repopulate the cache after the clear.
+- **Enabled cache**: commits are serialized by the publish lock, so version order matches storage commit order.
+- **Head version**: the storage only moves its `cacheVersion` forward.
+- **Read inserts**: re-checked inside `compute`, so a read delayed past a commit cannot insert a stale value.
+- **Clear**: `invalidateAll()` advances the version first, so in-flight reads cannot repopulate the cache.
 
 ---
 
 ## Disabled during the initial sync
 
-`BesuControllerBuilder` disables the cache while the initial (snap) sync runs and enables it on `onInitialSyncCompleted()` (disabling it again on `onInitialSyncRestart()`). While disabled:
+The cache is disabled during the initial sync and enabled on `onInitialSyncCompleted()` (disabled again on `onInitialSyncRestart()`). While disabled, reads go to storage, nothing is cached, and commits never publish. They are not serialized: they only share a read lock, so sync pipelines never block each other.
 
-- reads go straight to storage, and nothing is inserted or published;
-- commits never publish and are not serialized: they only share a read lock, so sync pipelines never block each other;
-- commits still advance the version, so a read overlapping a disable → commit → enable sequence cannot insert afterwards.
-
-`enable()` takes the write side of that lock and the publish lock: it waits until no commit is in flight, clears the cache, then enables it. No commit started while disabled can therefore overlap the enabled period. Managers built directly (tests, tools) start enabled.
+`enable()` waits until no commit is in flight, clears the cache, then enables it.
 
 ---
 
 ## Operational note
 
-Cache maintenance (Caffeine cleanup) is deferred on purpose: Caffeine's drain task is queued by `ThresholdDrainExecutor` and only run by `scheduleAsyncMaintenance()` after each commit, so no eviction work runs while a block is being processed. Only new keys use Caffeine's bounded write buffer (`128 × ceilPow2(NCPU)` entries); an inserting thread performs maintenance inline only if more new keys than that are inserted between two commits.
+Cache cleanup (evictions) is deferred until after each commit, so it never runs during block processing: `ThresholdDrainExecutor` holds Caffeine's cleanup task and `scheduleAsyncMaintenance()` runs it after each commit. Exception: if a block inserts more new keys than Caffeine's write buffer holds (`128 × NCPU`, rounded up to a power of two), the inserting thread runs the cleanup itself.

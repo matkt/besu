@@ -60,38 +60,24 @@ public interface FlatDbCacheManager {
   }
 
   /**
-   * Commits storage and, if the cache is enabled, publishes the matching cache writes.
-   *
-   * <p>The storage commit runs first, then a new version is allocated. Readers bypass the cache for
-   * the whole sequence. If the cache was enabled when the commit started, the version is handed to
-   * {@code publisher}, which must publish the committed writes at exactly that version; such calls
-   * (and {@link #invalidateAll(LongConsumer)}) are serialized, so version order matches storage
-   * commit order. A commit running while the cache is disabled never publishes and is not
-   * serialized with other such commits: their returned versions may reach callers out of order, so
-   * callers tracking the latest version must only move it forward.
+   * Commits storage, allocates a new version and, if the cache is enabled, publishes at that
+   * version. Enabled commits are serialized; disabled ones are not and never publish.
    *
    * @param storageCommit commits the underlying storage transaction
-   * @param publisher receives the new version; publishes the committed writes at that version
+   * @param publisher publishes the committed writes at the given version
    * @return the version allocated for this commit
    */
   default long commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
-    // No cache to publish into: commit only, without serializing concurrent commits
     storageCommit.run();
     return getCurrentVersion();
   }
 
-  /**
-   * Turns the cache on (e.g. once the initial sync is done). Waits until no commit is in flight,
-   * then drops any leftover entry before enabling.
-   */
+  /** Enables the cache once no commit is in flight, starting from an empty cache. */
   default void enable() {
     // No-op
   }
 
-  /**
-   * Turns the cache off (e.g. while snap syncing): reads go to storage, nothing is cached and
-   * commits are not serialized. All entries are dropped.
-   */
+  /** Disables the cache: reads go to storage and nothing is cached. */
   default void disable() {
     // No-op
   }
@@ -101,11 +87,9 @@ public interface FlatDbCacheManager {
   }
 
   /**
-   * Drops every cached entry. The version is advanced first (and handed to {@code onNewVersion}) so
-   * that a read which loaded a pre-clear value and has not inserted it yet is rejected instead of
-   * repopulating the cache right after the clear.
+   * Drops every entry, advancing the version first so in-flight reads cannot repopulate the cache.
    *
-   * @param onNewVersion receives the version allocated for the clear
+   * @param onNewVersion receives the new version
    */
   default void invalidateAll(final LongConsumer onNewVersion) {
     // No-op
@@ -129,12 +113,8 @@ public interface FlatDbCacheManager {
   }
 
   /**
-   * Batch read through the cache.
-   *
-   * <p>The returned list is always aligned with {@code keys}, but an element may be {@code null}
-   * (not {@link Optional#empty()}) when the value is unknown: the batch fetcher does not support
-   * multi-get in the current flat-db mode, or returned a list of a different size. {@code
-   * Optional.empty()} means the key is known to be absent. Callers must handle both.
+   * Batch read through the cache, aligned with {@code keys}. A {@code null} element means unknown,
+   * {@code Optional.empty()} means absent.
    */
   default List<Optional<Bytes>> getMultipleFromCacheOrStorage(
       final SegmentIdentifier segment,
