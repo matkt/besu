@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
@@ -287,26 +288,45 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
     // bypass first: a read that inserted before this commit did so while enabled
     beginCommitCacheBypass();
     try {
-      Lock lock = enabled ? exclusiveCommit : sharedCommit;
-      while (true) {
-        lock.lock();
-        try {
-          // shared only while still disabled; the mode cannot change while either is held
-          if (lock == exclusiveCommit || !enabled) {
-            storageCommit.run();
-            final long version = incrementAndGetVersion();
-            if (enabled) {
-              publisher.accept(version);
-            }
-            return version;
-          }
-        } finally {
-          lock.unlock();
+      if (!enabled) {
+        final OptionalLong version = commitIfStillDisabled(storageCommit);
+        if (version.isPresent()) {
+          return version.getAsLong();
         }
-        lock = exclusiveCommit; // enabled meanwhile
       }
+      return commitExclusively(storageCommit, publisher);
     } finally {
       endCommitCacheBypass();
+    }
+  }
+
+  /** Shared lock, so disabled commits never wait for each other; empty if enabled meanwhile. */
+  private OptionalLong commitIfStillDisabled(final Runnable storageCommit) {
+    sharedCommit.lock();
+    try {
+      if (enabled) {
+        return OptionalLong.empty();
+      }
+      // never published; the version still advances to reject overlapping reads
+      storageCommit.run();
+      return OptionalLong.of(incrementAndGetVersion());
+    } finally {
+      sharedCommit.unlock();
+    }
+  }
+
+  /** Exclusive: the mode cannot change; publishes only if the cache is enabled. */
+  private long commitExclusively(final Runnable storageCommit, final LongConsumer publisher) {
+    exclusiveCommit.lock();
+    try {
+      storageCommit.run();
+      final long version = incrementAndGetVersion();
+      if (enabled) {
+        publisher.accept(version);
+      }
+      return version;
+    } finally {
+      exclusiveCommit.unlock();
     }
   }
 
