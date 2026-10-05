@@ -62,6 +62,7 @@ public interface FlatDbCacheManager {
     // No-op
   }
 
+  /** Evicts down to the size bounds, off the calling thread. Called once per committed block. */
   default void scheduleAsyncMaintenance() {
     // No-op
   }
