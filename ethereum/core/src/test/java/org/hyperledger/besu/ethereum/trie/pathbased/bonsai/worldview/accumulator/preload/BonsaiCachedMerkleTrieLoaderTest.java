@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -28,6 +29,7 @@ import org.hyperledger.besu.ethereum.core.TrieGenerator;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.TrieIterator;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -255,5 +257,38 @@ class BonsaiCachedMerkleTrieLoaderTest {
 
     verify(inMemoryWorldState, never())
         .getAccountStorageTrieNodeFromCacheOrStorage(any(), any(), any());
+  }
+
+  @Test
+  void noOpLoaderReadsThroughWithoutCaching() {
+    final NoOpBonsaiCachedMerkleTrieLoader noOpLoader = NoOpBonsaiCachedMerkleTrieLoader.INSTANCE;
+    final Hash hashAccountZero = accounts.get(0).addressHash();
+    noOpLoader.preLoadAccount(inMemoryWorldState, Hash.wrap(trie.getRootHash()), accounts.get(0));
+
+    final StoredMerklePatriciaTrie<Bytes, Bytes> trieThroughNoOp =
+        new StoredMerklePatriciaTrie<>(
+            (Bytes location, Bytes32 hash) ->
+                noOpLoader.getAccountStateTrieNode(
+                    inMemoryWorldState, location, Bytes32.wrap(hash)),
+            trie.getRootHash(),
+            Function.identity(),
+            Function.identity());
+    assertThat(trieThroughNoOp.get(hashAccountZero.getBytes()))
+        .isEqualTo(trie.get(hashAccountZero.getBytes()));
+
+    final BonsaiWorldStateKeyValueStorage emptyStorage =
+        new BonsaiWorldStateKeyValueStorage(
+            new InMemoryKeyValueStorageProvider(),
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    final StoredMerklePatriciaTrie<Bytes, Bytes> trieWithoutStorage =
+        new StoredMerklePatriciaTrie<>(
+            (Bytes location, Bytes32 hash) ->
+                noOpLoader.getAccountStateTrieNode(emptyStorage, location, Bytes32.wrap(hash)),
+            trie.getRootHash(),
+            Function.identity(),
+            Function.identity());
+    assertThatThrownBy(() -> trieWithoutStorage.get(hashAccountZero.getBytes()))
+        .isInstanceOf(MerkleTrieException.class);
   }
 }

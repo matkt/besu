@@ -17,10 +17,23 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulato
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
+import java.util.Optional;
+
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+
 public class NoOpBonsaiCachedMerkleTrieLoader extends BonsaiCachedMerkleTrieLoader {
+
+  /**
+   * Its caches are never used, so one instance serves every world state with the loader disabled
+   * instead of allocating a pair of caches for each.
+   */
+  public static final NoOpBonsaiCachedMerkleTrieLoader INSTANCE =
+      new NoOpBonsaiCachedMerkleTrieLoader();
 
   public NoOpBonsaiCachedMerkleTrieLoader() {
     super(new NoOpMetricsSystem());
@@ -40,5 +53,31 @@ public class NoOpBonsaiCachedMerkleTrieLoader extends BonsaiCachedMerkleTrieLoad
       final Address account,
       final StorageSlotKey slotKey) {
     // noop
+  }
+
+  /** Nothing is ever preloaded, so read through instead of probing empty caches. */
+  @Override
+  public Optional<Bytes> getAccountStateTrieNode(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Bytes location,
+      final Bytes32 nodeHash) {
+    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
+    }
+    return worldStateKeyValueStorage.getAccountStateTrieNodeFromCacheOrStorage(location, nodeHash);
+  }
+
+  /** See {@link #getAccountStateTrieNode}. */
+  @Override
+  public Optional<Bytes> getAccountStorageTrieNode(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Hash accountHash,
+      final Bytes location,
+      final Bytes32 nodeHash) {
+    if (nodeHash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
+      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
+    }
+    return worldStateKeyValueStorage.getAccountStorageTrieNodeFromCacheOrStorage(
+        accountHash, location, nodeHash);
   }
 }
