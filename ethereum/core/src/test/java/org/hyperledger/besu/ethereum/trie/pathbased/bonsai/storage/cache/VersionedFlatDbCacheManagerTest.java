@@ -191,26 +191,40 @@ class VersionedFlatDbCacheManagerTest {
 
   @ParameterizedTest(name = "enabled={0}")
   @ValueSource(booleans = {true, false})
-  void commitAndPublish_bypassesReadsAndPublishesAtNewVersion(final boolean enabled) {
+  void commitAndPublish_bypassesReadsAndPublishesOnlyWhenEnabled(final boolean enabled) {
     if (!enabled) {
       cacheManager.disable();
     }
-    final Bytes key = Bytes.of(7);
     final long before = cacheManager.getCurrentVersion();
     final AtomicLong published = new AtomicLong(-1);
 
-    cacheManager.commitAndPublish(
-        () -> assertThat(cacheManager.isCommitCacheBypassActive()).isTrue(),
-        version -> {
-          assertThat(cacheManager.isCommitCacheBypassActive()).isTrue();
-          published.set(version);
-          cacheManager.putInCache(ACCOUNT_INFO_STATE, key, Bytes.of(1), version);
-        });
+    final long version =
+        cacheManager.commitAndPublish(
+            () -> assertThat(cacheManager.isCommitCacheBypassActive()).isTrue(),
+            v -> {
+              assertThat(cacheManager.isCommitCacheBypassActive()).isTrue();
+              published.set(v);
+            });
 
     assertThat(cacheManager.isCommitCacheBypassActive()).isFalse();
     // the version advances even when disabled, so reads spanning an enable are still rejected
-    assertThat(published.get()).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
-    assertThat(cacheManager.isCached(ACCOUNT_INFO_STATE, key)).isEqualTo(enabled);
+    assertThat(version).isEqualTo(before + 1).isEqualTo(cacheManager.getCurrentVersion());
+    assertThat(published.get()).isEqualTo(enabled ? version : -1);
+  }
+
+  @Test
+  void commitStartedWhileDisabled_doesNotPublishEvenIfEnabledBeforeItCompletes() {
+    cacheManager.disable();
+    final AtomicBoolean published = new AtomicBoolean();
+
+    // enable() lands between this commit's storage write and its publish step: publishing now
+    // could let two such commits on the same key publish out of their storage commit order
+    final long version =
+        cacheManager.commitAndPublish(cacheManager::enable, v -> published.set(true));
+
+    assertThat(cacheManager.isEnabled()).isTrue();
+    assertThat(published).isFalse();
+    assertThat(version).isEqualTo(cacheManager.getCurrentVersion());
   }
 
   @Test

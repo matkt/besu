@@ -473,7 +473,7 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
   @Test
   void headVersionNeverMovesBackwardsWhenCommitVersionsArriveOutOfOrder() throws Exception {
     disposeHead();
-    final OutOfOrderPublishCacheManager cacheManager = new OutOfOrderPublishCacheManager();
+    final OutOfOrderCommitCacheManager cacheManager = new OutOfOrderCommitCacheManager();
     head =
         new BonsaiWorldStateKeyValueStorage(
             new InMemoryKeyValueStorageProvider(),
@@ -482,42 +482,35 @@ public class BonsaiWorldStateKeyValueStorageCacheTest {
             cacheManager);
     cacheManager.disable();
 
-    // commit A gets v1 but its publish is delayed until after commit B (v2) has published,
-    // as two unserialized commits (cache disabled) can do
-    cacheManager.deferNextPublish();
+    // commit A gets v1 but only hands it back after commit B has got (and applied) v2, as two
+    // unserialized commits (cache disabled) can do
+    cacheManager.beforeNextReturn(() -> commitAccount(Hash.hash(Bytes.of(50)), Bytes.of(2)));
     commitAccount(Hash.hash(Bytes.of(49)), Bytes.of(1));
-    commitAccount(Hash.hash(Bytes.of(50)), Bytes.of(2));
-    cacheManager.runDeferredPublish();
 
     assertThat(head.getCurrentVersion()).isEqualTo(cacheManager.getCurrentVersion()).isEqualTo(2);
   }
 
-  /** Delays one publish callback so that commit versions reach the storage out of order. */
-  private static final class OutOfOrderPublishCacheManager extends VersionedFlatDbCacheManager {
-    private boolean deferNext;
-    private Runnable deferredPublish;
+  /** Runs another commit before handing a commit's version back, so versions arrive reordered. */
+  private static final class OutOfOrderCommitCacheManager extends VersionedFlatDbCacheManager {
+    private Runnable beforeNextReturn;
 
-    OutOfOrderPublishCacheManager() {
+    OutOfOrderCommitCacheManager() {
       super(100, 100, new NoOpMetricsSystem());
     }
 
-    void deferNextPublish() {
-      deferNext = true;
-    }
-
-    void runDeferredPublish() {
-      deferredPublish.run();
+    void beforeNextReturn(final Runnable action) {
+      beforeNextReturn = action;
     }
 
     @Override
-    public void commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
-      if (!deferNext) {
-        super.commitAndPublish(storageCommit, publisher);
-        return;
+    public long commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
+      final long version = super.commitAndPublish(storageCommit, publisher);
+      final Runnable action = beforeNextReturn;
+      if (action != null) {
+        beforeNextReturn = null;
+        action.run();
       }
-      deferNext = false;
-      super.commitAndPublish(
-          storageCommit, version -> deferredPublish = () -> publisher.accept(version));
+      return version;
     }
   }
 

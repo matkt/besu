@@ -766,15 +766,19 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
     /**
      * Write storage first, then publish the staged writes at the version the cache manager
-     * allocated for this commit (see {@link FlatDbCacheManager#commitAndPublish}).
+     * allocated for this commit (see {@link FlatDbCacheManager#commitAndPublish}). The publisher is
+     * not called for commits that started while the cache was disabled; the storage still follows
+     * their version.
      */
     private void commitAndPublishCache(final Runnable storageCommit) {
-      cacheManager.commitAndPublish(
-          storageCommit,
-          newVersion -> {
-            advanceCacheVersion(newVersion);
-            updateCache(newVersion);
-          });
+      final long version =
+          cacheManager.commitAndPublish(
+              storageCommit,
+              newVersion -> {
+                advanceCacheVersion(newVersion);
+                updateCache(newVersion);
+              });
+      advanceCacheVersion(version);
       // no-op when published; drops staged writes when the cache is disabled
       clearStaged();
     }

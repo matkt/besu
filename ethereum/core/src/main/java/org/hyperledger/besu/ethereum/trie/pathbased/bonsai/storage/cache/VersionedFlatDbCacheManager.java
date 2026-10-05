@@ -280,7 +280,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
   }
 
   @Override
-  public void commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
+  public long commitAndPublish(final Runnable storageCommit, final LongConsumer publisher) {
     // The bypass is started before reading `enabled`: a reader that inserted before this commit
     // did so while enabled, so this commit necessarily takes the publishing path below.
     beginCommitCacheBypass();
@@ -288,14 +288,17 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       if (enabled) {
         synchronized (publishLock) {
           storageCommit.run();
-          publisher.accept(incrementAndGetVersion());
+          final long version = incrementAndGetVersion();
+          publisher.accept(version);
+          return version;
         }
-      } else {
-        // cache disabled: nothing is published (putInCache/removeFromCache are no-ops), and
-        // concurrent commits are not serialized
-        storageCommit.run();
-        publisher.accept(incrementAndGetVersion());
       }
+      // Started while disabled: not serialized and never published, even if the cache gets enabled
+      // before this commit completes. Publishing then could let two such commits on the same key
+      // publish in a different order than they committed, leaving the cache out of sync with the
+      // DB. The version still advances so that reads overlapping this commit cannot insert.
+      storageCommit.run();
+      return incrementAndGetVersion();
     } finally {
       endCommitCacheBypass();
     }

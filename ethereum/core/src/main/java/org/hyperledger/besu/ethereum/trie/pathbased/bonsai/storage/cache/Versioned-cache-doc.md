@@ -133,7 +133,7 @@ Other segments (e.g. code, trie branches) are not covered by this versioned cach
 
 ## Disabled during the initial sync
 
-`BesuControllerBuilder` disables the cache while the initial (snap) sync runs and enables it on `onInitialSyncCompleted()` (disabling it again on `onInitialSyncRestart()`). While disabled, reads go straight to storage, nothing is inserted or published, and `commitAndPublish()` does not take the publish lock, so concurrent sync pipelines are never serialized; their versions may reach the storage out of order, which only keeps the highest one. Commits still advance the version under the bypass, so a read that loaded a value around a disable → commit → enable sequence cannot insert it afterwards. Managers built directly (tests, tools) start enabled.
+`BesuControllerBuilder` disables the cache while the initial (snap) sync runs and enables it on `onInitialSyncCompleted()` (disabling it again on `onInitialSyncRestart()`). While disabled, reads go straight to storage and nothing is inserted or published. A commit that started while disabled never publishes, even if the cache is enabled before it completes (two such commits on the same key could otherwise publish out of their storage commit order). `commitAndPublish()` does not take the publish lock for those commits, so concurrent sync pipelines are never serialized; their versions may reach the storage out of order, which only keeps the highest one. Commits still advance the version under the bypass, so a read that loaded a value around a disable → commit → enable sequence cannot insert it afterwards. Managers built directly (tests, tools) start enabled.
 
 ---
 
