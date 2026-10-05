@@ -15,8 +15,10 @@
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine;
 
 import org.hyperledger.besu.datatypes.HardforkId;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV1;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV4;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.NewPayloadRequestParametersV3;
@@ -26,9 +28,14 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
+import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -40,12 +47,33 @@ public sealed class EngineNewPayloadV5<
     extends EngineNewPayloadV4<EP, NPRP> permits EngineNewPayloadWithWitnessV5 {
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV5.class);
+  private static final String BLOCK_ACCESS_LIST = "blockAccessList";
+
+  /** The state prefetch started for the payload being handled on this thread, if any. */
+  private static final ThreadLocal<BalPrefetch> STATE_PREFETCH = new ThreadLocal<>();
 
   public EngineNewPayloadV5(
       final ConstructorArguments constructorArguments,
       final HardforkId minSupportedFork,
       final HardforkId firstUnsupportedFork) {
     super(constructorArguments, minSupportedFork, firstUnsupportedFork);
+  }
+
+  /**
+   * Once the payload is handled, its block is processed or rejected: what its state prefetch still
+   * has to read is of no use, so it is cancelled.
+   */
+  @Override
+  public JsonRpcResponse syncResponse(final JsonRpcRequestContext requestContext) {
+    try {
+      return super.syncResponse(requestContext);
+    } finally {
+      final BalPrefetch prefetch = STATE_PREFETCH.get();
+      if (prefetch != null) {
+        STATE_PREFETCH.remove();
+        prefetch.cancel();
+      }
+    }
   }
 
   @Override
@@ -70,6 +98,78 @@ public sealed class EngineNewPayloadV5<
     blockHeaderBuilder
         .balHash(BodyValidation.balHash(requestParameters.payloadParameter().getBlockAccessList()))
         .slotNumber(requestParameters.payloadParameter().getSlotNumber());
+  }
+
+  /**
+   * Decodes the block access list first and starts prefetching the state it touches, then decodes
+   * the rest of the payload, mostly its transactions, while the prefetch runs. The block access
+   * list is decoded once, and the payload carries the instance the prefetch was started with.
+   */
+  @Override
+  protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
+    if (!(requestContext.getRequest().getParams()[0] instanceof Map<?, ?> rawPayload)
+        || rawPayload.get(BLOCK_ACCESS_LIST) == null) {
+      return super.readPayloadParameter(requestContext);
+    }
+    final BlockAccessList blockAccessList =
+        convertPayloadParameter(
+                Map.of(BLOCK_ACCESS_LIST, rawPayload.get(BLOCK_ACCESS_LIST)),
+                BlockAccessListField.class)
+            .blockAccessList();
+    startStatePrefetch(rawPayload, blockAccessList);
+
+    final Map<Object, Object> payloadWithoutBlockAccessList = new LinkedHashMap<>(rawPayload);
+    payloadWithoutBlockAccessList.remove(BLOCK_ACCESS_LIST);
+    final ExecutionPayloadV4 payload =
+        (ExecutionPayloadV4)
+            convertPayloadParameter(payloadWithoutBlockAccessList, getPayloadParameterClass());
+    payload.setBlockAccessList(blockAccessList);
+    return payload;
+  }
+
+  /** The block access list field of a payload, decoded on its own. */
+  record BlockAccessListField(BlockAccessList blockAccessList) {}
+
+  /**
+   * Prefetches the state the block access list touches, so that it is mostly in cache once the
+   * block is executed. Starts before the payload is validated: a payload that turns out to be
+   * invalid only warmed the cache.
+   */
+  private void startStatePrefetch(
+      final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
+    try {
+      final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
+      final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
+      final long gasLimit = Long.decode((String) rawPayload.get("gasLimit"));
+      protocolContext
+          .getBlockchain()
+          .getBlockHeader(parentHash)
+          .ifPresent(
+              parentHeader -> {
+                final ProtocolSpec protocolSpec =
+                    protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
+                if (exceedsItemBudget(blockAccessList, gasLimit, protocolSpec)) {
+                  // the block is invalid and will be rejected: do not read for it
+                  return;
+                }
+                protocolSpec
+                    .getBlockProcessor()
+                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList)
+                    .ifPresent(STATE_PREFETCH::set);
+              });
+    } catch (final RuntimeException e) {
+      LOG.debug("Could not start the state prefetch of a payload", e);
+    }
+  }
+
+  /**
+   * The EIP-7928 item budget the block validation enforces later: a block access list over it
+   * belongs to an invalid block, and its size is up to its producer.
+   */
+  private static boolean exceedsItemBudget(
+      final BlockAccessList blockAccessList, final long gasLimit, final ProtocolSpec protocolSpec) {
+    final long itemCost = protocolSpec.getGasCalculator().getBlockAccessListItemCost();
+    return itemCost > 0 && blockAccessList.eip7928ItemCount() > gasLimit / itemCost;
   }
 
   @Override
@@ -117,7 +217,7 @@ public sealed class EngineNewPayloadV5<
       if (maybeJsonPath.isPresent()) {
         final String jsonPath = maybeJsonPath.get();
 
-        if (jsonPath.equals("blockAccessList")) {
+        if (jsonPath.equals(BLOCK_ACCESS_LIST)) {
           final String validationError =
               "Failed to decode block access list payload parameter ("
                   + fieldEx.getOriginalMessage()

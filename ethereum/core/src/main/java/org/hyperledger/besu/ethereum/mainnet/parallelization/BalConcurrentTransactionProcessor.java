@@ -19,7 +19,6 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Transaction;
-import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.TransactionValidationParams;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.AccessLocationTracker;
@@ -59,20 +58,18 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
   private final BlockAccessListAccountLookup blockAccessListAccountLookup;
   private final Optional<BalPrefetcher> maybePrefetcher;
 
+  /**
+   * @param maybePrefetcher prefetches the block state when execution starts; empty when disabled or
+   *     already started (see {@link MainnetParallelBlockProcessor#prefetchBlockAccessList})
+   */
   public BalConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
       final BlockAccessList blockAccessList,
-      final BalConfiguration balConfiguration) {
+      final Optional<BalPrefetcher> maybePrefetcher) {
     this.transactionProcessor = transactionProcessor;
     this.blockAccessList = blockAccessList;
     this.blockAccessListAccountLookup = BlockAccessListAccountLookup.of(blockAccessList);
-    this.maybePrefetcher =
-        balConfiguration.isBalPreFetchReadingEnabled()
-            ? Optional.of(
-                new BalPrefetcher(
-                    balConfiguration.isBalPreFetchSortingEnabled(),
-                    balConfiguration.getBalPreFetchBatchSize()))
-            : Optional.empty();
+    this.maybePrefetcher = maybePrefetcher;
   }
 
   private Optional<BonsaiWorldState> getWorldStateForTransaction(
@@ -106,36 +103,10 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockHeader> maybeParentHeader) {
 
-    maybePrefetcher.ifPresent(
-        balPrefetchMechanism -> {
-          final Optional<BonsaiWorldState> maybeWorldState =
-              maybeParentHeader.flatMap(
-                  parentHeader ->
-                      protocolContext
-                          .getWorldStateArchive()
-                          .getWorldState(
-                              WorldStateQueryParams.newBuilder()
-                                  .withBlockHeader(parentHeader)
-                                  .withShouldWorldStateUpdateHead(false)
-                                  .build())
-                          .map(BonsaiWorldState.class::cast));
-          if (maybeWorldState.isPresent()) {
-            balPrefetchMechanism
-                .prefetch(
-                    maybeWorldState.get(),
-                    blockAccessList,
-                    BlockProcessingExecutors.ioExecutor(),
-                    BlockProcessingExecutors.ioExecutor())
-                .exceptionally(
-                    ex -> {
-                      LOG.error("Prefetch failed", ex);
-                      return null;
-                    })
-                .whenComplete((result, ex) -> maybeWorldState.get().close());
-          } else {
-            LOG.info("Prefetcher block header for block not loaded {}", blockHeader);
-          }
-        });
+    maybeParentHeader.ifPresent(
+        parentHeader ->
+            maybePrefetcher.ifPresent(
+                prefetcher -> prefetcher.prefetch(protocolContext, parentHeader, blockAccessList)));
     super.runAsyncBlock(
         protocolContext,
         blockHeader,

@@ -19,8 +19,13 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.ProtocolContext;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 
 import java.util.ArrayList;
@@ -28,6 +33,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -63,6 +69,63 @@ public class BalPrefetcher {
   }
 
   /**
+   * Returns the prefetcher configured by {@code balConfiguration}, empty when BAL prefetch is
+   * disabled or the block access list does not drive the parallel execution.
+   *
+   * @param balConfiguration the BAL configuration
+   * @return the configured prefetcher, if enabled
+   */
+  public static Optional<BalPrefetcher> fromConfiguration(final BalConfiguration balConfiguration) {
+    return balConfiguration.isPerfectParallelizationEnabled()
+            && balConfiguration.isBalPreFetchReadingEnabled()
+        ? Optional.of(
+            new BalPrefetcher(
+                balConfiguration.isBalPreFetchSortingEnabled(),
+                balConfiguration.getBalPreFetchBatchSize()))
+        : Optional.empty();
+  }
+
+  /**
+   * Prefetches the state that {@code blockAccessList} touches, as of {@code parentHeader}, on a
+   * world state of its own that is closed once done.
+   *
+   * @param protocolContext the protocol context, for the world state archive
+   * @param parentHeader the header of the parent of the block the access list belongs to
+   * @param blockAccessList the block access list
+   * @return the prefetch, to cancel once its block is processed or rejected
+   */
+  public BalPrefetch prefetch(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final BlockAccessList blockAccessList) {
+    final BalPrefetch prefetch = new BalPrefetch();
+    final Optional<BonsaiWorldState> maybeWorldState =
+        protocolContext
+            .getWorldStateArchive()
+            .getWorldState(
+                WorldStateQueryParams.newBuilder()
+                    .withBlockHeader(parentHeader)
+                    .withShouldWorldStateUpdateHead(false)
+                    .build())
+            .map(BonsaiWorldState.class::cast);
+    if (maybeWorldState.isEmpty()) {
+      LOG.debug(
+          "Prefetch skipped, world state of block {} not available", parentHeader.toLogString());
+      return prefetch;
+    }
+    final BonsaiWorldState worldState = maybeWorldState.get();
+    // failures are logged by the prefetch itself
+    prefetch(
+            worldState,
+            blockAccessList,
+            BlockProcessingExecutors.ioExecutor(),
+            BlockProcessingExecutors.ioExecutor(),
+            prefetch)
+        .whenComplete((result, ex) -> worldState.close());
+    return prefetch;
+  }
+
+  /**
    * Prefetch world state data based on the block access list.
    *
    * @param worldState the world state to prefetch data into
@@ -76,6 +139,16 @@ public class BalPrefetcher {
       final BlockAccessList blockAccessList,
       final Executor orchestrationExecutor,
       final Executor fetchExecutor) {
+    return prefetch(
+        worldState, blockAccessList, orchestrationExecutor, fetchExecutor, new BalPrefetch());
+  }
+
+  CompletableFuture<Void> prefetch(
+      final BonsaiWorldState worldState,
+      final BlockAccessList blockAccessList,
+      final Executor orchestrationExecutor,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     return CompletableFuture.supplyAsync(
             () -> {
@@ -94,11 +167,12 @@ public class BalPrefetcher {
             orchestrationExecutor)
         .thenCompose(
             keys ->
-                fetchKeysAsync(worldState, keys, fetchExecutor)
+                fetchKeysAsync(worldState, keys, fetchExecutor, prefetch)
                     .thenRun(
                         () ->
                             LOG.info(
-                                "Prefetch completed: {} accounts + {} storage slots{}",
+                                "Prefetch {}: {} accounts + {} storage slots{}",
+                                prefetch.isCancelled() ? "cancelled" : "completed",
                                 keys.accountKeys.size(),
                                 keys.storageKeys.size(),
                                 shouldBatch()
@@ -159,19 +233,32 @@ public class BalPrefetcher {
    * @return a future that completes when all fetch operations finish
    */
   private CompletableFuture<Void> fetchKeysAsync(
-      final BonsaiWorldState worldState, final PrefetchKeys keys, final Executor fetchExecutor) {
+      final BonsaiWorldState worldState,
+      final PrefetchKeys keys,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     // Fetch accounts (with optional batching)
     final List<CompletableFuture<Void>> futures =
         new ArrayList<>(
             fetchSegmentKeys(
-                worldState, ACCOUNT_INFO_STATE, keys.accountKeys, "account", fetchExecutor));
+                worldState,
+                ACCOUNT_INFO_STATE,
+                keys.accountKeys,
+                "account",
+                fetchExecutor,
+                prefetch));
 
     // Fetch storage (with optional batching)
     if (!keys.storageKeys.isEmpty()) {
       futures.addAll(
           fetchSegmentKeys(
-              worldState, ACCOUNT_STORAGE_STORAGE, keys.storageKeys, "storage", fetchExecutor));
+              worldState,
+              ACCOUNT_STORAGE_STORAGE,
+              keys.storageKeys,
+              "storage",
+              fetchExecutor,
+              prefetch));
     }
 
     return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
@@ -192,7 +279,8 @@ public class BalPrefetcher {
       final SegmentIdentifier segment,
       final List<byte[]> keys,
       final String segmentName,
-      final Executor fetchExecutor) {
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
 
     final List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -201,7 +289,7 @@ public class BalPrefetcher {
       futures.add(
           CompletableFuture.runAsync(
               () -> {
-                prefetchKeys(worldState, segment, keys);
+                prefetchKeys(worldState, segment, keys, prefetch);
                 LOG.debug("Prefetch: fetched {} {} keys in single batch", keys.size(), segmentName);
               },
               fetchExecutor));
@@ -215,7 +303,7 @@ public class BalPrefetcher {
         futures.add(
             CompletableFuture.runAsync(
                 () -> {
-                  prefetchKeys(worldState, segment, batch);
+                  prefetchKeys(worldState, segment, batch, prefetch);
                   LOG.trace(
                       "Prefetch: fetched {} batch {}/{} ({} keys)",
                       segmentName,
@@ -233,8 +321,13 @@ public class BalPrefetcher {
   }
 
   private void prefetchKeys(
-      final BonsaiWorldState worldState, final SegmentIdentifier segment, final List<byte[]> keys) {
-    worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
+      final BonsaiWorldState worldState,
+      final SegmentIdentifier segment,
+      final List<byte[]> keys,
+      final BalPrefetch prefetch) {
+    if (!prefetch.isCancelled()) {
+      worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
+    }
   }
 
   private boolean shouldBatch() {

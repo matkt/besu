@@ -21,8 +21,15 @@ import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.BOGOTA
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.ExecutionEngineJsonRpcMethod.EngineStatus.INVALID;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineTestSupport.fromErrorResp;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType.INVALID_BLOCK_ACCESS_LIST_PARAMS;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.BlobGas;
@@ -33,9 +40,12 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.ConstructorArg
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
+import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.util.List;
@@ -49,6 +59,8 @@ import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
@@ -178,6 +190,93 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
         respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
     assertValidResponse(header, resp);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void shouldStartPrefetchingTheBlockAccessListStateBeforeProcessingTheBlock() {
+    final BlockProcessor blockProcessor = mockBlockProcessor(mock(GasCalculator.class));
+    final BalPrefetch prefetch = new BalPrefetch();
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+        .thenReturn(Optional.of(prefetch));
+    final BlockHeader header =
+        setupPayloadV5(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.empty()),
+            BLOCK_ACCESS_LIST,
+            0L);
+    final BlockHeader parentHeader = mock(BlockHeader.class);
+    when(blockchain.getBlockHeader(header.getParentHash())).thenReturn(Optional.of(parentHeader));
+
+    final JsonRpcResponse resp =
+        respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
+
+    assertValidResponse(header, resp);
+    final ArgumentCaptor<BlockAccessList> prefetched =
+        ArgumentCaptor.forClass(BlockAccessList.class);
+    final ArgumentCaptor<Optional<BlockAccessList>> processed =
+        ArgumentCaptor.forClass(Optional.class);
+    final InOrder inOrder = inOrder(blockProcessor, mergeCoordinator);
+    inOrder
+        .verify(blockProcessor)
+        .prefetchBlockAccessList(eq(protocolContext), eq(parentHeader), prefetched.capture());
+    inOrder.verify(mergeCoordinator).rememberBlock(any(), processed.capture());
+    assertThat(prefetched.getValue()).isEqualTo(BLOCK_ACCESS_LIST);
+    // The same instance: the block processor does not prefetch that block access list again.
+    assertThat(processed.getValue()).containsSame(prefetched.getValue());
+    // the block is processed: what is left to read is of no use
+    assertThat(prefetch.isCancelled()).isTrue();
+  }
+
+  @Test
+  public void shouldStartPrefetchingBeforeDecodingTheTransactions() {
+    final BlockProcessor blockProcessor = mockBlockProcessor(mock(GasCalculator.class));
+    final BalPrefetch prefetch = new BalPrefetch();
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+        .thenReturn(Optional.of(prefetch));
+    final BlockHeader header =
+        setupPayloadV5(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.empty()),
+            BLOCK_ACCESS_LIST,
+            0L);
+
+    final var resp =
+        fromSuccessResp(
+            respV5(mockEnginePayloadParam(header, List.of("0xDEAD"), BLOCK_ACCESS_LIST, 0L)));
+
+    assertThat(resp.getStatus()).isEqualTo(INVALID);
+    assertThat(resp.getError()).startsWith("Failed to decode transactions from block parameter");
+    verify(blockProcessor).prefetchBlockAccessList(any(), any(), eq(BLOCK_ACCESS_LIST));
+    // the payload is invalid: its prefetch stops
+    assertThat(prefetch.isCancelled()).isTrue();
+  }
+
+  @Test
+  public void shouldNotPrefetchABlockAccessListOverTheItemBudget() {
+    final GasCalculator gasCalculator = mock(GasCalculator.class);
+    // no item fits in the gas limit
+    when(gasCalculator.getBlockAccessListItemCost()).thenReturn(Long.MAX_VALUE);
+    final BlockProcessor blockProcessor = mockBlockProcessor(gasCalculator);
+    final BlockHeader header =
+        setupPayloadV5(
+            getMinSupportedTimestamp(),
+            new BlockProcessingResult(Optional.empty()),
+            BLOCK_ACCESS_LIST,
+            0L);
+
+    respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
+
+    verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
+  }
+
+  /** The block processor the payload's state prefetch is started with. */
+  private BlockProcessor mockBlockProcessor(final GasCalculator gasCalculator) {
+    final BlockProcessor blockProcessor = mock(BlockProcessor.class);
+    when(protocolSchedule.getForNextBlockHeader(any(), anyLong())).thenReturn(protocolSpec);
+    when(protocolSpec.getBlockProcessor()).thenReturn(blockProcessor);
+    when(protocolSpec.getGasCalculator()).thenReturn(gasCalculator);
+    return blockProcessor;
   }
 
   protected BlockHeader setupPayloadV5(
