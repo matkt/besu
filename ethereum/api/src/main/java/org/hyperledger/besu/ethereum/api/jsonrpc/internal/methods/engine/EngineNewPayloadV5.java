@@ -162,7 +162,9 @@ public sealed class EngineNewPayloadV5<
                 // the state root only needs the parent state and the access list
                 final StateRootCommitterFactory stateRootCommitters =
                     protocolSpec.getStateRootCommitterFactory();
-                stateRootCommitters.startAhead(protocolContext, parentHeader, blockAccessList);
+                // a payload is validated on a frozen world state: newPayload does not move the head
+                stateRootCommitters.startAhead(
+                    protocolContext, parentHeader, blockAccessList, true);
                 CANCEL_STARTED_AHEAD.set(
                     () -> {
                       prefetch.ifPresent(BalPrefetch::cancel);

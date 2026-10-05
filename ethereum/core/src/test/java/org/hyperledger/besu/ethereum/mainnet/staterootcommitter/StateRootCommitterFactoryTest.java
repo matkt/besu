@@ -328,7 +328,7 @@ class StateRootCommitterFactoryTest {
       final BlockHeader blockHeader =
           childHeader(computeRootFromAccumulator(address, newBalance, 3L));
 
-      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      factory.startAhead(protocolContext, chainHeadHeader, bal, false);
       assertThat(factory.hasStartedAhead()).isTrue();
 
       try (BonsaiWorldState worldState = getWorldState(false)) {
@@ -349,7 +349,7 @@ class StateRootCommitterFactoryTest {
       final BlockHeader blockHeader =
           childHeader(computeRootFromAccumulator(address, newBalance, 0L));
 
-      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      factory.startAhead(protocolContext, chainHeadHeader, bal, false);
 
       try (BonsaiWorldState worldState = getWorldState(false)) {
         applyBalanceAndNonce(worldState, address, newBalance, 0L);
@@ -369,14 +369,34 @@ class StateRootCommitterFactoryTest {
     }
 
     @Test
-    void aBlockOnAFrozenWorldStateComputesItsOwnRoot() {
+    void aBlockOnAFrozenWorldStateTakesTheComputationStartedFrozen() {
+      final Address address = testAddress("c5");
+      final Wei newBalance = Wei.of(999L);
+      final BlockAccessList bal = balanceOnlyBal(address, newBalance);
+      final BlockHeader blockHeader =
+          childHeader(computeRootFromAccumulator(address, newBalance, 0L));
+
+      factory.startAhead(protocolContext, chainHeadHeader, bal, true);
+
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        applyBalanceAndNonce(worldState, address, newBalance, 0L);
+        final StateRootCommitter committer =
+            factory.forBlock(protocolContext, blockHeader, Optional.of(bal), true);
+        assertThat(factory.hasStartedAhead()).isFalse();
+        assertThat(committer.compute(worldState, blockHeader, worldState.updater()).root())
+            .isEqualTo(blockHeader.getStateRoot());
+      }
+    }
+
+    @Test
+    void aBlockOnTheOtherKindOfWorldStateComputesItsOwnRoot() {
       final Address address = testAddress("c3");
       final Wei newBalance = Wei.of(777L);
       final BlockAccessList bal = balanceOnlyBal(address, newBalance);
       final BlockHeader blockHeader =
           childHeader(computeRootFromAccumulator(address, newBalance, 0L));
 
-      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      factory.startAhead(protocolContext, chainHeadHeader, bal, false);
 
       try (BonsaiWorldState worldState = getWorldState(false)) {
         applyBalanceAndNonce(worldState, address, newBalance, 0L);
@@ -396,7 +416,7 @@ class StateRootCommitterFactoryTest {
       final BlockHeader blockHeader =
           childHeader(computeRootFromAccumulator(address, newBalance, 0L));
 
-      factory.startAhead(protocolContext, chainHeadHeader, bal);
+      factory.startAhead(protocolContext, chainHeadHeader, bal, false);
       factory.cancelAhead(bal);
       assertThat(factory.hasStartedAhead()).isFalse();
 

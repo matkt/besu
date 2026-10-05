@@ -47,7 +47,8 @@ public final class StateRootCommitterFactory {
   }
 
   /** A BAL state root computation started before its block is processed. */
-  private record StartedAhead(BlockAccessList blockAccessList, BalStateRootCommitter committer) {}
+  private record StartedAhead(
+      BlockAccessList blockAccessList, BalStateRootCommitter committer, boolean storageFrozen) {}
 
   private final BalConfiguration balConfiguration;
   private final AtomicReference<StartedAhead> startedAhead = new AtomicReference<>();
@@ -64,20 +65,23 @@ public final class StateRootCommitterFactory {
    * @param protocolContext the protocol context
    * @param parentHeader the header of the parent of the upcoming block
    * @param blockAccessList the block access list of the upcoming block
+   * @param storageFrozen whether the block will be processed on a frozen world state; a block
+   *     processed otherwise does not take the computation
    */
   public void startAhead(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
-      final BlockAccessList blockAccessList) {
+      final BlockAccessList blockAccessList,
+      final boolean storageFrozen) {
     if (resolveMode(protocolContext, Optional.of(blockAccessList)) != Mode.BAL) {
       return;
     }
-    // a payload is imported on top of the head, which is not frozen
     final BalStateRootCommitter committer =
-        BalStateRootCommitter.forParent(protocolContext, parentHeader, blockAccessList, false)
+        BalStateRootCommitter.forParent(
+                protocolContext, parentHeader, blockAccessList, storageFrozen)
             .start();
     final StartedAhead previous =
-        startedAhead.getAndSet(new StartedAhead(blockAccessList, committer));
+        startedAhead.getAndSet(new StartedAhead(blockAccessList, committer, storageFrozen));
     if (previous != null) {
       previous.committer().cancel();
     }
@@ -89,7 +93,7 @@ public final class StateRootCommitterFactory {
    * @param blockAccessList the block access list it was started for
    */
   public void cancelAhead(final BlockAccessList blockAccessList) {
-    takeStartedAhead(blockAccessList).ifPresent(BalStateRootCommitter::cancel);
+    takeStartedAhead(blockAccessList).ifPresent(started -> started.committer().cancel());
   }
 
   public StateRootCommitter forBlock(
@@ -99,12 +103,13 @@ public final class StateRootCommitterFactory {
       final boolean storageFrozen) {
     return switch (resolveMode(protocolContext, maybeBal)) {
       case BAL -> {
-        final Optional<BalStateRootCommitter> ahead = takeStartedAhead(maybeBal.get());
-        if (ahead.isPresent() && !storageFrozen) {
-          yield ahead.get();
+        final Optional<StartedAhead> ahead = takeStartedAhead(maybeBal.get());
+        if (ahead.isPresent() && ahead.get().storageFrozen() == storageFrozen) {
+          yield ahead.get().committer();
         }
-        // started for a world state that is not frozen: its writes are not the ones wanted here
-        ahead.ifPresent(BalStateRootCommitter::cancel);
+        // started for the other kind of world state: it records writes that are not wanted here,
+        // or does not record those that are
+        ahead.ifPresent(started -> started.committer().cancel());
         yield BalStateRootCommitter.forBlock(
                 protocolContext, blockHeader, maybeBal.get(), storageFrozen)
             .start();
@@ -123,12 +128,12 @@ public final class StateRootCommitterFactory {
   // the very instance decoded from the payload reaches the block processing: compare identities,
   // not the content of two possibly large lists
   @SuppressWarnings("ReferenceEquality")
-  private Optional<BalStateRootCommitter> takeStartedAhead(final BlockAccessList blockAccessList) {
+  private Optional<StartedAhead> takeStartedAhead(final BlockAccessList blockAccessList) {
     final StartedAhead started = startedAhead.get();
     return started != null
             && started.blockAccessList() == blockAccessList
             && startedAhead.compareAndSet(started, null)
-        ? Optional.of(started.committer())
+        ? Optional.of(started)
         : Optional.empty();
   }
 

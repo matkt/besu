@@ -22,6 +22,7 @@ import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.Executi
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.engine.EngineTestSupport.fromErrorResp;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType.INVALID_BLOCK_ACCESS_LIST_PARAMS;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -232,7 +233,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     final InOrder stateRootOrder = inOrder(stateRootCommitterFactory, mergeCoordinator);
     stateRootOrder
         .verify(stateRootCommitterFactory)
-        .startAhead(protocolContext, parentHeader, processed.getValue().orElseThrow());
+        .startAhead(protocolContext, parentHeader, processed.getValue().orElseThrow(), true);
     stateRootOrder.verify(mergeCoordinator).rememberBlock(any(), any());
     // the block is processed: what is left to read is of no use, nor is a computation not taken
     assertThat(prefetch.isCancelled()).isTrue();
@@ -279,7 +280,7 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
     respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
     verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
-    verify(stateRootCommitterFactory, never()).startAhead(any(), any(), any());
+    verify(stateRootCommitterFactory, never()).startAhead(any(), any(), any(), anyBoolean());
   }
 
   /** The block processor the payload's state prefetch is started with. */
