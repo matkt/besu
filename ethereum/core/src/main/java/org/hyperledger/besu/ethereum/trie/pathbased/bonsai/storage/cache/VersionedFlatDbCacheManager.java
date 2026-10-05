@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -52,6 +53,9 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
 
   /** Upper bound for {@code initialCapacity} (must fit in a positive int). */
   private static final long MAX_INITIAL_CAPACITY = Integer.MAX_VALUE;
+
+  /** On average, one single insert in this many checks whether the cache overflows. */
+  private static final int OVERFLOW_CHECK_INTERVAL = 1024;
 
   private static final long ACCOUNT_TRIE_NODE_CACHE_SIZE = 100_000;
   private static final long STORAGE_TRIE_NODE_CACHE_SIZE = 100_000;
@@ -323,7 +327,7 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
             }
             return existingValue;
           });
-      requestMaintenanceIfOverflowing(cache);
+      maybeRequestMaintenanceIfOverflowing(cache);
     }
 
     return result;
@@ -486,13 +490,23 @@ public class VersionedFlatDbCacheManager implements FlatDbCacheManager, Closeabl
       final BlockLruCache<Bytes> cache, final Bytes32 nodeHash, final Bytes node) {
     // the hash may be a slice of the parent node's RLP; copy it so the key doesn't pin that
     cache.put(CacheKey.of(nodeHash.copy()), node);
-    requestMaintenanceIfOverflowing(cache);
+    maybeRequestMaintenanceIfOverflowing(cache);
   }
 
   /** Normally eviction waits for the end of the block; a large block or RPC load can't wait. */
   private void requestMaintenanceIfOverflowing(final BlockLruCache<?> cache) {
     if (cache.isOverflowing()) {
       scheduleAsyncMaintenance();
+    }
+  }
+
+  /**
+   * {@link #requestMaintenanceIfOverflowing} for a single insert. Reading the size sums one counter
+   * per core that the other threads keep writing, so only a sample of the inserts checks it.
+   */
+  private void maybeRequestMaintenanceIfOverflowing(final BlockLruCache<?> cache) {
+    if (ThreadLocalRandom.current().nextInt(OVERFLOW_CHECK_INTERVAL) == 0) {
+      requestMaintenanceIfOverflowing(cache);
     }
   }
 
