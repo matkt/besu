@@ -62,9 +62,14 @@ public final class BlockAccessListAccountLookup {
     return entry == null ? Optional.empty() : Optional.of(entry.accountChanges);
   }
 
+  /**
+   * The hash of an address of the block access list. Computed by the first caller (a transaction
+   * worker or the state root committer) rather than when indexing, which runs before execution
+   * starts.
+   */
   public Optional<Hash> getAddressHash(final Address address) {
     final AccountEntry entry = accountEntries.get(address);
-    return entry == null ? Optional.empty() : Optional.of(entry.addressHash);
+    return entry == null ? Optional.empty() : Optional.of(entry.addressHash());
   }
 
   Optional<BlockAccessList.SlotChanges> getSlotChanges(
@@ -75,13 +80,22 @@ public final class BlockAccessListAccountLookup {
 
   private static final class AccountEntry {
     private final BlockAccessList.AccountChanges accountChanges;
-    private final Hash addressHash;
     private final Map<StorageSlotKey, BlockAccessList.SlotChanges> storageBySlot;
+    private volatile Hash addressHash;
 
     private AccountEntry(final BlockAccessList.AccountChanges accountChanges) {
       this.accountChanges = accountChanges;
-      this.addressHash = accountChanges.address().addressHash();
       this.storageBySlot = buildStorageBySlot(accountChanges.storageChanges());
+    }
+
+    /** Computed on first use and kept: two threads may at worst both compute it. */
+    Hash addressHash() {
+      Hash hash = addressHash;
+      if (hash == null) {
+        hash = accountChanges.address().addressHash();
+        addressHash = hash;
+      }
+      return hash;
     }
 
     private static Map<StorageSlotKey, BlockAccessList.SlotChanges> buildStorageBySlot(
