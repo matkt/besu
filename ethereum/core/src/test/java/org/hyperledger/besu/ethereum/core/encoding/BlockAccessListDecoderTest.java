@@ -18,11 +18,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -125,5 +131,61 @@ class BlockAccessListDecoderTest {
     assertThatThrownBy(() -> decode(encodeBlockAccessList(field)))
         .isInstanceOf(RLPException.class)
         .hasMessageContaining("leading zero");
+  }
+
+  @Test
+  void decodesAListOfManyAccountsInParallelInOrder() {
+    final BlockAccessList blockAccessList = manyAccounts(5_000);
+
+    final BlockAccessList decoded = decode(blockAccessList.encode());
+
+    assertThat(decoded.accountChanges()).isEqualTo(blockAccessList.accountChanges());
+    assertThat(decoded.rawRlp()).contains(blockAccessList.encode());
+  }
+
+  @Test
+  void decodingAListOfManyAccountsFailsLikeDecodingAFewAtAMalformedAccount() {
+    final List<BlockAccessList.AccountChanges> accounts = manyAccounts(5_000).accountChanges();
+    final Bytes encoded =
+        RLP.encode(
+            out -> {
+              out.startList();
+              for (int i = 0; i < accounts.size(); i++) {
+                out.writeRaw(
+                    i == 4_321
+                        ? firstAccountOf(encodeBlockAccessList("balance"))
+                        : firstAccountOf(new BlockAccessList(List.of(accounts.get(i))).encode()));
+              }
+              out.endList();
+            });
+
+    assertThatThrownBy(() -> decode(encoded))
+        .isInstanceOf(RLPException.class)
+        .hasMessageContaining("leading zero");
+  }
+
+  /** The encoding of the first account of an encoded block access list. */
+  private static Bytes firstAccountOf(final Bytes encodedBlockAccessList) {
+    final RLPInput list = RLP.input(encodedBlockAccessList);
+    list.enterList();
+    return list.readAsRlp().raw();
+  }
+
+  private static BlockAccessList manyAccounts(final int count) {
+    final List<BlockAccessList.AccountChanges> accounts = new ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      accounts.add(
+          new BlockAccessList.AccountChanges(
+              Address.fromHexString(String.format("0x%040x", i + 1)),
+              List.of(
+                  new BlockAccessList.SlotChanges(
+                      new StorageSlotKey(UInt256.valueOf(i)),
+                      List.of(new BlockAccessList.StorageChange(i, UInt256.valueOf(i + 1))))),
+              List.of(),
+              List.of(new BlockAccessList.BalanceChange(i, Wei.of(i + 1L))),
+              List.of(),
+              List.of()));
+    }
+    return new BlockAccessList(accounts);
   }
 }
