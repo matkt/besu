@@ -74,6 +74,12 @@ public final class BlockAccessListAccountLookup {
     return entry == null ? Optional.empty() : entry.slotChanges(storageSlotKey);
   }
 
+  /**
+   * The index, built by its first caller. The state root computation and the transaction workers
+   * all need it as soon as the block starts: the lock makes one of them build it while the others
+   * wait for it, rather than each building its own copy at the same time. Once it is built, an
+   * access only reads the volatile field, without taking the lock.
+   */
   private Map<Address, AccountEntry> accountEntries() {
     Map<Address, AccountEntry> entries = accountEntries;
     if (entries == null) {
