@@ -46,6 +46,7 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -91,17 +92,8 @@ public class BonsaiWorldState extends PathBasedWorldState {
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.evmConfiguration = evmConfiguration;
-    final BonsaiWorldStateUpdateAccumulator acc =
-        new BonsaiWorldStateUpdateAccumulator(
-            this,
-            (addr, value) ->
-                this.bonsaiCachedMerkleTrieLoader.preLoadAccount(
-                    getWorldStateStorage(), worldStateRootHash, addr),
-            (addr, value) ->
-                this.bonsaiCachedMerkleTrieLoader.preLoadStorageSlot(
-                    getWorldStateStorage(), addr, value),
-            evmConfiguration,
-            codeCache);
+    this.codeCache = codeCache;
+    final BonsaiWorldStateUpdateAccumulator acc = newAccumulator(new ConcurrentHashMap<>());
     this.setAccumulator(acc);
     final FrontierStorageRootTracker frontierStorageRootTracker =
         worldStateConfig.isTrieDisabled()
@@ -126,7 +118,31 @@ public class BonsaiWorldState extends PathBasedWorldState {
             frontierStorageRootTracker);
     // Keep frontier-derived caches aligned with accumulator resets.
     acc.setCommittedTransactionListener(frontierRootHashTracker);
-    this.codeCache = codeCache;
+  }
+
+  private BonsaiWorldStateUpdateAccumulator newAccumulator(
+      final Map<UInt256, Hash> storageKeyHashLookup) {
+    return new BonsaiWorldStateUpdateAccumulator(
+        this,
+        (addr, value) ->
+            this.bonsaiCachedMerkleTrieLoader.preLoadAccount(
+                getWorldStateStorage(), worldStateRootHash, addr),
+        (addr, value) ->
+            this.bonsaiCachedMerkleTrieLoader.preLoadStorageSlot(
+                getWorldStateStorage(), addr, value),
+        evmConfiguration,
+        codeCache,
+        storageKeyHashLookup);
+  }
+
+  /**
+   * Replaces the accumulator, before any use, with one hashing storage slots through the lookup of
+   * the block, so the transactions of a block executed on their own world state hash a slot once.
+   *
+   * @param storageKeyHashLookup slot to keccak(slot) lookup of the block
+   */
+  public void useStorageKeyHashLookup(final Map<UInt256, Hash> storageKeyHashLookup) {
+    setAccumulator(newAccumulator(storageKeyHashLookup));
   }
 
   @Override
@@ -142,9 +158,22 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   @Override
   public void applyBlockAccessListOverlay(final BlockAccessListOverlay blockAccessListOverlay) {
+    applyBlockAccessListOverlay(blockAccessListOverlay, new ConcurrentHashMap<>());
+  }
+
+  /**
+   * Like {@link #applyBlockAccessListOverlay(BlockAccessListOverlay)}, hashing storage slots
+   * through the lookup of the block.
+   *
+   * @param blockAccessListOverlay the overlay to attach
+   * @param storageKeyHashLookup slot to keccak(slot) lookup of the block
+   */
+  public void applyBlockAccessListOverlay(
+      final BlockAccessListOverlay blockAccessListOverlay,
+      final Map<UInt256, Hash> storageKeyHashLookup) {
     setAccumulator(
         new BonsaiBalWorldStateUpdateAccumulator(
-            this, evmConfiguration, codeCache, blockAccessListOverlay));
+            this, evmConfiguration, codeCache, blockAccessListOverlay, storageKeyHashLookup));
   }
 
   @Override

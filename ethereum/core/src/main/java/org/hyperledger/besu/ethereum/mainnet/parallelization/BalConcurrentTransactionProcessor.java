@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -41,10 +42,12 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
+import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,7 +65,9 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
   public BalConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
       final BlockAccessList blockAccessList,
-      final BalConfiguration balConfiguration) {
+      final BalConfiguration balConfiguration,
+      final Map<UInt256, Hash> blockSlotHashes) {
+    super(blockSlotHashes);
     this.transactionProcessor = transactionProcessor;
     this.blockAccessList = blockAccessList;
     this.blockAccessListAccountLookup = BlockAccessListAccountLookup.of(blockAccessList);
@@ -79,19 +84,16 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
       final ProtocolContext protocolContext,
       final Optional<BlockHeader> maybeParentHeader,
       final int transactionLocation) {
-    return maybeParentHeader.flatMap(
-        blockHeader ->
-            protocolContext
-                .getWorldStateArchive()
-                .getWorldState(
-                    WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(blockHeader)
-                        .withShouldWorldStateUpdateHead(false)
-                        .withBalOverlay(
-                            new BlockAccessListOverlay(
-                                blockAccessListAccountLookup, (long) transactionLocation + 1L))
-                        .build())
-                .map(BonsaiWorldState.class::cast));
+    return maybeParentHeader
+        .flatMap(parentHeader -> getWorldState(protocolContext, parentHeader))
+        .map(
+            ws -> {
+              ws.applyBlockAccessListOverlay(
+                  new BlockAccessListOverlay(
+                      blockAccessListAccountLookup, (long) transactionLocation + 1L),
+                  blockSlotHashes);
+              return ws;
+            });
   }
 
   @Override
@@ -173,13 +175,12 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
           new ParallelizedTransactionContext.Builder();
 
       final PathBasedWorldStateUpdateAccumulator<?> blockUpdater = ws.getAccumulator();
-      blockUpdater.shareStorageKeyHashLookup(blockSlotHashes);
       final WorldUpdater txUpdater = blockUpdater.updater();
       final Optional<AccessLocationTracker> txTracker =
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                      transactionLocation));
+                      transactionLocation, ws));
 
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(
@@ -224,7 +225,6 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
         final PathBasedWorldState pathWs = (PathBasedWorldState) worldState;
         final PathBasedWorldStateUpdateAccumulator blockAccumulator =
             (PathBasedWorldStateUpdateAccumulator) pathWs.updater();
-        blockAccumulator.shareStorageKeyHashLookup(blockSlotHashes);
 
         final TransactionProcessingResult result = ctx.transactionProcessingResult();
         final Optional<PartialBlockAccessView> maybePartialBlockAccessView =

@@ -254,7 +254,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
     try {
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
           blockAccessListBuilder.map(
-              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker());
+              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(worldState));
       final BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
               blockHeader,
@@ -283,6 +283,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       preProcessingContext =
           preprocessingBlockFunction.run(
               protocolContext,
+              worldState,
               blockHeader,
               transactions,
               miningBeneficiary,
@@ -314,7 +315,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
         }
 
         final Optional<AccessLocationTracker> transactionLocationTracker =
-            createTransactionAccessLocationTracker(blockAccessListBuilder, i);
+            createTransactionAccessLocationTracker(blockAccessListBuilder, worldState, i);
         TransactionProcessingResult transactionProcessingResult =
             getTransactionProcessingResult(
                 preProcessingContext,
@@ -413,7 +414,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                      transactions.size()));
+                      transactions.size(), worldState));
 
       final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
           protocolSpec.getWithdrawalsProcessor();
@@ -641,9 +642,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
+      final MutableWorldState worldState,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
-        b -> BlockAccessListBuilder.createTransactionAccessLocationTracker(transactionLocation));
+        b ->
+            BlockAccessListBuilder.createTransactionAccessLocationTracker(
+                transactionLocation, worldState));
   }
 
   private void applyAccessLocationTracker(
@@ -676,6 +680,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
   public interface PreprocessingFunction {
     Optional<PreprocessingContext> run(
         final ProtocolContext protocolContext,
+        final MutableWorldState worldState,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
         final Address miningBeneficiary,
@@ -690,6 +695,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       @Override
       public Optional<PreprocessingContext> run(
           final ProtocolContext protocolContext,
+          final MutableWorldState worldState,
           final BlockHeader blockHeader,
           final List<Transaction> transactions,
           final Address miningBeneficiary,

@@ -706,7 +706,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
         maybeBlockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                    currentTxnLocation.get()));
+                    currentTxnLocation.get(), worldState));
     final TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             txWorldStateUpdater,

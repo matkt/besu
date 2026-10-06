@@ -23,6 +23,9 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -31,13 +34,13 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogMa
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.bal.BonsaiBalWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpBonsaiWorldStateCacheManager;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
 
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
@@ -92,49 +95,38 @@ class BonsaiWorldStateUpdateAccumulatorTest {
   }
 
   @Test
-  void sharedSlotHashLookup_hashesEachSlotOnceAcrossAccumulators() {
-    try (BonsaiWorldState first = newEmptyWorldState();
-        BonsaiWorldState second = newEmptyWorldState()) {
-      final Map<UInt256, Hash> blockSlotHashes = new ConcurrentHashMap<>();
-      first.getAccumulator().shareStorageKeyHashLookup(blockSlotHashes);
-      second.getAccumulator().shareStorageKeyHashLookup(blockSlotHashes);
+  void transactionAccumulator_reusesTheSlotHashesOfTheBlock() {
+    try (BonsaiWorldState block = newEmptyWorldState();
+        BonsaiWorldState transaction = newEmptyWorldState()) {
       final UInt256 slot = SLOT.getSlotKey().orElseThrow();
+      final Hash known = block.getAccumulator().createStorageSlotKey(slot).getSlotHash();
 
-      final StorageSlotKey fromFirst = first.getAccumulator().createStorageSlotKey(slot);
-      final StorageSlotKey fromSecond = second.getAccumulator().createStorageSlotKey(slot);
+      transaction.useStorageKeyHashLookup(block.getAccumulator().getStorageKeyHashLookup());
+      final StorageSlotKey fromTransaction =
+          transaction.getAccumulator().createStorageSlotKey(slot);
 
-      assertThat(fromFirst).isEqualTo(SLOT);
-      // same instance: the second accumulator reused the hash instead of computing it again
-      assertThat(fromSecond.getSlotHash()).isSameAs(fromFirst.getSlotHash());
-      assertThat(blockSlotHashes).containsOnlyKeys(slot);
+      assertThat(fromTransaction).isEqualTo(SLOT);
+      // same instance: the transaction reused the block's hash instead of computing it again
+      assertThat(fromTransaction.getSlotHash()).isSameAs(known);
     }
   }
 
   @Test
-  void shareStorageKeyHashLookup_keepsTheHashesAlreadyKnown() {
-    try (BonsaiWorldState worldState = newEmptyWorldState()) {
+  void balTransactionAccumulator_reusesTheSlotHashesOfTheBlock() {
+    try (BonsaiWorldState block = newEmptyWorldState();
+        BonsaiWorldState transaction = newEmptyWorldState()) {
       final UInt256 slot = SLOT.getSlotKey().orElseThrow();
-      final Hash known = worldState.getAccumulator().createStorageSlotKey(slot).getSlotHash();
-      final Map<UInt256, Hash> blockSlotHashes = new ConcurrentHashMap<>();
+      final Hash known = block.getAccumulator().createStorageSlotKey(slot).getSlotHash();
 
-      worldState.getAccumulator().shareStorageKeyHashLookup(blockSlotHashes);
+      transaction.applyBlockAccessListOverlay(
+          new BlockAccessListOverlay(
+              BlockAccessListAccountLookup.of(new BlockAccessList(List.of())), 1L),
+          block.getAccumulator().getStorageKeyHashLookup());
 
-      assertThat(blockSlotHashes.get(slot)).isSameAs(known);
-    }
-  }
-
-  @Test
-  void reset_detachesTheSharedSlotHashLookupWithoutClearingIt() {
-    try (BonsaiWorldState worldState = newEmptyWorldState()) {
-      final PathBasedWorldStateUpdateAccumulator<?> accumulator = worldState.getAccumulator();
-      final Map<UInt256, Hash> blockSlotHashes = new ConcurrentHashMap<>();
-      accumulator.shareStorageKeyHashLookup(blockSlotHashes);
-      accumulator.createStorageSlotKey(UInt256.ONE);
-
-      accumulator.reset();
-      accumulator.createStorageSlotKey(UInt256.valueOf(2));
-
-      assertThat(blockSlotHashes).containsOnlyKeys(UInt256.ONE);
+      assertThat(transaction.getAccumulator())
+          .isInstanceOf(BonsaiBalWorldStateUpdateAccumulator.class);
+      assertThat(transaction.getAccumulator().createStorageSlotKey(slot).getSlotHash())
+          .isSameAs(known);
     }
   }
 

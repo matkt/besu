@@ -52,7 +52,7 @@ class AccessLocationTrackerTest {
   private final MutableWorldState worldState =
       InMemoryKeyValueStorageProvider.createInMemoryWorldState();
   private final AccessLocationTracker tracker =
-      BlockAccessListBuilder.createPostExecutionAccessLocationTracker(0);
+      BlockAccessListBuilder.createPostExecutionAccessLocationTracker(0, worldState);
   private final BlockAccessListBuilder builder = BlockAccessList.builder();
 
   @Test
@@ -103,7 +103,7 @@ class AccessLocationTrackerTest {
       final PathBasedWorldStateUpdateAccumulator<?> accumulator = bonsai.getAccumulator();
       final Hash known = accumulator.createStorageSlotKey(SLOT).getSlotHash();
       final AccessLocationTracker txTracker =
-          BlockAccessListBuilder.createTransactionAccessLocationTracker(0);
+          BlockAccessListBuilder.createTransactionAccessLocationTracker(0, bonsai);
       txTracker.addSlotAccessForAccount(CONTRACT, SLOT);
 
       final PartialBlockAccessView view =

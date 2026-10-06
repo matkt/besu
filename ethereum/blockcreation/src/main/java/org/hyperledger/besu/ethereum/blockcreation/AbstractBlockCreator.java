@@ -239,7 +239,9 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
               .map(BlockAccessListFactory::newBlockAccessListBuilder);
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
           blockAccessListBuilder.map(
-              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker());
+              b ->
+                  BlockAccessListBuilder.createPreExecutionAccessLocationTracker(
+                      disposableWorldState));
 
       BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
@@ -277,7 +279,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                      transactionResults.getSelectedTransactions().size()));
+                      transactionResults.getSelectedTransactions().size(), disposableWorldState));
 
       final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
           newProtocolSpec.getWithdrawalsProcessor();

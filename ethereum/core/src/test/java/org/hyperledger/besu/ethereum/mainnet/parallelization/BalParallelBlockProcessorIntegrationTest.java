@@ -288,6 +288,7 @@ class BalParallelBlockProcessorIntegrationTest {
     @Override
     public Optional<PreprocessingContext> run(
         final ProtocolContext protocolContext,
+        final MutableWorldState worldState,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
         final Address miningBeneficiary,
@@ -298,6 +299,7 @@ class BalParallelBlockProcessorIntegrationTest {
         final Optional<BlockHeader> maybeParentHeader) {
       return super.run(
           protocolContext,
+          worldState,
           blockHeader,
           transactions,
           miningBeneficiary,

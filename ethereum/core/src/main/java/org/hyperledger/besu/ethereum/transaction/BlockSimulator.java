@@ -298,7 +298,7 @@ public class BlockSimulator {
 
     Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
         blockAccessListBuilder.map(
-            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker());
+            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(ws));
 
     final BlockProcessingContext blockProcessingContext =
         new BlockProcessingContext(
@@ -345,7 +345,7 @@ public class BlockSimulator {
         blockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                    blockStateCallSimulationResult.getTransactions().size()));
+                    blockStateCallSimulationResult.getTransactions().size(), ws));
 
     // EIP-7685: process EL requests
     final Optional<RequestProcessorCoordinator> requestProcessor =
@@ -469,7 +469,7 @@ public class BlockSimulator {
           getBlobGasPricePerGasSupplier(blockStateCall.getBlockOverrides(), validationParams);
 
       final Optional<AccessLocationTracker> transactionLocationTracker =
-          createTransactionAccessLocationTracker(blockAccessListBuilder, transactionLocation);
+          createTransactionAccessLocationTracker(blockAccessListBuilder, ws, transactionLocation);
       final Optional<TransactionSimulatorResult> transactionSimulatorResult =
           transactionSimulator.processWithWorldUpdater(
               callParameter,
@@ -555,9 +555,11 @@ public class BlockSimulator {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
+      final MutableWorldState ws,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
-        b -> BlockAccessListBuilder.createTransactionAccessLocationTracker(transactionLocation));
+        b ->
+            BlockAccessListBuilder.createTransactionAccessLocationTracker(transactionLocation, ws));
   }
 
   private BlockSimulationResult createFinalBlock(

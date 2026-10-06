@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 import org.apache.tuweni.units.bigints.UInt256;
@@ -41,8 +40,12 @@ public abstract class ParallelBlockTransactionProcessor {
 
   protected CompletableFuture<ParallelizedTransactionContext>[] futures;
 
-  /** keccak(slot) for this block, shared by the transaction accumulators and the block one. */
-  protected final Map<UInt256, Hash> blockSlotHashes = new ConcurrentHashMap<>();
+  /** keccak(slot) lookup of the block accumulator, shared with each transaction accumulator. */
+  protected final Map<UInt256, Hash> blockSlotHashes;
+
+  protected ParallelBlockTransactionProcessor(final Map<UInt256, Hash> blockSlotHashes) {
+    this.blockSlotHashes = blockSlotHashes;
+  }
 
   protected CompletableFuture<ParallelizedTransactionContext> removeFuture(final int txIndex) {
     final CompletableFuture<ParallelizedTransactionContext> future = futures[txIndex];

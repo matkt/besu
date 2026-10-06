@@ -61,6 +61,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -109,7 +110,8 @@ class OptimisticTransactionProcessorUnitTest {
   @BeforeEach
   void setUp() {
     processor =
-        new OptimisticConcurrentTransactionProcessor(transactionProcessor, collisionDetector);
+        new OptimisticConcurrentTransactionProcessor(
+            transactionProcessor, collisionDetector, new ConcurrentHashMap<>());
     env = createTestEnvironment();
   }
 

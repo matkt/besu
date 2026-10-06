@@ -20,7 +20,6 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.AccountChangesBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.PartialBlockAccessViewBuilder;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.Eip7928AccessList;
 import org.hyperledger.besu.evm.worldstate.StackedUpdater;
@@ -43,6 +42,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
   private final long blockAccessIndex;
   private final boolean sharedIndex;
+  private final Function<UInt256, StorageSlotKey> slotKeys;
   private final Map<Address, AccountAccessList> touchedAccounts = new ConcurrentHashMap<>();
 
   /**
@@ -51,9 +51,20 @@ public class AccessLocationTracker implements Eip7928AccessList {
    */
   private final Map<Address, IndexStartAccount> indexStartAccounts = new HashMap<>();
 
-  public AccessLocationTracker(final long blockAccessIndex, final boolean sharedIndex) {
+  /**
+   * Tracks the accounts and storage slots accessed at one block access list index.
+   *
+   * @param blockAccessIndex index of the block access list entries this tracker records
+   * @param sharedIndex whether several calls record at the same index
+   * @param slotKeys builds the key of a touched slot, reusing its hash when already known
+   */
+  public AccessLocationTracker(
+      final long blockAccessIndex,
+      final boolean sharedIndex,
+      final Function<UInt256, StorageSlotKey> slotKeys) {
     this.blockAccessIndex = blockAccessIndex;
     this.sharedIndex = sharedIndex;
+    this.slotKeys = slotKeys;
   }
 
   @Override
@@ -100,7 +111,6 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
   public PartialBlockAccessView createPartialBlockAccessView(final WorldUpdater updater) {
     final StackedUpdater<?, ?> stackedUpdater = (StackedUpdater<?, ?>) updater;
-    final Function<UInt256, StorageSlotKey> slotKeys = slotKeyFactory(updater);
     final PartialBlockAccessViewBuilder builder = new PartialBlockAccessViewBuilder();
     builder.withTxIndex(this.blockAccessIndex).withSharedIndex(sharedIndex);
 
@@ -129,7 +139,6 @@ public class AccessLocationTracker implements Eip7928AccessList {
         addChangesSinceIndexStart(
             accountBuilder,
             stackedUpdater,
-            slotKeys,
             address,
             touchedSlots,
             deletedAddresses.contains(address),
@@ -217,7 +226,6 @@ public class AccessLocationTracker implements Eip7928AccessList {
   private void addChangesSinceIndexStart(
       final AccountChangesBuilder accountBuilder,
       final StackedUpdater<?, ?> stackedUpdater,
-      final Function<UInt256, StorageSlotKey> slotKeys,
       final Address address,
       final Set<UInt256> touchedSlots,
       final boolean isDeleted,
@@ -305,18 +313,6 @@ public class AccessLocationTracker implements Eip7928AccessList {
       }
       storage.put(slot, value);
     }
-  }
-
-  /** Slot keys hashed through the accumulator's lookup, so a slot hashed there is not re-hashed. */
-  private static Function<UInt256, StorageSlotKey> slotKeyFactory(final WorldUpdater updater) {
-    WorldUpdater current = updater;
-    while (current != null) {
-      if (current instanceof PathBasedWorldStateUpdateAccumulator<?> accumulator) {
-        return accumulator::createStorageSlotKey;
-      }
-      current = current.parentUpdater().orElse(null);
-    }
-    return StorageSlotKey::new;
   }
 
   private Account findOriginalAccount(final WorldUpdater updater, final Address address) {

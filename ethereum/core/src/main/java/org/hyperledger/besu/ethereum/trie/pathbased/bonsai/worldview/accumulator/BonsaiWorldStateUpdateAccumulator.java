@@ -27,7 +27,11 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.apache.tuweni.units.bigints.UInt256;
 
 public class BonsaiWorldStateUpdateAccumulator
     extends PathBasedWorldStateUpdateAccumulator<BonsaiAccount> {
@@ -49,8 +53,23 @@ public class BonsaiWorldStateUpdateAccumulator
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache) {
-    super(world, accountPreloader, storagePreloader, evmConfiguration);
+    this(
+        world,
+        accountPreloader,
+        storagePreloader,
+        evmConfiguration,
+        codeCache,
+        new ConcurrentHashMap<>());
+  }
 
+  public BonsaiWorldStateUpdateAccumulator(
+      final BonsaiWorldView world,
+      final Consumer<BonsaiValue<BonsaiAccount>> accountPreloader,
+      final Consumer<StorageSlotKey> storagePreloader,
+      final EvmConfiguration evmConfiguration,
+      final BonsaiCodeCache codeCache,
+      final Map<UInt256, Hash> storageKeyHashLookup) {
+    super(world, accountPreloader, storagePreloader, evmConfiguration, storageKeyHashLookup);
     this.codeCache = codeCache;
   }
 

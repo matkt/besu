@@ -80,8 +80,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   private final Map<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
       storageToUpdate = new ConcurrentHashMap<>();
 
-  // slot -> keccak(slot); may be shared by all the accumulators of a block
-  private Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
+  // slot -> keccak(slot), shared with the accumulators of the block's transactions
+  private final Map<UInt256, Hash> storageKeyHashLookup;
   protected boolean isAccumulatorStateChanged;
 
   public PathBasedWorldStateUpdateAccumulator(
@@ -89,12 +89,22 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
+    this(world, accountPreloader, storagePreloader, evmConfiguration, new ConcurrentHashMap<>());
+  }
+
+  public PathBasedWorldStateUpdateAccumulator(
+      final BonsaiWorldView world,
+      final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
+      final Consumer<StorageSlotKey> storagePreloader,
+      final EvmConfiguration evmConfiguration,
+      final Map<UInt256, Hash> storageKeyHashLookup) {
     super(world, evmConfiguration);
     this.accountsToUpdate = new AccountConsumingMap<>(new ConcurrentHashMap<>(), accountPreloader);
     this.accountPreloader = accountPreloader;
     this.storagePreloader = storagePreloader;
     this.isAccumulatorStateChanged = false;
     this.evmConfiguration = evmConfiguration;
+    this.storageKeyHashLookup = storageKeyHashLookup;
   }
 
   public void cloneFromUpdater(final PathBasedWorldStateUpdateAccumulator<ACCOUNT> source) {
@@ -297,9 +307,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                   });
             });
 
-    if (source.storageKeyHashLookup != storageKeyHashLookup) {
-      storageKeyHashLookup.putAll(source.storageKeyHashLookup);
-    }
     this.isAccumulatorStateChanged = true;
   }
 
@@ -1023,21 +1030,16 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     resetAccumulatorStateChanged();
     updatedAccounts.clear();
     deletedAccounts.clear();
-    // a new map rather than clear(): a shared one may still be used by the block that owns it
-    storageKeyHashLookup = new ConcurrentHashMap<>();
+    storageKeyHashLookup.clear();
   }
 
   /**
-   * Uses {@code blockSlotHashes} as the slot hash lookup, keeping the hashes already known, so the
-   * accumulators of one block hash each slot once.
+   * Slot hashes of this accumulator, to share with the accumulators of the block's transactions.
    *
-   * @param blockSlotHashes slot to keccak(slot) map shared by the block
+   * @return the slot to keccak(slot) lookup
    */
-  public void shareStorageKeyHashLookup(final Map<UInt256, Hash> blockSlotHashes) {
-    if (storageKeyHashLookup != blockSlotHashes) {
-      blockSlotHashes.putAll(storageKeyHashLookup);
-      storageKeyHashLookup = blockSlotHashes;
-    }
+  public Map<UInt256, Hash> getStorageKeyHashLookup() {
+    return storageKeyHashLookup;
   }
 
   /**
