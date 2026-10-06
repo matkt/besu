@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.AccountChangesBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.PartialBlockAccessViewBuilder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.evm.frame.Eip7928AccessList;
 import org.hyperledger.besu.evm.worldstate.StackedUpdater;
@@ -33,6 +34,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -98,6 +100,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
   public PartialBlockAccessView createPartialBlockAccessView(final WorldUpdater updater) {
     final StackedUpdater<?, ?> stackedUpdater = (StackedUpdater<?, ?>) updater;
+    final Function<UInt256, StorageSlotKey> slotKeys = slotKeyFactory(updater);
     final PartialBlockAccessViewBuilder builder = new PartialBlockAccessViewBuilder();
     builder.withTxIndex(this.blockAccessIndex).withSharedIndex(sharedIndex);
 
@@ -126,6 +129,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
         addChangesSinceIndexStart(
             accountBuilder,
             stackedUpdater,
+            slotKeys,
             address,
             touchedSlots,
             deletedAddresses.contains(address),
@@ -136,7 +140,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
       final boolean isDeleted = deletedAddresses.contains(address);
       if (isDeleted || !updatedAddresses.contains(address)) {
         for (final UInt256 slot : touchedSlots) {
-          accountBuilder.addStorageRead(new StorageSlotKey(slot));
+          accountBuilder.addStorageRead(slotKeys.apply(slot));
         }
         if (isDeleted) {
           final Account originalAccount = findOriginalAccount(stackedUpdater, address);
@@ -151,7 +155,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
           (UpdateTrackingAccount<?>) stackedUpdater.get(address);
       if (account == null) {
         for (final UInt256 slot : touchedSlots) {
-          accountBuilder.addStorageRead(new StorageSlotKey(slot));
+          accountBuilder.addStorageRead(slotKeys.apply(slot));
         }
         continue;
       }
@@ -185,7 +189,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
       final Map<UInt256, UInt256> updatedStorage = account.getUpdatedStorage();
       for (final UInt256 touchedSlot : touchedSlots) {
-        final StorageSlotKey slotKeyObj = new StorageSlotKey(touchedSlot);
+        final StorageSlotKey slotKeyObj = slotKeys.apply(touchedSlot);
 
         final UInt256 updatedValue = updatedStorage.get(touchedSlot);
         final boolean present = updatedValue != null || updatedStorage.containsKey(touchedSlot);
@@ -213,6 +217,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
   private void addChangesSinceIndexStart(
       final AccountChangesBuilder accountBuilder,
       final StackedUpdater<?, ?> stackedUpdater,
+      final Function<UInt256, StorageSlotKey> slotKeys,
       final Address address,
       final Set<UInt256> touchedSlots,
       final boolean isDeleted,
@@ -228,7 +233,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
     final Account account = indexStart == null || isDeleted ? null : stackedUpdater.get(address);
     if (account == null) {
       for (final UInt256 slot : touchedSlots) {
-        accountBuilder.addStorageRead(new StorageSlotKey(slot));
+        accountBuilder.addStorageRead(slotKeys.apply(slot));
       }
       // Deleted at this index, by this call or an earlier one.
       if (indexStart != null && !indexStart.balance.isZero()) {
@@ -250,7 +255,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
     }
 
     for (final UInt256 touchedSlot : touchedSlots) {
-      final StorageSlotKey slotKeyObj = new StorageSlotKey(touchedSlot);
+      final StorageSlotKey slotKeyObj = slotKeys.apply(touchedSlot);
       final UInt256 originalValue = indexStart.storageValue(touchedSlot);
       if (originalValue == null) {
         accountBuilder.addStorageRead(slotKeyObj);
@@ -300,6 +305,18 @@ public class AccessLocationTracker implements Eip7928AccessList {
       }
       storage.put(slot, value);
     }
+  }
+
+  /** Slot keys hashed through the accumulator's lookup, so a slot hashed there is not re-hashed. */
+  private static Function<UInt256, StorageSlotKey> slotKeyFactory(final WorldUpdater updater) {
+    WorldUpdater current = updater;
+    while (current != null) {
+      if (current instanceof PathBasedWorldStateUpdateAccumulator<?> accumulator) {
+        return accumulator::createStorageSlotKey;
+      }
+      current = current.parentUpdater().orElse(null);
+    }
+    return StorageSlotKey::new;
   }
 
   private Account findOriginalAccount(final WorldUpdater updater, final Address address) {

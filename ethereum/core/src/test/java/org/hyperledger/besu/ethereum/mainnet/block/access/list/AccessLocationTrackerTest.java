@@ -15,15 +15,27 @@
 package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig.createStatefulConfigWithTrie;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.NoOpTrieLogManager;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.NoOpBonsaiCachedMerkleTrieLoader;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache.NoOpBonsaiWorldStateCacheManager;
+import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
+import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
+import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.function.Consumer;
@@ -83,6 +95,42 @@ class AccessLocationTrackerTest {
 
     assertThat(accountChanges().balanceChanges())
         .containsExactly(new BlockAccessList.BalanceChange(1, Wei.ZERO));
+  }
+
+  @Test
+  void slotKeysReuseTheAccumulatorSlotHash() {
+    try (BonsaiWorldState bonsai = newBonsaiWorldState()) {
+      final PathBasedWorldStateUpdateAccumulator<?> accumulator = bonsai.getAccumulator();
+      final Hash known = accumulator.createStorageSlotKey(SLOT).getSlotHash();
+      final AccessLocationTracker txTracker =
+          BlockAccessListBuilder.createTransactionAccessLocationTracker(0);
+      txTracker.addSlotAccessForAccount(CONTRACT, SLOT);
+
+      final PartialBlockAccessView view =
+          txTracker.createPartialBlockAccessView(accumulator.updater());
+
+      final StorageSlotKey read = view.accountChanges().getFirst().getStorageReads().getFirst();
+      assertThat(read).isEqualTo(new StorageSlotKey(SLOT));
+      // same instance: the tracker reused the accumulator's hash instead of computing it again
+      assertThat(read.getSlotHash()).isSameAs(known);
+    }
+  }
+
+  private static BonsaiWorldState newBonsaiWorldState() {
+    final BonsaiWorldStateKeyValueStorage storage =
+        new BonsaiWorldStateKeyValueStorage(
+            new InMemoryKeyValueStorageProvider(),
+            new NoOpMetricsSystem(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    return new BonsaiWorldState(
+        storage,
+        new NoOpBonsaiCachedMerkleTrieLoader(),
+        new NoOpBonsaiWorldStateCacheManager(
+            storage, EvmConfiguration.DEFAULT, new BonsaiCodeCache()),
+        new NoOpTrieLogManager(),
+        EvmConfiguration.DEFAULT,
+        createStatefulConfigWithTrie(),
+        new BonsaiCodeCache());
   }
 
   private void createContract(final Consumer<MutableAccount> init) {

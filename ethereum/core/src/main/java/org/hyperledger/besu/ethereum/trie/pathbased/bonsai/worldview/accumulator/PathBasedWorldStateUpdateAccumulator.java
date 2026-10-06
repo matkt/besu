@@ -80,7 +80,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   private final Map<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
       storageToUpdate = new ConcurrentHashMap<>();
 
-  private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
+  // slot -> keccak(slot); may be shared by all the accumulators of a block
+  private Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
   protected boolean isAccumulatorStateChanged;
 
   public PathBasedWorldStateUpdateAccumulator(
@@ -296,7 +297,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                   });
             });
 
-    storageKeyHashLookup.putAll(source.storageKeyHashLookup);
+    if (source.storageKeyHashLookup != storageKeyHashLookup) {
+      storageKeyHashLookup.putAll(source.storageKeyHashLookup);
+    }
     this.isAccumulatorStateChanged = true;
   }
 
@@ -585,9 +588,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
                   .forEach(
                       storageUpdate -> {
                         final UInt256 keyUInt = storageUpdate.getKey();
-                        final StorageSlotKey slotKey =
-                            new StorageSlotKey(
-                                hashAndSaveSlotPreImage(keyUInt), Optional.of(keyUInt));
+                        final StorageSlotKey slotKey = createStorageSlotKey(keyUInt);
                         final UInt256 value = storageUpdate.getValue();
                         final BonsaiValue<UInt256> pendingValue =
                             pendingStorageUpdates.get(slotKey);
@@ -630,8 +631,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
 
   @Override
   public UInt256 getStorageValue(final Address address, final UInt256 slotKey) {
-    StorageSlotKey storageSlotKey =
-        new StorageSlotKey(hashAndSaveSlotPreImage(slotKey), Optional.of(slotKey));
+    final StorageSlotKey storageSlotKey = createStorageSlotKey(slotKey);
     return getStorageValueByStorageSlotKey(address, storageSlotKey).orElse(UInt256.ZERO);
   }
 
@@ -678,8 +678,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   @Override
   public UInt256 getPriorStorageValue(final Address address, final UInt256 storageKey) {
     // TODO maybe log the read into the trie layer?
-    StorageSlotKey storageSlotKey =
-        new StorageSlotKey(hashAndSaveSlotPreImage(storageKey), Optional.of(storageKey));
+    final StorageSlotKey storageSlotKey = createStorageSlotKey(storageKey);
     final Map<StorageSlotKey, BonsaiValue<UInt256>> localAccountStorage =
         storageToUpdate.get(address);
     if (localAccountStorage != null) {
@@ -1024,7 +1023,31 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     resetAccumulatorStateChanged();
     updatedAccounts.clear();
     deletedAccounts.clear();
-    storageKeyHashLookup.clear();
+    // a new map rather than clear(): a shared one may still be used by the block that owns it
+    storageKeyHashLookup = new ConcurrentHashMap<>();
+  }
+
+  /**
+   * Uses {@code blockSlotHashes} as the slot hash lookup, keeping the hashes already known, so the
+   * accumulators of one block hash each slot once.
+   *
+   * @param blockSlotHashes slot to keccak(slot) map shared by the block
+   */
+  public void shareStorageKeyHashLookup(final Map<UInt256, Hash> blockSlotHashes) {
+    if (storageKeyHashLookup != blockSlotHashes) {
+      blockSlotHashes.putAll(storageKeyHashLookup);
+      storageKeyHashLookup = blockSlotHashes;
+    }
+  }
+
+  /**
+   * Slot key whose hash comes from the slot hash lookup, so it is computed at most once.
+   *
+   * @param slotKey the storage slot
+   * @return the slot key with its hash
+   */
+  public StorageSlotKey createStorageSlotKey(final UInt256 slotKey) {
+    return new StorageSlotKey(hashAndSaveSlotPreImage(slotKey), Optional.of(slotKey));
   }
 
   protected Hash hashAndSaveAccountPreImage(final Address address) {
@@ -1033,12 +1056,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   }
 
   protected Hash hashAndSaveSlotPreImage(final UInt256 slotKey) {
-    Hash hash = storageKeyHashLookup.get(slotKey);
-    if (hash == null) {
-      hash = Hash.hash(slotKey);
-      storageKeyHashLookup.put(slotKey, hash);
-    }
-    return hash;
+    // computeIfAbsent: transactions running in parallel share the lookup and must not race
+    return storageKeyHashLookup.computeIfAbsent(slotKey, Hash::hash);
   }
 
   public abstract PathBasedWorldStateUpdateAccumulator<ACCOUNT> copy();

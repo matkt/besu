@@ -173,6 +173,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
           new ParallelizedTransactionContext.Builder();
 
       final PathBasedWorldStateUpdateAccumulator<?> blockUpdater = ws.getAccumulator();
+      blockUpdater.shareStorageKeyHashLookup(blockSlotHashes);
       final WorldUpdater txUpdater = blockUpdater.updater();
       final Optional<AccessLocationTracker> txTracker =
           blockAccessListBuilder.map(
@@ -223,6 +224,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
         final PathBasedWorldState pathWs = (PathBasedWorldState) worldState;
         final PathBasedWorldStateUpdateAccumulator blockAccumulator =
             (PathBasedWorldStateUpdateAccumulator) pathWs.updater();
+        blockAccumulator.shareStorageKeyHashLookup(blockSlotHashes);
 
         final TransactionProcessingResult result = ctx.transactionProcessingResult();
         final Optional<PartialBlockAccessView> maybePartialBlockAccessView =

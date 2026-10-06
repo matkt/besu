@@ -101,6 +101,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
           new ParallelizedTransactionContext.Builder();
       final PathBasedWorldStateUpdateAccumulator<?> roundWorldStateUpdater =
           (PathBasedWorldStateUpdateAccumulator<?>) ws.updater();
+      roundWorldStateUpdater.shareStorageKeyHashLookup(blockSlotHashes);
       final WorldUpdater transactionUpdater = roundWorldStateUpdater.updater();
       final Optional<AccessLocationTracker> transactionLocationTracker =
           blockAccessListBuilder.map(
@@ -209,6 +210,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
       final PathBasedWorldState pathBasedWorldState = (PathBasedWorldState) worldState;
       final PathBasedWorldStateUpdateAccumulator blockAccumulator =
           (PathBasedWorldStateUpdateAccumulator) pathBasedWorldState.updater();
+      blockAccumulator.shareStorageKeyHashLookup(blockSlotHashes);
       final PathBasedWorldStateUpdateAccumulator<?> transactionAccumulator =
           parallelizedTransactionContext.transactionAccumulator();
       final TransactionProcessingResult transactionProcessingResult =
