@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
@@ -37,6 +39,9 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
 
   private final List<BlockHeader> ommers;
   private final Optional<List<Withdrawal>> withdrawals;
+
+  /** The root of the trie of the transactions, computed on first use. */
+  private volatile Hash transactionsRoot;
 
   public BlockBody(final List<Transaction> transactions, final List<BlockHeader> ommers) {
     this.transactions = transactions;
@@ -63,6 +68,22 @@ public class BlockBody implements org.hyperledger.besu.plugin.data.BlockBody {
   @Override
   public List<Transaction> getTransactions() {
     return transactions;
+  }
+
+  /**
+   * The root of the trie of the transactions, computed once: the transactions of a body do not
+   * change, and both building a header from a body (e.g. for engine_newPayload) and validating a
+   * block against its header need it.
+   *
+   * @return The root of the trie of the transactions of the block.
+   */
+  public Hash getTransactionsRoot() {
+    Hash root = transactionsRoot;
+    if (root == null) {
+      root = BodyValidation.transactionsRoot(transactions);
+      transactionsRoot = root;
+    }
+    return root;
   }
 
   /**

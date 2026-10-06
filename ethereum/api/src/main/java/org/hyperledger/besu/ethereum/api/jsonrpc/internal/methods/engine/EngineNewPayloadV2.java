@@ -131,8 +131,10 @@ public sealed class EngineNewPayloadV2<
 
   @Override
   protected void setBlockHeaderFields(
-      final BlockHeaderBuilder blockHeaderBuilder, final NPRP requestParameters) {
-    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters);
+      final BlockHeaderBuilder blockHeaderBuilder,
+      final NPRP requestParameters,
+      final BlockBody blockBody) {
+    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters, blockBody);
     final ExecutionPayloadV2 executionPayloadV2 = requestParameters.payloadParameter();
     if (executionPayloadV2.getWithdrawals() != null) {
       blockHeaderBuilder.withdrawalsRoot(

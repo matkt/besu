@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorR
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
@@ -65,8 +66,10 @@ public sealed class EngineNewPayloadV5<
 
   @Override
   protected void setBlockHeaderFields(
-      final BlockHeaderBuilder blockHeaderBuilder, final NPRP requestParameters) {
-    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters);
+      final BlockHeaderBuilder blockHeaderBuilder,
+      final NPRP requestParameters,
+      final BlockBody blockBody) {
+    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters, blockBody);
     blockHeaderBuilder
         .balHash(BodyValidation.balHash(requestParameters.payloadParameter().getBlockAccessList()))
         .slotNumber(requestParameters.payloadParameter().getSlotNumber());

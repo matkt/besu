@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorR
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
 import org.hyperledger.besu.ethereum.core.Block;
+import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.core.Transaction;
@@ -137,8 +138,10 @@ public sealed class EngineNewPayloadV3<
 
   @Override
   protected void setBlockHeaderFields(
-      final BlockHeaderBuilder blockHeaderBuilder, final NPRP requestParameters) {
-    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters);
+      final BlockHeaderBuilder blockHeaderBuilder,
+      final NPRP requestParameters,
+      final BlockBody blockBody) {
+    super.setBlockHeaderFields(blockHeaderBuilder, requestParameters, blockBody);
     final ExecutionPayloadV3 payloadParameter = requestParameters.payloadParameter();
     blockHeaderBuilder
         .blobGasUsed(payloadParameter.getBlobGasUsed())

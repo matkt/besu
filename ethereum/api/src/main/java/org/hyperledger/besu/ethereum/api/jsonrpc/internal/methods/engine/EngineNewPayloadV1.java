@@ -48,7 +48,6 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
-import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
@@ -154,8 +153,9 @@ public sealed class EngineNewPayloadV1<
     // EIP-3675, extended with the corresponding section of EIP-4399. Client software MUST run this
     // validation in all cases even if this branch or any other branches of the block tree are in an
     // active sync process.
+    final BlockBody blockBody = createBlockBody(blockParam);
     final BlockHeaderBuilder blockHeaderBuilder = BlockHeaderBuilder.create();
-    setBlockHeaderFields(blockHeaderBuilder, requestParameters);
+    setBlockHeaderFields(blockHeaderBuilder, requestParameters, blockBody);
     final BlockHeader newBlockHeader = blockHeaderBuilder.buildBlockHeader();
 
     // ensure the block hash matches the blockParam hash
@@ -197,7 +197,7 @@ public sealed class EngineNewPayloadV1<
           maybeBadBlockError.get());
     }
 
-    final var unvalidatedBlock = new Block(newBlockHeader, createBlockBody(blockParam));
+    final var unvalidatedBlock = new Block(newBlockHeader, blockBody);
 
     // 3. Client software MAY initiate a sync process if requisite data for payload validation is
     // missing. Sync process is specified in the Sync section.
@@ -490,15 +490,25 @@ public sealed class EngineNewPayloadV1<
     return ValidationResult.valid();
   }
 
+  /**
+   * Sets the header fields of the block of the payload.
+   *
+   * @param blockHeaderBuilder the builder of the header
+   * @param requestParameters the request parameters
+   * @param blockBody the body of the block, whose transactions root the block validation reads
+   *     again rather than computing it a second time
+   */
   protected void setBlockHeaderFields(
-      final BlockHeaderBuilder blockHeaderBuilder, final NPRP requestParameters) {
+      final BlockHeaderBuilder blockHeaderBuilder,
+      final NPRP requestParameters,
+      final BlockBody blockBody) {
     final ExecutionPayloadV1 blockParam = requestParameters.payloadParameter();
     blockHeaderBuilder
         .parentHash(blockParam.getParentHash())
         .ommersHash(OMMERS_HASH_CONSTANT)
         .coinbase(blockParam.getFeeRecipient())
         .stateRoot(blockParam.getStateRoot())
-        .transactionsRoot(BodyValidation.transactionsRoot(blockParam.getTransactions()))
+        .transactionsRoot(blockBody.getTransactionsRoot())
         .receiptsRoot(blockParam.getReceiptsRoot())
         .logsBloom(blockParam.getLogsBloom())
         .difficulty(Difficulty.ZERO)
