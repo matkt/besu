@@ -161,11 +161,11 @@ reader ──► hash stems (N threads, order kept) ──► attach to the PBT 
    stem**. The reader enforces the canonical rules above, and reads the claimed root after the end
    tag.
 2. **Hash stems**, in parallel. `AscendingCollapseBinaryTrie.prepare` builds the stem's small
-   subtree, hashes every leaf and inner node, encodes the nodes to write, and replaces the subtree by
+   subtree and hashes every leaf and inner node. When only verifying, it then replaces the subtree by
    hash stubs.
 3. **Attach**, on one thread, in order. `AscendingCollapseBinaryTrie.insert` attaches the stem's
-   top node, the only hash that depends on where the stem lands. When loading, every node is written
-   to the binary column at its location.
+   top node, the only hash that depends on where the stem lands. When loading, the stem is written
+   to the binary column as one entry.
 4. **Join**, against the sorted requests, like merging two sorted lists:
    - **Header:**
      - its account request must be next;
@@ -396,14 +396,15 @@ Memory is the trie's depth, not its size. The PBT and the rebuilt MPT both work 
 
 A snapshot unit holds every leaf of a stem (keys equal in all but their last byte). Their subtree
 depends on nothing else, except for its top node, whose stored prefix depends on its neighbours.
-So the heavy work (hashing leaves and inner nodes, encoding them) runs on many threads, and one
-thread attaches the top nodes in order.
+So the heavy work (hashing leaves and inner nodes) runs on many threads, and one thread attaches
+the top nodes in order.
 
 ### Writing the PBT
 
-Each node is written at its **location**, the bit path from the root, with the same encoding the
-live Besu trie uses. The column therefore reads back like any stored PBT. Writes are committed every
-100,000 nodes, and the cursor is written last.
+Each stem is written as one entry, and each branch above the stems on its own, at its **location**,
+the bit path from the root, with the same encoding the live Besu trie uses. The column therefore
+reads back like any stored PBT. Writes are committed every 100,000 entries, and the cursor is
+written last.
 
 ## How convert works
 
@@ -454,10 +455,11 @@ tail, shared bytecode), 14 cores, 2 GiB heap:
 
 | State | Snapshot | Convert | Verify | Verify + load into RocksDB |
 |---|---|---|---|---|
-| 1M accounts, 2.3M slots | 172 MB | 8 s, 214 MB of temp files | 10 s, 217 MB | 13 s |
-| 5M accounts, 13M slots | 872 MB | 34 s, 1.1 GB | 53 s, 1.3 GB | 88 s |
+| 1M accounts, 2.3M slots | 172 MB | 8 s, 214 MB of temp files | 10 s, 217 MB | 13 s, 488 MB database |
+| 5M accounts, 13M slots | 872 MB | 34 s, 1.1 GB | 53 s, 1.3 GB | 67 s, 2.6 GB database |
 
-At scale, loading is bound by RocksDB's write rate: the PBT stores about two nodes per leaf.
+At scale, loading is bound by RocksDB's write rate. The PBT stores about 1.4 entries per leaf: one per
+stem, plus the branches joining them.
 
 ## Code map
 
