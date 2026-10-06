@@ -169,10 +169,13 @@ class BalTransactionProcessorUnitTest {
     return transaction;
   }
 
-  private BlockAccessList mockEmptyBlockAccessList() {
-    final BlockAccessList blockAccessList = mock(BlockAccessList.class);
-    when(blockAccessList.accountChanges()).thenReturn(Collections.emptyList());
-    return blockAccessList;
+  /**
+   * A real empty block access list rather than a stubbed mock: whether its account changes are read
+   * depends on the lookup being indexed and on the asynchronous prefetch running before the test
+   * ends, which made a strict stub of them flaky.
+   */
+  private BlockAccessList emptyBlockAccessList() {
+    return new BlockAccessList(Collections.emptyList());
   }
 
   private PartialBlockAccessView emptyPartialBlockAccessView(final long txIndex) {
@@ -200,7 +203,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("Transaction processor is called with correct parameters")
     void transactionProcessorCalledWithCorrectParams() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
       stubSuccessfulTransaction();
 
@@ -238,7 +241,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("All transactions are processed")
     void allTransactionsProcessed() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction tx1 = mockTransaction();
       final Transaction tx2 = mockTransaction();
       final Transaction tx3 = mockTransaction();
@@ -269,7 +272,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("Processing result is returned for successful transaction")
     void processingResultReturnedForSuccessfulTransaction() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
       stubSuccessfulTransaction();
 
@@ -308,7 +311,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("Partial BAL writes are applied without retaining transaction accumulator")
     void partialBalWritesAreAppliedWithoutRetainingAccumulator() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
 
       final Address writeAddress =
@@ -410,7 +413,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("Clears accounts made empty by partial BAL view writes")
     void clearsAccountsMadeEmptyByPartialBalWrites() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
       final Address accountAddress =
           Address.fromHexString("0x1000000000000000000000000000000000000003");
@@ -557,7 +560,7 @@ class BalTransactionProcessorUnitTest {
     void loadWorldStateUsesParentBlockHeader() {
       final TestEnvironment env = createTestEnvironment();
       stubSuccessfulTransaction();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
       final BlockHeader parent = env.maybeParentHeader().orElseThrow();
       final BalConcurrentTransactionProcessor processor =
@@ -755,7 +758,7 @@ class BalTransactionProcessorUnitTest {
     @DisplayName("Returns empty when parallel context is null")
     void returnsEmptyWhenParallelContextIsNull() {
       final TestEnvironment env = createTestEnvironment();
-      final BlockAccessList blockAccessList = mockEmptyBlockAccessList();
+      final BlockAccessList blockAccessList = emptyBlockAccessList();
       final Transaction transaction = mockTransaction();
 
       when(transactionProcessor.processTransaction(
