@@ -32,7 +32,6 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.JsonRpcRequestContext;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.exception.InvalidJsonRpcRequestException;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.OrderedExecutionJsonRpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.ExecutionPayloadV1;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.JsonRpcParameter;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.JsonRpcParameter.JsonRpcParameterException;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.NewPayloadRequestParametersV1;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcErrorResponse;
@@ -76,8 +75,6 @@ import org.slf4j.LoggerFactory;
 public sealed class EngineNewPayloadV1<
         EP extends ExecutionPayloadV1, NPRP extends NewPayloadRequestParametersV1<? extends EP>>
     extends OrderedExecutionJsonRpcMethod permits EngineNewPayloadV2 {
-
-  private static final JsonRpcParameter PAYLOAD_PARAMETER = new JsonRpcParameter();
 
   private static final Logger LOG = LoggerFactory.getLogger(EngineNewPayloadV1.class);
   private static final Hash OMMERS_HASH_CONSTANT = Hash.EMPTY_LIST_HASH;
@@ -300,28 +297,18 @@ public sealed class EngineNewPayloadV1<
   }
 
   protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
-    return convertPayloadParameter(
-        requestContext.getRequest().getParams()[0], getPayloadParameterClass());
-  }
-
-  /**
-   * Converts (part of) the raw payload parameter, failing like reading the payload parameter does.
-   *
-   * @param rawPayload the raw payload parameter, or part of it
-   * @param parameterClass the class to convert it to
-   * @return the converted parameter
-   * @param <T> the type of the converted parameter
-   */
-  protected <T> T convertPayloadParameter(final Object rawPayload, final Class<T> parameterClass) {
+    final ExecutionPayloadV1 blockParam;
     try {
-      return PAYLOAD_PARAMETER.required(
-          new Object[] {rawPayload}, 0, parameterClass, FAIL_ON_UNKNOWN_BUT_EMPTY);
+      blockParam =
+          requestContext.getRequiredParameter(
+              0, getPayloadParameterClass(), FAIL_ON_UNKNOWN_BUT_EMPTY);
     } catch (JsonRpcParameterException e) {
       throw new InvalidRequestParametersException(
           "Invalid engine payload parameter (index 0)",
           RpcErrorType.INVALID_ENGINE_NEW_PAYLOAD_PARAMS,
           e);
     }
+    return blockParam;
   }
 
   @SuppressWarnings("unchecked")

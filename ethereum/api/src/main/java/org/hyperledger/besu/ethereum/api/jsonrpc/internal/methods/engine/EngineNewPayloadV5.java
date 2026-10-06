@@ -30,15 +30,14 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderBuilder;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.ValidationResult;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.prefetch.BalPrefetch;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
+import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -101,42 +100,25 @@ public sealed class EngineNewPayloadV5<
   }
 
   /**
-   * Decodes the block access list first and starts prefetching the state it touches, then decodes
-   * the rest of the payload, mostly its transactions, while the prefetch runs. The block access
-   * list is decoded once, and the payload carries the instance the prefetch was started with.
+   * Starts prefetching the state the block access list touches before reading the payload: the
+   * prefetch reads the encoded list itself, in the background, while the payload is read here.
    */
   @Override
   protected ExecutionPayloadV1 readPayloadParameter(final JsonRpcRequestContext requestContext) {
-    if (!(requestContext.getRequest().getParams()[0] instanceof Map<?, ?> rawPayload)
-        || rawPayload.get(BLOCK_ACCESS_LIST) == null) {
-      return super.readPayloadParameter(requestContext);
+    if (requestContext.getRequest().getParams()[0] instanceof Map<?, ?> rawPayload
+        && rawPayload.get(BLOCK_ACCESS_LIST) instanceof String encodedBlockAccessList) {
+      startStatePrefetch(rawPayload, encodedBlockAccessList);
     }
-    final BlockAccessList blockAccessList =
-        convertPayloadParameter(
-                Map.of(BLOCK_ACCESS_LIST, rawPayload.get(BLOCK_ACCESS_LIST)),
-                BlockAccessListField.class)
-            .blockAccessList();
-    startStatePrefetch(rawPayload, blockAccessList);
-
-    final Map<Object, Object> payloadWithoutBlockAccessList = new LinkedHashMap<>(rawPayload);
-    payloadWithoutBlockAccessList.remove(BLOCK_ACCESS_LIST);
-    final ExecutionPayloadV4 payload =
-        (ExecutionPayloadV4)
-            convertPayloadParameter(payloadWithoutBlockAccessList, getPayloadParameterClass());
-    payload.setBlockAccessList(blockAccessList);
-    return payload;
+    return super.readPayloadParameter(requestContext);
   }
-
-  /** The block access list field of a payload, decoded on its own. */
-  record BlockAccessListField(BlockAccessList blockAccessList) {}
 
   /**
    * Prefetches the state the block access list touches, so that it is mostly in cache once the
-   * block is executed. Starts before the payload is validated: a payload that turns out to be
-   * invalid only warmed the cache.
+   * block is executed. Starts before anything of the payload is validated: a payload that turns out
+   * to be invalid only warmed the cache, and one whose block access list is malformed or over the
+   * EIP-7928 item budget (gas limit / item cost) stops its prefetch.
    */
-  private void startStatePrefetch(
-      final Map<?, ?> rawPayload, final BlockAccessList blockAccessList) {
+  private void startStatePrefetch(final Map<?, ?> rawPayload, final String encodedBlockAccessList) {
     try {
       final Hash parentHash = Hash.fromHexString((String) rawPayload.get("parentHash"));
       final long timestamp = Long.decode((String) rawPayload.get("timestamp"));
@@ -148,28 +130,19 @@ public sealed class EngineNewPayloadV5<
               parentHeader -> {
                 final ProtocolSpec protocolSpec =
                     protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
-                if (exceedsItemBudget(blockAccessList, gasLimit, protocolSpec)) {
-                  // the block is invalid and will be rejected: do not read for it
-                  return;
-                }
+                final long itemCost = protocolSpec.getGasCalculator().getBlockAccessListItemCost();
                 protocolSpec
                     .getBlockProcessor()
-                    .prefetchBlockAccessList(protocolContext, parentHeader, blockAccessList)
+                    .prefetchBlockAccessList(
+                        protocolContext,
+                        parentHeader,
+                        () -> Bytes.fromHexString(encodedBlockAccessList),
+                        itemCost > 0 ? gasLimit / itemCost : Long.MAX_VALUE)
                     .ifPresent(STATE_PREFETCH::set);
               });
     } catch (final RuntimeException e) {
       LOG.debug("Could not start the state prefetch of a payload", e);
     }
-  }
-
-  /**
-   * The EIP-7928 item budget the block validation enforces later: a block access list over it
-   * belongs to an invalid block, and its size is up to its producer.
-   */
-  private static boolean exceedsItemBudget(
-      final BlockAccessList blockAccessList, final long gasLimit, final ProtocolSpec protocolSpec) {
-    final long itemCost = protocolSpec.getGasCalculator().getBlockAccessListItemCost();
-    return itemCost > 0 && blockAccessList.eip7928ItemCount() > gasLimit / itemCost;
   }
 
   @Override

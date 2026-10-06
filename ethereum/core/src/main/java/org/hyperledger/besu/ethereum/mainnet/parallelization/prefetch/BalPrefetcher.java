@@ -18,12 +18,14 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -31,37 +33,42 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Mechanism for prefetching world state data based on Block Access List (BAL).
+ * Reads ahead the account and storage values a block access list touches, so that they are in the
+ * cache when the block is executed.
  *
- * <p>This class handles the prefetching of account and storage data to populate the cache before
- * transaction execution, improving parallel processing performance.
+ * <p>The accounts are read by lots, each as soon as it is handed over: while the encoded list is
+ * read (see {@link #prefetch(ProtocolContext, BlockHeader, Supplier, long)}), or as the decoded
+ * list is split. A lot computes its own keys and reads them, so the first reads start right away
+ * rather than once every key of the list is known.
  */
-@SuppressWarnings("rawtypes")
 public class BalPrefetcher {
 
   private static final Logger LOG = LoggerFactory.getLogger(BalPrefetcher.class);
 
-  private static final Comparator<byte[]> STORAGE_KEY_COMPARATOR = Arrays::compareUnsigned;
+  private static final Comparator<byte[]> KEY_COMPARATOR = Arrays::compareUnsigned;
   private final boolean isSortingEnabled;
   private final int batchSize;
 
   /**
    * Creates a new prefetch mechanism.
    *
-   * @param isSortingEnabled whether to sort keys before prefetching (may improve DB locality)
-   * @param batchSize the batch size for prefetch operations (0 or negative = no batching, fetch all
-   *     at once)
+   * @param isSortingEnabled whether to sort the keys of a read (may improve DB locality)
+   * @param batchSize the number of accounts of a lot and of keys of a read (0 or negative = all of
+   *     them at once)
    */
   public BalPrefetcher(final boolean isSortingEnabled, final int batchSize) {
     this.isSortingEnabled = isSortingEnabled;
@@ -86,6 +93,52 @@ public class BalPrefetcher {
   }
 
   /**
+   * Prefetches the state that an encoded block access list touches, as of {@code parentHeader},
+   * while the list is read: each lot of accounts is read as soon as the list is read past it,
+   * without waiting for the list to be decoded. Everything runs in the background, from getting the
+   * encoding on.
+   *
+   * <p>The block access list is not validated: a malformed one stops the prefetch, and so does one
+   * over {@code maxItems}, the EIP-7928 item budget of its block. Either belongs to an invalid
+   * block.
+   *
+   * @param protocolContext the protocol context, for the world state archive
+   * @param parentHeader the header of the parent of the block the access list belongs to
+   * @param encodedBlockAccessList the RLP encoding of the block access list, called in the
+   *     background (e.g. to decode it from hex)
+   * @param maxItems the EIP-7928 item budget of the block: accounts plus storage keys
+   * @return the prefetch, to cancel once its block is processed or rejected
+   */
+  public BalPrefetch prefetch(
+      final ProtocolContext protocolContext,
+      final BlockHeader parentHeader,
+      final Supplier<Bytes> encodedBlockAccessList,
+      final long maxItems) {
+    final BalPrefetch prefetch = new BalPrefetch();
+    final Executor executor = BlockProcessingExecutors.ioExecutor();
+    CompletableFuture.runAsync(
+            () ->
+                openWorldState(protocolContext, parentHeader)
+                    .ifPresent(
+                        worldState ->
+                            prefetchEncoded(
+                                    worldState,
+                                    encodedBlockAccessList,
+                                    maxItems,
+                                    Runnable::run,
+                                    executor,
+                                    prefetch)
+                                .whenComplete((result, ex) -> worldState.close())),
+            executor)
+        .exceptionally(
+            ex -> {
+              LOG.error("Error during prefetch", ex);
+              return null;
+            });
+    return prefetch;
+  }
+
+  /**
    * Prefetches the state that {@code blockAccessList} touches, as of {@code parentHeader}, on a
    * world state of its own that is closed once done.
    *
@@ -100,21 +153,11 @@ public class BalPrefetcher {
       final BlockAccessList blockAccessList) {
     final BalPrefetch prefetch = new BalPrefetch();
     final Optional<BonsaiWorldState> maybeWorldState =
-        protocolContext
-            .getWorldStateArchive()
-            .getWorldState(
-                WorldStateQueryParams.newBuilder()
-                    .withBlockHeader(parentHeader)
-                    .withShouldWorldStateUpdateHead(false)
-                    .build())
-            .map(BonsaiWorldState.class::cast);
+        openWorldState(protocolContext, parentHeader);
     if (maybeWorldState.isEmpty()) {
-      LOG.debug(
-          "Prefetch skipped, world state of block {} not available", parentHeader.toLogString());
       return prefetch;
     }
     final BonsaiWorldState worldState = maybeWorldState.get();
-    // failures are logged by the prefetch itself
     prefetch(
             worldState,
             blockAccessList,
@@ -130,8 +173,8 @@ public class BalPrefetcher {
    *
    * @param worldState the world state to prefetch data into
    * @param blockAccessList the block access list containing read operations
-   * @param orchestrationExecutor the executor that runs the prefetch orchestration task
-   * @param fetchExecutor the executor for fetch operations
+   * @param orchestrationExecutor the executor that splits the list into lots
+   * @param fetchExecutor the executor that reads the lots
    * @return a completable future that completes when prefetching is done
    */
   public CompletableFuture<Void> prefetch(
@@ -149,201 +192,244 @@ public class BalPrefetcher {
       final Executor orchestrationExecutor,
       final Executor fetchExecutor,
       final BalPrefetch prefetch) {
+    return readByLots(
+        worldState,
+        handOver -> {
+          final List<BlockAccessList.AccountChanges> accounts = blockAccessList.accountChanges();
+          final int lotSize = lotSize(accounts.size());
+          for (int start = 0;
+              start < accounts.size() && !prefetch.isCancelled();
+              start += lotSize) {
+            final List<BlockAccessList.AccountChanges> lot =
+                accounts.subList(start, Math.min(start + lotSize, accounts.size()));
+            handOver.accept(keys -> lot.forEach(keys::add));
+          }
+        },
+        Long.MAX_VALUE,
+        orchestrationExecutor,
+        fetchExecutor,
+        prefetch);
+  }
 
+  CompletableFuture<Void> prefetchEncoded(
+      final BonsaiWorldState worldState,
+      final Supplier<Bytes> encodedBlockAccessList,
+      final long maxItems,
+      final Executor orchestrationExecutor,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
+    return readByLots(
+        worldState,
+        handOver -> {
+          final Bytes encoded = encodedBlockAccessList.get();
+          prefetch.readsFrom(encoded);
+          final RLPInput list = RLP.input(encoded);
+          list.enterList();
+          List<RLPInput> lot = new ArrayList<>();
+          while (!list.isEndOfCurrentList() && !prefetch.isCancelled()) {
+            // only delimited here: the lot reads its accounts itself
+            lot.add(list.readAsRlp());
+            if (lot.size() == batchSize) {
+              final List<RLPInput> fullLot = lot;
+              handOver.accept(keys -> fullLot.forEach(keys::add));
+              lot = new ArrayList<>();
+            }
+          }
+          if (!lot.isEmpty()) {
+            final List<RLPInput> lastLot = lot;
+            handOver.accept(keys -> lastLot.forEach(keys::add));
+          }
+        },
+        maxItems,
+        orchestrationExecutor,
+        fetchExecutor,
+        prefetch);
+  }
+
+  /** A lot of accounts of a block access list, which adds their keys to {@link LotKeys}. */
+  @FunctionalInterface
+  private interface Lot {
+    void addKeysTo(LotKeys keys);
+  }
+
+  /** Splits a block access list into lots, handing each over as soon as it is delimited. */
+  @FunctionalInterface
+  private interface Splitter {
+    void split(Consumer<Lot> handOver);
+  }
+
+  /**
+   * Reads each lot {@code splitter} hands over on {@code fetchExecutor}, as soon as it is handed
+   * over. Stops, and cancels {@code prefetch}, once the block access list turns out malformed or
+   * over {@code maxItems}.
+   */
+  private CompletableFuture<Void> readByLots(
+      final BonsaiWorldState worldState,
+      final Splitter splitter,
+      final long maxItems,
+      final Executor orchestrationExecutor,
+      final Executor fetchExecutor,
+      final BalPrefetch prefetch) {
+    final AtomicLong items = new AtomicLong();
+    final AtomicLong accounts = new AtomicLong();
+    final AtomicLong storageSlots = new AtomicLong();
     return CompletableFuture.supplyAsync(
             () -> {
               worldState.disableCacheMerkleTrieLoader();
-
-              // Collect all keys to prefetch
-              final PrefetchKeys keys = collectKeys(blockAccessList.accountChanges());
-
-              LOG.debug(
-                  "Prefetch: collected {} account keys and {} storage keys",
-                  keys.accountKeys.size(),
-                  keys.storageKeys.size());
-
-              return keys;
+              final List<CompletableFuture<Void>> lots = new ArrayList<>();
+              try {
+                splitter.split(
+                    lot ->
+                        lots.add(
+                            CompletableFuture.runAsync(
+                                () -> {
+                                  if (prefetch.isCancelled()) {
+                                    return;
+                                  }
+                                  final LotKeys keys = new LotKeys();
+                                  try {
+                                    lot.addKeysTo(keys);
+                                  } catch (final RuntimeException e) {
+                                    stop(prefetch, e);
+                                    return;
+                                  }
+                                  if (items.addAndGet(keys.items) > maxItems) {
+                                    // over the item budget: the block is invalid
+                                    prefetch.cancel();
+                                    return;
+                                  }
+                                  accounts.addAndGet(keys.accountKeys.size());
+                                  storageSlots.addAndGet(keys.storageKeys.size());
+                                  read(worldState, ACCOUNT_INFO_STATE, keys.accountKeys, prefetch);
+                                  read(
+                                      worldState,
+                                      ACCOUNT_STORAGE_STORAGE,
+                                      keys.storageKeys,
+                                      prefetch);
+                                },
+                                fetchExecutor)));
+              } catch (final RuntimeException e) {
+                stop(prefetch, e);
+              }
+              return lots;
             },
             orchestrationExecutor)
-        .thenCompose(
-            keys ->
-                fetchKeysAsync(worldState, keys, fetchExecutor, prefetch)
-                    .thenRun(
-                        () ->
-                            LOG.info(
-                                "Prefetch {}: {} accounts + {} storage slots{}",
-                                prefetch.isCancelled() ? "cancelled" : "completed",
-                                keys.accountKeys.size(),
-                                keys.storageKeys.size(),
-                                shouldBatch()
-                                    ? " in batches of " + batchSize
-                                    : " in single batch")))
+        .thenCompose(lots -> CompletableFuture.allOf(lots.toArray(CompletableFuture[]::new)))
         .whenComplete(
             (result, ex) -> {
               if (ex != null) {
                 LOG.error("Error during prefetch", ex);
+              } else {
+                LOG.info(
+                    "Prefetch {}: {} accounts + {} storage slots{}",
+                    prefetch.isCancelled() ? "cancelled" : "completed",
+                    accounts.get(),
+                    storageSlots.get(),
+                    batchSize > 0 ? " in lots of " + batchSize : " in a single lot");
               }
             });
   }
 
-  /** Collect all account and storage keys from the block access list. */
-  private PrefetchKeys collectKeys(final List<BlockAccessList.AccountChanges> accounts) {
-    final List<byte[]> accountKeys = new ArrayList<>(accounts.size());
-    final List<byte[]> storageKeys = new ArrayList<>();
-    for (final BlockAccessList.AccountChanges accountChanges : accounts) {
-      final Address address = accountChanges.address();
-      final byte[] addressHash = address.addressHash().getBytes().toArrayUnsafe();
-      accountKeys.add(addressHash);
-      final List<BlockAccessList.SlotChanges> storageChanges = accountChanges.storageChanges();
-      final List<BlockAccessList.SlotRead> storageReads = accountChanges.storageReads();
-      final int rawSlotCount = storageChanges.size() + storageReads.size();
-      if (rawSlotCount == 0) {
-        continue;
-      }
-      // Deduplicate storage slots by hash without streams/lambdas (plain iterator loops).
-      final Set<StorageSlotKey> uniqueSlots = HashSet.newHashSet(rawSlotCount);
-      for (final BlockAccessList.SlotChanges storageChange : storageChanges) {
-        uniqueSlots.add(storageChange.slot());
-      }
-      for (final BlockAccessList.SlotRead storageRead : storageReads) {
-        uniqueSlots.add(storageRead.slot());
-      }
-      final int rangeStart = storageKeys.size();
-      for (final StorageSlotKey slot : uniqueSlots) {
-        final byte[] slotHash = slot.getSlotHash().getBytes().toArrayUnsafe();
-        final byte[] storageKey = new byte[addressHash.length + slotHash.length];
-        System.arraycopy(addressHash, 0, storageKey, 0, addressHash.length);
-        System.arraycopy(slotHash, 0, storageKey, addressHash.length, slotHash.length);
-        storageKeys.add(storageKey);
-      }
-      if (isSortingEnabled) {
-        storageKeys.subList(rangeStart, storageKeys.size()).sort(STORAGE_KEY_COMPARATOR);
-      }
-    }
-    return new PrefetchKeys(accountKeys, storageKeys);
+  /** A malformed block access list belongs to an invalid block: nothing more is read for it. */
+  private static void stop(final BalPrefetch prefetch, final RuntimeException e) {
+    prefetch.cancel();
+    LOG.debug("Prefetch stopped, block access list not readable", e);
   }
 
-  /**
-   * Unified method to fetch keys with optional batching.
-   *
-   * <p>If batchSize <= 0, fetches all keys in parallel (2 futures: accounts + storage).
-   *
-   * <p>If batchSize > 0, splits into multiple batches and fetches them in parallel.
-   *
-   * @return a future that completes when all fetch operations finish
-   */
-  private CompletableFuture<Void> fetchKeysAsync(
-      final BonsaiWorldState worldState,
-      final PrefetchKeys keys,
-      final Executor fetchExecutor,
-      final BalPrefetch prefetch) {
-
-    // Fetch accounts (with optional batching)
-    final List<CompletableFuture<Void>> futures =
-        new ArrayList<>(
-            fetchSegmentKeys(
-                worldState,
-                ACCOUNT_INFO_STATE,
-                keys.accountKeys,
-                "account",
-                fetchExecutor,
-                prefetch));
-
-    // Fetch storage (with optional batching)
-    if (!keys.storageKeys.isEmpty()) {
-      futures.addAll(
-          fetchSegmentKeys(
-              worldState,
-              ACCOUNT_STORAGE_STORAGE,
-              keys.storageKeys,
-              "storage",
-              fetchExecutor,
-              prefetch));
-    }
-
-    return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
-  }
-
-  /**
-   * Fetch keys for a specific segment, with optional batching.
-   *
-   * @param worldState the world state
-   * @param segment the segment identifier
-   * @param keys the keys to fetch
-   * @param segmentName human-readable segment name for logging
-   * @param fetchExecutor the executor for fetch operations
-   * @return list of futures for all batch operations
-   */
-  private List<CompletableFuture<Void>> fetchSegmentKeys(
-      final BonsaiWorldState worldState,
-      final SegmentIdentifier segment,
-      final List<byte[]> keys,
-      final String segmentName,
-      final Executor fetchExecutor,
-      final BalPrefetch prefetch) {
-
-    final List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-    if (!shouldBatch()) {
-      // Single batch: fetch all keys at once
-      futures.add(
-          CompletableFuture.runAsync(
-              () -> {
-                prefetchKeys(worldState, segment, keys, prefetch);
-                LOG.debug("Prefetch: fetched {} {} keys in single batch", keys.size(), segmentName);
-              },
-              fetchExecutor));
-    } else {
-      // Multiple batches
-      final int batchCount = calculateBatchCount(keys.size());
-      for (int i = 0; i < batchCount; i++) {
-        final List<byte[]> batch = getBatch(keys, i);
-        final int batchNumber = i;
-
-        futures.add(
-            CompletableFuture.runAsync(
-                () -> {
-                  prefetchKeys(worldState, segment, batch, prefetch);
-                  LOG.trace(
-                      "Prefetch: fetched {} batch {}/{} ({} keys)",
-                      segmentName,
-                      batchNumber + 1,
-                      batchCount,
-                      batch.size());
-                },
-                fetchExecutor));
-      }
-
-      LOG.debug("Prefetch: fetched {} {} keys in {} batches", keys.size(), segmentName, batchCount);
-    }
-
-    return futures;
-  }
-
-  private void prefetchKeys(
+  private void read(
       final BonsaiWorldState worldState,
       final SegmentIdentifier segment,
       final List<byte[]> keys,
       final BalPrefetch prefetch) {
-    if (!prefetch.isCancelled()) {
-      worldState.getWorldStateStorage().getMultipleFlat(segment, keys);
+    if (isSortingEnabled) {
+      keys.sort(KEY_COMPARATOR);
+    }
+    final int readSize = lotSize(keys.size());
+    for (int start = 0; start < keys.size() && !prefetch.isCancelled(); start += readSize) {
+      worldState
+          .getWorldStateStorage()
+          .getMultipleFlat(segment, keys.subList(start, Math.min(start + readSize, keys.size())));
     }
   }
 
-  private boolean shouldBatch() {
-    return batchSize > 0;
+  private int lotSize(final int count) {
+    return batchSize > 0 ? batchSize : Math.max(count, 1);
   }
 
-  private int calculateBatchCount(final int totalKeys) {
-    return (int) Math.ceil((double) totalKeys / batchSize);
+  private static Optional<BonsaiWorldState> openWorldState(
+      final ProtocolContext protocolContext, final BlockHeader parentHeader) {
+    final Optional<BonsaiWorldState> worldState =
+        protocolContext
+            .getWorldStateArchive()
+            .getWorldState(
+                WorldStateQueryParams.newBuilder()
+                    .withBlockHeader(parentHeader)
+                    .withShouldWorldStateUpdateHead(false)
+                    .build())
+            .map(BonsaiWorldState.class::cast);
+    if (worldState.isEmpty()) {
+      LOG.debug(
+          "Prefetch skipped, world state of block {} not available", parentHeader.toLogString());
+    }
+    return worldState;
   }
 
-  private List<byte[]> getBatch(final List<byte[]> keys, final int batchIndex) {
-    final int start = batchIndex * batchSize;
-    final int end = Math.min(start + batchSize, keys.size());
-    return keys.subList(start, end);
-  }
+  /**
+   * The keys of a lot of accounts, and its EIP-7928 items (accounts plus storage keys). An address
+   * is hashed here rather than through the shared address hash cache, which the addresses of a
+   * block outnumber.
+   */
+  private static final class LotKeys {
+    private final List<byte[]> accountKeys = new ArrayList<>();
+    private final List<byte[]> storageKeys = new ArrayList<>();
+    private long items;
 
-  /** Container for collected prefetch keys. */
-  private record PrefetchKeys(List<byte[]> accountKeys, List<byte[]> storageKeys) {}
+    void add(final BlockAccessList.AccountChanges account) {
+      final byte[] accountKey = addAccount(account.address());
+      for (final BlockAccessList.SlotChanges slotChanges : account.storageChanges()) {
+        addStorageKey(accountKey, slotChanges.slot().getSlotHash().getBytes());
+      }
+      for (final BlockAccessList.SlotRead slotRead : account.storageReads()) {
+        addStorageKey(accountKey, slotRead.slot().getSlotHash().getBytes());
+      }
+    }
+
+    /** Reads only what the keys need: the address and the slots, not the changes. */
+    void add(final RLPInput account) {
+      account.enterList();
+      final byte[] accountKey = addAccount(Address.readFrom(account));
+      account.enterList();
+      while (!account.isEndOfCurrentList()) {
+        account.enterList();
+        addSlot(accountKey, account.readUInt256Scalar());
+        account.skipNext();
+        account.leaveList();
+      }
+      account.leaveList();
+      account.enterList();
+      while (!account.isEndOfCurrentList()) {
+        addSlot(accountKey, account.readUInt256Scalar());
+      }
+      account.leaveList();
+    }
+
+    private byte[] addAccount(final Address address) {
+      items++;
+      final byte[] accountKey = Hash.hash(address.getBytes()).getBytes().toArrayUnsafe();
+      accountKeys.add(accountKey);
+      return accountKey;
+    }
+
+    private void addSlot(final byte[] accountKey, final UInt256 slot) {
+      addStorageKey(accountKey, Hash.hash(slot).getBytes());
+    }
+
+    private void addStorageKey(final byte[] accountKey, final Bytes slotHash) {
+      items++;
+      final byte[] storageKey = new byte[accountKey.length + slotHash.size()];
+      System.arraycopy(accountKey, 0, storageKey, 0, accountKey.length);
+      System.arraycopy(slotHash.toArrayUnsafe(), 0, storageKey, accountKey.length, slotHash.size());
+      storageKeys.add(storageKey);
+    }
+  }
 }

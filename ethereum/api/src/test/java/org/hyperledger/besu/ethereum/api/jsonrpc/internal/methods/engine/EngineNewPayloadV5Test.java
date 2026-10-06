@@ -26,7 +26,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -194,10 +194,10 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
   @Test
   @SuppressWarnings("unchecked")
-  public void shouldStartPrefetchingTheBlockAccessListStateBeforeProcessingTheBlock() {
+  public void shouldStartPrefetchingFromTheEncodedBlockAccessListBeforeProcessingTheBlock() {
     final BlockProcessor blockProcessor = mockBlockProcessor(mock(GasCalculator.class));
     final BalPrefetch prefetch = new BalPrefetch();
-    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any(), anyLong()))
         .thenReturn(Optional.of(prefetch));
     final BlockHeader header =
         setupPayloadV5(
@@ -212,27 +212,23 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
         respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
     assertValidResponse(header, resp);
-    final ArgumentCaptor<BlockAccessList> prefetched =
-        ArgumentCaptor.forClass(BlockAccessList.class);
-    final ArgumentCaptor<Optional<BlockAccessList>> processed =
-        ArgumentCaptor.forClass(Optional.class);
+    final ArgumentCaptor<Supplier<Bytes>> encoded = ArgumentCaptor.forClass(Supplier.class);
     final InOrder inOrder = inOrder(blockProcessor, mergeCoordinator);
     inOrder
         .verify(blockProcessor)
-        .prefetchBlockAccessList(eq(protocolContext), eq(parentHeader), prefetched.capture());
-    inOrder.verify(mergeCoordinator).rememberBlock(any(), processed.capture());
-    assertThat(prefetched.getValue()).isEqualTo(BLOCK_ACCESS_LIST);
-    // The same instance: the block processor does not prefetch that block access list again.
-    assertThat(processed.getValue()).containsSame(prefetched.getValue());
+        .prefetchBlockAccessList(
+            eq(protocolContext), eq(parentHeader), encoded.capture(), eq(Long.MAX_VALUE));
+    inOrder.verify(mergeCoordinator).rememberBlock(any(), any());
+    assertThat(encoded.getValue().get()).isEqualTo(BLOCK_ACCESS_LIST.encode());
     // the block is processed: what is left to read is of no use
     assertThat(prefetch.isCancelled()).isTrue();
   }
 
   @Test
-  public void shouldStartPrefetchingBeforeDecodingTheTransactions() {
+  public void shouldStartPrefetchingBeforeDecodingThePayload() {
     final BlockProcessor blockProcessor = mockBlockProcessor(mock(GasCalculator.class));
     final BalPrefetch prefetch = new BalPrefetch();
-    when(blockProcessor.prefetchBlockAccessList(any(), any(), any()))
+    when(blockProcessor.prefetchBlockAccessList(any(), any(), any(), anyLong()))
         .thenReturn(Optional.of(prefetch));
     final BlockHeader header =
         setupPayloadV5(
@@ -247,16 +243,15 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
     assertThat(resp.getStatus()).isEqualTo(INVALID);
     assertThat(resp.getError()).startsWith("Failed to decode transactions from block parameter");
-    verify(blockProcessor).prefetchBlockAccessList(any(), any(), eq(BLOCK_ACCESS_LIST));
+    verify(blockProcessor).prefetchBlockAccessList(any(), any(), any(), anyLong());
     // the payload is invalid: its prefetch stops
     assertThat(prefetch.isCancelled()).isTrue();
   }
 
   @Test
-  public void shouldNotPrefetchABlockAccessListOverTheItemBudget() {
+  public void shouldGiveThePrefetchTheItemBudgetOfTheBlock() {
     final GasCalculator gasCalculator = mock(GasCalculator.class);
-    // no item fits in the gas limit
-    when(gasCalculator.getBlockAccessListItemCost()).thenReturn(Long.MAX_VALUE);
+    when(gasCalculator.getBlockAccessListItemCost()).thenReturn(2_000L);
     final BlockProcessor blockProcessor = mockBlockProcessor(gasCalculator);
     final BlockHeader header =
         setupPayloadV5(
@@ -267,7 +262,9 @@ public class EngineNewPayloadV5Test extends EngineNewPayloadV4Test {
 
     respV5(mockEnginePayloadParam(header, emptyList(), BLOCK_ACCESS_LIST, 0L));
 
-    verify(blockProcessor, never()).prefetchBlockAccessList(any(), any(), any());
+    // past it the block is invalid: the prefetch stops there
+    verify(blockProcessor)
+        .prefetchBlockAccessList(any(), any(), any(), eq(header.getGasLimit() / 2_000L));
   }
 
   /** The block processor the payload's state prefetch is started with. */

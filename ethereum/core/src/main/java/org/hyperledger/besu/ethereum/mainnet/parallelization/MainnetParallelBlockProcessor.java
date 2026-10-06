@@ -47,7 +47,9 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,8 +64,8 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
 
   private final Optional<BalPrefetcher> maybePrefetcher;
 
-  /** Block access list whose state is being prefetched ahead of the processing of its block. */
-  private final AtomicReference<BlockAccessList> prefetchedAhead = new AtomicReference<>();
+  /** The prefetch started ahead of the processing of an upcoming block, from its payload. */
+  private final AtomicReference<BalPrefetch> prefetchedAhead = new AtomicReference<>();
 
   public MainnetParallelBlockProcessor(
       final MainnetTransactionProcessor transactionProcessor,
@@ -100,19 +102,22 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
   }
 
   /**
-   * Starts prefetching the state of a block from its access list as soon as the payload is
-   * received, so that it is mostly in cache when the block is executed. Processing that block (the
-   * same access list instance) then does not prefetch it again.
+   * Starts prefetching the state of a block from its encoded access list as soon as the payload is
+   * received, so that it is mostly in cache when the block is executed. Processing that block (an
+   * access list with the same encoding) then does not prefetch it again.
    */
   @Override
   public Optional<BalPrefetch> prefetchBlockAccessList(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
-      final BlockAccessList blockAccessList) {
+      final Supplier<Bytes> encodedBlockAccessList,
+      final long maxItems) {
     return maybePrefetcher.map(
         prefetcher -> {
-          prefetchedAhead.set(blockAccessList);
-          return prefetcher.prefetch(protocolContext, parentHeader, blockAccessList);
+          final BalPrefetch prefetch =
+              prefetcher.prefetch(protocolContext, parentHeader, encodedBlockAccessList, maxItems);
+          prefetchedAhead.set(prefetch);
+          return prefetch;
         });
   }
 
@@ -168,8 +173,12 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
       final MutableWorldState worldState,
       final Block block,
       final Optional<BlockAccessList> blockAccessList) {
+    final BalPrefetch ahead = prefetchedAhead.get();
     final boolean isPrefetchedAhead =
-        blockAccessList.isPresent() && prefetchedAhead.compareAndSet(blockAccessList.get(), null);
+        ahead != null
+            && blockAccessList.isPresent()
+            && ahead.isFor(blockAccessList.get())
+            && prefetchedAhead.compareAndSet(ahead, null);
     final BlockProcessingResult blockProcessingResult =
         super.processBlock(
             protocolContext,

@@ -27,6 +27,9 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
+
+import org.apache.tuweni.bytes.Bytes;
 
 /** Processes a block. */
 public interface BlockProcessor {
@@ -56,18 +59,22 @@ public interface BlockProcessor {
   }
 
   /**
-   * Starts reading ahead the state that the access list of an upcoming block touches, before the
-   * block itself is validated and processed. Does nothing by default.
+   * Starts reading ahead the state that the access list of an upcoming block touches, from its
+   * encoding, before the list is decoded and the block validated and processed. Does nothing by
+   * default.
    *
    * @param protocolContext the current context of the protocol
    * @param parentHeader the header of the parent of the upcoming block
-   * @param blockAccessList the block access list of the upcoming block
+   * @param encodedBlockAccessList the RLP encoding of the block access list of the upcoming block,
+   *     called in the background
+   * @param maxItems the EIP-7928 item budget of the upcoming block: past it, the block is invalid
    * @return the prefetch, to cancel once the block is processed or rejected; empty if none started
    */
   default Optional<BalPrefetch> prefetchBlockAccessList(
       final ProtocolContext protocolContext,
       final BlockHeader parentHeader,
-      final BlockAccessList blockAccessList) {
+      final Supplier<Bytes> encodedBlockAccessList,
+      final long maxItems) {
     return Optional.empty();
   }
 
