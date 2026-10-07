@@ -17,8 +17,8 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotRead;
@@ -52,12 +52,12 @@ class BlockAccessListTest {
 
   @Test
   void slotKeysOfTheBlockReuseTheDecodedHashes() {
-    final StorageSlotKeyCache slotKeys = new StorageSlotKeyCache();
+    final KeyHashCache keyHashes = new KeyHashCache();
 
-    BLOCK_ACCESS_LIST.storageSlotKeys().forEach(slotKeys::add);
+    BLOCK_ACCESS_LIST.storageSlotKeys().forEach(keyHashes::add);
 
-    assertThat(slotKeys.slotHash(CHANGED.getSlotKey().orElseThrow()))
+    assertThat(keyHashes.slotHash(CHANGED.getSlotKey().orElseThrow()))
         .isSameAs(CHANGED.getSlotHash());
-    assertThat(slotKeys.slotHash(READ.getSlotKey().orElseThrow())).isSameAs(READ.getSlotHash());
+    assertThat(keyHashes.slotHash(READ.getSlotKey().orElseThrow())).isSameAs(READ.getSlotHash());
   }
 }

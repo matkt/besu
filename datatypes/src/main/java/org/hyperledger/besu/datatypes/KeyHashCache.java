@@ -21,16 +21,37 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Storage slot keys whose hash is computed once. A block shares one cache between its accumulators
- * and its access location trackers, so a slot touched by several transactions is hashed once.
- * Thread safe.
+ * keccak256 of the keys of the state, account addresses and storage slots, each computed once. A
+ * block shares one cache between its accumulators and its access location trackers, so an account
+ * or a slot touched by several transactions is hashed once. Thread safe.
  */
-public final class StorageSlotKeyCache {
+public final class KeyHashCache {
 
+  private final Map<Address, Hash> addressHashes = new ConcurrentHashMap<>();
   private final Map<UInt256, Hash> slotHashes = new ConcurrentHashMap<>();
 
   /** Creates an empty cache. */
-  public StorageSlotKeyCache() {}
+  public KeyHashCache() {}
+
+  /**
+   * Returns keccak256 of an address, computed only the first time, whatever the instance.
+   *
+   * @param address the account address
+   * @return the hash of the address
+   */
+  public Hash addressHash(final Address address) {
+    final Hash known = address.knownHash();
+    if (known != null) {
+      return known;
+    }
+    // as for slots: get first, computeIfAbsent on a miss
+    final Hash cached = addressHashes.get(address);
+    final Hash hash =
+        cached != null ? cached : addressHashes.computeIfAbsent(address, Address::addressHash);
+    // a block creates many instances of an address: each transaction, CALL, BALANCE...
+    address.rememberHash(hash);
+    return hash;
+  }
 
   /**
    * Returns the key of a storage slot, hashing the slot only the first time.
@@ -68,6 +89,7 @@ public final class StorageSlotKeyCache {
 
   /** Forgets every hash, at the end of a block. */
   public void clear() {
+    addressHashes.clear();
     slotHashes.clear();
   }
 }

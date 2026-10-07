@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -37,11 +37,11 @@ public abstract class ParallelBlockTransactionProcessor {
 
   protected CompletableFuture<ParallelizedTransactionContext>[] futures;
 
-  /** Slot keys of the block accumulator, shared with each transaction. */
-  protected final StorageSlotKeyCache blockSlotKeys;
+  /** Key hashes of the block accumulator, shared with each transaction. */
+  protected final KeyHashCache blockKeyHashes;
 
-  protected ParallelBlockTransactionProcessor(final StorageSlotKeyCache blockSlotKeys) {
-    this.blockSlotKeys = blockSlotKeys;
+  protected ParallelBlockTransactionProcessor(final KeyHashCache blockKeyHashes) {
+    this.blockKeyHashes = blockKeyHashes;
   }
 
   protected CompletableFuture<ParallelizedTransactionContext> removeFuture(final int txIndex) {

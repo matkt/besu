@@ -21,7 +21,7 @@ import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.wit
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.BlobGas;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
@@ -206,8 +206,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
 
     try (final MutableWorldState disposableWorldState = duplicateWorldStateAtParent(parentHeader)) {
       timings.register("duplicateWorldState");
-      final StorageSlotKeyCache slotKeys =
-          PathBasedWorldState.storageSlotKeysOf(disposableWorldState);
+      final KeyHashCache keyHashes = PathBasedWorldState.keyHashesOf(disposableWorldState);
       final ProtocolSpec newProtocolSpec =
           protocolSchedule.getForNextBlockHeader(parentHeader, timestamp);
 
@@ -243,7 +242,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
               .map(BlockAccessListFactory::newBlockAccessListBuilder);
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
           blockAccessListBuilder.map(
-              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(slotKeys));
+              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(keyHashes));
 
       BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
@@ -281,7 +280,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                      transactionResults.getSelectedTransactions().size(), slotKeys));
+                      transactionResults.getSelectedTransactions().size(), keyHashes));
 
       final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
           newProtocolSpec.getWithdrawalsProcessor();

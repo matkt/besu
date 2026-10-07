@@ -18,8 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
@@ -88,11 +88,11 @@ class AccessLocationTrackerTest {
   }
 
   @Test
-  void slotKeysReuseTheHashesOfTheBlock() {
-    final StorageSlotKeyCache blockSlotKeys = new StorageSlotKeyCache();
-    final Hash known = blockSlotKeys.slotHash(SLOT);
+  void keyHashesReuseTheHashesOfTheBlock() {
+    final KeyHashCache blockKeyHashes = new KeyHashCache();
+    final Hash known = blockKeyHashes.slotHash(SLOT);
     final AccessLocationTracker txTracker =
-        BlockAccessListBuilder.createTransactionAccessLocationTracker(0, blockSlotKeys);
+        BlockAccessListBuilder.createTransactionAccessLocationTracker(0, blockKeyHashes);
     txTracker.addSlotAccessForAccount(CONTRACT, SLOT);
 
     final PartialBlockAccessView view =

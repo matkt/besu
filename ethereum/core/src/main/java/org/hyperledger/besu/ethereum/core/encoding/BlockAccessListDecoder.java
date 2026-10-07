@@ -15,8 +15,8 @@
 package org.hyperledger.besu.ethereum.core.encoding;
 
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
@@ -45,7 +45,7 @@ public final class BlockAccessListDecoder {
     final RLPInput in = input.readAsRlp();
     final List<AccountChanges> accounts = new ArrayList<>();
     // a slot number used by several accounts is hashed once
-    final StorageSlotKeyCache slotKeys = new StorageSlotKeyCache();
+    final KeyHashCache keyHashes = new KeyHashCache();
 
     in.enterList();
     while (!in.isEndOfCurrentList()) {
@@ -58,7 +58,7 @@ public final class BlockAccessListDecoder {
           acctIn.readList(
               scIn -> {
                 scIn.enterList();
-                StorageSlotKey slot = slotKeys.slotKey(scIn.readUInt256Scalar());
+                StorageSlotKey slot = keyHashes.slotKey(scIn.readUInt256Scalar());
                 List<StorageChange> changes =
                     scIn.readList(
                         changeIn -> {
@@ -76,7 +76,7 @@ public final class BlockAccessListDecoder {
               });
 
       List<SlotRead> reads =
-          acctIn.readList(r -> new SlotRead(slotKeys.slotKey(r.readUInt256Scalar())));
+          acctIn.readList(r -> new SlotRead(keyHashes.slotKey(r.readUInt256Scalar())));
 
       List<BalanceChange> balances =
           acctIn.readList(

@@ -19,13 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
-class StorageSlotKeyCacheTest {
+class KeyHashCacheTest {
 
   private static final UInt256 SLOT = UInt256.valueOf(7);
 
   @Test
   void hashesEachSlotOnce() {
-    final StorageSlotKeyCache cache = new StorageSlotKeyCache();
+    final KeyHashCache cache = new KeyHashCache();
 
     final Hash first = cache.slotHash(SLOT);
 
@@ -38,7 +38,7 @@ class StorageSlotKeyCacheTest {
 
   @Test
   void addKeepsAKnownHash() {
-    final StorageSlotKeyCache cache = new StorageSlotKeyCache();
+    final KeyHashCache cache = new KeyHashCache();
     final StorageSlotKey known = new StorageSlotKey(SLOT);
 
     cache.add(known);
@@ -47,8 +47,22 @@ class StorageSlotKeyCacheTest {
   }
 
   @Test
+  void hashesEachAddressOnceWhateverTheInstance() {
+    final KeyHashCache cache = new KeyHashCache();
+    final Address first = Address.fromHexString("0x5107");
+    final Address other = Address.fromHexString("0x5107");
+
+    final Hash hash = cache.addressHash(first);
+
+    assertThat(hash).isEqualTo(Hash.hash(first.getBytes()));
+    // the other instance gets the hash of the first, and keeps it
+    assertThat(cache.addressHash(other)).isSameAs(hash);
+    assertThat(other.addressHash()).isSameAs(hash);
+  }
+
+  @Test
   void clearForgetsTheHashes() {
-    final StorageSlotKeyCache cache = new StorageSlotKeyCache();
+    final KeyHashCache cache = new KeyHashCache();
     final Hash before = cache.slotHash(SLOT);
 
     cache.clear();

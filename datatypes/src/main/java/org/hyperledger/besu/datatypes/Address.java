@@ -236,6 +236,16 @@ public final class Address extends BytesHolder implements Comparable<Address> {
     return hash;
   }
 
+  /** The hash of this address if this instance computed or was given it, otherwise null. */
+  @Nullable Hash knownHash() {
+    return addressHash;
+  }
+
+  /** Gives this instance the hash of its address, computed from another instance. */
+  void rememberHash(final Hash hash) {
+    addressHash = hash;
+  }
+
   /**
    * Compares this Address with another for ordering.
    *

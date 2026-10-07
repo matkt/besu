@@ -22,9 +22,9 @@ import org.hyperledger.besu.crypto.SECPSignature;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.BlobGas;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.StateOverride;
 import org.hyperledger.besu.datatypes.StateOverrideMap;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -296,11 +296,11 @@ public class BlockSimulator {
         protocolSpec
             .getBlockAccessListFactory()
             .map(BlockAccessListFactory::newBlockAccessListBuilder);
-    final StorageSlotKeyCache slotKeys = PathBasedWorldState.storageSlotKeysOf(ws);
+    final KeyHashCache keyHashes = PathBasedWorldState.keyHashesOf(ws);
 
     Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
         blockAccessListBuilder.map(
-            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(slotKeys));
+            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(keyHashes));
 
     final BlockProcessingContext blockProcessingContext =
         new BlockProcessingContext(
@@ -347,7 +347,7 @@ public class BlockSimulator {
         blockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                    blockStateCallSimulationResult.getTransactions().size(), slotKeys));
+                    blockStateCallSimulationResult.getTransactions().size(), keyHashes));
 
     // EIP-7685: process EL requests
     final Optional<RequestProcessorCoordinator> requestProcessor =
@@ -422,7 +422,7 @@ public class BlockSimulator {
             .orElseGet(protocolSpec::getMiningBeneficiaryCalculator);
 
     final WorldUpdater blockUpdater = ws.updater();
-    final StorageSlotKeyCache slotKeys = PathBasedWorldState.storageSlotKeysOf(ws);
+    final KeyHashCache keyHashes = PathBasedWorldState.keyHashesOf(ws);
     for (int transactionLocation = 0;
         transactionLocation < blockStateCall.getCalls().size();
         transactionLocation++) {
@@ -473,7 +473,7 @@ public class BlockSimulator {
 
       final Optional<AccessLocationTracker> transactionLocationTracker =
           createTransactionAccessLocationTracker(
-              blockAccessListBuilder, slotKeys, transactionLocation);
+              blockAccessListBuilder, keyHashes, transactionLocation);
       final Optional<TransactionSimulatorResult> transactionSimulatorResult =
           transactionSimulator.processWithWorldUpdater(
               callParameter,
@@ -559,12 +559,12 @@ public class BlockSimulator {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
-      final StorageSlotKeyCache slotKeys,
+      final KeyHashCache keyHashes,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
         b ->
             BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                transactionLocation, slotKeys));
+                transactionLocation, keyHashes));
   }
 
   private BlockSimulationResult createFinalBlock(

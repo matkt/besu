@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -59,20 +59,19 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
    * processor is responsible for the individual processing of transactions.
    *
    * @param transactionProcessor The transaction processor for processing individual transactions.
-   * @param blockSlotKeys slot keys of the block accumulator
+   * @param blockKeyHashes key hashes of the block accumulator
    */
   public OptimisticConcurrentTransactionProcessor(
-      final MainnetTransactionProcessor transactionProcessor,
-      final StorageSlotKeyCache blockSlotKeys) {
-    this(transactionProcessor, new TransactionCollisionDetector(), blockSlotKeys);
+      final MainnetTransactionProcessor transactionProcessor, final KeyHashCache blockKeyHashes) {
+    this(transactionProcessor, new TransactionCollisionDetector(), blockKeyHashes);
   }
 
   @VisibleForTesting
   public OptimisticConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
       final TransactionCollisionDetector transactionCollisionDetector,
-      final StorageSlotKeyCache blockSlotKeys) {
-    super(blockSlotKeys);
+      final KeyHashCache blockKeyHashes) {
+    super(blockKeyHashes);
     this.transactionProcessor = transactionProcessor;
     this.transactionCollisionDetector = transactionCollisionDetector;
   }
@@ -101,7 +100,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
 
     try {
       ws.disableCacheMerkleTrieLoader();
-      ws.useStorageSlotKeys(blockSlotKeys);
+      ws.useKeyHashes(blockKeyHashes);
       final ParallelizedTransactionContext.Builder contextBuilder =
           new ParallelizedTransactionContext.Builder();
       final PathBasedWorldStateUpdateAccumulator<?> roundWorldStateUpdater =
@@ -111,7 +110,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                      transactionLocation, blockSlotKeys));
+                      transactionLocation, blockKeyHashes));
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(
               transactionUpdater,

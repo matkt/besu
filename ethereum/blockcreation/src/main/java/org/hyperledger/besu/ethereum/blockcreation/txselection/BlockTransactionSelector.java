@@ -26,7 +26,7 @@ import static org.hyperledger.besu.plugin.data.TransactionSelectionResult.SELECT
 import static org.hyperledger.besu.plugin.data.TransactionSelectionResult.TX_EVALUATION_TOO_LONG;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.selectors.AbstractTransactionSelector;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.selectors.BlobPriceTransactionSelector;
@@ -116,7 +116,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
   private final MainnetTransactionProcessor transactionProcessor;
   private final Blockchain blockchain;
   private final MutableWorldState worldState;
-  private final StorageSlotKeyCache slotKeys;
+  private final KeyHashCache keyHashes;
   private final AbstractBlockProcessor.TransactionReceiptFactory transactionReceiptFactory;
   private final BlockSelectionContext blockSelectionContext;
   private final TransactionSelectionResults transactionSelectionResults =
@@ -159,7 +159,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
     this.transactionProcessor = transactionProcessor;
     this.blockchain = blockchain;
     this.worldState = worldState;
-    this.slotKeys = PathBasedWorldState.storageSlotKeysOf(worldState);
+    this.keyHashes = PathBasedWorldState.keyHashesOf(worldState);
     this.transactionReceiptFactory = transactionReceiptFactory;
     this.ethScheduler = ethScheduler;
     this.blockSelectionContext =
@@ -710,7 +710,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
         maybeBlockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                    currentTxnLocation.get(), slotKeys));
+                    currentTxnLocation.get(), keyHashes));
     final TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             txWorldStateUpdater,

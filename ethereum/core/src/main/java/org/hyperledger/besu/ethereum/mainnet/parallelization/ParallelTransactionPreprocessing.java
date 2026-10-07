@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -50,7 +50,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
   @Override
   public Optional<PreprocessingContext> run(
       final ProtocolContext protocolContext,
-      final StorageSlotKeyCache blockSlotKeys,
+      final KeyHashCache blockKeyHashes,
       final BlockHeader blockHeader,
       final List<Transaction> transactions,
       final Address miningBeneficiary,
@@ -68,10 +68,10 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
     if (balConfiguration.isPerfectParallelizationEnabled() && maybeBlockBal.isPresent()) {
       parallelProcessor =
           new BalConcurrentTransactionProcessor(
-              transactionProcessor, maybeBlockBal.get(), balConfiguration, blockSlotKeys);
+              transactionProcessor, maybeBlockBal.get(), balConfiguration, blockKeyHashes);
     } else {
       parallelProcessor =
-          new OptimisticConcurrentTransactionProcessor(transactionProcessor, blockSlotKeys);
+          new OptimisticConcurrentTransactionProcessor(transactionProcessor, blockKeyHashes);
     }
 
     parallelProcessor.runAsyncBlock(

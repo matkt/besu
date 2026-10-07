@@ -19,8 +19,8 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.Worl
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
@@ -96,30 +96,45 @@ class BonsaiWorldStateUpdateAccumulatorTest {
   }
 
   @Test
-  void transactionAccumulator_sharesTheSlotKeysOfTheBlock() {
+  void transactionAccumulator_sharesTheKeyHashesOfTheBlock() {
     try (BonsaiWorldState block = newEmptyWorldState();
         BonsaiWorldState transaction = newEmptyWorldState()) {
-      final StorageSlotKeyCache blockSlotKeys = block.getAccumulator().getStorageSlotKeys();
+      final KeyHashCache blockKeyHashes = block.getAccumulator().getKeyHashes();
 
-      transaction.useStorageSlotKeys(blockSlotKeys);
+      transaction.useKeyHashes(blockKeyHashes);
 
-      assertThat(transaction.getAccumulator().getStorageSlotKeys()).isSameAs(blockSlotKeys);
+      assertThat(transaction.getAccumulator().getKeyHashes()).isSameAs(blockKeyHashes);
     }
   }
 
   @Test
-  void balTransactionAccumulator_sharesTheSlotKeysOfTheBlock() {
+  void balTransactionAccumulator_sharesTheKeyHashesOfTheBlock() {
     try (BonsaiWorldState block = newEmptyWorldState();
         BonsaiWorldState transaction = newEmptyWorldState()) {
-      final StorageSlotKeyCache blockSlotKeys = block.getAccumulator().getStorageSlotKeys();
+      final KeyHashCache blockKeyHashes = block.getAccumulator().getKeyHashes();
 
       transaction.applyBlockAccessListOverlay(
           new BlockAccessListOverlay(
-              BlockAccessListAccountLookup.of(new BlockAccessList(List.of())), 1L, blockSlotKeys));
+              BlockAccessListAccountLookup.of(new BlockAccessList(List.of())), 1L, blockKeyHashes));
 
       assertThat(transaction.getAccumulator())
           .isInstanceOf(BonsaiBalWorldStateUpdateAccumulator.class);
-      assertThat(transaction.getAccumulator().getStorageSlotKeys()).isSameAs(blockSlotKeys);
+      assertThat(transaction.getAccumulator().getKeyHashes()).isSameAs(blockKeyHashes);
+    }
+  }
+
+  @Test
+  void worldStateReads_reuseTheAddressHashesOfTheBlock() {
+    try (BonsaiWorldState block = newEmptyWorldState();
+        BonsaiWorldState transaction = newEmptyWorldState()) {
+      transaction.useKeyHashes(block.getAccumulator().getKeyHashes());
+      final Hash hashedByTheBlock =
+          block.getAccumulator().getKeyHashes().addressHash(Address.fromHexString("0x5107"));
+      final Address otherInstance = Address.fromHexString("0x5107");
+
+      transaction.get(otherInstance);
+
+      assertThat(otherInstance.addressHash()).isSameAs(hashedByTheBlock);
     }
   }
 

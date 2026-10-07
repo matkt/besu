@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
+import org.hyperledger.besu.datatypes.KeyHashCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.ProtocolContext;
@@ -289,7 +289,7 @@ class BalParallelBlockProcessorIntegrationTest {
     @Override
     public Optional<PreprocessingContext> run(
         final ProtocolContext protocolContext,
-        final StorageSlotKeyCache blockSlotKeys,
+        final KeyHashCache blockKeyHashes,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
         final Address miningBeneficiary,
@@ -300,7 +300,7 @@ class BalParallelBlockProcessorIntegrationTest {
         final Optional<BlockHeader> maybeParentHeader) {
       return super.run(
           protocolContext,
-          blockSlotKeys,
+          blockKeyHashes,
           blockHeader,
           transactions,
           miningBeneficiary,
