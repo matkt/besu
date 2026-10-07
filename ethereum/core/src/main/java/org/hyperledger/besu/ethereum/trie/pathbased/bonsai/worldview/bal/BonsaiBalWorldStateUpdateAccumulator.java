@@ -50,7 +50,7 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
         (address, slot) -> {},
         evmConfiguration,
         codeCache,
-        blockAccessListOverlay.getStorageKeyHashLookup());
+        blockAccessListOverlay.getStorageSlotKeys());
     this.blockAccessListOverlay = blockAccessListOverlay;
   }
 

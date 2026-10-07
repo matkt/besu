@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
@@ -27,11 +28,7 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
 
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
-import org.apache.tuweni.units.bigints.UInt256;
 
 public class BonsaiWorldStateUpdateAccumulator
     extends PathBasedWorldStateUpdateAccumulator<BonsaiAccount> {
@@ -59,7 +56,7 @@ public class BonsaiWorldStateUpdateAccumulator
         storagePreloader,
         evmConfiguration,
         codeCache,
-        new ConcurrentHashMap<>());
+        new StorageSlotKeyCache());
   }
 
   public BonsaiWorldStateUpdateAccumulator(
@@ -68,8 +65,8 @@ public class BonsaiWorldStateUpdateAccumulator
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache,
-      final Map<UInt256, Hash> storageKeyHashLookup) {
-    super(world, accountPreloader, storagePreloader, evmConfiguration, storageKeyHashLookup);
+      final StorageSlotKeyCache storageSlotKeys) {
+    super(world, accountPreloader, storagePreloader, evmConfiguration, storageSlotKeys);
     this.codeCache = codeCache;
   }
 

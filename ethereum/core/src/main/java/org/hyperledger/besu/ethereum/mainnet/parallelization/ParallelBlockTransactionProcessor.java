@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -29,22 +29,19 @@ import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-
-import org.apache.tuweni.units.bigints.UInt256;
 
 public abstract class ParallelBlockTransactionProcessor {
 
   protected CompletableFuture<ParallelizedTransactionContext>[] futures;
 
-  /** keccak(slot) lookup of the block accumulator, shared with each transaction accumulator. */
-  protected final Map<UInt256, Hash> blockSlotHashes;
+  /** Slot keys of the block accumulator, shared with each transaction. */
+  protected final StorageSlotKeyCache blockSlotKeys;
 
-  protected ParallelBlockTransactionProcessor(final Map<UInt256, Hash> blockSlotHashes) {
-    this.blockSlotHashes = blockSlotHashes;
+  protected ParallelBlockTransactionProcessor(final StorageSlotKeyCache blockSlotKeys) {
+    this.blockSlotKeys = blockSlotKeys;
   }
 
   protected CompletableFuture<ParallelizedTransactionContext> removeFuture(final int txIndex) {

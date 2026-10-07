@@ -18,7 +18,7 @@ import static org.hyperledger.besu.ethereum.mainnet.feemarket.ExcessBlobGasCalcu
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
@@ -62,9 +62,7 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 
-import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -254,7 +252,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
             .getBlockAccessListFactory()
             .map(BlockAccessListFactory::newBlockAccessListBuilder);
 
-    final Function<UInt256, StorageSlotKey> slotKeys = storageSlotKeys(worldState);
+    final StorageSlotKeyCache slotKeys = storageSlotKeys(worldState);
     Optional<PreprocessingContext> preProcessingContext = Optional.empty();
     try {
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
@@ -647,7 +645,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
-      final Function<UInt256, StorageSlotKey> slotKeys,
+      final StorageSlotKeyCache slotKeys,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
         b ->
@@ -655,12 +653,11 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 transactionLocation, slotKeys));
   }
 
-  /** Slot keys hashed through the accumulator, which keeps the slot hashes of the block. */
-  private static Function<UInt256, StorageSlotKey> storageSlotKeys(
-      final MutableWorldState worldState) {
+  /** Slot keys of the block, kept by the path-based accumulator for the whole block. */
+  private static StorageSlotKeyCache storageSlotKeys(final MutableWorldState worldState) {
     return worldState instanceof PathBasedWorldState pathBasedWorldState
-        ? pathBasedWorldState.getAccumulator()::createStorageSlotKey
-        : StorageSlotKey::new;
+        ? pathBasedWorldState.getAccumulator().getStorageSlotKeys()
+        : new StorageSlotKeyCache();
   }
 
   private void applyAccessLocationTracker(

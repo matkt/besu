@@ -31,6 +31,7 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -65,7 +66,6 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -209,7 +209,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -250,7 +250,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -280,7 +280,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -355,7 +355,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -445,7 +445,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -491,7 +491,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           protocolContext,
@@ -531,7 +531,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -572,7 +572,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),
@@ -718,7 +718,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       final Transaction tx0 = mockTransaction();
       final Transaction tx1 = mockTransaction();
@@ -776,7 +776,7 @@ class BalTransactionProcessorUnitTest {
               transactionProcessor,
               blockAccessList,
               BalConfiguration.DEFAULT,
-              new ConcurrentHashMap<>());
+              new StorageSlotKeyCache());
 
       processor.runAsyncBlock(
           env.protocolContext(),

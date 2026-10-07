@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -36,12 +36,10 @@ import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.tuweni.units.bigints.UInt256;
 
 /**
  * Optimizes transaction processing by executing transactions in parallel within a given block.
@@ -61,20 +59,20 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
    * processor is responsible for the individual processing of transactions.
    *
    * @param transactionProcessor The transaction processor for processing individual transactions.
-   * @param blockSlotHashes keccak(slot) lookup of the block accumulator
+   * @param blockSlotKeys slot keys of the block accumulator
    */
   public OptimisticConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
-      final Map<UInt256, Hash> blockSlotHashes) {
-    this(transactionProcessor, new TransactionCollisionDetector(), blockSlotHashes);
+      final StorageSlotKeyCache blockSlotKeys) {
+    this(transactionProcessor, new TransactionCollisionDetector(), blockSlotKeys);
   }
 
   @VisibleForTesting
   public OptimisticConcurrentTransactionProcessor(
       final MainnetTransactionProcessor transactionProcessor,
       final TransactionCollisionDetector transactionCollisionDetector,
-      final Map<UInt256, Hash> blockSlotHashes) {
-    super(blockSlotHashes);
+      final StorageSlotKeyCache blockSlotKeys) {
+    super(blockSlotKeys);
     this.transactionProcessor = transactionProcessor;
     this.transactionCollisionDetector = transactionCollisionDetector;
   }
@@ -103,7 +101,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
 
     try {
       ws.disableCacheMerkleTrieLoader();
-      ws.useStorageKeyHashLookup(blockSlotHashes);
+      ws.useStorageSlotKeys(blockSlotKeys);
       final ParallelizedTransactionContext.Builder contextBuilder =
           new ParallelizedTransactionContext.Builder();
       final PathBasedWorldStateUpdateAccumulator<?> roundWorldStateUpdater =
@@ -113,7 +111,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                      transactionLocation, roundWorldStateUpdater::createStorageSlotKey));
+                      transactionLocation, blockSlotKeys));
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(
               transactionUpdater,

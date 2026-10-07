@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
@@ -46,7 +47,6 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -93,7 +93,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.evmConfiguration = evmConfiguration;
     this.codeCache = codeCache;
-    final BonsaiWorldStateUpdateAccumulator acc = newAccumulator(new ConcurrentHashMap<>());
+    final BonsaiWorldStateUpdateAccumulator acc = newAccumulator(new StorageSlotKeyCache());
     this.setAccumulator(acc);
     final FrontierStorageRootTracker frontierStorageRootTracker =
         worldStateConfig.isTrieDisabled()
@@ -121,7 +121,7 @@ public class BonsaiWorldState extends PathBasedWorldState {
   }
 
   private BonsaiWorldStateUpdateAccumulator newAccumulator(
-      final Map<UInt256, Hash> storageKeyHashLookup) {
+      final StorageSlotKeyCache storageSlotKeys) {
     return new BonsaiWorldStateUpdateAccumulator(
         this,
         (addr, value) ->
@@ -132,17 +132,17 @@ public class BonsaiWorldState extends PathBasedWorldState {
                 getWorldStateStorage(), addr, value),
         evmConfiguration,
         codeCache,
-        storageKeyHashLookup);
+        storageSlotKeys);
   }
 
   /**
-   * Replaces the accumulator, before any use, with one hashing storage slots through the lookup of
-   * the block, so the transactions of a block executed on their own world state hash a slot once.
+   * Replaces the accumulator, before any use, with one sharing the slot keys of the block, so the
+   * transactions of a block executed on their own world state hash a slot once.
    *
-   * @param storageKeyHashLookup slot to keccak(slot) lookup of the block
+   * @param storageSlotKeys slot keys of the block
    */
-  public void useStorageKeyHashLookup(final Map<UInt256, Hash> storageKeyHashLookup) {
-    setAccumulator(newAccumulator(storageKeyHashLookup));
+  public void useStorageSlotKeys(final StorageSlotKeyCache storageSlotKeys) {
+    setAccumulator(newAccumulator(storageSlotKeys));
   }
 
   @Override

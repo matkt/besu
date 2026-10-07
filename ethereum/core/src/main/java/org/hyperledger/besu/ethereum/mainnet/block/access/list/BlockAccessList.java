@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.encoding.BlockAccessListDecoder;
 import org.hyperledger.besu.ethereum.core.encoding.BlockAccessListEncoder;
@@ -34,7 +35,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -188,18 +188,36 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
   public static class BlockAccessListBuilder {
     final Map<Address, AccountBuilder> accountChangesBuilders = new HashMap<>();
 
+    public static AccessLocationTracker createPreExecutionAccessLocationTracker() {
+      return createPreExecutionAccessLocationTracker(new StorageSlotKeyCache());
+    }
+
+    /** With the slot keys of the block, so its slots are hashed once. */
     public static AccessLocationTracker createPreExecutionAccessLocationTracker(
-        final Function<UInt256, StorageSlotKey> slotKeys) {
+        final StorageSlotKeyCache slotKeys) {
       return new AccessLocationTracker(0, true, slotKeys);
     }
 
     public static AccessLocationTracker createPostExecutionAccessLocationTracker(
-        final int numberOfTransactions, final Function<UInt256, StorageSlotKey> slotKeys) {
+        final int numberOfTransactions) {
+      return createPostExecutionAccessLocationTracker(
+          numberOfTransactions, new StorageSlotKeyCache());
+    }
+
+    /** With the slot keys of the block, so its slots are hashed once. */
+    public static AccessLocationTracker createPostExecutionAccessLocationTracker(
+        final int numberOfTransactions, final StorageSlotKeyCache slotKeys) {
       return new AccessLocationTracker((long) numberOfTransactions + 1L, true, slotKeys);
     }
 
     public static AccessLocationTracker createTransactionAccessLocationTracker(
-        final int transactionLocation, final Function<UInt256, StorageSlotKey> slotKeys) {
+        final int transactionLocation) {
+      return createTransactionAccessLocationTracker(transactionLocation, new StorageSlotKeyCache());
+    }
+
+    /** With the slot keys of the block, so its slots are hashed once. */
+    public static AccessLocationTracker createTransactionAccessLocationTracker(
+        final int transactionLocation, final StorageSlotKeyCache slotKeys) {
       return new AccessLocationTracker((long) transactionLocation + 1L, false, slotKeys);
     }
 

@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView;
 import org.hyperledger.besu.ethereum.rlp.RLP;
@@ -80,8 +81,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   private final Map<Address, StorageConsumingMap<StorageSlotKey, BonsaiValue<UInt256>>>
       storageToUpdate = new ConcurrentHashMap<>();
 
-  // slot -> keccak(slot), shared with the accumulators of the block's transactions
-  private final Map<UInt256, Hash> storageKeyHashLookup;
+  // slot hashes of the block, shared with the accumulators of its transactions
+  private final StorageSlotKeyCache storageSlotKeys;
   protected boolean isAccumulatorStateChanged;
 
   public PathBasedWorldStateUpdateAccumulator(
@@ -89,7 +90,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration) {
-    this(world, accountPreloader, storagePreloader, evmConfiguration, new ConcurrentHashMap<>());
+    this(world, accountPreloader, storagePreloader, evmConfiguration, new StorageSlotKeyCache());
   }
 
   public PathBasedWorldStateUpdateAccumulator(
@@ -97,14 +98,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       final Consumer<BonsaiValue<ACCOUNT>> accountPreloader,
       final Consumer<StorageSlotKey> storagePreloader,
       final EvmConfiguration evmConfiguration,
-      final Map<UInt256, Hash> storageKeyHashLookup) {
+      final StorageSlotKeyCache storageSlotKeys) {
     super(world, evmConfiguration);
     this.accountsToUpdate = new AccountConsumingMap<>(new ConcurrentHashMap<>(), accountPreloader);
     this.accountPreloader = accountPreloader;
     this.storagePreloader = storagePreloader;
     this.isAccumulatorStateChanged = false;
     this.evmConfiguration = evmConfiguration;
-    this.storageKeyHashLookup = storageKeyHashLookup;
+    this.storageSlotKeys = storageSlotKeys;
   }
 
   public void cloneFromUpdater(final PathBasedWorldStateUpdateAccumulator<ACCOUNT> source) {
@@ -1030,25 +1031,19 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     resetAccumulatorStateChanged();
     updatedAccounts.clear();
     deletedAccounts.clear();
-    storageKeyHashLookup.clear();
+    storageSlotKeys.clear();
   }
 
   /**
-   * Slot hashes of this accumulator, to share with the accumulators of the block's transactions.
+   * Slot keys of the block, to share with the accumulators and trackers of its transactions.
    *
-   * @return the slot to keccak(slot) lookup
+   * @return the slot key cache of this accumulator
    */
-  public Map<UInt256, Hash> getStorageKeyHashLookup() {
-    return storageKeyHashLookup;
+  public StorageSlotKeyCache getStorageSlotKeys() {
+    return storageSlotKeys;
   }
 
-  /**
-   * Slot key whose hash comes from the slot hash lookup, so it is computed at most once.
-   *
-   * @param slotKey the storage slot
-   * @return the slot key with its hash
-   */
-  public StorageSlotKey createStorageSlotKey(final UInt256 slotKey) {
+  private StorageSlotKey createStorageSlotKey(final UInt256 slotKey) {
     return new StorageSlotKey(hashAndSaveSlotPreImage(slotKey), Optional.of(slotKey));
   }
 
@@ -1058,8 +1053,7 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   }
 
   protected Hash hashAndSaveSlotPreImage(final UInt256 slotKey) {
-    // computeIfAbsent: transactions running in parallel share the lookup and must not race
-    return storageKeyHashLookup.computeIfAbsent(slotKey, Hash::hash);
+    return storageSlotKeys.slotHash(slotKey);
   }
 
   public abstract PathBasedWorldStateUpdateAccumulator<ACCOUNT> copy();

@@ -15,7 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet.parallelization;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -31,11 +31,8 @@ import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
-
-import org.apache.tuweni.units.bigints.UInt256;
 
 public class ParallelTransactionPreprocessing implements PreprocessingFunction {
 
@@ -68,18 +65,18 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
         || !(worldState instanceof PathBasedWorldState pathBasedWorldState)) {
       return Optional.empty();
     }
-    final Map<UInt256, Hash> blockSlotHashes =
-        pathBasedWorldState.getAccumulator().getStorageKeyHashLookup();
+    final StorageSlotKeyCache blockSlotKeys =
+        pathBasedWorldState.getAccumulator().getStorageSlotKeys();
 
     final ParallelBlockTransactionProcessor parallelProcessor;
 
     if (balConfiguration.isPerfectParallelizationEnabled() && maybeBlockBal.isPresent()) {
       parallelProcessor =
           new BalConcurrentTransactionProcessor(
-              transactionProcessor, maybeBlockBal.get(), balConfiguration, blockSlotHashes);
+              transactionProcessor, maybeBlockBal.get(), balConfiguration, blockSlotKeys);
     } else {
       parallelProcessor =
-          new OptimisticConcurrentTransactionProcessor(transactionProcessor, blockSlotHashes);
+          new OptimisticConcurrentTransactionProcessor(transactionProcessor, blockSlotKeys);
     }
 
     parallelProcessor.runAsyncBlock(

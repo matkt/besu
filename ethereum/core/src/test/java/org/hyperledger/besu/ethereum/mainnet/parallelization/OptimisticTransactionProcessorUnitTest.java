@@ -30,6 +30,7 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -61,7 +62,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -111,7 +111,7 @@ class OptimisticTransactionProcessorUnitTest {
   void setUp() {
     processor =
         new OptimisticConcurrentTransactionProcessor(
-            transactionProcessor, collisionDetector, new ConcurrentHashMap<>());
+            transactionProcessor, collisionDetector, new StorageSlotKeyCache());
     env = createTestEnvironment();
   }
 

@@ -26,7 +26,6 @@ import static org.hyperledger.besu.plugin.data.TransactionSelectionResult.SELECT
 import static org.hyperledger.besu.plugin.data.TransactionSelectionResult.TX_EVALUATION_TOO_LONG;
 
 import org.hyperledger.besu.datatypes.Address;
-import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.selectors.AbstractTransactionSelector;
 import org.hyperledger.besu.ethereum.blockcreation.txselection.selectors.BlobPriceTransactionSelector;
@@ -707,7 +706,7 @@ public class BlockTransactionSelector implements BlockTransactionSelectionServic
         maybeBlockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                    currentTxnLocation.get(), StorageSlotKey::new));
+                    currentTxnLocation.get()));
     final TransactionProcessingResult result =
         transactionProcessor.processTransaction(
             txWorldStateUpdater,

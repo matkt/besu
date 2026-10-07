@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.mainnet.block.access.list;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.AccountChangesBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.PartialBlockAccessView.PartialBlockAccessViewBuilder;
@@ -33,7 +34,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -42,7 +42,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
   private final long blockAccessIndex;
   private final boolean sharedIndex;
-  private final Function<UInt256, StorageSlotKey> slotKeys;
+  private final StorageSlotKeyCache slotKeys;
   private final Map<Address, AccountAccessList> touchedAccounts = new ConcurrentHashMap<>();
 
   /**
@@ -56,12 +56,10 @@ public class AccessLocationTracker implements Eip7928AccessList {
    *
    * @param blockAccessIndex index of the block access list entries this tracker records
    * @param sharedIndex whether several calls record at the same index
-   * @param slotKeys builds the key of a touched slot, reusing its hash when already known
+   * @param slotKeys slot keys of the block, so a slot hashed already is not hashed again
    */
   public AccessLocationTracker(
-      final long blockAccessIndex,
-      final boolean sharedIndex,
-      final Function<UInt256, StorageSlotKey> slotKeys) {
+      final long blockAccessIndex, final boolean sharedIndex, final StorageSlotKeyCache slotKeys) {
     this.blockAccessIndex = blockAccessIndex;
     this.sharedIndex = sharedIndex;
     this.slotKeys = slotKeys;
@@ -149,7 +147,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
       final boolean isDeleted = deletedAddresses.contains(address);
       if (isDeleted || !updatedAddresses.contains(address)) {
         for (final UInt256 slot : touchedSlots) {
-          accountBuilder.addStorageRead(slotKeys.apply(slot));
+          accountBuilder.addStorageRead(slotKeys.slotKey(slot));
         }
         if (isDeleted) {
           final Account originalAccount = findOriginalAccount(stackedUpdater, address);
@@ -164,7 +162,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
           (UpdateTrackingAccount<?>) stackedUpdater.get(address);
       if (account == null) {
         for (final UInt256 slot : touchedSlots) {
-          accountBuilder.addStorageRead(slotKeys.apply(slot));
+          accountBuilder.addStorageRead(slotKeys.slotKey(slot));
         }
         continue;
       }
@@ -198,7 +196,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
 
       final Map<UInt256, UInt256> updatedStorage = account.getUpdatedStorage();
       for (final UInt256 touchedSlot : touchedSlots) {
-        final StorageSlotKey slotKeyObj = slotKeys.apply(touchedSlot);
+        final StorageSlotKey slotKeyObj = slotKeys.slotKey(touchedSlot);
 
         final UInt256 updatedValue = updatedStorage.get(touchedSlot);
         final boolean present = updatedValue != null || updatedStorage.containsKey(touchedSlot);
@@ -241,7 +239,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
     final Account account = indexStart == null || isDeleted ? null : stackedUpdater.get(address);
     if (account == null) {
       for (final UInt256 slot : touchedSlots) {
-        accountBuilder.addStorageRead(slotKeys.apply(slot));
+        accountBuilder.addStorageRead(slotKeys.slotKey(slot));
       }
       // Deleted at this index, by this call or an earlier one.
       if (indexStart != null && !indexStart.balance.isZero()) {
@@ -263,7 +261,7 @@ public class AccessLocationTracker implements Eip7928AccessList {
     }
 
     for (final UInt256 touchedSlot : touchedSlots) {
-      final StorageSlotKey slotKeyObj = slotKeys.apply(touchedSlot);
+      final StorageSlotKey slotKeyObj = slotKeys.slotKey(touchedSlot);
       final UInt256 originalValue = indexStart.storageValue(touchedSlot);
       if (originalValue == null) {
         accountBuilder.addStorageRead(slotKeyObj);

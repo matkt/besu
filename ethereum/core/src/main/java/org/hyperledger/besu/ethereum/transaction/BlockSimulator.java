@@ -24,7 +24,6 @@ import org.hyperledger.besu.datatypes.BlobGas;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StateOverride;
 import org.hyperledger.besu.datatypes.StateOverrideMap;
-import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -299,9 +298,7 @@ public class BlockSimulator {
 
     Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
         blockAccessListBuilder.map(
-            b ->
-                BlockAccessListBuilder.createPreExecutionAccessLocationTracker(
-                    StorageSlotKey::new));
+            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker());
 
     final BlockProcessingContext blockProcessingContext =
         new BlockProcessingContext(
@@ -348,7 +345,7 @@ public class BlockSimulator {
         blockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                    blockStateCallSimulationResult.getTransactions().size(), StorageSlotKey::new));
+                    blockStateCallSimulationResult.getTransactions().size()));
 
     // EIP-7685: process EL requests
     final Optional<RequestProcessorCoordinator> requestProcessor =
@@ -560,9 +557,7 @@ public class BlockSimulator {
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
-        b ->
-            BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                transactionLocation, StorageSlotKey::new));
+        b -> BlockAccessListBuilder.createTransactionAccessLocationTracker(transactionLocation));
   }
 
   private BlockSimulationResult createFinalBlock(
