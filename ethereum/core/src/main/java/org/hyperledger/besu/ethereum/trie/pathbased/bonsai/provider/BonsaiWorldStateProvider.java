@@ -383,18 +383,21 @@ public class BonsaiWorldStateProvider implements WorldStateArchive {
         .map(MutableWorldState::freezeStorage);
   }
 
-  /** Aligns in-memory trie branch with the format required for the upcoming roll/persist. */
+  /**
+   * Aligns in-memory trie branch with the format required for the upcoming roll/persist.
+   *
+   * <p>The cursor comes from the world state's own storage: a cached world state on a side branch
+   * holds that branch's nodes, while the provider's storage names the head's block.
+   */
   private void ensureTrieBranchType(
       final BonsaiWorldState worldState, final TrieBranchType rollBranchType) {
     if (worldState.getTrieBranchType() != rollBranchType) {
+      final BonsaiWorldStateKeyValueStorage candidateStorage = worldState.getWorldStateStorage();
       final Hash stateroot =
           Hash.wrap(
               Bytes32.wrap(
-                  worldStateKeyValueStorage
-                      .getWorldStateRootHash(rollBranchType)
-                      .orElse(Bytes32.ZERO)));
-      final Hash blockhash =
-          worldStateKeyValueStorage.getWorldStateBlockHash(rollBranchType).orElseThrow();
+                  candidateStorage.getWorldStateRootHash(rollBranchType).orElse(Bytes32.ZERO)));
+      final Hash blockhash = candidateStorage.getWorldStateBlockHash(rollBranchType).orElseThrow();
       worldState.resetWorldStateTo(blockhash, stateroot, rollBranchType);
     }
   }
