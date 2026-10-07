@@ -12,13 +12,15 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.mainnet.parallelization;
+package org.hyperledger.besu.ethereum.slothashing;
 
 import static net.bytebuddy.matcher.ElementMatchers.is;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
 import org.hyperledger.besu.crypto.Hash;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 import net.bytebuddy.agent.ByteBuddyAgent;
@@ -34,6 +36,9 @@ public final class KeccakCounter {
 
   /** keccak256 of a 32-byte input, which is how storage slot keys are hashed. */
   public static final LongAdder WORD_INPUTS = new LongAdder();
+
+  /** The 32-byte inputs hashed while {@link #distinctWordInputs} runs, null otherwise. */
+  public static volatile Set<Bytes> recordedWordInputs;
 
   private static boolean installed;
 
@@ -61,6 +66,17 @@ public final class KeccakCounter {
     installed = true;
   }
 
+  /** Runs {@code action} and returns how many different 32-byte inputs it hashed. */
+  public static int distinctWordInputs(final Runnable action) {
+    recordedWordInputs = ConcurrentHashMap.newKeySet();
+    try {
+      action.run();
+      return recordedWordInputs.size();
+    } finally {
+      recordedWordInputs = null;
+    }
+  }
+
   /** Inlined at the start of {@link Hash#keccak256}. */
   public static final class CountKeccak {
 
@@ -71,6 +87,10 @@ public final class KeccakCounter {
       ALL.increment();
       if (input.size() == 32) {
         WORD_INPUTS.increment();
+        final Set<Bytes> recorded = recordedWordInputs;
+        if (recorded != null) {
+          recorded.add(input.copy());
+        }
       }
     }
   }
