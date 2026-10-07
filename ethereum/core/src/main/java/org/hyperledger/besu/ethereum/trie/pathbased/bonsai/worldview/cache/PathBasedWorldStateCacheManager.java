@@ -130,12 +130,13 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
     if (cachedWorldStatesByHash.containsKey(blockHash)) {
       // return a new worldstate using worldstate storage and an isolated copy of the updater
       return Optional.ofNullable(cachedWorldStatesByHash.get(blockHash))
+          .map(BonsaiCachedWorldStateView::getCachedStorage)
           .map(
               cached ->
                   createWorldState(
                       archive,
-                      createLayeredKeyValueStorage(cached.getWorldStateStorage()),
-                      cached.getStoredRootAndBlockHash(),
+                      createLayeredKeyValueStorage(cached.worldStateStorage()),
+                      cached.rootAndBlockHash(),
                       evmConfiguration));
     }
     LOG.atDebug()

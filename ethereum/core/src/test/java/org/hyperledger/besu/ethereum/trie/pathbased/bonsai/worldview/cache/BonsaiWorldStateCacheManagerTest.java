@@ -151,6 +151,29 @@ class BonsaiWorldStateCacheManagerTest {
     Mockito.verify(storage, Mockito.times(1)).getWorldStateBlockHash();
   }
 
+  @Test
+  void aReplacedStorageIsCachedWithItsOwnRootAndBlockHash() {
+    final BonsaiWorldStateKeyValueStorage after = storageAt(headers[2]);
+    final BonsaiCachedWorldStateView view =
+        new BonsaiCachedWorldStateView(headers[1], storageAt(headers[1]));
+
+    view.updateWorldStateStorage(after);
+
+    final BonsaiCachedWorldStateView.CachedStorage cached = view.getCachedStorage();
+    assertThat(cached.worldStateStorage()).isSameAs(after);
+    assertThat(cached.rootAndBlockHash().rootHash()).contains(headers[2].getStateRoot().getBytes());
+    assertThat(cached.rootAndBlockHash().blockHash()).contains(headers[2].getBlockHash());
+  }
+
+  private static BonsaiWorldStateKeyValueStorage storageAt(final BlockHeader header) {
+    final BonsaiWorldStateKeyValueStorage storage =
+        Mockito.mock(BonsaiWorldStateKeyValueStorage.class);
+    Mockito.when(storage.getWorldStateRootHash())
+        .thenReturn(Optional.of(header.getStateRoot().getBytes()));
+    Mockito.when(storage.getWorldStateBlockHash()).thenReturn(Optional.of(header.getBlockHash()));
+    return storage;
+  }
+
   private static Hash uniqueStateRoot(final long blockNumber) {
     return Hash.wrap(Bytes32.leftPad(Bytes.ofUnsignedLong(blockNumber)));
   }

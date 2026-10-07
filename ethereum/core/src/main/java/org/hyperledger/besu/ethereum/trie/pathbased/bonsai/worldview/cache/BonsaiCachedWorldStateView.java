@@ -24,9 +24,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class BonsaiCachedWorldStateView implements StorageSubscriber {
-  private BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
-  // read once: every world state created from this block (one per transaction) starts from them
-  private volatile StoredRootAndBlockHash storedRootAndBlockHash;
+
+  /** The storage of the block and its root and block hash, read once and replaced together. */
+  public record CachedStorage(
+      BonsaiWorldStateKeyValueStorage worldStateStorage, StoredRootAndBlockHash rootAndBlockHash) {
+
+    static CachedStorage of(final BonsaiWorldStateKeyValueStorage worldStateStorage) {
+      return new CachedStorage(
+          worldStateStorage, StoredRootAndBlockHash.readFrom(worldStateStorage));
+    }
+  }
+
+  private volatile CachedStorage cachedStorage;
   private final BlockHeader blockHeader;
   private long worldViewSubscriberId;
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiCachedWorldStateView.class);
@@ -34,17 +43,17 @@ public class BonsaiCachedWorldStateView implements StorageSubscriber {
   public BonsaiCachedWorldStateView(
       final BlockHeader blockHeader, final BonsaiWorldStateKeyValueStorage worldView) {
     this.blockHeader = blockHeader;
-    this.worldStateKeyValueStorage = worldView;
-    this.storedRootAndBlockHash = StoredRootAndBlockHash.readFrom(worldView);
-    this.worldViewSubscriberId = worldStateKeyValueStorage.subscribe(this);
+    this.cachedStorage = CachedStorage.of(worldView);
+    this.worldViewSubscriberId = worldView.subscribe(this);
   }
 
   public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
-    return worldStateKeyValueStorage;
+    return cachedStorage.worldStateStorage();
   }
 
-  public StoredRootAndBlockHash getStoredRootAndBlockHash() {
-    return storedRootAndBlockHash;
+  /** The storage of the block with its root and block hash, from the same replacement. */
+  public CachedStorage getCachedStorage() {
+    return cachedStorage;
   }
 
   public long getBlockNumber() {
@@ -56,6 +65,8 @@ public class BonsaiCachedWorldStateView implements StorageSubscriber {
   }
 
   public synchronized void close() {
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
+        cachedStorage.worldStateStorage();
     worldStateKeyValueStorage.unSubscribe(this.worldViewSubscriberId);
     try {
       worldStateKeyValueStorage.close();
@@ -67,10 +78,9 @@ public class BonsaiCachedWorldStateView implements StorageSubscriber {
   public synchronized void updateWorldStateStorage(
       final BonsaiWorldStateKeyValueStorage newWorldStateStorage) {
     long newSubscriberId = newWorldStateStorage.subscribe(this);
-    this.worldStateKeyValueStorage.unSubscribe(this.worldViewSubscriberId);
-    final BonsaiWorldStateKeyValueStorage oldWorldStateStorage = this.worldStateKeyValueStorage;
-    this.worldStateKeyValueStorage = newWorldStateStorage;
-    this.storedRootAndBlockHash = StoredRootAndBlockHash.readFrom(newWorldStateStorage);
+    final BonsaiWorldStateKeyValueStorage oldWorldStateStorage = cachedStorage.worldStateStorage();
+    oldWorldStateStorage.unSubscribe(this.worldViewSubscriberId);
+    this.cachedStorage = CachedStorage.of(newWorldStateStorage);
     this.worldViewSubscriberId = newSubscriberId;
     try {
       oldWorldStateStorage.close();
