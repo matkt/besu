@@ -22,7 +22,9 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount
 import org.hyperledger.besu.evm.account.MutableAccount;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
@@ -41,11 +43,21 @@ public final class BlockAccessListOverlay {
 
   private final BlockAccessListAccountLookup accountLookup;
   private final long maxTxIndexExclusive;
+  // slot -> keccak(slot) of the block, for the accumulator built on this overlay
+  private final Map<UInt256, Hash> storageKeyHashLookup;
 
   public BlockAccessListOverlay(
       final BlockAccessListAccountLookup accountLookup, final long maxTxIndexExclusive) {
+    this(accountLookup, maxTxIndexExclusive, new ConcurrentHashMap<>());
+  }
+
+  public BlockAccessListOverlay(
+      final BlockAccessListAccountLookup accountLookup,
+      final long maxTxIndexExclusive,
+      final Map<UInt256, Hash> storageKeyHashLookup) {
     this.accountLookup = accountLookup;
     this.maxTxIndexExclusive = maxTxIndexExclusive;
+    this.storageKeyHashLookup = storageKeyHashLookup;
   }
 
   public BlockAccessListAccountLookup getAccountLookup() {
@@ -54,6 +66,10 @@ public final class BlockAccessListOverlay {
 
   public long getMaxTxIndexExclusive() {
     return maxTxIndexExclusive;
+  }
+
+  public Map<UInt256, Hash> getStorageKeyHashLookup() {
+    return storageKeyHashLookup;
   }
 
   public Optional<Wei> getBalance(final Address address) {

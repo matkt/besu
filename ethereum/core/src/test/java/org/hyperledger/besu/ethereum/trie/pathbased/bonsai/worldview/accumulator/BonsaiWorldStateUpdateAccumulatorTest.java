@@ -120,8 +120,9 @@ class BonsaiWorldStateUpdateAccumulatorTest {
 
       transaction.applyBlockAccessListOverlay(
           new BlockAccessListOverlay(
-              BlockAccessListAccountLookup.of(new BlockAccessList(List.of())), 1L),
-          block.getAccumulator().getStorageKeyHashLookup());
+              BlockAccessListAccountLookup.of(new BlockAccessList(List.of())),
+              1L,
+              block.getAccumulator().getStorageKeyHashLookup()));
 
       assertThat(transaction.getAccumulator())
           .isInstanceOf(BonsaiBalWorldStateUpdateAccumulator.class);

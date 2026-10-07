@@ -18,6 +18,7 @@ import static org.hyperledger.besu.ethereum.mainnet.feemarket.ExcessBlobGasCalcu
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
@@ -43,6 +44,7 @@ import org.hyperledger.besu.ethereum.processing.TransactionProcessingResult;
 import org.hyperledger.besu.ethereum.trie.MerkleTrieException;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
@@ -60,7 +62,9 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
+import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -250,11 +254,12 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
             .getBlockAccessListFactory()
             .map(BlockAccessListFactory::newBlockAccessListBuilder);
 
+    final Function<UInt256, StorageSlotKey> slotKeys = storageSlotKeys(worldState);
     Optional<PreprocessingContext> preProcessingContext = Optional.empty();
     try {
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
           blockAccessListBuilder.map(
-              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(worldState));
+              b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(slotKeys));
       final BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
               blockHeader,
@@ -315,7 +320,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
         }
 
         final Optional<AccessLocationTracker> transactionLocationTracker =
-            createTransactionAccessLocationTracker(blockAccessListBuilder, worldState, i);
+            createTransactionAccessLocationTracker(blockAccessListBuilder, slotKeys, i);
         TransactionProcessingResult transactionProcessingResult =
             getTransactionProcessingResult(
                 preProcessingContext,
@@ -414,7 +419,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                      transactions.size(), worldState));
+                      transactions.size(), slotKeys));
 
       final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
           protocolSpec.getWithdrawalsProcessor();
@@ -642,12 +647,20 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
-      final MutableWorldState worldState,
+      final Function<UInt256, StorageSlotKey> slotKeys,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
         b ->
             BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                transactionLocation, worldState));
+                transactionLocation, slotKeys));
+  }
+
+  /** Slot keys hashed through the accumulator, which keeps the slot hashes of the block. */
+  private static Function<UInt256, StorageSlotKey> storageSlotKeys(
+      final MutableWorldState worldState) {
+    return worldState instanceof PathBasedWorldState pathBasedWorldState
+        ? pathBasedWorldState.getAccumulator()::createStorageSlotKey
+        : StorageSlotKey::new;
   }
 
   private void applyAccessLocationTracker(

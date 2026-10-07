@@ -24,6 +24,7 @@ import org.hyperledger.besu.datatypes.BlobGas;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StateOverride;
 import org.hyperledger.besu.datatypes.StateOverrideMap;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.Block;
@@ -298,7 +299,9 @@ public class BlockSimulator {
 
     Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
         blockAccessListBuilder.map(
-            b -> BlockAccessListBuilder.createPreExecutionAccessLocationTracker(ws));
+            b ->
+                BlockAccessListBuilder.createPreExecutionAccessLocationTracker(
+                    StorageSlotKey::new));
 
     final BlockProcessingContext blockProcessingContext =
         new BlockProcessingContext(
@@ -345,7 +348,7 @@ public class BlockSimulator {
         blockAccessListBuilder.map(
             b ->
                 BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                    blockStateCallSimulationResult.getTransactions().size(), ws));
+                    blockStateCallSimulationResult.getTransactions().size(), StorageSlotKey::new));
 
     // EIP-7685: process EL requests
     final Optional<RequestProcessorCoordinator> requestProcessor =
@@ -469,7 +472,7 @@ public class BlockSimulator {
           getBlobGasPricePerGasSupplier(blockStateCall.getBlockOverrides(), validationParams);
 
       final Optional<AccessLocationTracker> transactionLocationTracker =
-          createTransactionAccessLocationTracker(blockAccessListBuilder, ws, transactionLocation);
+          createTransactionAccessLocationTracker(blockAccessListBuilder, transactionLocation);
       final Optional<TransactionSimulatorResult> transactionSimulatorResult =
           transactionSimulator.processWithWorldUpdater(
               callParameter,
@@ -555,11 +558,11 @@ public class BlockSimulator {
 
   private Optional<AccessLocationTracker> createTransactionAccessLocationTracker(
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
-      final MutableWorldState ws,
       final int transactionLocation) {
     return blockAccessListBuilder.map(
         b ->
-            BlockAccessListBuilder.createTransactionAccessLocationTracker(transactionLocation, ws));
+            BlockAccessListBuilder.createTransactionAccessLocationTracker(
+                transactionLocation, StorageSlotKey::new));
   }
 
   private BlockSimulationResult createFinalBlock(

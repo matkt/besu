@@ -22,9 +22,7 @@ import org.hyperledger.besu.ethereum.core.encoding.BlockAccessListEncoder;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
-import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -191,27 +189,18 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
     final Map<Address, AccountBuilder> accountChangesBuilders = new HashMap<>();
 
     public static AccessLocationTracker createPreExecutionAccessLocationTracker(
-        final MutableWorldState worldState) {
-      return new AccessLocationTracker(0, true, slotKeys(worldState));
+        final Function<UInt256, StorageSlotKey> slotKeys) {
+      return new AccessLocationTracker(0, true, slotKeys);
     }
 
     public static AccessLocationTracker createPostExecutionAccessLocationTracker(
-        final int numberOfTransactions, final MutableWorldState worldState) {
-      return new AccessLocationTracker(
-          (long) numberOfTransactions + 1L, true, slotKeys(worldState));
+        final int numberOfTransactions, final Function<UInt256, StorageSlotKey> slotKeys) {
+      return new AccessLocationTracker((long) numberOfTransactions + 1L, true, slotKeys);
     }
 
     public static AccessLocationTracker createTransactionAccessLocationTracker(
-        final int transactionLocation, final MutableWorldState worldState) {
-      return new AccessLocationTracker(
-          (long) transactionLocation + 1L, false, slotKeys(worldState));
-    }
-
-    /** Slot keys from the world state's accumulator, which keeps the slot hashes of the block. */
-    private static Function<UInt256, StorageSlotKey> slotKeys(final MutableWorldState worldState) {
-      return worldState instanceof PathBasedWorldState pathBasedWorldState
-          ? pathBasedWorldState.getAccumulator()::createStorageSlotKey
-          : StorageSlotKey::new;
+        final int transactionLocation, final Function<UInt256, StorageSlotKey> slotKeys) {
+      return new AccessLocationTracker((long) transactionLocation + 1L, false, slotKeys);
     }
 
     public AccountBuilder getOrCreateAccountBuilder(final Address address) {

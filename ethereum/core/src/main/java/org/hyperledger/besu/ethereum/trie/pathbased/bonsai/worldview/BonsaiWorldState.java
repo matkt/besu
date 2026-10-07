@@ -158,22 +158,9 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   @Override
   public void applyBlockAccessListOverlay(final BlockAccessListOverlay blockAccessListOverlay) {
-    applyBlockAccessListOverlay(blockAccessListOverlay, new ConcurrentHashMap<>());
-  }
-
-  /**
-   * Like {@link #applyBlockAccessListOverlay(BlockAccessListOverlay)}, hashing storage slots
-   * through the lookup of the block.
-   *
-   * @param blockAccessListOverlay the overlay to attach
-   * @param storageKeyHashLookup slot to keccak(slot) lookup of the block
-   */
-  public void applyBlockAccessListOverlay(
-      final BlockAccessListOverlay blockAccessListOverlay,
-      final Map<UInt256, Hash> storageKeyHashLookup) {
     setAccumulator(
         new BonsaiBalWorldStateUpdateAccumulator(
-            this, evmConfiguration, codeCache, blockAccessListOverlay, storageKeyHashLookup));
+            this, evmConfiguration, codeCache, blockAccessListOverlay));
   }
 
   @Override

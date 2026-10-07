@@ -84,16 +84,21 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
       final ProtocolContext protocolContext,
       final Optional<BlockHeader> maybeParentHeader,
       final int transactionLocation) {
-    return maybeParentHeader
-        .flatMap(parentHeader -> getWorldState(protocolContext, parentHeader))
-        .map(
-            ws -> {
-              ws.applyBlockAccessListOverlay(
-                  new BlockAccessListOverlay(
-                      blockAccessListAccountLookup, (long) transactionLocation + 1L),
-                  blockSlotHashes);
-              return ws;
-            });
+    return maybeParentHeader.flatMap(
+        blockHeader ->
+            protocolContext
+                .getWorldStateArchive()
+                .getWorldState(
+                    WorldStateQueryParams.newBuilder()
+                        .withBlockHeader(blockHeader)
+                        .withShouldWorldStateUpdateHead(false)
+                        .withBalOverlay(
+                            new BlockAccessListOverlay(
+                                blockAccessListAccountLookup,
+                                (long) transactionLocation + 1L,
+                                blockSlotHashes))
+                        .build())
+                .map(BonsaiWorldState.class::cast));
   }
 
   @Override
@@ -180,7 +185,7 @@ public class BalConcurrentTransactionProcessor extends ParallelBlockTransactionP
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                      transactionLocation, ws));
+                      transactionLocation, blockUpdater::createStorageSlotKey));
 
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(

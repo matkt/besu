@@ -113,7 +113,7 @@ public class OptimisticConcurrentTransactionProcessor extends ParallelBlockTrans
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createTransactionAccessLocationTracker(
-                      transactionLocation, ws));
+                      transactionLocation, roundWorldStateUpdater::createStorageSlotKey));
       final TransactionProcessingResult result =
           transactionProcessor.processTransaction(
               transactionUpdater,

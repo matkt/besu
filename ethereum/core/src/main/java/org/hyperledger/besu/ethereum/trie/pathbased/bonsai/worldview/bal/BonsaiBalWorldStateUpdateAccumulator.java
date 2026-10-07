@@ -27,9 +27,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.PathBasedWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -47,22 +44,13 @@ public class BonsaiBalWorldStateUpdateAccumulator extends BonsaiWorldStateUpdate
       final EvmConfiguration evmConfiguration,
       final BonsaiCodeCache codeCache,
       final BlockAccessListOverlay blockAccessListOverlay) {
-    this(world, evmConfiguration, codeCache, blockAccessListOverlay, new ConcurrentHashMap<>());
-  }
-
-  public BonsaiBalWorldStateUpdateAccumulator(
-      final BonsaiWorldView world,
-      final EvmConfiguration evmConfiguration,
-      final BonsaiCodeCache codeCache,
-      final BlockAccessListOverlay blockAccessListOverlay,
-      final Map<UInt256, Hash> storageKeyHashLookup) {
     super(
         world,
         (address, value) -> {},
         (address, slot) -> {},
         evmConfiguration,
         codeCache,
-        storageKeyHashLookup);
+        blockAccessListOverlay.getStorageKeyHashLookup());
     this.blockAccessListOverlay = blockAccessListOverlay;
   }
 

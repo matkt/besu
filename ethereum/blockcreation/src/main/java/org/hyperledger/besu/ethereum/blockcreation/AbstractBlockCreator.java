@@ -21,6 +21,7 @@ import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.wit
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.BlobGas;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.ProtocolContext;
@@ -241,7 +242,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPreExecutionAccessLocationTracker(
-                      disposableWorldState));
+                      StorageSlotKey::new));
 
       BlockProcessingContext blockProcessingContext =
           new BlockProcessingContext(
@@ -279,7 +280,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
           blockAccessListBuilder.map(
               b ->
                   BlockAccessListBuilder.createPostExecutionAccessLocationTracker(
-                      transactionResults.getSelectedTransactions().size(), disposableWorldState));
+                      transactionResults.getSelectedTransactions().size(), StorageSlotKey::new));
 
       final Optional<WithdrawalsProcessor> maybeWithdrawalsProcessor =
           newProtocolSpec.getWithdrawalsProcessor();
