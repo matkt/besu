@@ -49,8 +49,11 @@ public final class StorageSlotKeyCache {
    * @return the hash of the slot
    */
   public Hash slotHash(final UInt256 slot) {
+    // get first: computeIfAbsent can lock the bucket even when the slot is there, and every
+    // thread of the block reads this map
+    final Hash hash = slotHashes.get(slot);
     // computeIfAbsent: transactions running in parallel must not hash the same slot twice
-    return slotHashes.computeIfAbsent(slot, Hash::hash);
+    return hash != null ? hash : slotHashes.computeIfAbsent(slot, Hash::hash);
   }
 
   /**
