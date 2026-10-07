@@ -24,14 +24,12 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
@@ -39,7 +37,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorld
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.provider.WorldStateQueryParams;
 import org.hyperledger.besu.ethereum.trie.pathbased.common.storage.TrieBranchSegments;
-import org.hyperledger.besu.ethereum.trie.pathbased.common.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
@@ -90,6 +87,7 @@ class PbtSideBranchTransitionTest {
 
     assertThat(s2State).isPresent();
     assertThat(s2State.get().rootHash()).isEqualTo(s2.getStateRoot());
+    assertThat(s2.getStateRoot()).isEqualTo(binaryRootFromScratch(2, 3));
   }
 
   @Test
@@ -130,6 +128,7 @@ class PbtSideBranchTransitionTest {
     assertThat(h1State).isPresent();
     assertThat(h1State.get().rootHash().getBytes())
         .isEqualTo(storage.getWorldStateRootHash(TrieBranchType.BINARY).orElseThrow());
+    assertThat(h1State.get().rootHash()).isEqualTo(binaryRootFromScratch(1, 5));
   }
 
   /** Builds both branches and leaves H2 as the head; returns S2. */
@@ -156,7 +155,6 @@ class PbtSideBranchTransitionTest {
             s1,
             PBT_TIME + 1,
             u -> u.getAccount(CONTRACT).setStorageValue(SLOT, UInt256.valueOf(2)));
-    chainHead = h2;
     return s2;
   }
 
@@ -182,12 +180,7 @@ class PbtSideBranchTransitionTest {
             });
     chainHead = genesis;
 
-    final TrieLogLayer genesisLog =
-        new TrieLogLayer().setBlockHash(genesis.getBlockHash()).setBlockNumber(0);
-    genesisLog.addAccountChange(CONTRACT, null, new BinaryTrieAccountValue(0, Wei.ONE, Hash.EMPTY));
-    genesisLog.addAccountChange(OTHER, null, new BinaryTrieAccountValue(0, Wei.ONE, Hash.EMPTY));
-    genesisLog.addStorageChange(CONTRACT, new StorageSlotKey(SLOT), null, UInt256.ONE);
-    migrate(genesisLog, genesis);
+    advanceMigratorColumn(genesis);
     return genesis;
   }
 
