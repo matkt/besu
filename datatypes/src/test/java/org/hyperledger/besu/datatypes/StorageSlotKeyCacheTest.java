@@ -37,6 +37,16 @@ class StorageSlotKeyCacheTest {
   }
 
   @Test
+  void addKeepsAKnownHash() {
+    final StorageSlotKeyCache cache = new StorageSlotKeyCache();
+    final StorageSlotKey known = new StorageSlotKey(SLOT);
+
+    cache.add(known);
+
+    assertThat(cache.slotHash(SLOT)).isSameAs(known.getSlotHash());
+  }
+
+  @Test
   void clearForgetsTheHashes() {
     final StorageSlotKeyCache cache = new StorageSlotKeyCache();
     final Hash before = cache.slotHash(SLOT);

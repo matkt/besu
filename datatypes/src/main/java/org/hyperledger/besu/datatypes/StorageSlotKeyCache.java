@@ -53,6 +53,16 @@ public final class StorageSlotKeyCache {
     return slotHashes.computeIfAbsent(slot, Hash::hash);
   }
 
+  /**
+   * Records a slot key whose hash is already known, such as one decoded from a block access list,
+   * so the slot is not hashed again.
+   *
+   * @param slotKey a slot key that has its slot
+   */
+  public void add(final StorageSlotKey slotKey) {
+    slotKey.getSlotKey().ifPresent(slot -> slotHashes.putIfAbsent(slot, slotKey.getSlotHash()));
+  }
+
   /** Forgets every hash, at the end of a block. */
   public void clear() {
     slotHashes.clear();

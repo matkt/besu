@@ -26,9 +26,7 @@ import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BlockAccessListBuilder;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
-import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
 import java.util.Optional;
@@ -52,7 +50,7 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
   @Override
   public Optional<PreprocessingContext> run(
       final ProtocolContext protocolContext,
-      final MutableWorldState worldState,
+      final StorageSlotKeyCache blockSlotKeys,
       final BlockHeader blockHeader,
       final List<Transaction> transactions,
       final Address miningBeneficiary,
@@ -61,12 +59,9 @@ public class ParallelTransactionPreprocessing implements PreprocessingFunction {
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
       final Optional<BlockAccessList> maybeBlockBal,
       final Optional<BlockHeader> maybeParentHeader) {
-    if (!(protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider)
-        || !(worldState instanceof PathBasedWorldState pathBasedWorldState)) {
+    if (!(protocolContext.getWorldStateArchive() instanceof PathBasedWorldStateProvider)) {
       return Optional.empty();
     }
-    final StorageSlotKeyCache blockSlotKeys =
-        pathBasedWorldState.getAccumulator().getStorageSlotKeys();
 
     final ParallelBlockTransactionProcessor parallelProcessor;
 

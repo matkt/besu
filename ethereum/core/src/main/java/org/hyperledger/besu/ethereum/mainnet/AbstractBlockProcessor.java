@@ -252,7 +252,9 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
             .getBlockAccessListFactory()
             .map(BlockAccessListFactory::newBlockAccessListBuilder);
 
-    final StorageSlotKeyCache slotKeys = storageSlotKeys(worldState);
+    final StorageSlotKeyCache slotKeys = PathBasedWorldState.storageSlotKeysOf(worldState);
+    // the slots of a received block access list were hashed when it was decoded
+    blockAccessList.ifPresent(bal -> bal.storageSlotKeys().forEach(slotKeys::add));
     Optional<PreprocessingContext> preProcessingContext = Optional.empty();
     try {
       final Optional<AccessLocationTracker> preExecutionAccessLocationTracker =
@@ -286,7 +288,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       preProcessingContext =
           preprocessingBlockFunction.run(
               protocolContext,
-              worldState,
+              slotKeys,
               blockHeader,
               transactions,
               miningBeneficiary,
@@ -653,13 +655,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
                 transactionLocation, slotKeys));
   }
 
-  /** Slot keys of the block, kept by the path-based accumulator for the whole block. */
-  private static StorageSlotKeyCache storageSlotKeys(final MutableWorldState worldState) {
-    return worldState instanceof PathBasedWorldState pathBasedWorldState
-        ? pathBasedWorldState.getAccumulator().getStorageSlotKeys()
-        : new StorageSlotKeyCache();
-  }
-
   private void applyAccessLocationTracker(
       final Optional<AccessLocationTracker> accessLocationTracker,
       final Optional<BlockAccessListBuilder> blockAccessListBuilder,
@@ -690,7 +685,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
   public interface PreprocessingFunction {
     Optional<PreprocessingContext> run(
         final ProtocolContext protocolContext,
-        final MutableWorldState worldState,
+        final StorageSlotKeyCache blockSlotKeys,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
         final Address miningBeneficiary,
@@ -705,7 +700,7 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       @Override
       public Optional<PreprocessingContext> run(
           final ProtocolContext protocolContext,
-          final MutableWorldState worldState,
+          final StorageSlotKeyCache blockSlotKeys,
           final BlockHeader blockHeader,
           final List<Transaction> transactions,
           final Address miningBeneficiary,

@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -54,6 +55,16 @@ public record BlockAccessList(List<AccountChanges> accountChanges, Optional<Byte
   @JsonCreator
   public static BlockAccessList fromBytes(final Bytes bytes) {
     return BlockAccessListDecoder.decode(new BytesValueRLPInput(bytes, false));
+  }
+
+  /** The storage slot keys of every account, changed or only read, with their hash. */
+  public Stream<StorageSlotKey> storageSlotKeys() {
+    return accountChanges.stream()
+        .flatMap(
+            account ->
+                Stream.concat(
+                    account.storageChanges().stream().map(SlotChanges::slot),
+                    account.storageReads().stream().map(SlotRead::slot)));
   }
 
   @Override

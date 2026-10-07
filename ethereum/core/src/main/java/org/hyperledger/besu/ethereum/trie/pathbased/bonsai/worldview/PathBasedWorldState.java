@@ -22,6 +22,7 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.Bonsai
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.StorageSlotKeyCache;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.DefaultStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.TrieDisabledStateRootCommitter;
@@ -179,6 +180,19 @@ public abstract class PathBasedWorldState
   @Override
   public BonsaiWorldStateKeyValueStorage getWorldStateStorage() {
     return worldStateKeyValueStorage;
+  }
+
+  /**
+   * Slot keys for a block processed on {@code worldState}: the accumulator's for a path-based world
+   * state, so each slot of the block is hashed once, otherwise a new cache.
+   *
+   * @param worldState the world state the block is processed on
+   * @return the slot keys of the block
+   */
+  public static StorageSlotKeyCache storageSlotKeysOf(final MutableWorldState worldState) {
+    return worldState instanceof PathBasedWorldState pathBasedWorldState
+        ? pathBasedWorldState.getAccumulator().getStorageSlotKeys()
+        : new StorageSlotKeyCache();
   }
 
   public PathBasedWorldStateUpdateAccumulator<?> getAccumulator() {
