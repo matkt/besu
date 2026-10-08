@@ -35,6 +35,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.Trie
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeStrategy;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
+import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.AccountStorageEntry;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -53,6 +54,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -382,11 +385,17 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                 .getMultipleFlat(segmentIdentifier, keysToFetch, composedWorldStateStorage));
   }
 
-  public Optional<Bytes> getCode(final Hash codeHash, final Hash accountHash) {
+  /** The code, with its jump destination analysis when the storage holds it. */
+  public Optional<Code> getCode(final Hash codeHash, final Hash accountHash) {
     if (codeHash.equals(Hash.EMPTY)) {
-      return Optional.of(Bytes.EMPTY);
+      return Optional.of(Code.EMPTY_CODE);
     }
     return getFlatDbStrategy().getFlatCode(codeHash, accountHash, composedWorldStateStorage);
+  }
+
+  /** The bytes of the code alone, for the readers that have no use for its analysis. */
+  public Optional<Bytes> getCodeBytes(final Hash codeHash, final Hash accountHash) {
+    return getFlatDbStrategy().getFlatCodeBytes(codeHash, accountHash, composedWorldStateStorage);
   }
 
   /**
@@ -519,6 +528,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     protected final FlatDbStrategy flatDbStrategy;
     protected final SegmentedKeyValueStorage worldStorage;
     protected final TrieNodeStrategy trieNodeStrategy;
+    // code keyed by its hash is shared by every account holding it, so it is written only once
+    private final Set<Hash> writtenCodeHashes = ConcurrentHashMap.newKeySet();
 
     public Updater(
         final SegmentedKeyValueStorageTransaction composedWorldStateTransaction,
@@ -546,7 +557,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     }
 
     public Updater putCode(final Hash accountHash, final Hash codeHash, final Bytes code) {
-      if (code.isEmpty()) {
+      if (code.isEmpty()
+          || (flatDbStrategy.isCodeByCodeHash() && !writtenCodeHashes.add(codeHash))) {
         return this;
       }
       flatDbStrategy.putFlatCode(
