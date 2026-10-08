@@ -25,6 +25,10 @@ import org.apache.tuweni.units.bigints.UInt256;
 /** The Eq operation. */
 public class EqOperation extends AbstractFixedCostOperation {
 
+  // Array-backed 32 bytes words: UInt256 stack items would make stack consumers megamorphic.
+  private static final Bytes TRUE = UInt256.ONE.toBytes();
+  private static final Bytes FALSE = UInt256.ZERO.toBytes();
+
   private static final byte[] ZEROS = new byte[32];
 
   /** The Eq operation success result. */
@@ -55,9 +59,9 @@ public class EqOperation extends AbstractFixedCostOperation {
     final byte[] b = frame.popStackItem().toArrayUnsafe();
     final int nonZeroA = firstNonZeroIndex(a);
     final int nonZeroB = firstNonZeroIndex(b);
-    Bytes result = UInt256.ZERO;
+    Bytes result = FALSE;
     if (Arrays.equals(a, nonZeroA, a.length, b, nonZeroB, b.length)) {
-      result = UInt256.ONE;
+      result = TRUE;
     }
 
     frame.pushStackItem(result);

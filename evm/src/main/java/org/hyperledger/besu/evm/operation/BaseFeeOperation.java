@@ -39,7 +39,7 @@ public class BaseFeeOperation extends AbstractFixedCostOperation {
     if (maybeBaseFee.isEmpty()) {
       return new Operation.OperationResult(gasCost, ExceptionalHaltReason.INVALID_OPERATION);
     }
-    frame.pushStackItem(maybeBaseFee.orElseThrow());
+    frame.pushStackItem(maybeBaseFee.orElseThrow().toBytes());
     return successResponse;
   }
 }

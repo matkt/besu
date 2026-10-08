@@ -37,7 +37,7 @@ public class SelfBalanceOperation extends AbstractFixedCostOperation {
   public Operation.OperationResult executeFixedCostOperation(final MessageFrame frame) {
     final Address accountAddress = frame.getRecipientAddress();
     final Account account = getAccount(accountAddress, frame);
-    frame.pushStackItem(account == null ? Bytes.EMPTY : account.getBalance());
+    frame.pushStackItem(account == null ? Bytes.EMPTY : account.getBalance().toBytes());
 
     return successResponse;
   }

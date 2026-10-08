@@ -270,7 +270,7 @@ public abstract class AbstractCreateOperation extends AbstractOperation {
       frame.incrementStateGasSpilled(childFrame.getStateGasSpilled());
       // EIP-8037: a successful create adds the leaf it was charged for, so the charge stands.
       frame.settleStateGasOnChildSuccess();
-      frame.pushStackItem(Words.fromAddress(createdAddress));
+      frame.pushStackItem(Words.fromAddress(createdAddress).toBytes());
       frame.setReturnData(Bytes.EMPTY);
       onSuccess(frame, createdAddress);
     } else {
