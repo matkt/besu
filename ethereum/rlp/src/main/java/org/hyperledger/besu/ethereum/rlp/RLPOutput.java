@@ -21,6 +21,8 @@ import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.MutableBytes;
+import org.apache.tuweni.units.bigints.BaseUInt256Value;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.apache.tuweni.units.bigints.UInt256Value;
 import org.apache.tuweni.units.bigints.UInt64Value;
 
@@ -87,7 +89,9 @@ public interface RLPOutput {
    * @param v The scalar to write.
    */
   default void writeUInt256Scalar(final UInt256Value<?> v) {
-    writeBytes(v.trimLeadingZeros());
+    // Wei and Difficulty share BaseUInt256Value: unwrapping them keeps this call site monomorphic.
+    final UInt256 value = v instanceof BaseUInt256Value<?> base ? base.toUInt256() : v.toUInt256();
+    writeBytes(value.trimLeadingZeros());
   }
 
   /**
