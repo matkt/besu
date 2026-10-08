@@ -17,9 +17,7 @@ package org.hyperledger.besu.evm.operation;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 
-import java.math.BigInteger;
-
-import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
 
 /** The Mul operation. */
 public class MulOperation extends AbstractFixedCostOperation {
@@ -48,16 +46,9 @@ public class MulOperation extends AbstractFixedCostOperation {
    * @return the operation result
    */
   public static OperationResult staticOperation(final MessageFrame frame) {
-    BigInteger a = new BigInteger(1, frame.popStackItem().toArrayUnsafe());
-    BigInteger b = new BigInteger(1, frame.popStackItem().toArrayUnsafe());
-    BigInteger c = a.multiply(b);
-    byte[] cBytes = c.toByteArray();
-    Bytes result = Bytes.wrap(cBytes);
-    if (cBytes.length > 32) {
-      result = result.slice(cBytes.length - 32, 32);
-    }
-
-    frame.pushStackItem(result);
+    final UInt256 value0 = UInt256.fromBytes(frame.popStackItem());
+    final UInt256 value1 = UInt256.fromBytes(frame.popStackItem());
+    frame.pushStackItem(value0.multiply(value1).toBytes());
     return mulSuccess;
   }
 }

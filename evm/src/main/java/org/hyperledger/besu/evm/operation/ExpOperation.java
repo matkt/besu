@@ -19,14 +19,11 @@ import org.hyperledger.besu.evm.frame.ExceptionalHaltReason;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 
-import java.math.BigInteger;
-
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
 
 /** The Exp operation. */
 public class ExpOperation extends AbstractOperation {
-
-  static final BigInteger MOD_BASE = BigInteger.TWO.pow(256);
 
   /**
    * Instantiates a new Exp operation.
@@ -61,20 +58,7 @@ public class ExpOperation extends AbstractOperation {
       return new OperationResult(cost, ExceptionalHaltReason.INSUFFICIENT_GAS);
     }
 
-    byte[] numberBytes = number.toArrayUnsafe();
-    BigInteger numBI = numberBytes.length > 0 ? new BigInteger(1, numberBytes) : BigInteger.ZERO;
-    byte[] powBytes = power.toArrayUnsafe();
-    BigInteger powBI = powBytes.length > 0 ? new BigInteger(1, powBytes) : BigInteger.ZERO;
-
-    final BigInteger result = numBI.modPow(powBI, MOD_BASE);
-
-    byte[] resultArray = result.toByteArray();
-    int length = resultArray.length;
-    if (length > 32) {
-      frame.pushStackItem(Bytes.wrap(resultArray, length - 32, 32));
-    } else {
-      frame.pushStackItem(Bytes.wrap(resultArray));
-    }
+    frame.pushStackItem(UInt256.fromBytes(number).pow(UInt256.fromBytes(power)).toBytes());
     return new OperationResult(cost, null);
   }
 }

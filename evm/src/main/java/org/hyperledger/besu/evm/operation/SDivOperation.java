@@ -17,10 +17,7 @@ package org.hyperledger.besu.evm.operation;
 import org.hyperledger.besu.evm.frame.MessageFrame;
 import org.hyperledger.besu.evm.gascalculator.GasCalculator;
 
-import java.math.BigInteger;
-
-import org.apache.tuweni.bytes.Bytes;
-import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 
 /** The SDiv operation. */
 public class SDivOperation extends AbstractFixedCostOperation {
@@ -48,29 +45,9 @@ public class SDivOperation extends AbstractFixedCostOperation {
    * @return the operation result
    */
   public static OperationResult staticOperation(final MessageFrame frame) {
-    final Bytes value0 = frame.popStackItem();
-    final Bytes value1 = frame.popStackItem();
-
-    if (value1.isZero()) {
-      frame.pushStackItem(Bytes.EMPTY);
-    } else {
-      final BigInteger b1 =
-          value0.size() < 32
-              ? new BigInteger(1, value0.toArrayUnsafe())
-              : new BigInteger(value0.toArrayUnsafe());
-      final BigInteger b2 =
-          value1.size() < 32
-              ? new BigInteger(1, value1.toArrayUnsafe())
-              : new BigInteger(value1.toArrayUnsafe());
-      final BigInteger result = b1.divide(b2);
-      Bytes resultBytes = Bytes.wrap(result.toByteArray());
-      if (resultBytes.size() > 32) {
-        resultBytes = resultBytes.slice(resultBytes.size() - 32, 32);
-      }
-
-      frame.pushStackItem(Bytes32.leftPad(resultBytes, result.signum() < 0 ? (byte) 0xFF : 0x00));
-    }
-
+    final UInt256 value0 = UInt256.fromBytes(frame.popStackItem());
+    final UInt256 value1 = UInt256.fromBytes(frame.popStackItem());
+    frame.pushStackItem(value0.sdiv0(value1).toBytes());
     return sdivSuccess;
   }
 }
