@@ -23,6 +23,8 @@ import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import org.hyperledger.besu.util.Subscribers;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -130,6 +132,9 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     private final KeyValueStorageTransaction transaction;
     private final Subscribers<NodesAddedListener> nodeAddedListeners;
     private final Set<Bytes32> addedNodes = new HashSet<>();
+    // A TransactionDB put locks its key until the commit, so writes are only applied by commit,
+    // under the storage lock: open updaters writing the same content-addressed node never block.
+    private final Map<Bytes, Optional<Bytes>> pendingWrites = new LinkedHashMap<>();
     private final Lock lock;
 
     public Updater(
@@ -154,12 +159,12 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
       }
 
       addedNodes.add(codeHash);
-      transaction.put(codeHash.toArrayUnsafe(), code.toArrayUnsafe());
+      pendingWrites.put(codeHash, Optional.of(code));
       return this;
     }
 
     public Updater saveWorldState(final Bytes32 nodeHash, final Bytes node) {
-      transaction.remove(ACCOUNT_TRIE_ROOT_LOCATION);
+      pendingWrites.put(Bytes.wrap(ACCOUNT_TRIE_ROOT_LOCATION), Optional.empty());
       return putAccountStateTrieNode(nodeHash, node);
     }
 
@@ -167,7 +172,7 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     public Updater putAccountStateTrieNode(
         final Bytes location, final Bytes32 nodeHash, final Bytes node) {
       if (location.isEmpty()) {
-        transaction.put(ACCOUNT_TRIE_ROOT_LOCATION, node.toArrayUnsafe());
+        pendingWrites.put(Bytes.wrap(ACCOUNT_TRIE_ROOT_LOCATION), Optional.of(node));
         return this;
       }
       return putAccountStateTrieNode(nodeHash, node);
@@ -179,12 +184,12 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         return this;
       }
       addedNodes.add(nodeHash);
-      transaction.put(nodeHash.toArrayUnsafe(), node.toArrayUnsafe());
+      pendingWrites.put(nodeHash, Optional.of(node));
       return this;
     }
 
     public WorldStateKeyValueStorage.Updater removeAccountStateTrieNode(final Bytes32 nodeHash) {
-      transaction.remove(nodeHash.toArrayUnsafe());
+      pendingWrites.put(nodeHash, Optional.empty());
       return this;
     }
 
@@ -194,7 +199,7 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         return this;
       }
       addedNodes.add(nodeHash);
-      transaction.put(nodeHash.toArrayUnsafe(), node.toArrayUnsafe());
+      pendingWrites.put(nodeHash, Optional.of(node));
       return this;
     }
 
@@ -202,6 +207,11 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     public void commit() {
       lock.lock();
       try {
+        pendingWrites.forEach(
+            (key, value) ->
+                value.ifPresentOrElse(
+                    v -> transaction.put(key.toArrayUnsafe(), v.toArrayUnsafe()),
+                    () -> transaction.remove(key.toArrayUnsafe())));
         nodeAddedListeners.forEach(listener -> listener.onNodesAdded(addedNodes));
         transaction.commit();
       } finally {
@@ -211,6 +221,7 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
     public void rollback() {
       addedNodes.clear();
+      pendingWrites.clear();
       transaction.rollback();
     }
   }
