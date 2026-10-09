@@ -521,20 +521,8 @@ public class DefaultBlockchain implements MutableBlockchain {
         .map(
             cache ->
                 Optional.ofNullable(cache.getIfPresent(blockHash))
-                    .map(bal -> withCachedRawRlp(cache, blockHash, bal))
                     .or(() -> blockchainStorage.getBlockAccessList(blockHash)))
         .orElseGet(() -> blockchainStorage.getBlockAccessList(blockHash));
-  }
-
-  // BALs built during block execution have no RLP bytes: encode once and keep them in the cache
-  private static BlockAccessList withCachedRawRlp(
-      final Cache<Hash, BlockAccessList> cache, final Hash blockHash, final BlockAccessList bal) {
-    if (bal.rawRlp().isPresent()) {
-      return bal;
-    }
-    final BlockAccessList encoded = bal.withRawRlp();
-    cache.put(blockHash, encoded);
-    return encoded;
   }
 
   @Override
