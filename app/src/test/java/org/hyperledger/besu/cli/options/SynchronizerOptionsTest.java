@@ -77,6 +77,8 @@ public class SynchronizerOptionsTest
                     SnapSyncConfiguration.DEFAULT_BYTECODE_COUNT_PER_REQUEST + 2)
                 .isSnapServerEnabled(Boolean.TRUE)
                 .isSnap2Enabled(Boolean.TRUE)
+                .snap2RequestParallelism(
+                    SnapSyncConfiguration.DEFAULT_SNAP2_REQUEST_PARALLELISM + 2)
                 .isSnapSyncTransactionIndexingEnabled(Boolean.TRUE)
                 .build())
         .snapSyncSavePreCheckpointHeadersOnlyEnabled(
