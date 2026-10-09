@@ -80,6 +80,8 @@ public class SnapSyncChainDownloader
   private static final int MAX_SAME_STATE_RETRIES = 20;
   private static final long RETRY_WARN_INTERVAL_MS = 30_000L;
   private static final long RETRY_MAX_BACKOFF_MS = 30_000L;
+  static final int MAX_CATCHUP_DOWNLOAD_ATTEMPTS = 3;
+  private static final Duration CATCHUP_RETRY_DELAY = Duration.ofSeconds(1);
 
   private final SnapSyncChainDownloadPipelineFactory pipelineFactory;
 
@@ -267,7 +269,7 @@ public class SnapSyncChainDownloader
     // The catch-up only needs the headers and BALs between the two pivots, so it is downloaded
     // straight away rather than waiting for the current download cycle, which on the first cycle
     // spans the whole chain and can take hours.
-    downloadPivotCatchupRange(currentPivotBlockHeader, newPivotBlockHeader)
+    downloadPivotCatchupRange(currentPivotBlockHeader, newPivotBlockHeader, 1)
         .whenComplete(
             (ignore, error) -> {
               if (error != null
@@ -308,6 +310,43 @@ public class SnapSyncChainDownloader
    * {@link WrongChainException} before writing anything at or below the current pivot.
    */
   private CompletableFuture<Void> downloadPivotCatchupRange(
+      final BlockHeader currentPivotBlockHeader,
+      final BlockHeader newPivotBlockHeader,
+      final int attempt) {
+    return downloadPivotCatchupRangeOnce(currentPivotBlockHeader, newPivotBlockHeader)
+        .handle(
+            (ignore, error) -> {
+              if (error == null) {
+                return CompletableFuture.<Void>completedFuture(null);
+              }
+              final Throwable cause = ExceptionUtils.rootCause(error);
+              if (attempt >= MAX_CATCHUP_DOWNLOAD_ATTEMPTS
+                  || cancelled.get()
+                  || cause instanceof CancellationException
+                  || cause instanceof WrongChainException) {
+                return CompletableFuture.<Void>failedFuture(error);
+              }
+              // Transient failures include peer errors and write conflicts with the main cycle,
+              // which downloads the same range when it starts at the new pivot (e.g. on restart).
+              LOG.debug(
+                  "snap/2 pivot catch-up download from block {} to {} failed (attempt {}/{}), retrying: {}",
+                  currentPivotBlockHeader.getNumber(),
+                  newPivotBlockHeader.getNumber(),
+                  attempt,
+                  MAX_CATCHUP_DOWNLOAD_ATTEMPTS,
+                  cause.toString());
+              return ethContext
+                  .getScheduler()
+                  .scheduleFutureTask(
+                      () ->
+                          downloadPivotCatchupRange(
+                              currentPivotBlockHeader, newPivotBlockHeader, attempt + 1),
+                      CATCHUP_RETRY_DELAY);
+            })
+        .thenCompose(f -> f);
+  }
+
+  private CompletableFuture<Void> downloadPivotCatchupRangeOnce(
       final BlockHeader currentPivotBlockHeader, final BlockHeader newPivotBlockHeader) {
     final SnapSyncChainDownloadPipelineFactory.BackwardHeaderPipelineResult headers;
     try {

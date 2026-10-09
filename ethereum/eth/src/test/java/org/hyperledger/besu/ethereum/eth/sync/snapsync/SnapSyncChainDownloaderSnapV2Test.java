@@ -24,6 +24,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,11 +49,13 @@ import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.services.pipeline.Pipeline;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -131,6 +134,10 @@ class SnapSyncChainDownloaderSnapV2Test {
     lenient()
         .when(scheduler.startPipeline(any()))
         .thenReturn(CompletableFuture.completedFuture(null));
+    // Run delayed retries immediately.
+    lenient()
+        .when(scheduler.scheduleFutureTask(any(Supplier.class), any(Duration.class)))
+        .thenAnswer(inv -> ((Supplier<CompletableFuture<?>>) inv.getArgument(0)).get());
   }
 
   @Test
@@ -284,8 +291,34 @@ class SnapSyncChainDownloaderSnapV2Test {
 
     assertThatThrownBy(() -> catchup.get(5, TimeUnit.SECONDS))
         .hasRootCauseInstanceOf(IllegalStateException.class);
+    verify(pipelineFactory, times(SnapSyncChainDownloader.MAX_CATCHUP_DOWNLOAD_ATTEMPTS))
+        .createBackwardHeaderDownloadPipeline(
+            argThat(s -> s.pivotBlockHeader().equals(catchupPivot)));
     verify(pipelineFactory, never())
         .createBlockAccessListDownloadPipeline(anyLong(), eq(catchupPivot));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void pivotCatchupRetriesATransientDownloadFailure() throws Exception {
+    // e.g. a RocksDB write conflict with the main cycle downloading the same range on restart
+    final BlockHeader catchupPivot = header(2000);
+    final SnapSyncChainDownloader downloader = downloader();
+    startWithCycleBlockedInStage2(downloader);
+    final Pipeline<Long> catchupHeaderPipeline = mock(Pipeline.class);
+    catchupHeaderDownload(
+        catchupPivot,
+        catchupHeaderPipeline,
+        CompletableFuture.failedFuture(new IllegalStateException("Busy")));
+    when(scheduler.startPipeline(catchupHeaderPipeline))
+        .thenReturn(
+            CompletableFuture.failedFuture(new IllegalStateException("Busy")),
+            CompletableFuture.completedFuture(null));
+    catchupBalDownload(catchupPivot);
+
+    downloader.preparePivotCatchup(initialPivot, catchupPivot).get(5, TimeUnit.SECONDS);
+
+    verify(pipelineFactory).createBlockAccessListDownloadPipeline(anyLong(), eq(catchupPivot));
   }
 
   @Test
