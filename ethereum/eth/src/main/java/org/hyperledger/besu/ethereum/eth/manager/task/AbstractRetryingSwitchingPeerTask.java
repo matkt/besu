@@ -28,7 +28,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
-import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -127,15 +126,12 @@ public abstract class AbstractRetryingSwitchingPeerTask<T> extends AbstractRetry
   }
 
   protected Optional<EthPeer> nextPeerToTry() {
-    return peersInSelectionOrder()
+    return getEthContext()
+        .getEthPeers()
+        .streamBestPeers()
         .filter((peer) -> isSuitablePeer(peer) && !triedPeers.contains(peer.ethPeer()))
         .map(EthPeerImmutableAttributes::ethPeer)
         .findFirst();
-  }
-
-  /** Peers in the order they are tried, best chain first. */
-  protected Stream<EthPeerImmutableAttributes> peersInSelectionOrder() {
-    return getEthContext().getEthPeers().streamBestPeers();
   }
 
   private void refreshPeers() {
