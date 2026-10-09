@@ -129,12 +129,6 @@ public class SnapDownloaderFactory {
         createSnapWorldStateDownloaderTaskCollection();
     final WorldStateDownloader snapWorldStateDownloader;
     if (snap2Enabled) {
-      if (!worldStateStorageCoordinator.getDataStorageFormat().isBonsaiFormat()) {
-        throw new IllegalStateException(
-            "Snap/2 synchronization requires a Bonsai data storage format, but "
-                + worldStateStorageCoordinator.getDataStorageFormat()
-                + " is configured");
-      }
       snapWorldStateDownloader =
           new SnapV2WorldStateDownloader(
               ethContext,

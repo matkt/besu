@@ -36,6 +36,10 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorage {
 
+  // Like Bonsai, the root of an account trie being built is kept at the empty location rather than
+  // under its hash, so its world state is only reported as available once saved.
+  private static final byte[] ACCOUNT_TRIE_ROOT_LOCATION = Bytes.EMPTY.toArrayUnsafe();
+
   private final Subscribers<NodesAddedListener> nodeAddedListeners = Subscribers.create();
   private final KeyValueStorage keyValueStorage;
   private final ReentrantLock lock = new ReentrantLock();
@@ -63,6 +67,13 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   public Optional<Bytes> getAccountStorageTrieNode(final Bytes32 nodeHash) {
     return getTrieNode(nodeHash);
+  }
+
+  /** Reads a node by hash, or the account trie root kept at the empty location. */
+  public Optional<Bytes> getTrieNodeUnsafe(final Bytes key) {
+    return key.isEmpty()
+        ? keyValueStorage.get(ACCOUNT_TRIE_ROOT_LOCATION).map(Bytes::wrap)
+        : getTrieNode(Bytes32.wrap(key));
   }
 
   private Optional<Bytes> getTrieNode(final Bytes32 nodeHash) {
@@ -148,6 +159,17 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     }
 
     public Updater saveWorldState(final Bytes32 nodeHash, final Bytes node) {
+      transaction.remove(ACCOUNT_TRIE_ROOT_LOCATION);
+      return putAccountStateTrieNode(nodeHash, node);
+    }
+
+    /** Stores a node by hash, except the root which is kept at the empty location until saved. */
+    public Updater putAccountStateTrieNode(
+        final Bytes location, final Bytes32 nodeHash, final Bytes node) {
+      if (location.isEmpty()) {
+        transaction.put(ACCOUNT_TRIE_ROOT_LOCATION, node.toArrayUnsafe());
+        return this;
+      }
       return putAccountStateTrieNode(nodeHash, node);
     }
 

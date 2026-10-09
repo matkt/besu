@@ -73,6 +73,16 @@ public class SnapV2BlockAccessListApplier {
     this.protocolSchedule = protocolSchedule;
   }
 
+  /** Reads the storage root of a locally persisted account. */
+  public Optional<Bytes32> readLocalStorageRoot(final Hash accountHash) {
+    return worldStateStorageCoordinator
+        .applyForStrategy(
+            bonsai -> bonsai.getAccount(accountHash),
+            forest -> openAccountTrie().get(accountHash.getBytes()))
+        .map(b -> PmtStateTrieAccountValue.readFrom(RLP.input(b)).getStorageRoot())
+        .map(root -> Bytes32.wrap(root.getBytes()));
+  }
+
   public BatchState applyBlockAccessLists(
       final long fromBlock,
       final long toBlock,
@@ -294,6 +304,7 @@ public class SnapV2BlockAccessListApplier {
           fetchedSlots,
           canonicalAccount,
           accountRangeTracker,
+          accountTrie,
           updater);
     }
 
@@ -351,9 +362,10 @@ public class SnapV2BlockAccessListApplier {
       final Map<Hash, Optional<UInt256>> fetchedSlots,
       final PmtStateTrieAccountValue canonicalAccount,
       final DownloadedAccountRangeTracker accountRangeTracker,
+      final MerkleTrie<Bytes, Bytes> accountTrie,
       final WorldStateKeyValueStorage.Updater updater) {
 
-    final PmtStateTrieAccountValue localAccount = readFlatAccount(accountHash);
+    final PmtStateTrieAccountValue localAccount = readLocalAccount(accountTrie, accountHash);
     if (localAccount == null) {
       throw new WorldStateDownloaderException(
           "snap/2 reorg correction: account " + accountHash + " not found locally");
@@ -365,7 +377,7 @@ public class SnapV2BlockAccessListApplier {
             applyForStrategy(
                 updater,
                 onBonsai -> onBonsai.putAccountStorageTrieNode(accountHash, location, hash, value),
-                onForest -> {});
+                onForest -> onForest.putAccountStorageTrieNode(hash, value));
 
     for (final Hash slotHash : divergedSlots) {
       final Optional<UInt256> fetchedValue = fetchedSlots.get(slotHash);
@@ -428,7 +440,9 @@ public class SnapV2BlockAccessListApplier {
               + " was not fetched");
     }
     applyForStrategy(
-        updater, onBonsai -> onBonsai.putCode(accountHash, codeHash, code), onForest -> {});
+        updater,
+        onBonsai -> onBonsai.putCode(accountHash, codeHash, code),
+        onForest -> onForest.putCode(Bytes32.wrap(codeHash.getBytes()), code));
   }
 
   private boolean hasCodeLocally(final Hash codeHash, final Hash accountHash) {
@@ -465,12 +479,16 @@ public class SnapV2BlockAccessListApplier {
 
   private MerkleTrie<Bytes, Bytes> openAccountTrie() {
     final Function<Bytes, Bytes> identity = Function.identity();
+    // the root is the node at the empty location, where Forest keeps it until the state is saved
+    final Optional<Bytes> rootNode = worldStateStorageCoordinator.getTrieNodeUnsafe(Bytes.EMPTY);
     final NodeLoader accountNodeLoader =
-        (location, hash) -> worldStateStorageCoordinator.getAccountStateTrieNode(location, hash);
+        (location, hash) ->
+            location.isEmpty()
+                ? rootNode
+                : worldStateStorageCoordinator.getAccountStateTrieNode(location, hash);
 
     final Bytes32 rootHash =
-        worldStateStorageCoordinator
-            .getTrieNodeUnsafe(Bytes.EMPTY)
+        rootNode
             .map(node -> Bytes32.wrap(Hash.hash(node).getBytes()))
             .orElse(MerkleTrie.EMPTY_TRIE_NODE_HASH);
 
@@ -497,7 +515,7 @@ public class SnapV2BlockAccessListApplier {
       final Hash accountHash = entry.getKey();
       final PerAccountChanges perAccount = entry.getValue();
 
-      final PmtStateTrieAccountValue existingAccount = readFlatAccount(accountHash);
+      final PmtStateTrieAccountValue existingAccount = readLocalAccount(accountTrie, accountHash);
 
       final long newNonce = computeNewNonce(perAccount, existingAccount);
       final Wei newBalance = computeNewBalance(perAccount, existingAccount);
@@ -523,7 +541,6 @@ public class SnapV2BlockAccessListApplier {
       applyForStrategy(
           updater,
           onBonsai -> onBonsai.putAccountInfoState(accountHash, encodedAccount),
-          // TODO: What would it take to implement support for forest in BAL applier?
           onForest -> {});
       updatedAccounts++;
 
@@ -550,15 +567,18 @@ public class SnapV2BlockAccessListApplier {
             applyForStrategy(
                 updater,
                 onBonsai -> onBonsai.putAccountStateTrieNode(location, hash, value),
-                onForest -> {});
+                onForest -> onForest.putAccountStateTrieNode(location, hash, value));
 
     accountTrie.commit(nodeUpdater);
   }
 
-  private PmtStateTrieAccountValue readFlatAccount(final Hash accountHash) {
+  /** Reads an account from the flat db on Bonsai, or from the given account trie on Forest. */
+  private PmtStateTrieAccountValue readLocalAccount(
+      final MerkleTrie<Bytes, Bytes> accountTrie, final Hash accountHash) {
     return readAccountData(
         worldStateStorageCoordinator.applyForStrategy(
-            bonsai -> bonsai.getAccount(accountHash), forest -> Optional.<Bytes>empty()));
+            bonsai -> bonsai.getAccount(accountHash),
+            forest -> accountTrie.get(accountHash.getBytes())));
   }
 
   private static PmtStateTrieAccountValue readTrieAccount(
@@ -601,7 +621,7 @@ public class SnapV2BlockAccessListApplier {
     applyForStrategy(
         updater,
         onBonsai -> onBonsai.putCode(accountHash, codeHash, perAccount.latestCode),
-        onForest -> {});
+        onForest -> onForest.putCode(Bytes32.wrap(codeHash.getBytes()), perAccount.latestCode));
     return codeHash;
   }
 
@@ -635,7 +655,7 @@ public class SnapV2BlockAccessListApplier {
             applyForStrategy(
                 updater,
                 onBonsai -> onBonsai.putAccountStorageTrieNode(accountHash, location, hash, value),
-                onForest -> {});
+                onForest -> onForest.putAccountStorageTrieNode(hash, value));
 
     int downloadedSlots = 0;
     for (final PerAccountChanges.StorageSlotUpdate update : perAccount.storageChanges.values()) {

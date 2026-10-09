@@ -90,7 +90,7 @@ public class SnapV2AccountRangeRequest extends SnapV2DataRequest {
           applyForStrategy(
               updater,
               onBonsai -> onBonsai.putAccountStateTrieNode(location, hash, value),
-              onForest -> onForest.putAccountStateTrieNode(hash, value));
+              onForest -> onForest.putAccountStateTrieNode(location, hash, value));
           nbNodesSaved.getAndIncrement();
         };
 

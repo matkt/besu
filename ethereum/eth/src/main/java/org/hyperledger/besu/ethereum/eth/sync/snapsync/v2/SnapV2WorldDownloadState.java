@@ -258,8 +258,7 @@ public class SnapV2WorldDownloadState extends WorldDownloadState<SnapDataRequest
       nodeData = MerkleTrie.EMPTY_TRIE_NODE;
     } else {
       nodeData =
-          worldStateStorageCoordinator
-              .getAccountStateTrieNode(Bytes.EMPTY, expectedRoot)
+          readAccountTrieRootNode(expectedRoot)
               .orElseThrow(
                   () ->
                       new WorldStateDownloaderException(
@@ -285,8 +284,7 @@ public class SnapV2WorldDownloadState extends WorldDownloadState<SnapDataRequest
       LOG.info("snap/2 world state root is empty at pivot block {}", header.getNumber());
       return true;
     }
-    final Optional<Bytes> rootNode =
-        worldStateStorageCoordinator.getAccountStateTrieNode(Bytes.EMPTY, expectedRoot);
+    final Optional<Bytes> rootNode = readAccountTrieRootNode(expectedRoot);
     if (rootNode.isEmpty()) {
       LOG.error(
           "snap/2 state root verification failed at sync completion for pivot block {}: "
@@ -312,6 +310,13 @@ public class SnapV2WorldDownloadState extends WorldDownloadState<SnapDataRequest
     LOG.info(
         "snap/2 world state root verified at pivot block {}: {}", header.getNumber(), expectedRoot);
     return true;
+  }
+
+  // the root is the node at the empty location, where Forest keeps it until the state is saved
+  private Optional<Bytes> readAccountTrieRootNode(final Bytes32 expectedRoot) {
+    return worldStateStorageCoordinator
+        .getTrieNodeUnsafe(Bytes.EMPTY)
+        .filter(node -> Hash.hash(node).getBytes().equals(expectedRoot));
   }
 
   private void notifyWorldStateFinished() {
@@ -792,13 +797,8 @@ public class SnapV2WorldDownloadState extends WorldDownloadState<SnapDataRequest
   }
 
   private Bytes32 readStorageRoot(final Hash accountHash) {
-    return worldStateStorageCoordinator
-        .applyForStrategy(
-            bonsai -> bonsai.getAccount(accountHash), forest -> Optional.<Bytes>empty())
-        .map(
-            b ->
-                Bytes32.wrap(
-                    PmtStateTrieAccountValue.readFrom(RLP.input(b)).getStorageRoot().getBytes()))
+    return blockAccessListApplier
+        .readLocalStorageRoot(accountHash)
         .orElseThrow(
             () ->
                 new WorldStateDownloaderException(

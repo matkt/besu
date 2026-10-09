@@ -161,6 +161,39 @@ public class ForestKeyValueStorageWorldStateStorageTest {
         .isTrue();
   }
 
+  @Test
+  public void rootAtEmptyLocation_isReadableButNotAvailable() {
+    final ForestWorldStateKeyValueStorage storage = emptyStorage();
+    final Bytes rootNode = Bytes.fromHexString("0x123456");
+    final Bytes32 rootHash = Bytes32.wrap(Hash.hash(rootNode).getBytes());
+    final Bytes childNode = Bytes.fromHexString("0x789a");
+    final Bytes32 childHash = Bytes32.wrap(Hash.hash(childNode).getBytes());
+
+    storage
+        .updater()
+        .putAccountStateTrieNode(Bytes.EMPTY, rootHash, rootNode)
+        .putAccountStateTrieNode(Bytes.of(1), childHash, childNode)
+        .commit();
+
+    assertThat(storage.isWorldStateAvailable(rootHash)).isFalse();
+    assertThat(storage.getAccountStateTrieNode(rootHash)).isEmpty();
+    assertThat(storage.getTrieNodeUnsafe(Bytes.EMPTY)).contains(rootNode);
+    assertThat(storage.getAccountStateTrieNode(childHash)).contains(childNode);
+  }
+
+  @Test
+  public void saveWorldState_storesRootByHashAndClearsEmptyLocation() {
+    final ForestWorldStateKeyValueStorage storage = emptyStorage();
+    final Bytes rootNode = Bytes.fromHexString("0x123456");
+    final Bytes32 rootHash = Bytes32.wrap(Hash.hash(rootNode).getBytes());
+    storage.updater().putAccountStateTrieNode(Bytes.EMPTY, rootHash, rootNode).commit();
+
+    storage.updater().saveWorldState(rootHash, rootNode).commit();
+
+    assertThat(storage.isWorldStateAvailable(rootHash)).isTrue();
+    assertThat(storage.getTrieNodeUnsafe(Bytes.EMPTY)).isEmpty();
+  }
+
   private ForestWorldStateKeyValueStorage emptyStorage() {
     return new ForestWorldStateKeyValueStorage(new InMemoryKeyValueStorage());
   }
