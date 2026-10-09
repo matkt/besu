@@ -33,11 +33,13 @@ import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.MainnetTransactionProcessor;
+import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
+import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.util.List;
@@ -64,24 +66,12 @@ class BalParallelBlockProcessorIntegrationTest {
     return "BAL";
   }
 
-  private static ParallelTransactionPreprocessing createPreprocessing(
-      final MainnetTransactionProcessor transactionProcessor) {
-    return new ParallelTransactionPreprocessing(
-        transactionProcessor, Runnable::run, BalConfiguration.DEFAULT);
-  }
-
   /** Base class for BAL tests that overrides executeAndCompare with BAL-specific logic. */
   abstract static class BalTestBase extends AbstractParallelBlockProcessorIntegrationTest {
 
     @Override
     protected String getVariantName() {
       return getVariant();
-    }
-
-    @Override
-    protected ParallelTransactionPreprocessing createParallelPreprocessing(
-        final MainnetTransactionProcessor transactionProcessor) {
-      return createPreprocessing(transactionProcessor);
     }
 
     /**
@@ -112,9 +102,7 @@ class BalParallelBlockProcessorIntegrationTest {
           new MainnetBlockProcessor(
               txProcessor,
               spec.getTransactionReceiptFactory(),
-              Wei.ZERO,
               BlockHeader::getCoinbase,
-              true,
               seqCtx.getProtocolSchedule(),
               SEQUENTIAL_CONFIG);
 
@@ -132,24 +120,12 @@ class BalParallelBlockProcessorIntegrationTest {
       final ExecutionContextTestFixture parCtx = createFreshContext();
       final MutableWorldState parWs = parCtx.getStateArchive().getWorldState();
       final Block parBlock = createBlock(parCtx, stateRoot, baseFee, txs);
-      final ProtocolSpec parSpec =
-          parCtx
-              .getProtocolSchedule()
-              .getByBlockHeader(new BlockHeaderTestFixture().number(0L).buildHeader());
-      final MainnetTransactionProcessor parTxProcessor = parSpec.getTransactionProcessor();
-
-      final BlockProcessor parProcessor = createParallelProcessor(parCtx);
-      final ParallelTransactionPreprocessing balImportPreprocessing =
-          new ParallelTransactionPreprocessingWithBal(
-              parTxProcessor, generatedBal.get(), BalConfiguration.DEFAULT);
+      final BlockProcessor parProcessor =
+          new ParallelExecutionWithPrecomputedBal(parCtx, generatedBal.get());
 
       final BlockProcessingResult parResult =
           parProcessor.processBlock(
-              parCtx.getProtocolContext(),
-              parCtx.getBlockchain(),
-              parWs,
-              parBlock,
-              balImportPreprocessing);
+              parCtx.getProtocolContext(), parCtx.getBlockchain(), parWs, parBlock);
       assertTrue(
           parResult.isSuccessful(),
           "BAL parallel import failed: " + parResult.errorMessage.orElse("(no message)"));
@@ -202,9 +178,7 @@ class BalParallelBlockProcessorIntegrationTest {
           new MainnetBlockProcessor(
               txProcessor,
               spec.getTransactionReceiptFactory(),
-              Wei.ZERO,
               BlockHeader::getCoinbase,
-              true,
               seqCtx.getProtocolSchedule(),
               SEQUENTIAL_CONFIG);
 
@@ -228,24 +202,12 @@ class BalParallelBlockProcessorIntegrationTest {
               .orElseThrow();
       final Block parBlock =
           createBlock(parCtx, parTxParent, stateRoot, baseFee, MINING_BENEFICIARY, txs);
-      final ProtocolSpec parSpec =
-          parCtx
-              .getProtocolSchedule()
-              .getByBlockHeader(new BlockHeaderTestFixture().number(0L).buildHeader());
-      final MainnetTransactionProcessor parTxProcessor = parSpec.getTransactionProcessor();
-
-      final BlockProcessor parProcessor = createParallelProcessor(parCtx);
-      final ParallelTransactionPreprocessing balImportPreprocessing =
-          new ParallelTransactionPreprocessingWithBal(
-              parTxProcessor, generatedBal.get(), BalConfiguration.DEFAULT);
+      final BlockProcessor parProcessor =
+          new ParallelExecutionWithPrecomputedBal(parCtx, generatedBal.get());
 
       final BlockProcessingResult parResult =
           parProcessor.processBlock(
-              parCtx.getProtocolContext(),
-              parCtx.getBlockchain(),
-              parWs,
-              parBlock,
-              balImportPreprocessing);
+              parCtx.getProtocolContext(), parCtx.getBlockchain(), parWs, parBlock);
       assertTrue(
           parResult.isSuccessful(),
           "BAL parallel import failed: " + parResult.errorMessage.orElse("(no message)"));
@@ -270,24 +232,40 @@ class BalParallelBlockProcessorIntegrationTest {
   }
 
   /**
-   * Custom preprocessing that injects a pre-computed BAL to force use of
+   * Parallel execution that injects a pre-computed BAL into the parallel run to force use of
    * BalConcurrentTransactionProcessor with applyWritesFromPriorTransactions.
    */
-  private static class ParallelTransactionPreprocessingWithBal
-      extends ParallelTransactionPreprocessing {
+  private static class ParallelExecutionWithPrecomputedBal extends MainnetParallelBlockProcessor {
 
     private final BlockAccessList preComputedBal;
 
-    ParallelTransactionPreprocessingWithBal(
-        final MainnetTransactionProcessor transactionProcessor,
-        final BlockAccessList preComputedBal,
-        final BalConfiguration balConfiguration) {
-      super(transactionProcessor, Runnable::run, balConfiguration);
+    ParallelExecutionWithPrecomputedBal(
+        final ExecutionContextTestFixture ctx, final BlockAccessList preComputedBal) {
+      this(
+          ctx.getProtocolSchedule()
+              .getByBlockHeader(new BlockHeaderTestFixture().number(0L).buildHeader()),
+          ctx.getProtocolSchedule(),
+          preComputedBal);
+    }
+
+    private ParallelExecutionWithPrecomputedBal(
+        final ProtocolSpec spec,
+        final ProtocolSchedule protocolSchedule,
+        final BlockAccessList preComputedBal) {
+      super(
+          spec.getTransactionProcessor(),
+          spec.getTransactionReceiptFactory(),
+          BlockHeader::getCoinbase,
+          protocolSchedule,
+          BalConfiguration.DEFAULT,
+          new NoOpMetricsSystem(),
+          Runnable::run,
+          Optional.empty());
       this.preComputedBal = preComputedBal;
     }
 
     @Override
-    public Optional<PreprocessingContext> run(
+    protected Optional<ParallelBlockTransactionProcessor> startParallelExecution(
         final ProtocolContext protocolContext,
         final BlockHeader blockHeader,
         final List<Transaction> transactions,
@@ -295,9 +273,9 @@ class BalParallelBlockProcessorIntegrationTest {
         final BlockHashLookup blockHashLookup,
         final Wei blobGasPrice,
         final Optional<BlockAccessList.BlockAccessListBuilder> blockAccessListBuilder,
-        final Optional<BlockAccessListAccountLookup> maybeBlockAccessListLookup,
+        final Optional<BlockAccessListAccountLookup> blockAccessListLookup,
         final Optional<BlockHeader> maybeParentHeader) {
-      return super.run(
+      return super.startParallelExecution(
           protocolContext,
           blockHeader,
           transactions,
@@ -316,12 +294,6 @@ class BalParallelBlockProcessorIntegrationTest {
     @Override
     protected String getVariantName() {
       return getVariant();
-    }
-
-    @Override
-    protected ParallelTransactionPreprocessing createParallelPreprocessing(
-        final MainnetTransactionProcessor transactionProcessor) {
-      return createPreprocessing(transactionProcessor);
     }
 
     @Override
@@ -345,12 +317,6 @@ class BalParallelBlockProcessorIntegrationTest {
     }
 
     @Override
-    protected ParallelTransactionPreprocessing createParallelPreprocessing(
-        final MainnetTransactionProcessor transactionProcessor) {
-      return createPreprocessing(transactionProcessor);
-    }
-
-    @Override
     protected ComparisonResult executeAndCompare(final Wei baseFee, final Transaction... txs) {
       return new BalTestBase() {}.executeAndCompare(baseFee, txs);
     }
@@ -365,12 +331,6 @@ class BalParallelBlockProcessorIntegrationTest {
     }
 
     @Override
-    protected ParallelTransactionPreprocessing createParallelPreprocessing(
-        final MainnetTransactionProcessor transactionProcessor) {
-      return createPreprocessing(transactionProcessor);
-    }
-
-    @Override
     protected ComparisonResult executeAndCompare(final Wei baseFee, final Transaction... txs) {
       return new BalTestBase() {}.executeAndCompare(baseFee, txs);
     }
@@ -382,12 +342,6 @@ class BalParallelBlockProcessorIntegrationTest {
     @Override
     protected String getVariantName() {
       return getVariant();
-    }
-
-    @Override
-    protected ParallelTransactionPreprocessing createParallelPreprocessing(
-        final MainnetTransactionProcessor transactionProcessor) {
-      return createPreprocessing(transactionProcessor);
     }
 
     @Override
