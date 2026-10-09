@@ -41,6 +41,7 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.pipeline.Pipeline;
+import org.hyperledger.besu.util.ExceptionUtils;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -269,7 +270,8 @@ public class SnapSyncChainDownloader
     downloadPivotCatchupRange(currentPivotBlockHeader, newPivotBlockHeader)
         .whenComplete(
             (ignore, error) -> {
-              if (error != null) {
+              if (error != null
+                  && !(ExceptionUtils.rootCause(error) instanceof WrongChainException)) {
                 LOG.warn(
                     "snap/2 pivot catch-up download from block {} to {} failed",
                     currentPivotBlockHeader.getNumber(),
@@ -284,49 +286,60 @@ public class SnapSyncChainDownloader
                 pendingPivotUpdate.getAndSet(newPivotBlockHeader);
                 pivotUpdateFuture.complete(null);
               }
-              completeSnapV2PivotCatchupIfNeeded(newPivotBlockHeader);
+              if (error == null) {
+                completeSnapV2PivotCatchupIfNeeded(newPivotBlockHeader);
+              } else {
+                // The current pivot was reorged out. Recovering below it would rewrite canonical
+                // index entries the main cycle may still be importing, so the main cycle handles
+                // the reorg in order and completes the request once it reaches the new pivot.
+                LOG.info(
+                    "snap/2 pivot {} is not an ancestor of new pivot {}; deferring catch-up to the chain download cycle",
+                    currentPivotBlockHeader.getNumber(),
+                    newPivotBlockHeader.getNumber());
+              }
             });
     return completionFuture;
   }
 
   /**
    * Downloads the headers (currentPivot, newPivot] and their BALs, independently of the main
-   * download cycle. The two never write the same headers: the main cycle only stores headers at or
-   * below its own pivot, and the catch-up range starts above the world state's current pivot.
+   * download cycle. Using the current pivot as the checkpoint stops the header download from
+   * recovering below it: if the new pivot does not descend from the current one it fails with a
+   * {@link WrongChainException} before writing anything at or below the current pivot.
    */
   private CompletableFuture<Void> downloadPivotCatchupRange(
       final BlockHeader currentPivotBlockHeader, final BlockHeader newPivotBlockHeader) {
-    final ChainSyncState state = chainSyncState.get();
-    if (state == null) {
-      return CompletableFuture.failedFuture(
-          new IllegalStateException("snap/2 pivot catch-up requested before chain sync started"));
+    final SnapSyncChainDownloadPipelineFactory.BackwardHeaderPipelineResult headers;
+    try {
+      headers =
+          pipelineFactory.createBackwardHeaderDownloadPipeline(
+              new ChainSyncState(
+                  newPivotBlockHeader, currentPivotBlockHeader, currentPivotBlockHeader, false));
+    } catch (final RuntimeException e) {
+      return CompletableFuture.failedFuture(e);
     }
-    final SnapSyncChainDownloadPipelineFactory.BackwardHeaderPipelineResult headers =
-        pipelineFactory.createBackwardHeaderDownloadPipeline(
-            state.restartHeaderDownload(newPivotBlockHeader, currentPivotBlockHeader));
-    catchupPipeline = headers.pipeline();
-    return ethContext
-        .getScheduler()
-        .startPipeline(headers.pipeline())
+    return startCatchupPipeline(headers.pipeline())
         .thenCompose(
-            ignore -> {
-              if (cancelled.get()) {
-                return CompletableFuture.failedFuture(new CancellationException());
-              }
-              // If the current pivot was reorged out, the header download recovered down to a
-              // canonical ancestor, and the blocks above it need their BALs too.
-              final long balAnchor =
-                  headers
-                      .driver()
-                      .getMatchedAncestor()
-                      .map(BlockHeader::getNumber)
-                      .orElse(currentPivotBlockHeader.getNumber());
-              final Pipeline<List<BlockHeader>> bals =
-                  pipelineFactory.createBlockAccessListDownloadPipeline(
-                      balAnchor, newPivotBlockHeader);
-              catchupPipeline = bals;
-              return ethContext.getScheduler().startPipeline(bals);
-            });
+            ignore ->
+                startCatchupPipeline(
+                    pipelineFactory.createBlockAccessListDownloadPipeline(
+                        currentPivotBlockHeader.getNumber(), newPivotBlockHeader)));
+  }
+
+  /**
+   * Starts a catch-up pipeline and registers it for {@link #cancel()}. Cancellation is re-checked
+   * after registering, so either cancel() sees the pipeline or the pipeline sees the cancellation.
+   */
+  private CompletableFuture<Void> startCatchupPipeline(final Pipeline<?> pipeline) {
+    if (cancelled.get()) {
+      return CompletableFuture.failedFuture(new CancellationException());
+    }
+    final CompletableFuture<Void> result = ethContext.getScheduler().startPipeline(pipeline);
+    catchupPipeline = pipeline;
+    if (cancelled.get()) {
+      pipeline.abort();
+    }
+    return result;
   }
 
   @Override
@@ -683,6 +696,8 @@ public class SnapSyncChainDownloader
             ignore -> {
               final Duration balDuration = Duration.between(balStartTime, Instant.now());
               LOG.debug("snap/2 BAL download finished in {} seconds", balDuration.toSeconds());
+              // Completes a catch-up deferred to this cycle after a reorg of the old pivot.
+              completeSnapV2PivotCatchupIfNeeded(pivotBlockHeader);
               return null;
             });
   }

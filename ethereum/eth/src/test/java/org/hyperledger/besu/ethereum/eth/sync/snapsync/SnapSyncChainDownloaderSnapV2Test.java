@@ -39,6 +39,7 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.common.BackwardHeaderDriver;
 import org.hyperledger.besu.ethereum.eth.sync.common.ChainSyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.common.SingleBlockHeaderDownloader;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
@@ -183,14 +184,28 @@ class SnapSyncChainDownloaderSnapV2Test {
   }
 
   @Test
-  void pivotCatchupFailsWhenRequestedBeforeTheChainDownloadStarted() {
+  void pivotCatchupDoesNotNeedTheChainDownloadToHaveStarted() throws Exception {
+    // The world state can request a catch-up while the chain downloader is still loading its
+    // state, e.g. right after a restart.
+    final BlockHeader catchupPivot = header(2000);
     final SnapSyncChainDownloader downloader = downloader();
+    catchupHeaderDownload(catchupPivot, CompletableFuture.completedFuture(null));
+    catchupBalDownload(catchupPivot);
+
+    downloader.preparePivotCatchup(initialPivot, catchupPivot).get(5, TimeUnit.SECONDS);
+  }
+
+  @Test
+  void pivotCatchupStartsNoDownloadAfterCancellation() {
+    final SnapSyncChainDownloader downloader = downloader();
+    downloader.cancel();
 
     final CompletableFuture<Void> catchup =
         downloader.preparePivotCatchup(initialPivot, header(2000));
 
     assertThatThrownBy(() -> catchup.get(1, TimeUnit.SECONDS))
-        .hasCauseInstanceOf(IllegalStateException.class);
+        .hasRootCauseInstanceOf(CancellationException.class);
+    verify(scheduler, never()).startPipeline(any());
   }
 
   @Test
@@ -228,27 +243,32 @@ class SnapSyncChainDownloaderSnapV2Test {
             argThat(
                 s ->
                     s.pivotBlockHeader().equals(catchupPivot)
-                        && s.headerDownloadAnchor().equals(initialPivot)));
+                        && s.headerDownloadAnchor().equals(initialPivot)
+                        // the current pivot as checkpoint disables recovery below it
+                        && s.bodyCheckpoint().equals(initialPivot)));
     verify(pipelineFactory)
         .createBlockAccessListDownloadPipeline(initialPivot.getNumber(), catchupPivot);
     verify(scheduler).startPipeline(catchupBalPipeline);
   }
 
   @Test
-  void pivotCatchupDownloadsBalsFromTheMatchedAncestorAfterAReorg() throws Exception {
+  void pivotCatchupIsDeferredToTheDownloadCycleWhenTheCurrentPivotWasReorgedOut() throws Exception {
+    lenient().when(pipelineFactory.isSnap2Enabled()).thenReturn(true);
     final BlockHeader catchupPivot = header(2000);
-    final BlockHeader ancestor = header(990);
     final SnapSyncChainDownloader downloader = downloader();
-    startWithCycleBlockedInStage2(downloader);
-    final BackwardHeaderDriver catchupDriver =
-        catchupHeaderDownload(catchupPivot, CompletableFuture.completedFuture(null));
-    when(catchupDriver.getMatchedAncestor()).thenReturn(Optional.of(ancestor));
-    catchupBalDownload(catchupPivot);
+    catchupHeaderDownload(
+        catchupPivot, CompletableFuture.failedFuture(new WrongChainException("reorged out")));
 
-    downloader.preparePivotCatchup(initialPivot, catchupPivot).get(5, TimeUnit.SECONDS);
+    final CompletableFuture<Void> catchup =
+        downloader.preparePivotCatchup(initialPivot, catchupPivot);
 
-    verify(pipelineFactory)
-        .createBlockAccessListDownloadPipeline(ancestor.getNumber(), catchupPivot);
+    // Not failed: the main cycle recovers from the reorg in order and completes the request once
+    // its BAL download reaches the new pivot.
+    assertThat(catchup).isNotDone();
+    downloader.onWorldStateHealFinished();
+    downloader.start().get(5, TimeUnit.SECONDS);
+    catchup.get(5, TimeUnit.SECONDS);
+    verify(pipelineFactory).createBlockAccessListDownloadPipeline(anyLong(), eq(catchupPivot));
   }
 
   @Test
@@ -326,7 +346,11 @@ class SnapSyncChainDownloaderSnapV2Test {
     final BackwardHeaderDriver driver = mock(BackwardHeaderDriver.class);
     lenient().when(driver.getMatchedAncestor()).thenReturn(Optional.empty());
     when(pipelineFactory.createBackwardHeaderDownloadPipeline(
-            argThat(s -> s != null && s.pivotBlockHeader().equals(catchupPivot))))
+            argThat(
+                s ->
+                    s != null
+                        && s.pivotBlockHeader().equals(catchupPivot)
+                        && s.bodyCheckpoint().equals(s.headerDownloadAnchor()))))
         .thenReturn(
             new SnapSyncChainDownloadPipelineFactory.BackwardHeaderPipelineResult(
                 pipeline, driver));
