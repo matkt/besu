@@ -35,6 +35,7 @@ import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.DefaultProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
@@ -1091,6 +1092,33 @@ public class DefaultBlockchainTest {
     assertThat(blockchain.getTotalDifficultyCache().get().size()).isEqualTo(1);
     assertThat(blockchain.getTotalDifficultyCache().get().getIfPresent(newBlock.getHash()))
         .isEqualTo(newBlock.getHeader().getDifficulty());
+  }
+
+  @Test
+  public void cachedBlockAccessListIsEncodedOnceAndKeptInTheCache() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(),
+            new InMemoryKeyValueStorage(),
+            genesisBlock,
+            "/data/test",
+            512,
+            0);
+    final Block block =
+        gen.block(new BlockOptions().setBlockNumber(1L).setParentHash(genesisBlock.getHash()));
+    // BALs built during block execution have no RLP bytes
+    final BlockAccessList bal = new BlockAccessList(gen.blockAccessList().accountChanges());
+
+    blockchain.appendBlock(block, gen.receipts(block), Optional.of(bal));
+
+    final BlockAccessList served = blockchain.getBlockAccessList(block.getHash()).orElseThrow();
+    assertThat(served).isEqualTo(bal);
+    assertThat(served.rawRlp()).contains(bal.encode());
+    assertThat(blockchain.getBlockAccessListCache().orElseThrow().getIfPresent(block.getHash()))
+        .isSameAs(served);
+    assertThat(blockchain.getBlockAccessList(block.getHash())).containsSame(served);
   }
 
   @Test
