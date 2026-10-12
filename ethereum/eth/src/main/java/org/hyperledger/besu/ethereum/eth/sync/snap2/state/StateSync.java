@@ -52,12 +52,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Downloads the flat state at the current pivot: account ranges in parallel chunks, storage in
- * multi-account batches or, for large storages, in parallel slot chunks, and bytecodes.
- *
- * <p>Every response is verified against the root it was requested at and persisted only if the
- * pivot did not move meanwhile; a pivot move applies the block access lists of the skipped blocks
- * to what is persisted, under an exclusive lock. Bookkeeping runs on a single thread.
+ * Downloads the flat state at the pivot: accounts, storages and bytecodes in parallel, each
+ * response checked against its root and persisted only if the pivot did not move meanwhile.
  */
 public final class StateSync {
 
@@ -170,24 +166,16 @@ public final class StateSync {
       final BlockHeader newPivot, final StateDiff diff) {
     return CompletableFuture.supplyAsync(
         () -> {
-          pivotLock.writeLock().lock();
           try {
-            if (stopped) {
-              throw new IllegalStateException("state download stopped");
-            }
-            final StateDiffApplier.Outcome outcome =
-                StateDiffApplier.apply(diff, storage, coverage);
-            pivot = new Pivot(pivot.epoch() + 1, newPivot);
-            pivotStale = false;
-            return outcome;
-          } finally {
-            pivotLock.writeLock().unlock();
-            execute(
+            return exclusively(
                 () -> {
-                  consecutiveEmpty = 0;
-                  emptyPeers.clear();
-                  dispatch();
+                  final StateDiffApplier.Outcome outcome =
+                      StateDiffApplier.apply(diff, storage, coverage);
+                  switchPivot(newPivot);
+                  return outcome;
                 });
+          } finally {
+            execute(this::dispatch);
           }
         },
         scheduler.workers());
@@ -199,14 +187,21 @@ public final class StateSync {
    * @return false if the pivot moved and nothing was run
    */
   public boolean withPivot(final int epoch, final Runnable write) {
+    return atPivot(
+            epoch,
+            () -> {
+              write.run();
+              return Boolean.TRUE;
+            })
+        != null;
+  }
+
+  // the result of a write at a known pivot, or null if the pivot moved
+  private <T> T atPivot(final int epoch, final Supplier<T> write) {
     pivotLock.readLock().lock();
     try {
       // a stopped download must not touch a storage that may already be wiped for a new sync
-      if (stopped || pivot.epoch() != epoch) {
-        return false;
-      }
-      write.run();
-      return true;
+      return stopped || pivot.epoch() != epoch ? null : write.get();
     } finally {
       pivotLock.readLock().unlock();
     }
@@ -485,44 +480,42 @@ public final class StateSync {
 
   private AccountsPersisted persistAccounts(
       final AccountRangeRequest request, final AccountRangeRequest.Result result) {
-    final List<StorageTask> storageTasks = new ArrayList<>();
-    final Set<Bytes32> codeHashes = new LinkedHashSet<>();
-    final Bytes32[] end = new Bytes32[1];
-    final boolean[] done = new boolean[1];
-    final boolean persisted =
-        withPivot(
-            request.pivot.epoch(),
-            () -> {
-              final SyncStateStorage.Batch batch = storage.batch();
-              int count = 0;
-              for (int i = 0; i < result.hashes().size(); i++) {
-                final Bytes32 hash = result.hashes().get(i);
-                if (hash.compareTo(request.limit) > 0) {
-                  break;
-                }
-                final Bytes account = result.accounts().get(i);
-                batch.putAccount(hash, account);
-                final PmtStateTrieAccountValue value = Accounts.decode(account);
-                if (!value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
-                  final StorageTask task =
-                      new StorageTask(hash, Bytes32.wrap(value.getStorageRoot().getBytes()));
-                  coverage.addStorageTask(task);
-                  storageTasks.add(task);
-                }
-                if (!value.getCodeHash().equals(Hash.EMPTY)) {
-                  codeHashes.add(Bytes32.wrap(value.getCodeHash().getBytes()));
-                }
-                count++;
-              }
-              final List<Bytes32> hashes = result.hashes();
-              final Bytes32 last = hashes.isEmpty() ? null : hashes.getLast();
-              done[0] = last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
-              end[0] = done[0] ? request.limit : last;
-              batch.commit();
-              coverage.accounts().add(request.origin, end[0]);
-              accounts.addAndGet(count);
-            });
-    return persisted ? new AccountsPersisted(end[0], done[0], storageTasks, codeHashes) : null;
+    return atPivot(
+        request.pivot.epoch(),
+        () -> {
+          final SyncStateStorage.Batch batch = storage.batch();
+          final List<StorageTask> storageTasks = new ArrayList<>();
+          final Set<Bytes32> codeHashes = new LinkedHashSet<>();
+          int count = 0;
+          for (int i = 0; i < result.hashes().size(); i++) {
+            final Bytes32 hash = result.hashes().get(i);
+            if (hash.compareTo(request.limit) > 0) {
+              break;
+            }
+            final Bytes account = result.accounts().get(i);
+            batch.putAccount(hash, account);
+            final PmtStateTrieAccountValue value = Accounts.decode(account);
+            if (!value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
+              final StorageTask task =
+                  new StorageTask(hash, Bytes32.wrap(value.getStorageRoot().getBytes()));
+              coverage.addStorageTask(task);
+              storageTasks.add(task);
+            }
+            if (!value.getCodeHash().equals(Hash.EMPTY)) {
+              codeHashes.add(Bytes32.wrap(value.getCodeHash().getBytes()));
+            }
+            count++;
+          }
+          final List<Bytes32> hashes = result.hashes();
+          final Bytes32 last = hashes.isEmpty() ? null : hashes.getLast();
+          final boolean done =
+              last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
+          final Bytes32 end = done ? request.limit : last;
+          batch.commit();
+          coverage.accounts().add(request.origin, end);
+          accounts.addAndGet(count);
+          return new AccountsPersisted(end, done, storageTasks, codeHashes);
+        });
   }
 
   private void queueStorage(final StorageTask task) {
@@ -595,8 +588,7 @@ public final class StateSync {
 
   private StoragePersisted persistStorage(
       final StorageRangesRequest request, final StorageRangesRequest.Result result) {
-    final StoragePersisted[] out = new StoragePersisted[1];
-    withPivot(
+    return atPivot(
         request.pivot.epoch(),
         () -> {
           final SyncStateStorage.Batch batch = storage.batch();
@@ -634,9 +626,8 @@ public final class StateSync {
           }
           batch.commit();
           slots.addAndGet(count);
-          out[0] = new StoragePersisted(result.accounts().size(), lastSlot, lastComplete, count);
+          return new StoragePersisted(result.accounts().size(), lastSlot, lastComplete, count);
         });
-    return out[0];
   }
 
   private void afterStorage(final StorageRangesRequest request, final StoragePersisted persisted) {
@@ -767,18 +758,17 @@ public final class StateSync {
         .submit(request)
         .whenComplete(
             (response, error) -> {
-              final Map<Bytes32, Bytes> received =
+              final Set<Bytes32> stored =
                   error == null
-                          && persistSafely(() -> persistCodes(response.value()), request) != null
-                      ? response.value()
-                      : Map.of();
+                      ? persistSafely(() -> persistCodes(response.value()), request)
+                      : null;
               execute(
                   () -> {
                     codesRequestsInFlight--;
                     codesInFlight.removeAll(batch);
                     // missing codes go back to the queue
                     batch.stream()
-                        .filter(hash -> !received.containsKey(hash))
+                        .filter(hash -> stored == null || !stored.contains(hash))
                         .forEach(codeQueue::add);
                     if (error != null) {
                       onFailure(error, NO_EPOCH);
@@ -789,12 +779,12 @@ public final class StateSync {
     return true;
   }
 
-  private Boolean persistCodes(final Map<Bytes32, Bytes> received) {
+  private Set<Bytes32> persistCodes(final Map<Bytes32, Bytes> received) {
     final SyncStateStorage.Batch batch = storage.batch();
     received.forEach((hash, code) -> batch.putCode(Bytes32.ZERO, hash, code));
     batch.commit();
     codes.addAndGet(received.size());
-    return Boolean.TRUE;
+    return received.keySet();
   }
 
   // a failed write is retried like a discarded response, and never skips the bookkeeping

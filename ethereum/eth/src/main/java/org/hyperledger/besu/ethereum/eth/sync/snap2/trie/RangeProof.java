@@ -27,12 +27,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * Verifies snap range responses: the returned leaves must be exactly the leaves of the trie between
- * the requested origin and the last returned key, with no gap.
- *
- * <p>The proof nodes are walked along both range boundaries. Subtrees outside the range are kept as
- * sealed references, subtrees inside it are dropped, and the root is recomputed from the sealed
- * subtrees and the returned leaves with a {@link StackTrie}.
+ * Verifies a snap range response: the leaves must be exactly those of the trie from the origin to
+ * the last returned key, which holds when the root recomputed from them and the proof matches.
  */
 public final class RangeProof {
 

@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -110,7 +111,7 @@ public final class Snap2SyncFactory {
     }
     final BonsaiWorldStateKeyValueStorage bonsai =
         coordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class);
-    if (bonsai.getFlatDbMode() == org.hyperledger.besu.ethereum.worldstate.FlatDbMode.ARCHIVE) {
+    if (bonsai.getFlatDbMode() == FlatDbMode.ARCHIVE) {
       throw new IllegalStateException("SNAP2 sync does not support the Bonsai archive format");
     }
     return new BonsaiSyncStateStorage(bonsai);

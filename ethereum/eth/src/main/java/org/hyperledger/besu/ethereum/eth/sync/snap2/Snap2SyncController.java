@@ -48,21 +48,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * SNAP2 sync: one process downloading the chain and the state together, sharing one request
- * scheduler and one header chain anchored on the trusted head.
- *
- * <ul>
- *   <li>the pivot trails the head; headers between the pivot and the head prove its ancestry;
- *   <li>the state is downloaded flat at the pivot, and each pivot move applies the block access
- *       lists of the blocks skipped to what is already persisted;
- *   <li>headers below the first pivot are back-filled while bodies and receipts are stored up to
- *       the pivot;
- *   <li>once the state is complete, the pivot is moved next to the head, the tries are built from
- *       the flat state and the root checked against that pivot, which becomes the chain head.
- * </ul>
- *
- * <p>The work of one run lives in a {@link SyncAttempt}. When the state cannot be recovered, the
- * sync starts over with a new attempt.
+ * SNAP2 sync: downloads the chain and the state together, the state flat at a pivot that trails the
+ * head and follows it through block access lists, then builds the tries once the state is complete.
+ * One run is a {@link SyncAttempt}; the sync starts over when the state cannot be recovered.
  */
 public final class Snap2SyncController implements SnapSyncController {
 

@@ -40,20 +40,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Recovers the flat state after the chain reorganised below the pivot. With W the common ancestor,
- * the orphaned blocks are W+1..P and the canonical ones W+1..P'. Every entry falls in one of four
- * cases:
- *
- * <ul>
- *   <li>written by both forks, or by the canonical fork only: the canonical block access lists set
- *       its value at P';
- *   <li>written by the orphaned fork only: its value at P' is its value at W, fetched again at P',
- *       or removed if it does not exist there;
- *   <li>written by neither fork: already right.
- * </ul>
- *
- * <p>Accounts are compared field by field, so an account whose nonce only the orphaned fork changed
- * is fetched again even if the canonical fork changed its balance.
+ * Recovers the flat state after a reorg below the pivot: what the canonical fork wrote comes from
+ * its block access lists, what only the orphaned fork wrote is fetched again at the new pivot, or
+ * removed. Accounts are compared field by field.
  */
 public final class ReorgRecovery {
 

@@ -25,12 +25,8 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * Builds a Merkle Patricia trie over 32-byte keys from items added in strictly increasing order,
- * keeping only the right edge of the trie in memory.
- *
- * <p>Besides leaves, it accepts already built subtrees (a branch at a given depth) and sealed
- * subtrees (a child reference that must hang directly under a branch), which lets it assemble
- * partitioned builds and recompute roots from range proofs.
+ * Builds a trie from keys added in increasing order, keeping only its right edge in memory. It also
+ * takes built or sealed subtrees, to assemble partitioned builds and range proofs.
  */
 public final class StackTrie {
 

@@ -60,16 +60,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Dispatches every request of the sync, chain and state alike, to the connected peers: most urgent
- * requests first, each to the peer with the best observed throughput that still has capacity.
- *
- * <p>Each peer has one lane per protocol, so chain and state requests never wait for each other.
- * The number of requests a lane accepts adapts to the peer: it grows with each answered request and
- * halves on a timeout, up to a maximum.
- *
- * <p>Dispatching, timeouts and peer bookkeeping run on a single loop thread; responses are decoded
- * on a worker pool. A timed out request keeps its stream open so that a late response is absorbed
- * instead of being treated as unsolicited, and keeps using a slot of the peer until then.
+ * Sends the sync requests to the peers, most urgent first, each to the fastest peer with capacity
+ * left. A peer has one lane per protocol whose capacity grows with answers and halves on timeouts;
+ * a timed out request keeps its slot until its late answer or one more timeout.
  */
 public final class RequestScheduler implements RequestSender {
 
