@@ -134,6 +134,7 @@ class Snap2SyncControllerTest {
     assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
     for (long number = 1; number <= pivot.getNumber(); number++) {
       assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
+      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
     }
     final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
     chain
@@ -175,6 +176,7 @@ class Snap2SyncControllerTest {
     assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
     for (long number = 1; number <= pivot.getNumber(); number++) {
       assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
+      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
     }
     final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
     chain

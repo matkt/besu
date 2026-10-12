@@ -84,6 +84,7 @@ public final class FakeSnapNetwork implements RequestSender {
       new ConcurrentHashMap<>();
   private final Map<Hash, Bytes> blockAccessLists = new ConcurrentHashMap<>();
   private final Set<EthPeer> withoutState = ConcurrentHashMap.newKeySet();
+  private final Set<EthPeer> withoutBlockAccessLists = ConcurrentHashMap.newKeySet();
   private final Map<EthPeer, AtomicLong> stateRequests = new ConcurrentHashMap<>();
   private volatile int maxResponseBytes = Integer.MAX_VALUE;
   private volatile long latencyMillis;
@@ -134,6 +135,11 @@ public final class FakeSnapNetwork implements RequestSender {
     withoutState.add(peers.get(peer));
   }
 
+  /** Makes a peer answer every block access list request with nothing. */
+  public void serveNoBlockAccessLists(final int peer) {
+    withoutBlockAccessLists.add(peers.get(peer));
+  }
+
   /** Returns the account and storage range requests a peer received. */
   public long stateRequestsTo(final EthPeer peer) {
     return stateRequests.getOrDefault(peer, new AtomicLong()).get();
@@ -167,11 +173,7 @@ public final class FakeSnapNetwork implements RequestSender {
             }
           }
           final Protocol protocol = request.protocolFor(peer);
-          final MessageData message = request.message(peer);
-          final MessageData raw =
-              protocol == Protocol.SNAP && isStateRequest(message)
-                  ? stateResponse(peer, message)
-                  : respond(protocol, message);
+          final MessageData raw = response(peer, protocol, request.message(peer));
           // eth responses reach requests already unwrapped, snap ones keep their request id
           final MessageData response =
               protocol == Protocol.SNAP ? raw.wrapMessageData(BigInteger.ONE) : raw;
@@ -212,6 +214,23 @@ public final class FakeSnapNetwork implements RequestSender {
   @Override
   public void stop() {
     workers.shutdownNow();
+  }
+
+  private MessageData response(
+      final EthPeer peer, final Protocol protocol, final MessageData message) {
+    if (protocol == Protocol.SNAP && isStateRequest(message)) {
+      return stateResponse(peer, message);
+    }
+    if (withoutBlockAccessLists.contains(peer)) {
+      if (protocol == Protocol.SNAP && message.getCode() == SnapV2.GET_BLOCK_ACCESS_LISTS) {
+        return BlockAccessListsMessage.create(List.of());
+      }
+      if (protocol == Protocol.ETH
+          && message.getCode() == EthProtocolMessages.GET_BLOCK_ACCESS_LISTS) {
+        return org.hyperledger.besu.ethereum.eth.messages.BlockAccessListsMessage.create(List.of());
+      }
+    }
+    return respond(protocol, message);
   }
 
   private MessageData respond(final Protocol protocol, final MessageData message) {

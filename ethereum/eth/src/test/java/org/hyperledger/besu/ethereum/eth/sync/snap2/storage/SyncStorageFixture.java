@@ -29,7 +29,6 @@ import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Optional;
 import java.util.Random;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -124,14 +123,14 @@ public final class SyncStorageFixture {
     public Bytes32 root() {
       final SimpleMerklePatriciaTrie<Bytes32, Bytes> trie =
           new SimpleMerklePatriciaTrie<>(Function.identity());
-      accounts.keySet().forEach(hash -> trie.put(hash, encode(account(hash))));
+      accounts.keySet().forEach(hash -> trie.put(hash, Accounts.encode(account(hash))));
       return trie.getRootHash();
     }
 
     /** Returns the leaf values of the account trie. */
     public NavigableMap<Bytes32, Bytes> accountLeaves() {
       final TreeMap<Bytes32, Bytes> out = new TreeMap<>();
-      accounts.keySet().forEach(hash -> out.put(hash, encode(account(hash))));
+      accounts.keySet().forEach(hash -> out.put(hash, Accounts.encode(account(hash))));
       return out;
     }
 
@@ -147,7 +146,7 @@ public final class SyncStorageFixture {
     /** Writes the flat state into a sync storage, with stale storage roots. */
     public void writeFlat(final SyncStateStorage sync) {
       final SyncStateStorage.Batch batch = sync.batch();
-      accounts.forEach((hash, account) -> batch.putAccount(hash, encode(account)));
+      accounts.forEach((hash, account) -> batch.putAccount(hash, Accounts.encode(account)));
       storage.forEach(
           (account, slots) ->
               slots.forEach((slot, value) -> batch.putStorage(account, slot, value)));
@@ -196,15 +195,7 @@ public final class SyncStorageFixture {
     return Bytes.wrap(bytes);
   }
 
-  public static Bytes encode(final PmtStateTrieAccountValue account) {
-    return RLP.encode(account::writeTo);
-  }
-
   public static Bytes encodeSlot(final UInt256 value) {
     return RLP.encodeOne(value.trimLeadingZeros());
-  }
-
-  public static Optional<PmtStateTrieAccountValue> decode(final Optional<Bytes> rlp) {
-    return rlp.map(r -> PmtStateTrieAccountValue.readFrom(RLP.input(r)));
   }
 }

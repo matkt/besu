@@ -70,7 +70,7 @@ class WorldStateTrieBuilderTest {
         .forEach(
             hash -> {
               final PmtStateTrieAccountValue flat =
-                  SyncStorageFixture.decode(storages.sync().getAccount(hash)).orElseThrow();
+                  Accounts.decode(storages.sync().getAccount(hash).orElseThrow());
               assertThat(flat.getStorageRoot().getBytes()).isEqualTo(world.storageRoot(hash));
             });
   }
@@ -100,7 +100,7 @@ class WorldStateTrieBuilderTest {
         changed,
         Accounts.encode(
             Accounts.withStorageRoot(
-                SyncStorageFixture.decode(storages.sync().getAccount(changed)).orElseThrow(),
+                Accounts.decode(storages.sync().getAccount(changed).orElseThrow()),
                 Accounts.UNKNOWN_STORAGE_ROOT)));
     batch.commit();
 

@@ -20,6 +20,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
@@ -119,11 +120,11 @@ class StateDiffApplierTest {
   }
 
   private static PmtStateTrieAccountValue read(final SyncStateStorage storage, final Address a) {
-    return SyncStorageFixture.decode(storage.getAccount(hash(a))).orElseThrow();
+    return Accounts.decode(storage.getAccount(hash(a)).orElseThrow());
   }
 
   private static Bytes account(final long nonce, final long balance, final Hash codeHash) {
-    return SyncStorageFixture.encode(
+    return Accounts.encode(
         new PmtStateTrieAccountValue(nonce, Wei.of(balance), Hash.EMPTY_TRIE_HASH, codeHash));
   }
 
