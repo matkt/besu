@@ -28,6 +28,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.common.NoSyncRequiredState;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.FullSyncDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.SyncTerminationCondition;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2SyncFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapDownloaderFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
@@ -149,6 +150,20 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
                       clock,
                       syncDurationMetrics,
                       chainDataPruner);
+          case SNAP2 ->
+              () ->
+                  Snap2SyncFactory.create(
+                      syncConfig,
+                      dataDirectory,
+                      protocolSchedule,
+                      protocolContext,
+                      metricsSystem,
+                      ethContext,
+                      worldStateStorageCoordinator,
+                      storageProvider,
+                      syncState,
+                      pivotBlockSelector,
+                      syncDurationMetrics);
           default -> () -> Optional.empty();
         };
 

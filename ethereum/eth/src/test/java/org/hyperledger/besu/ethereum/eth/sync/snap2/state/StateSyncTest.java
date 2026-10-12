@@ -1,0 +1,172 @@
+/*
+ * Copyright contributors to Hyperledger Besu.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2Configuration;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Format;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Storages;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+
+import java.time.Duration;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+
+import org.apache.tuweni.bytes.Bytes32;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+
+@Timeout(120)
+class StateSyncTest {
+
+  private final FakeSnapNetwork network = new FakeSnapNetwork();
+  private StateSync stateSync;
+
+  @AfterEach
+  void tearDown() {
+    if (stateSync != null) {
+      stateSync.stop();
+    }
+    network.stop();
+  }
+
+  private static Snap2Configuration config() {
+    return Snap2Configuration.getDefault().toBuilder()
+        .accountChunks(16)
+        .responseBytes(4096)
+        .storageBatchSize(8)
+        .maxStorageChunks(8)
+        .codeBatchSize(4)
+        .requestTimeout(Duration.ofSeconds(5))
+        .workerThreads(2)
+        .trieBuildThreads(2)
+        .build();
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void downloadsAStaticState(final Format format) throws Exception {
+    final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
+    network.serve(world);
+    final Storages storages = SyncStorageFixture.create(format);
+    stateSync = new StateSync(storages.sync(), network, config());
+
+    stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
+
+    assertThat(buildRoot(storages)).isEqualTo(world.root());
+  }
+
+  static Stream<Arguments> formatsAndSeeds() {
+    return Stream.of(Format.values())
+        .flatMap(
+            format ->
+                LongStream.of(11, 23, 37, 41, 59).mapToObj(seed -> Arguments.of(format, seed)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("formatsAndSeeds")
+  void followsAMovingPivot(final Format format, final long seed) throws Exception {
+    final Random random = new Random(seed);
+    TestWorld world = TestWorld.random(random, 1500, 6, 800);
+    network.serve(world);
+    network.latency(4);
+    final Storages storages = SyncStorageFixture.create(format);
+    stateSync = new StateSync(storages.sync(), network, config());
+    final var completion = stateSync.start(header(100, world.root()));
+
+    long block = 100;
+    int moves = 0;
+    for (int move = 0; move < 4 && !completion.isDone(); move++) {
+      waitForProgress(progress() + 50);
+      // no new request until the move is applied, but those in flight race with it
+      stateSync.pause();
+      final Bytes32 previousRoot = world.root();
+      final TestWorld next = world.copy();
+      final StateDiff diff = new StateDiff();
+      for (int b = 0; b < 3; b++) {
+        final BlockAccessList bal = next.mutate(random, 25);
+        diff.add(bal);
+        block++;
+      }
+      network.serve(next);
+      stateSync.moveTo(header(block, next.root()), diff).get(30, TimeUnit.SECONDS);
+      network.forget(previousRoot);
+      stateSync.resume();
+      world = next;
+      moves++;
+    }
+
+    completion.get(60, TimeUnit.SECONDS);
+    assertThat(moves).isGreaterThanOrEqualTo(3);
+    assertThat(stateSync.pivot().header().getNumber()).isEqualTo(block);
+    assertThat(buildRoot(storages)).isEqualTo(world.root());
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void detectsAStalePivot(final Format format) throws Exception {
+    final Random random = new Random(5);
+    final TestWorld world = TestWorld.random(random, 300, 2, 400);
+    final Storages storages = SyncStorageFixture.create(format);
+    stateSync = new StateSync(storages.sync(), network, config());
+    // nobody serves this root
+    stateSync.start(header(7, world.root()));
+
+    final long deadline = System.currentTimeMillis() + 20_000;
+    while (!stateSync.isPivotStale() && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20);
+    }
+    assertThat(stateSync.isPivotStale()).isTrue();
+
+    // a move to a served pivot resumes the download
+    network.serve(world);
+    stateSync.moveTo(header(8, world.root()), new StateDiff()).get(10, TimeUnit.SECONDS);
+    assertThat(stateSync.isPivotStale()).isFalse();
+  }
+
+  private long progress() {
+    return stateSync.downloadedAccounts() + stateSync.downloadedSlots();
+  }
+
+  private void waitForProgress(final long target) throws InterruptedException {
+    final long deadline = System.currentTimeMillis() + 20_000;
+    while (progress() < target
+        && !stateSync.isComplete()
+        && System.currentTimeMillis() < deadline) {
+      Thread.sleep(5);
+    }
+  }
+
+  private static Bytes32 buildRoot(final Storages storages) {
+    return new WorldStateTrieBuilder(storages.sync(), 2).build().root();
+  }
+
+  private static BlockHeader header(final long number, final Bytes32 root) {
+    return new BlockHeaderTestFixture().number(number).stateRoot(Hash.wrap(root)).buildHeader();
+  }
+}

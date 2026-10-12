@@ -1337,7 +1337,7 @@ public class BesuCommandTest extends CommandTestAbstract {
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains(
-            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP");
+            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP, SNAP2");
   }
 
   @Test

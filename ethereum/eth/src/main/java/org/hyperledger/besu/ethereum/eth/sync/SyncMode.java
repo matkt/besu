@@ -22,7 +22,10 @@ public enum SyncMode {
   // Fully validate all blocks as they sync
   FULL,
   // Perform snapsync
-  SNAP;
+  SNAP,
+  // Perform the snap/2 sync downloading the chain and the state together, healing with block
+  // access lists
+  SNAP2;
 
   public String normalize() {
     return StringUtils.capitalize(this.toString().toLowerCase(Locale.ROOT));

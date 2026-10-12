@@ -1,0 +1,95 @@
+/*
+ * Copyright contributors to Hyperledger Besu.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
+
+import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.manager.EthPeerImmutableAttributes;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.InvalidPeerTaskResponseException;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.MalformedRlpFromPeerException;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskValidationResponse;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+
+import java.util.function.Supplier;
+
+/**
+ * Sends an eth {@link PeerTask} through the {@link RequestScheduler}, reusing its encoding and
+ * validation. A fresh task is created per attempt since tasks may keep state.
+ */
+public final class PeerTaskRequest<T> implements SyncRequest<T> {
+
+  private final Supplier<PeerTask<T>> tasks;
+  private final Priority priority;
+  private final String name;
+  private final PeerTask<T> template;
+  private volatile PeerTask<T> current;
+
+  public PeerTaskRequest(
+      final Supplier<PeerTask<T>> tasks, final Priority priority, final String name) {
+    this.tasks = tasks;
+    this.priority = priority;
+    this.name = name;
+    this.template = tasks.get();
+  }
+
+  @Override
+  public Protocol protocol() {
+    return Protocol.ETH;
+  }
+
+  @Override
+  public Priority priority() {
+    return priority;
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public boolean canServe(final EthPeer peer) {
+    return template.getPeerRequirementFilter().test(EthPeerImmutableAttributes.from(peer));
+  }
+
+  @Override
+  public MessageData message(final EthPeer peer) {
+    final PeerTask<T> task = tasks.get();
+    current = task;
+    return task.getRequestMessage(peer.getAgreedCapabilities());
+  }
+
+  @Override
+  public T decode(final MessageData response, final EthPeer peer) {
+    final PeerTask<T> task = current;
+    final T result;
+    try {
+      result = task.processResponse(response, peer.getAgreedCapabilities());
+    } catch (final InvalidPeerTaskResponseException e) {
+      throw new InvalidResponseException(e.getMessage(), false);
+    } catch (final MalformedRlpFromPeerException e) {
+      throw new InvalidResponseException(e.getMessage(), true);
+    }
+    final PeerTaskValidationResponse validation = task.validateResult(result);
+    if (validation == PeerTaskValidationResponse.NO_RESULTS_RETURNED) {
+      throw new EmptyResponseException(name + " returned nothing");
+    }
+    if (validation != PeerTaskValidationResponse.RESULTS_VALID_AND_GOOD) {
+      throw new InvalidResponseException(
+          name + ": " + validation, validation.getDisconnectReason().isPresent());
+    }
+    return result;
+  }
+}

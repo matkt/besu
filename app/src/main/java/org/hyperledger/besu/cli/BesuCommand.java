@@ -476,7 +476,7 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
             "Invalid value for option '--sync-mode': '"
                 + value
                 + "' is not a valid sync mode. "
-                + "Valid values are: FULL, SNAP");
+                + "Valid values are: FULL, SNAP, SNAP2");
       }
     }
   }
@@ -2996,6 +2996,11 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
     if (unstableChainPruningOptions.getChainPruningStrategy().equals(ChainPruningStrategy.NONE)
         && !dataStorageConfiguration.getHistoryExpiryPruneEnabled()) {
       rocksDBPlugin.addIgnorableSegmentIdentifier(KeyValueSegmentIdentifier.CHAIN_PRUNER_STATE);
+    }
+    // only the SNAP2 sync stages flat state on Forest
+    if (getDefaultSyncModeIfNotSet() != SyncMode.SNAP2) {
+      rocksDBPlugin.addIgnorableSegmentIdentifier(KeyValueSegmentIdentifier.SNAPSYNC_FLAT_ACCOUNTS);
+      rocksDBPlugin.addIgnorableSegmentIdentifier(KeyValueSegmentIdentifier.SNAPSYNC_FLAT_STORAGE);
     }
   }
 

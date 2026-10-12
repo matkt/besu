@@ -662,6 +662,10 @@ public class EthPeers implements PeerSelector {
                           throw new RuntimeException(e);
                         }
                       });
+            } else if (syncMode == SyncMode.SNAP2) {
+              // the SNAP2 sync only uses peers that agreed on snap/2
+              peer.setIsServingSnap(peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2));
+              isServingSnapFuture = CompletableFuture.completedFuture(null);
             } else {
               isServingSnapFuture = CompletableFuture.completedFuture(null);
             }
