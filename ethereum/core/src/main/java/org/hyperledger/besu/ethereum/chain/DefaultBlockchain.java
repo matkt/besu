@@ -752,6 +752,65 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
+  public void unsafeStoreSyncBodiesAndReceipts(
+      final List<SyncBlockWithReceipts> blocksAndReceipts, final boolean indexTransactions) {
+    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    for (final SyncBlockWithReceipts blockAndReceipts : blocksAndReceipts) {
+      final Hash blockHash = blockAndReceipts.getHeader().getHash();
+      final SyncBlockBody body = blockAndReceipts.getBlock().getBody();
+      updater.putSyncBlockBody(blockHash, body);
+      updater.putSyncTransactionReceipts(blockHash, blockAndReceipts.getReceipts());
+      if (indexTransactions) {
+        indexTransactionHashesForBlock(
+            updater, blockHash, body.getEncodedTransactions().stream().map(Hash::hash).toList());
+      }
+    }
+    updater.commit();
+  }
+
+  @Override
+  public synchronized void unsafeSetSyncChainHead(final BlockHeader from, final BlockHeader to) {
+    Difficulty total =
+        blockchainStorage
+            .getTotalDifficulty(from.getHash())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException("no total difficulty for block " + from.getNumber()));
+    BlockchainStorage.Updater updater = blockchainStorage.updater();
+    Hash parent = from.getHash();
+    for (long number = from.getNumber() + 1; number <= to.getNumber(); number++) {
+      final long n = number;
+      final BlockHeader header =
+          blockchainStorage
+              .getBlockHash(number)
+              .flatMap(blockchainStorage::getBlockHeader)
+              .orElseThrow(() -> new IllegalStateException("no canonical header for block " + n));
+      if (!header.getParentHash().equals(parent)) {
+        throw new IllegalStateException("block " + number + " does not follow the canonical chain");
+      }
+      total = total.add(header.getDifficulty());
+      updater.putTotalDifficulty(header.getHash(), total);
+      parent = header.getHash();
+      if (number % 10_000 == 0) {
+        updater.commit();
+        updater = blockchainStorage.updater();
+      }
+    }
+    if (!parent.equals(to.getHash())) {
+      throw new IllegalStateException("block " + to.getNumber() + " is not canonical");
+    }
+    updater.setChainHead(to.getHash());
+    updater.commit();
+    chainHeadTransactionCount =
+        blockchainStorage
+            .getBlockBody(to.getHash())
+            .map(body -> body.getTransactions().size())
+            .orElse(0);
+    totalDifficulty = total;
+    chainHeader = to;
+  }
+
+  @Override
   public synchronized void unsafeSetChainHead(
       final BlockHeader blockHeader, final Difficulty totalDifficulty) {
     final BlockchainStorage.Updater updater = blockchainStorage.updater();

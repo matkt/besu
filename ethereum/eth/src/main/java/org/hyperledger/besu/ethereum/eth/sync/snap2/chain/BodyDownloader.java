@@ -28,136 +28,171 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
-import org.hyperledger.besu.metrics.BesuMetricCategory;
-import org.hyperledger.besu.plugin.services.MetricsSystem;
-import org.hyperledger.besu.plugin.services.metrics.Counter;
-import org.hyperledger.besu.plugin.services.metrics.LabelledMetric;
-import org.hyperledger.besu.services.pipeline.Pipeline;
-import org.hyperledger.besu.services.pipeline.PipelineBuilder;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Downloads block bodies and receipts for stored headers and imports them in order without
- * executing them; the chain head follows the last imported block.
+ * Downloads the bodies and receipts of stored headers, many ranges at a time and highest first, and
+ * stores each range as soon as it arrives. Nothing waits for the lowest pending range, neither the
+ * downloads nor the writes; the chain head is set once every block is stored, see {@link
+ * MutableBlockchain#unsafeSetSyncChainHead}.
  */
-public final class BlockImporter {
+public final class BodyDownloader {
 
-  private static final Logger LOG = LoggerFactory.getLogger(BlockImporter.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BodyDownloader.class);
   private static final int ATTEMPTS = 10;
 
   private final RequestSender sender;
   private final ProtocolSchedule protocolSchedule;
   private final MutableBlockchain blockchain;
+  private final long floor;
   private final int blocksPerRequest;
   private final int parallelism;
   private final boolean indexTransactions;
+  private final Executor writer;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
-  private final LabelledMetric<Counter> pipelineCounter;
-  private volatile long next;
-  private volatile boolean closed;
-  private final AtomicInteger generation = new AtomicInteger();
-  private volatile Pipeline<List<BlockHeader>> pipeline;
+
+  // guarded by this
+  private final BlockRanges stored = new BlockRanges();
+  private final BlockRanges fetching = new BlockRanges();
+  private long lowest;
+  private long highest = -1;
+  private int running;
+  private boolean closed;
 
   /**
-   * Creates an importer.
+   * Creates a downloader.
    *
-   * @param first the first block to import; its parent must be stored with its total difficulty
+   * @param floor the highest block whose body is not needed, its total difficulty stored
+   * @param writer runs the reads of headers and the writes of bodies
    */
-  public BlockImporter(
+  public BodyDownloader(
       final RequestSender sender,
       final ProtocolSchedule protocolSchedule,
       final MutableBlockchain blockchain,
-      final long first,
+      final long floor,
       final int blocksPerRequest,
       final int parallelism,
       final boolean indexTransactions,
-      final MetricsSystem metricsSystem) {
+      final Executor writer) {
     this.sender = sender;
     this.protocolSchedule = protocolSchedule;
     this.blockchain = blockchain;
-    this.next = first;
+    this.floor = floor;
     this.blocksPerRequest = blocksPerRequest;
     this.parallelism = parallelism;
     this.indexTransactions = indexTransactions;
-    this.pipelineCounter =
-        metricsSystem.createLabelledCounter(
-            BesuMetricCategory.SYNCHRONIZER,
-            "snap2_block_pipeline_processed_total",
-            "Block batches processed by the SNAP2 sync",
-            "step",
-            "action");
+    this.writer = writer;
   }
 
-  /** Returns the next block to import. */
-  public long nextBlock() {
-    return next;
+  /** Downloads what is missing from {@code from} to {@code to}, whose headers are canonical. */
+  public synchronized void download(final long from, final long to) {
+    lowest = Math.max(from, floor + 1);
+    highest = to;
+    dispatch();
   }
 
-  /**
-   * Imports again from the given block, after a reorg replaced the blocks above its parent. A
-   * running import is aborted, as it may have read replaced headers.
-   */
-  public synchronized void rewindTo(final long block) {
-    stop();
-    next = Math.min(next, block);
+  /** Returns whether every block above the floor up to {@code target} is stored. */
+  public synchronized boolean storedUpTo(final long target) {
+    return target <= floor || stored.covers(floor + 1, target);
   }
 
-  /** Imports every block up to {@code target}, whose headers must be stored. */
-  public synchronized CompletableFuture<Void> importUpTo(
-      final long target, final ExecutorService executor) {
-    if (closed) {
-      return CompletableFuture.failedFuture(new CancellationException("importer closed"));
-    }
-    if (next > target) {
-      return CompletableFuture.completedFuture(null);
-    }
-    LOG.info("Importing block bodies and receipts {} to {}", next, target);
-    final int started = generation.get();
-    pipeline =
-        PipelineBuilder.createPipelineFrom(
-                "headerBatches",
-                new HeaderBatches(next, target),
-                parallelism,
-                pipelineCounter,
-                false,
-                "snap2-blocks")
-            .thenProcessAsyncOrdered("downloadBodies", this::bodies, parallelism)
-            .thenProcessAsyncOrdered("downloadReceipts", this::receipts, parallelism)
-            .andFinishWith("importBlocks", batch -> importBatch(batch, started));
-    return pipeline.start(executor);
+  /** Returns the number of blocks stored. */
+  public synchronized long storedBlocks() {
+    return stored.size();
   }
 
-  /** Stops importing for good. */
+  /** Forgets the blocks from {@code from} on, which a reorg replaced. */
+  public synchronized void rewind(final long from) {
+    stored.remove(from, Long.MAX_VALUE);
+  }
+
+  /** Stops downloading; a range in flight may still be stored. */
   public synchronized void close() {
     closed = true;
-    stop();
   }
 
-  /** Stops importing; a batch in flight is not imported. */
-  public synchronized void stop() {
-    generation.incrementAndGet();
-    final Pipeline<List<BlockHeader>> running = pipeline;
-    if (running != null) {
-      try {
-        running.abort();
-      } catch (final IllegalStateException notStarted) {
-        // nothing to abort
+  private void dispatch() {
+    while (!closed && running < parallelism) {
+      final long[] range =
+          BlockRanges.highestGap(stored, fetching, lowest, highest, blocksPerRequest);
+      if (range == null) {
+        return;
       }
+      fetching.add(range[0], range[1]);
+      running++;
+      fetch(range[0], range[1]);
     }
+  }
+
+  private void fetch(final long from, final long to) {
+    CompletableFuture.supplyAsync(() -> headers(from, to), writer)
+        .thenCompose(this::bodies)
+        .thenCompose(this::receipts)
+        .thenApplyAsync(
+            blocks -> {
+              blockchain.unsafeStoreSyncBodiesAndReceipts(blocks, indexTransactions);
+              return blocks;
+            },
+            writer)
+        .whenComplete((blocks, error) -> finished(from, to, blocks, error));
+  }
+
+  private void finished(
+      final long from,
+      final long to,
+      final List<SyncBlockWithReceipts> blocks,
+      final Throwable error) {
+    if (error == null) {
+      release(from, to, blocks);
+      return;
+    }
+    LOG.debug("Bodies of blocks {} to {} failed, retrying: {}", from, to, error.getMessage());
+    // a failed range waits a little before being asked again
+    CompletableFuture.delayedExecutor(1, TimeUnit.SECONDS, writer)
+        .execute(() -> release(from, to, null));
+  }
+
+  // a range stored for headers a reorg replaced since is downloaded again
+  private synchronized void release(
+      final long from, final long to, final List<SyncBlockWithReceipts> blocks) {
+    fetching.remove(from, to);
+    running--;
+    if (blocks != null
+        && canonical(blocks.getFirst().getHeader())
+        && canonical(blocks.getLast().getHeader())) {
+      stored.add(from, to);
+    }
+    dispatch();
+  }
+
+  private boolean canonical(final BlockHeader header) {
+    return blockchain
+        .getBlockHashByNumber(header.getNumber())
+        .map(header.getHash()::equals)
+        .orElse(false);
+  }
+
+  private List<BlockHeader> headers(final long from, final long to) {
+    final List<BlockHeader> headers = new ArrayList<>((int) (to - from + 1));
+    for (long number = from; number <= to; number++) {
+      final long n = number;
+      headers.add(
+          blockchain
+              .getBlockHeader(number)
+              .orElseThrow(() -> new IllegalStateException("missing header of block " + n)));
+    }
+    return headers;
   }
 
   private CompletableFuture<List<SyncBlock>> bodies(final List<BlockHeader> headers) {
@@ -176,7 +211,8 @@ public final class BlockImporter {
             new PeerTaskRequest<>(
                 () -> new GetSyncBlockBodiesFromPeerTask(request, protocolSchedule, 0),
                 Priority.CHAIN,
-                "bodies"),
+                "bodies",
+                request.getLast().getNumber()),
             ATTEMPTS)
         .thenCompose(
             response -> {
@@ -217,7 +253,8 @@ public final class BlockImporter {
             new PeerTaskRequest<>(
                 () -> new GetSyncReceiptsFromPeerTask(request, protocolSchedule, receiptEncoder),
                 Priority.CHAIN,
-                "receipts"),
+                "receipts",
+                remaining.getLast().getHeader().getNumber()),
             ATTEMPTS)
         .thenCompose(
             response -> {
@@ -231,53 +268,5 @@ public final class BlockImporter {
                       .toList();
               return receiptsFrom(left, value.lastBlockPartialReceipts(), receipts);
             });
-  }
-
-  private synchronized void importBatch(
-      final List<SyncBlockWithReceipts> batch, final int startedGeneration) {
-    if (startedGeneration != generation.get()) {
-      throw new IllegalStateException("import rewound by a reorg");
-    }
-    final SyncBlockWithReceipts first = batch.getFirst();
-    if (first.getNumber() != next) {
-      throw new IllegalStateException(
-          "expected block " + next + " but the batch starts at " + first.getNumber());
-    }
-    blockchain.unsafeImportSyncBodiesAndReceipts(batch, indexTransactions);
-    next = batch.getLast().getNumber() + 1;
-  }
-
-  // batches of stored headers, read just before they are needed
-  private final class HeaderBatches implements Iterator<List<BlockHeader>> {
-    private final long target;
-    private long cursor;
-
-    private HeaderBatches(final long from, final long target) {
-      this.cursor = from;
-      this.target = target;
-    }
-
-    @Override
-    public boolean hasNext() {
-      return cursor <= target;
-    }
-
-    @Override
-    public List<BlockHeader> next() {
-      if (!hasNext()) {
-        throw new NoSuchElementException();
-      }
-      final long end = Math.min(target, cursor + blocksPerRequest - 1);
-      final List<BlockHeader> headers = new ArrayList<>((int) (end - cursor + 1));
-      for (long number = cursor; number <= end; number++) {
-        final long n = number;
-        headers.add(
-            blockchain
-                .getBlockHeader(number)
-                .orElseThrow(() -> new IllegalStateException("missing header of block " + n)));
-      }
-      cursor = end + 1;
-      return headers;
-    }
   }
 }

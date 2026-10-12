@@ -81,7 +81,7 @@ public record Snap2Configuration(
         Duration.ofSeconds(15),
         192,
         32,
-        32,
+        64,
         Math.max(2, cores / 2),
         Math.max(2, cores),
         1,

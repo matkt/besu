@@ -363,6 +363,47 @@ public class DefaultBlockchainTest {
   }
 
   @Test
+  public void storesSyncBodiesInAnyOrderAndSetsTheChainHeadAfterwards() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final List<Block> blocks = new ArrayList<>();
+    Block parent = genesisBlock;
+    for (long number = 1; number <= 4; number++) {
+      parent =
+          gen.block(
+              new BlockDataGenerator.BlockOptions()
+                  .setBlockNumber(number)
+                  .setParentHash(parent.getHash())
+                  .setDifficulty(Difficulty.of(number)));
+      blocks.add(parent);
+    }
+    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
+
+    for (final int index : new int[] {3, 1, 2, 0}) {
+      blockchain.unsafeStoreSyncBodiesAndReceipts(
+          List.of(toSyncBlockWithReceipts(blocks.get(index))), true);
+    }
+    // stored bodies do not move the chain head
+    assertThat(blockchain.getChainHeadBlockNumber()).isZero();
+
+    blockchain.unsafeSetSyncChainHead(genesisBlock.getHeader(), blocks.getLast().getHeader());
+
+    assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(4);
+    final Difficulty genesisDifficulty =
+        blockchain.getTotalDifficultyByHash(genesisBlock.getHash()).orElseThrow();
+    assertThat(blockchain.getChainHead().getTotalDifficulty())
+        .isEqualTo(genesisDifficulty.add(Difficulty.of(10)));
+    assertThat(blockchain.getTotalDifficultyByHash(blocks.get(1).getHash()))
+        .contains(genesisDifficulty.add(Difficulty.of(3)));
+    for (final Block block : blocks) {
+      assertThat(blockchain.getBlockBody(block.getHash())).isPresent();
+    }
+  }
+
+  @Test
   public void appendUnconnectedBlock() {
     final BlockDataGenerator gen = new BlockDataGenerator();
 

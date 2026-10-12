@@ -27,7 +27,7 @@ import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.sync.TrailingPeerRequirements;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BlockImporter;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.ChainHeadSource;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
@@ -236,7 +236,7 @@ public final class Snap2SyncController implements SnapSyncController {
               }
               restarts.incrementAndGet();
               LOG.warn("Restarting the SNAP2 sync from scratch: {}", restart.getMessage());
-              return run(failed == null ? resume : failed.resume(restart.canonicalUpTo()));
+              return run(failed == null ? resume : failed.resume());
             },
             executor);
   }
@@ -303,9 +303,9 @@ public final class Snap2SyncController implements SnapSyncController {
     }
   }
 
-  // what a new attempt keeps from a failed one: the canonical blocks imported, the headers indexed
-  private record Resume(long importFrom, long indexedUpTo) {
-    private static final Resume NONE = new Resume(0, -1);
+  // what a new attempt keeps from a failed one: the highest header it indexed
+  private record Resume(long indexedUpTo) {
+    private static final Resume NONE = new Resume(-1);
   }
 
   /** One run of the sync from a pivot, owning its download components. */
@@ -316,10 +316,9 @@ public final class Snap2SyncController implements SnapSyncController {
     private final CompletableFuture<BlockHeader> restart = new CompletableFuture<>();
     private final CompletableFuture<Void> headersDone = new CompletableFuture<>();
     private BlockHeader floor;
-    private long importStart;
     private volatile long indexedUpTo = -1;
     private volatile HeaderBackfill backfill;
-    private volatile BlockImporter importer;
+    private volatile BodyDownloader bodies;
     private volatile WorldStateTrieBuilder trieBuilder;
     private volatile boolean cancelled;
     private volatile boolean moving;
@@ -338,17 +337,17 @@ public final class Snap2SyncController implements SnapSyncController {
       storeHeaders(List.of(firstPivot));
       final CompletableFuture<Void> state = stateSync.start(firstPivot);
       startBackfill(firstPivot);
-      importer =
-          new BlockImporter(
+      bodies =
+          new BodyDownloader(
               scheduler,
               protocolSchedule,
               blockchain,
-              importStart,
+              floor.getNumber(),
               config.bodiesPerRequest(),
               config.chainParallelism(),
               indexTransactions,
-              metricsSystem);
-      final CompletableFuture<Void> blocks = importLoop(importer);
+              executor);
+      final CompletableFuture<Void> blocks = bodyLoop();
 
       final CompletableFuture<BlockHeader> main =
           state
@@ -397,9 +396,9 @@ public final class Snap2SyncController implements SnapSyncController {
       if (headers != null) {
         headers.stop();
       }
-      final BlockImporter blocks = importer;
-      if (blocks != null) {
-        blocks.close();
+      final BodyDownloader downloader = bodies;
+      if (downloader != null) {
+        downloader.close();
       }
       final WorldStateTrieBuilder builder = trieBuilder;
       if (builder != null) {
@@ -411,24 +410,19 @@ public final class Snap2SyncController implements SnapSyncController {
       return stopped || cancelled;
     }
 
-    // the imported blocks up to a canonical one are kept for the next attempt
-    private Resume resume(final long canonicalUpTo) {
-      final BlockImporter blocks = importer;
-      final long imported = blocks == null ? importStart : blocks.nextBlock();
-      return new Resume(Math.min(imported, canonicalUpTo + 1), indexedUpTo);
+    private Resume resume() {
+      return new Resume(indexedUpTo);
     }
 
     private <T> CompletableFuture<T> abandoned() {
       return CompletableFuture.failedFuture(new CancellationException("attempt abandoned"));
     }
 
-    // genesis, or the checkpoint stored with its total difficulty so imports can start after it
+    // genesis, or the checkpoint stored with its total difficulty, below which no body is needed
     private BlockHeader chainFloor() {
       final Optional<Checkpoint> checkpoint = syncState.getCheckpoint();
       if (checkpoint.isEmpty() || checkpoint.get().blockNumber() <= 0) {
-        final BlockHeader genesis = blockchain.getGenesisBlockHeader();
-        importStart = genesis.getNumber() + 1;
-        return genesis;
+        return blockchain.getGenesisBlockHeader();
       }
       final BlockHeader header =
           blockchain
@@ -442,27 +436,19 @@ public final class Snap2SyncController implements SnapSyncController {
                 + checkpoint.get().blockNumber());
       }
       blockchain.unsafeStoreHeader(header, checkpoint.get().totalDifficulty());
-      importStart = header.getNumber() + 1;
       return header;
     }
 
-    // drops what a failed attempt left above this pivot, and resumes after its canonical blocks
+    // the chain head stays on the floor until every body is stored; headers a failed attempt
+    // indexed above this pivot are dropped
     private void prepareChain() {
       if (resume.indexedUpTo() > firstPivot.getNumber()) {
         blockchain.unsafeRemoveCanonicalIndexRange(firstPivot.getNumber(), resume.indexedUpTo());
       }
-      importStart =
-          Math.max(importStart, Math.min(resume.importFrom(), firstPivot.getNumber() + 1));
-      final BlockHeader last =
-          importStart - 1 == floor.getNumber()
-              ? floor
-              : blockchain
-                  .getBlockHeader(importStart - 1)
-                  .orElseThrow(() -> new IllegalStateException("lost an imported header"));
       blockchain.unsafeSetChainHead(
-          last,
+          floor,
           blockchain
-              .getTotalDifficultyByHash(last.getHash())
+              .getTotalDifficultyByHash(floor.getHash())
               .orElseThrow(() -> new IllegalStateException("lost a total difficulty")));
     }
 
@@ -516,32 +502,30 @@ public final class Snap2SyncController implements SnapSyncController {
               });
     }
 
-    // bodies and receipts follow the stored headers, up to the pivot
-    private CompletableFuture<Void> importLoop(final BlockImporter blocks) {
-      if (inactive() || blocks != importer) {
+    // bodies and receipts of every stored header up to the pivot, then the chain head once the
+    // final pivot is reached
+    private CompletableFuture<Void> bodyLoop() {
+      if (inactive()) {
         return abandoned();
       }
-      final long next = blocks.nextBlock();
-      if (finalTarget >= 0 && next > finalTarget) {
-        return CompletableFuture.completedFuture(null);
+      final long target = finalTarget >= 0 ? finalTarget : pivotNumber();
+      bodies.download(lowestStoredHeader(), target);
+      if (finalTarget >= 0 && bodies.storedUpTo(finalTarget)) {
+        return CompletableFuture.runAsync(() -> setChainHead(finalTarget), executor);
       }
-      final long target = finalTarget >= 0 ? finalTarget : stateSync.pivot().header().getNumber();
-      if (backfill.lowestStored() > next || next > target) {
-        return poll().thenCompose(unused -> importLoop(blocks));
-      }
-      return blocks
-          .importUpTo(target, executor)
-          .handle(
-              (unused, error) -> {
-                if (error != null && !inactive()) {
-                  LOG.debug("Block import interrupted: {}", unwrap(error).getMessage());
-                }
-                return error == null;
-              })
-          // an interrupted import waits a little, so that a failing one does not spin
-          .thenCompose(
-              imported ->
-                  imported ? importLoop(blocks) : poll().thenCompose(unused -> importLoop(blocks)));
+      return poll().thenCompose(unused -> bodyLoop());
+    }
+
+    private void setChainHead(final long target) {
+      final BlockHeader head =
+          blockchain
+              .getBlockHeader(target)
+              .orElseThrow(() -> new IllegalStateException("lost the header of block " + target));
+      LOG.info(
+          "Bodies and receipts of blocks {} to {} stored, writing their total difficulties",
+          floor.getNumber() + 1,
+          target);
+      blockchain.unsafeSetSyncChainHead(floor, head);
     }
 
     private void maybeMove() {
@@ -663,7 +647,7 @@ public final class Snap2SyncController implements SnapSyncController {
                 if (ancestorIndex < 0) {
                   return CompletableFuture.failedFuture(
                       new RestartException(
-                          "the chain reorganised deeper than " + MAX_REORG_DEPTH + " blocks", -1));
+                          "the chain reorganised deeper than " + MAX_REORG_DEPTH + " blocks"));
                 }
                 final BlockHeader ancestor = canonical.get(ancestorIndex);
                 final long target =
@@ -689,8 +673,7 @@ public final class Snap2SyncController implements SnapSyncController {
                         error ->
                             CompletableFuture.failedFuture(
                                 new RestartException(
-                                    "orphaned block access lists are unavailable",
-                                    ancestor.getNumber())))
+                                    "orphaned block access lists are unavailable")))
                     .thenCombine(balFetcher.fetch(newFork), (old, fresh) -> List.of(old, fresh))
                     .thenCompose(
                         lists -> {
@@ -707,7 +690,7 @@ public final class Snap2SyncController implements SnapSyncController {
                           }
                           storeBlockAccessLists(newFork, lists.get(1));
                           // after the new headers, so that no import reads the orphaned ones
-                          importer.rewindTo(ancestor.getNumber() + 1);
+                          bodies.rewind(ancestor.getNumber() + 1);
                           return new ReorgRecovery(stateSync, storage, scheduler)
                               .recover(newFork.getLast(), fold(lists.get(0)), fold(lists.get(1)));
                         })
@@ -718,8 +701,7 @@ public final class Snap2SyncController implements SnapSyncController {
                                 ? CompletableFuture.failedFuture(error)
                                 : CompletableFuture.failedFuture(
                                     new RestartException(
-                                        "reorg recovery failed: " + unwrap(error).getMessage(),
-                                        ancestor.getNumber())));
+                                        "reorg recovery failed: " + unwrap(error).getMessage())));
               })
           .exceptionallyCompose(
               error -> {
@@ -794,8 +776,7 @@ public final class Snap2SyncController implements SnapSyncController {
                     + " does not match block "
                     + pivot.getNumber()
                     + " root "
-                    + pivot.getStateRoot(),
-                pivot.getNumber()));
+                    + pivot.getStateRoot()));
       }
       storage.saveWorldState(pivot, built.rootNode());
       storage.completeSync();
@@ -818,9 +799,14 @@ public final class Snap2SyncController implements SnapSyncController {
       return headers == null ? 0 : headers.lowestStored();
     }
 
-    private long importedUpTo() {
-      final BlockImporter blocks = importer;
-      return blocks == null ? 0 : blocks.nextBlock() - 1;
+    private long bodiesStored() {
+      final BodyDownloader downloader = bodies;
+      return downloader == null ? 0 : downloader.storedBlocks();
+    }
+
+    private long bodiesNeeded() {
+      final BlockHeader base = floor;
+      return base == null ? 0 : Math.max(0, pivotNumber() - base.getNumber());
     }
 
     private long trieProgress(final boolean accounts) {
@@ -834,7 +820,6 @@ public final class Snap2SyncController implements SnapSyncController {
     private String progress() {
       final WorldStateTrieBuilder builder = trieBuilder;
       final HeaderBackfill headers = backfill;
-      final BlockImporter blocks = importer;
       final String phase =
           builder != null
               ? String.format(
@@ -842,11 +827,12 @@ public final class Snap2SyncController implements SnapSyncController {
                   builder.accountsProcessed(), builder.slotsProcessed())
               : "state " + stateSync.progress();
       return String.format(
-          "pivot %d, %s, headers stored down to %s, blocks imported up to %s",
+          "pivot %d, %s, headers stored down to %s, bodies and receipts of %d of %d blocks",
           stateSync.pivot().header().getNumber(),
           phase,
           headers == null ? "-" : headers.lowestStored(),
-          blocks == null ? "-" : blocks.nextBlock() - 1);
+          bodiesStored(),
+          bodiesNeeded());
     }
   }
 
@@ -912,9 +898,14 @@ public final class Snap2SyncController implements SnapSyncController {
         () -> attemptValue(Attempt::lowestStoredHeader));
     metricsSystem.createLongGauge(
         category,
-        "snap2_blocks_imported",
-        "Highest block whose body and receipts SNAP2 imported",
-        () -> attemptValue(Attempt::importedUpTo));
+        "snap2_bodies_stored",
+        "Blocks whose body and receipts SNAP2 stored",
+        () -> attemptValue(Attempt::bodiesStored));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_bodies_needed",
+        "Blocks whose body and receipts SNAP2 needs, from the floor to the pivot",
+        () -> attemptValue(Attempt::bodiesNeeded));
     metricsSystem.createGauge(
         category,
         "snap2_account_coverage",
@@ -1071,20 +1062,8 @@ public final class Snap2SyncController implements SnapSyncController {
 
   /** The state cannot be recovered and the sync must start over. */
   static final class RestartException extends RuntimeException {
-    private final long canonicalUpTo;
-
-    /**
-     * Creates the exception.
-     *
-     * @param canonicalUpTo the highest block known to be canonical, -1 if none
-     */
-    RestartException(final String message, final long canonicalUpTo) {
+    RestartException(final String message) {
       super(message);
-      this.canonicalUpTo = canonicalUpTo;
-    }
-
-    long canonicalUpTo() {
-      return canonicalUpTo;
     }
   }
 }
