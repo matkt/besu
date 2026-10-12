@@ -30,13 +30,16 @@ import org.hyperledger.besu.ethereum.eth.sync.common.WorldStateHealFinishedListe
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncMetricsManager;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.context.SnapSyncStatePersistenceManager;
+import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.services.tasks.InMemoryTasksPriorityQueues;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -84,22 +87,25 @@ class SnapV2WorldDownloadStateCompletionTest {
     // The chain downloader still holds the pivot before a completed catch-up.
     assertThat(downloadState.checkCompletion(pivot(1000))).isFalse();
 
-    verify(worldStateStorageCoordinator, never()).getAccountStateTrieNode(any(), any());
+    verify(worldStateStorageCoordinator, never()).getTrieNodeUnsafe(any());
     assertThat(downloadState.getDownloadFuture()).isNotDone();
   }
 
   @Test
   void completionIsCheckedAgainstTheWorldStatePivot() {
-    when(worldStateStorageCoordinator.getAccountStateTrieNode(any(), any()))
-        .thenReturn(Optional.empty());
+    when(worldStateStorageCoordinator.getTrieNodeUnsafe(any())).thenReturn(Optional.empty());
 
     assertThat(downloadState.checkCompletion(worldStatePivot)).isFalse();
 
     // The root is looked up, so the download is otherwise complete.
-    verify(worldStateStorageCoordinator)
-        .getAccountStateTrieNode(
-            Bytes.EMPTY, Bytes32.wrap(worldStatePivot.getStateRoot().getBytes()));
-    assertThat(downloadState.getDownloadFuture()).isCompletedExceptionally();
+    verify(worldStateStorageCoordinator).getTrieNodeUnsafe(Bytes.EMPTY);
+    assertThat(downloadState.getDownloadFuture())
+        .failsWithin(Duration.ZERO)
+        .withThrowableOfType(ExecutionException.class)
+        .havingCause()
+        .isInstanceOfSatisfying(
+            StateRootMismatchException.class,
+            e -> assertThat(e.getExpectedRoot()).isEqualTo(worldStatePivot.getStateRoot()));
   }
 
   private static BlockHeader pivot(final long number) {
