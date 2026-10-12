@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.ReorgRecovery;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageRetry;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
@@ -435,7 +436,8 @@ public final class Snap2SyncController implements SnapSyncController {
                 + " is not at block "
                 + checkpoint.get().blockNumber());
       }
-      blockchain.unsafeStoreHeader(header, checkpoint.get().totalDifficulty());
+      StorageRetry.run(
+          () -> blockchain.unsafeStoreHeader(header, checkpoint.get().totalDifficulty()));
       return header;
     }
 
@@ -443,17 +445,20 @@ public final class Snap2SyncController implements SnapSyncController {
     // indexed above this pivot are dropped
     private void prepareChain() {
       if (resume.indexedUpTo() > firstPivot.getNumber()) {
-        blockchain.unsafeRemoveCanonicalIndexRange(firstPivot.getNumber(), resume.indexedUpTo());
+        StorageRetry.run(
+            () ->
+                blockchain.unsafeRemoveCanonicalIndexRange(
+                    firstPivot.getNumber(), resume.indexedUpTo()));
       }
-      blockchain.unsafeSetChainHead(
-          floor,
+      final var floorDifficulty =
           blockchain
               .getTotalDifficultyByHash(floor.getHash())
-              .orElseThrow(() -> new IllegalStateException("lost a total difficulty")));
+              .orElseThrow(() -> new IllegalStateException("lost a total difficulty"));
+      StorageRetry.run(() -> blockchain.unsafeSetChainHead(floor, floorDifficulty));
     }
 
     private void storeHeaders(final List<BlockHeader> headers) {
-      blockchain.storeBlockHeaders(headers);
+      StorageRetry.run(() -> blockchain.storeBlockHeaders(headers));
       indexedUpTo = Math.max(indexedUpTo, headers.getLast().getNumber());
     }
 
@@ -525,7 +530,7 @@ public final class Snap2SyncController implements SnapSyncController {
           "Bodies and receipts of blocks {} to {} stored, writing their total difficulties",
           floor.getNumber() + 1,
           target);
-      blockchain.unsafeSetSyncChainHead(floor, head);
+      StorageRetry.run(() -> blockchain.unsafeSetSyncChainHead(floor, head));
     }
 
     private void maybeMove() {
@@ -686,7 +691,10 @@ public final class Snap2SyncController implements SnapSyncController {
                           }
                           storeHeaders(newFork);
                           if (pivot.getNumber() > target) {
-                            blockchain.unsafeRemoveCanonicalIndexRange(target, pivot.getNumber());
+                            StorageRetry.run(
+                                () ->
+                                    blockchain.unsafeRemoveCanonicalIndexRange(
+                                        target, pivot.getNumber()));
                           }
                           storeBlockAccessLists(newFork, lists.get(1));
                           // after the new headers, so that no import reads the orphaned ones
@@ -860,12 +868,15 @@ public final class Snap2SyncController implements SnapSyncController {
   // keeps the lists of the blocks the node will hold, to serve them once synced
   private void storeBlockAccessLists(final List<BlockHeader> headers, final List<Bytes> lists) {
     if (blockchain instanceof DefaultBlockchain defaultBlockchain) {
-      final var updater = defaultBlockchain.getBlockchainStorage().updater();
-      for (int i = 0; i < headers.size(); i++) {
-        updater.putSyncBlockAccessList(
-            headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));
-      }
-      updater.commit();
+      StorageRetry.run(
+          () -> {
+            final var updater = defaultBlockchain.getBlockchainStorage().updater();
+            for (int i = 0; i < headers.size(); i++) {
+              updater.putSyncBlockAccessList(
+                  headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));
+            }
+            updater.commit();
+          });
     }
   }
 

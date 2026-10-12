@@ -754,15 +754,25 @@ public class DefaultBlockchain implements MutableBlockchain {
   @Override
   public void unsafeStoreSyncBodiesAndReceipts(
       final List<SyncBlockWithReceipts> blocksAndReceipts, final boolean indexTransactions) {
+    // hashed before the transaction starts, to keep it short
+    final List<List<Hash>> transactionHashes =
+        indexTransactions
+            ? blocksAndReceipts.stream()
+                .map(
+                    block ->
+                        block.getBlock().getBody().getEncodedTransactions().stream()
+                            .map(Hash::hash)
+                            .toList())
+                .toList()
+            : List.of();
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
-    for (final SyncBlockWithReceipts blockAndReceipts : blocksAndReceipts) {
+    for (int i = 0; i < blocksAndReceipts.size(); i++) {
+      final SyncBlockWithReceipts blockAndReceipts = blocksAndReceipts.get(i);
       final Hash blockHash = blockAndReceipts.getHeader().getHash();
-      final SyncBlockBody body = blockAndReceipts.getBlock().getBody();
-      updater.putSyncBlockBody(blockHash, body);
+      updater.putSyncBlockBody(blockHash, blockAndReceipts.getBlock().getBody());
       updater.putSyncTransactionReceipts(blockHash, blockAndReceipts.getReceipts());
       if (indexTransactions) {
-        indexTransactionHashesForBlock(
-            updater, blockHash, body.getEncodedTransactions().stream().map(Hash::hash).toList());
+        indexTransactionHashesForBlock(updater, blockHash, transactionHashes.get(i));
       }
     }
     updater.commit();

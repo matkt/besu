@@ -26,6 +26,10 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
+
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
@@ -47,45 +51,61 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     return flat.containsKey(CODE_STORAGE, codeHash.toArrayUnsafe());
   }
 
+  // writes are kept until the commit, which applies them in one short transaction and retries it
   @Override
   public Batch batch() {
-    final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
     return new Batch() {
+      private final List<Consumer<BonsaiWorldStateKeyValueStorage.Updater>> writes =
+          new ArrayList<>();
+
       @Override
       public void putAccount(final Bytes32 accountHash, final Bytes account) {
-        updater
-            .getWorldStateTransaction()
-            .put(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe(), account.toArrayUnsafe());
+        final byte[] key = accountHash.toArray();
+        final byte[] value = account.toArray();
+        writes.add(
+            updater -> updater.getWorldStateTransaction().put(ACCOUNT_INFO_STATE, key, value));
       }
 
       @Override
       public void removeAccount(final Bytes32 accountHash) {
-        updater.getWorldStateTransaction().remove(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe());
+        final byte[] key = accountHash.toArray();
+        writes.add(updater -> updater.getWorldStateTransaction().remove(ACCOUNT_INFO_STATE, key));
       }
 
       @Override
       public void putStorage(
           final Bytes32 accountHash, final Bytes32 slotHash, final Bytes32 value) {
-        updater
-            .getWorldStateTransaction()
-            .put(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash), value.toArrayUnsafe());
+        final byte[] key = slotKey(accountHash, slotHash);
+        final byte[] stored = value.toArray();
+        writes.add(
+            updater ->
+                updater.getWorldStateTransaction().put(ACCOUNT_STORAGE_STORAGE, key, stored));
       }
 
       @Override
       public void removeStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
-        updater
-            .getWorldStateTransaction()
-            .remove(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash));
+        final byte[] key = slotKey(accountHash, slotHash);
+        writes.add(
+            updater -> updater.getWorldStateTransaction().remove(ACCOUNT_STORAGE_STORAGE, key));
       }
 
       @Override
       public void putCode(final Bytes32 accountHash, final Bytes32 codeHash, final Bytes code) {
-        updater.putCode(Hash.wrap(accountHash), Hash.wrap(codeHash), code);
+        final Hash account = Hash.wrap(accountHash.copy());
+        final Hash hash = Hash.wrap(codeHash.copy());
+        final Bytes copy = code.copy();
+        writes.add(updater -> updater.putCode(account, hash, copy));
       }
 
       @Override
       public void commit() {
-        updater.commitComposedOnly();
+        StorageRetry.run(
+            () -> {
+              final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
+              writes.forEach(write -> write.accept(updater));
+              updater.commitComposedOnly();
+            });
+        writes.clear();
       }
     };
   }
@@ -97,43 +117,44 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
         .isPresent();
   }
 
+  // nodes are kept until the commit, which writes them in one short transaction and retries it
   @Override
   public TrieWriter trieWriter() {
     return new TrieWriter() {
-      private BonsaiWorldStateKeyValueStorage.Updater updater;
+      private final List<Bytes[]> nodes = new ArrayList<>();
       private long pendingBytes;
 
       @Override
       public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        updater().putTrieNode(location, hash, rlp);
-        maybeCommit(location.size() + rlp.size());
+        add(location.copy(), hash, rlp);
       }
 
       @Override
       public void storageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        updater().putTrieNode(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
-        maybeCommit(32 + location.size() + rlp.size());
+        add(TrieNodeKey.of(Hash.wrap(accountHash), location).copy(), hash, rlp);
       }
 
       @Override
       public void commit() {
-        if (updater != null) {
-          updater.commitComposedOnly();
-          updater = null;
-          pendingBytes = 0;
+        if (nodes.isEmpty()) {
+          return;
         }
+        StorageRetry.run(
+            () -> {
+              final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
+              for (final Bytes[] node : nodes) {
+                updater.putTrieNode(node[0], Bytes32.wrap(node[1]), node[2]);
+              }
+              updater.commitComposedOnly();
+            });
+        nodes.clear();
+        pendingBytes = 0;
       }
 
-      private BonsaiWorldStateKeyValueStorage.Updater updater() {
-        if (updater == null) {
-          updater = newUpdater();
-        }
-        return updater;
-      }
-
-      private void maybeCommit(final int bytes) {
-        pendingBytes += bytes;
+      private void add(final Bytes key, final Bytes32 hash, final Bytes rlp) {
+        nodes.add(new Bytes[] {key, hash.copy(), rlp.copy()});
+        pendingBytes += key.size() + rlp.size();
         if (pendingBytes >= BYTES_PER_COMMIT) {
           commit();
         }

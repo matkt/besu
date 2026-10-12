@@ -22,6 +22,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPee
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageRetry;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -200,9 +201,10 @@ public final class HeaderBackfill {
       complete.addAll(byHash(headers.getLast().getParentHash(), low));
       headers = complete;
     }
-    blockchain.storeBlockHeaders(headers);
-    expected = headers.getLast().getParentHash();
-    lowestStored = headers.getLast().getNumber();
+    final List<BlockHeader> verified = headers;
+    StorageRetry.run(() -> blockchain.storeBlockHeaders(verified));
+    expected = verified.getLast().getParentHash();
+    lowestStored = verified.getLast().getNumber();
   }
 
   // the trusted chain from the header with this hash down to low, highest first
