@@ -138,6 +138,8 @@ class StateSyncTest {
     final TestWorld world = TestWorld.random(new Random(13), 800, 3, 400);
     network.serve(world);
     network.serveNoState(1);
+    // many small responses, so that the requests it got before being left out are few
+    network.maxResponseBytes(1024);
     final Storages storages = SyncStorageFixture.create(format);
     stateSync = new StateSync(storages.sync(), network, config());
 

@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -25,6 +26,7 @@ import org.hyperledger.besu.ethereum.eth.manager.EthProtocolManagerTestBuilder;
 import org.hyperledger.besu.ethereum.eth.manager.RespondingEthPeer;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask.Direction;
+import org.hyperledger.besu.ethereum.eth.messages.GetBlockHeadersMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
@@ -33,6 +35,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -131,10 +134,48 @@ class RequestSchedulerTest {
         .containsExactly(3L, 4L);
   }
 
+  @Test
+  void sendsTheMostUrgentRequestFirst() {
+    // two requests take the two slots the peer starts with
+    scheduler.submit(headers(1, 1));
+    scheduler.submit(headers(2, 1));
+    await().until(() -> peer.streamPendingOutgoingRequests().count() == 2);
+    scheduler.submit(headers(3, 1));
+    scheduler.submit(headers(4, 1, Priority.PIVOT));
+
+    peer.respond(RespondingEthPeer.blockchainResponder(blockchain));
+
+    await().until(() -> peer.streamPendingOutgoingRequests().count() == 2);
+    final GetBlockHeadersMessage next =
+        GetBlockHeadersMessage.readFrom(
+            peer.peekNextOutgoingRequest().orElseThrow().unwrapMessageData().getValue());
+    assertThat(next.blockNumber()).hasValue(4L);
+  }
+
+  @Test
+  void neverSendsARequestToAnExcludedPeer() {
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> response =
+        scheduler.submit(headers(1, 2), Set.of(peer.getEthPeer()));
+
+    assertThatThrownBy(() -> response.get(10, TimeUnit.SECONDS))
+        .isInstanceOf(ExecutionException.class)
+        .cause()
+        .isInstanceOfSatisfying(
+            RequestFailedException.class,
+            failure ->
+                assertThat(failure.reason()).isEqualTo(RequestFailedException.Reason.NO_PEER));
+    assertThat(peer.hasOutstandingRequests()).isFalse();
+  }
+
   private PeerTaskRequest<List<BlockHeader>> headers(final long first, final int count) {
+    return headers(first, count, Priority.CHAIN);
+  }
+
+  private PeerTaskRequest<List<BlockHeader>> headers(
+      final long first, final int count, final Priority priority) {
     return new PeerTaskRequest<>(
         () -> new GetHeadersFromPeerTask(first, count, 0, Direction.FORWARD, protocolSchedule),
-        Priority.CHAIN,
+        priority,
         "headers");
   }
 }
