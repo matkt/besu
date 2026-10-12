@@ -29,11 +29,13 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListChanges;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.Node;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredNodeFactory;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 
@@ -479,22 +481,36 @@ public class SnapV2BlockAccessListApplier {
         Function.identity());
   }
 
+  /**
+   * Opens the local account trie, loading Bonsai nodes by location only: a parent rewritten at a
+   * newer pivot may reference a subtree whose local node still mixes the pivots of the last
+   * catch-up.
+   */
   private MerkleTrie<Bytes, Bytes> openAccountTrie() {
-    final Function<Bytes, Bytes> identity = Function.identity();
     // the root is the node at the empty location, where Forest keeps it until the state is saved
     final Optional<Bytes> rootNode = worldStateStorageCoordinator.getTrieNodeUnsafe(Bytes.EMPTY);
     final NodeLoader accountNodeLoader =
         (location, hash) ->
             location.isEmpty()
                 ? rootNode
-                : worldStateStorageCoordinator.getAccountStateTrieNode(location, hash);
+                : worldStateStorageCoordinator.applyForStrategy(
+                    bonsai -> bonsai.getTrieNodeUnsafe(location),
+                    forest -> forest.getAccountStateTrieNode(hash));
+    // Overridden to skip the node hash assertion of StoredNodeFactory
+    final StoredNodeFactory<Bytes> nodeFactory =
+        new StoredNodeFactory<>(accountNodeLoader, Function.identity(), Function.identity()) {
+          @Override
+          public Optional<Node<Bytes>> retrieve(final Bytes location, final Bytes32 hash) {
+            return accountNodeLoader.getNode(location, hash).map(rlp -> decode(location, rlp));
+          }
+        };
 
     final Bytes32 rootHash =
         rootNode
             .map(node -> Bytes32.wrap(Hash.hash(node).getBytes()))
             .orElse(MerkleTrie.EMPTY_TRIE_NODE_HASH);
 
-    return new StoredMerklePatriciaTrie<>(accountNodeLoader, rootHash, identity, identity);
+    return new StoredMerklePatriciaTrie<>(nodeFactory, rootHash);
   }
 
   /**
