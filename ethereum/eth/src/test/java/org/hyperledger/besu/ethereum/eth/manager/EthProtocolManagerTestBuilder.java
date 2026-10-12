@@ -65,6 +65,7 @@ public class EthProtocolManagerTestBuilder {
   private Optional<MergePeerFilter> mergePeerFilter = Optional.empty();
   private SynchronizerConfiguration synchronizerConfiguration;
   private PeerTaskExecutor peerTaskExecutor;
+  private SyncMode syncMode = SyncMode.SNAP;
 
   public static EthProtocolManagerTestBuilder builder() {
     return new EthProtocolManagerTestBuilder();
@@ -166,6 +167,11 @@ public class EthProtocolManagerTestBuilder {
     return this;
   }
 
+  public EthProtocolManagerTestBuilder setSyncMode(final SyncMode syncMode) {
+    this.syncMode = syncMode;
+    return this;
+  }
+
   public EthProtocolManager build() {
     if (protocolSchedule == null) {
       protocolSchedule = ProtocolScheduleFixture.TESTING_NETWORK;
@@ -209,7 +215,7 @@ public class EthProtocolManagerTestBuilder {
               25,
               25,
               false,
-              SyncMode.SNAP,
+              syncMode,
               forkIdManager);
     }
     ethPeers.setChainHeadTracker(EthProtocolManagerTestUtil.getChainHeadTrackerMock());

@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
-import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 
 import java.util.HashMap;
@@ -44,9 +43,7 @@ final class StateServers {
     record.strikes = 0;
     record.excludedUntil = 0;
     lastServedEpoch = Math.max(lastServedEpoch, epoch);
-    if (peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2)) {
-      peer.setIsServingSnap(true);
-    }
+    peer.setIsServingSnap(true);
   }
 
   /**
