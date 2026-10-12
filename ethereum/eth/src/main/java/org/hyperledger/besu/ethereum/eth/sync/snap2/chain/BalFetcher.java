@@ -16,13 +16,19 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.eth.EthProtocol;
+import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.messages.EthProtocolMessages;
+import org.hyperledger.besu.ethereum.eth.messages.GetBlockAccessListsMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.NodeEncoding;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -41,9 +47,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Downloads block access lists over snap/2 and checks each one against the block access list hash
- * of its header. Blocks a peer could not serve are asked to other peers until every list is
- * received or the attempts run out.
+ * Downloads block access lists, over snap/2 or eth/71 depending on the peer, and checks each one
+ * against the block access list hash of its header. Blocks a peer could not serve are asked to
+ * other peers until every list is received or the attempts run out.
  */
 public final class BalFetcher {
 
@@ -200,6 +206,20 @@ public final class BalFetcher {
       return Protocol.SNAP;
     }
 
+    // snap/2 when the peer has it, otherwise eth/71
+    @Override
+    public Protocol protocolFor(final EthPeer peer) {
+      return peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2)
+          ? Protocol.SNAP
+          : Protocol.ETH;
+    }
+
+    @Override
+    public boolean canServe(final EthPeer peer) {
+      return peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2)
+          || peer.getAgreedCapabilities().stream().anyMatch(EthProtocol::isEth71Compatible);
+    }
+
     @Override
     public Priority priority() {
       return Priority.PIVOT;
@@ -212,13 +232,18 @@ public final class BalFetcher {
 
     @Override
     public MessageData message(final EthPeer peer) {
-      return SnapMessages.getBlockAccessLists(
-          headers.stream().map(BlockHeader::getHash).toList(), bytes);
+      final List<Hash> hashes = headers.stream().map(BlockHeader::getHash).toList();
+      return protocolFor(peer) == Protocol.SNAP
+          ? SnapMessages.getBlockAccessLists(hashes, bytes)
+          : GetBlockAccessListsMessage.create(hashes);
     }
 
     @Override
     public Map<Hash, Bytes> decode(final MessageData response, final EthPeer peer) {
-      final List<Bytes> lists = SnapMessages.blockAccessLists(response);
+      final List<Bytes> lists =
+          protocolFor(peer) == Protocol.SNAP
+              ? SnapMessages.blockAccessLists(response)
+              : ethBlockAccessLists(response);
       if (lists.size() > headers.size()) {
         throw new InvalidResponseException("more block access lists than requested", true);
       }
@@ -239,6 +264,21 @@ public final class BalFetcher {
       if (out.isEmpty()) {
         throw new EmptyResponseException("no block access list");
       }
+      return out;
+    }
+
+    // [list...] without request id, as the eth request manager strips it; unavailable is empty
+    private static List<Bytes> ethBlockAccessLists(final MessageData message) {
+      if (message.getCode() != EthProtocolMessages.BLOCK_ACCESS_LISTS) {
+        throw new InvalidResponseException("unexpected message code " + message.getCode(), true);
+      }
+      final RLPInput in = RLP.input(message.getData());
+      final List<Bytes> out = new ArrayList<>();
+      in.enterList();
+      while (!in.isEndOfCurrentList()) {
+        out.add(in.nextIsList() ? in.readAsRlp().raw() : in.readBytes());
+      }
+      in.leaveList();
       return out;
     }
   }

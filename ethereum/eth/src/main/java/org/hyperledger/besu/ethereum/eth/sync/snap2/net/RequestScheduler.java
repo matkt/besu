@@ -310,8 +310,8 @@ public final class RequestScheduler implements RequestSender {
       final Pending<?> pending, final List<PeerState> candidates, final long now) {
     PeerState best = null;
     double bestScore = -1;
-    final Protocol protocol = pending.request.protocol();
     for (final PeerState state : candidates) {
+      final Protocol protocol = pending.request.protocolFor(state.peer);
       final Lane lane = state.lane(protocol);
       if (state.peer.isDisconnected()
           || state.backoffUntil > now
@@ -333,9 +333,10 @@ public final class RequestScheduler implements RequestSender {
   private <T> void send(final Pending<T> pending, final PeerState state) {
     final SyncRequest<T> request = pending.request;
     final EthPeer peer = state.peer;
+    final Protocol protocol = request.protocolFor(peer);
     ResponseStream stream = null;
     try {
-      stream = peer.send(request.message(peer), protocolName(request.protocol()));
+      stream = peer.send(request.message(peer), protocolName(protocol));
     } catch (final PeerNotConnected e) {
       LOG.trace("Peer {} disconnected before sending {}", peer.getLoggableId(), request.name());
     } catch (final RuntimeException e) {
@@ -346,7 +347,7 @@ public final class RequestScheduler implements RequestSender {
       queue.add(pending.excluding(peer));
       return;
     }
-    final Lane lane = state.lane(request.protocol());
+    final Lane lane = state.lane(protocol);
     lane.inFlight++;
     final Attempt<T> attempt = new Attempt<>(pending, state, lane, stream, System.nanoTime());
     attempt.timeoutTask =
@@ -362,15 +363,17 @@ public final class RequestScheduler implements RequestSender {
   }
 
   private <T> void onMessage(final Attempt<T> attempt, final MessageData message) {
+    final boolean answered = attempt.state.compareAndSet(PENDING, DONE);
+    if (!answered && attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
+      execute(
+          () -> {
+            attempt.lane.abandoned--;
+            dispatch();
+          });
+    }
+    // only once the state is settled: closing calls back synchronously with a closed stream
     attempt.stream.close();
-    if (!attempt.state.compareAndSet(PENDING, DONE)) {
-      if (attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
-        execute(
-            () -> {
-              attempt.lane.abandoned--;
-              dispatch();
-            });
-      }
+    if (!answered) {
       return;
     }
     final ScheduledFuture<?> timeoutTask = attempt.timeoutTask;
@@ -392,6 +395,13 @@ public final class RequestScheduler implements RequestSender {
               outcome = "success";
             } catch (final EmptyResponseException e) {
               outcome = "empty";
+              LOG.debug(
+                  "Empty {} ({} bytes) from {} {}: {}",
+                  request.name(),
+                  size,
+                  peer.getLoggableId(),
+                  peer.getConnection().getPeerInfo().getClientId(),
+                  e.getMessage());
               attempt.pending.future.completeExceptionally(failure(EMPTY, peer, e.getMessage()));
             } catch (final InvalidResponseException e) {
               outcome = "invalid";
@@ -478,8 +488,11 @@ public final class RequestScheduler implements RequestSender {
     requestCounter.labels(request.name(), outcome).inc();
   }
 
+  // range requests are the same in snap/1 and snap/2, so any snap peer serves them
   private static boolean speaks(final EthPeer peer, final Protocol protocol) {
-    return protocol == Protocol.ETH || peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2);
+    return protocol == Protocol.ETH
+        || peer.getAgreedCapabilities().stream()
+            .anyMatch(capability -> SnapProtocol.NAME.equals(capability.getName()));
   }
 
   private static String protocolName(final Protocol protocol) {

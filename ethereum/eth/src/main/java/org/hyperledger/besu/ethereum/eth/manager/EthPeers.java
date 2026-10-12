@@ -663,7 +663,8 @@ public class EthPeers implements PeerSelector {
                         }
                       });
             } else if (syncMode == SyncMode.SNAP2) {
-              // the SNAP2 sync only uses peers that agreed on snap/2
+              // ranges come from any snap peer, but only snap/2 peers count as servers, so that
+              // they are sought and kept until they are half of the peers
               peer.setIsServingSnap(peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2));
               isServingSnapFuture = CompletableFuture.completedFuture(null);
             } else {

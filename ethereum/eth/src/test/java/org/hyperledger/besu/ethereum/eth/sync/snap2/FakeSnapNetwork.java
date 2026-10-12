@@ -15,9 +15,13 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.eth.EthProtocolVersion;
+import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.messages.EthProtocolMessages;
 import org.hyperledger.besu.ethereum.eth.messages.snap.AccountRangeMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.BlockAccessListsMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.ByteCodesMessage;
@@ -33,6 +37,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 
@@ -67,8 +72,12 @@ public final class FakeSnapNetwork implements RequestSender {
   private final Map<Bytes32, ServedState> states = new ConcurrentHashMap<>();
   private final Map<Bytes32, Bytes> codes = new ConcurrentHashMap<>();
   private final ExecutorService workers = Executors.newFixedThreadPool(8);
+  // snap/2 peers, and a snap/1 peer serving block access lists over eth/71
   private final List<EthPeer> peers =
-      List.of(mock(EthPeer.class), mock(EthPeer.class), mock(EthPeer.class));
+      List.of(
+          peer(SnapProtocol.SNAP2, EthProtocolVersion.V71.getCapability()),
+          peer(SnapProtocol.SNAP1, EthProtocolVersion.V71.getCapability()),
+          peer(SnapProtocol.SNAP2, EthProtocolVersion.V68.getCapability()));
   private final AtomicInteger nextPeer = new AtomicInteger();
   private final AtomicLong requests = new AtomicLong();
   private final Map<String, Function<MessageData, MessageData>> handlers =
@@ -125,7 +134,11 @@ public final class FakeSnapNetwork implements RequestSender {
   @Override
   public <T> CompletableFuture<PeerResponse<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
-    final EthPeer peer = peers.get(Math.floorMod(nextPeer.getAndIncrement(), peers.size()));
+    final EthPeer peer = nextPeer(request);
+    if (peer == null) {
+      return CompletableFuture.failedFuture(
+          new RequestFailedException(RequestFailedException.Reason.NO_PEER, null, "no peer"));
+    }
     requests.incrementAndGet();
     return CompletableFuture.supplyAsync(
         () -> {
@@ -136,11 +149,12 @@ public final class FakeSnapNetwork implements RequestSender {
               Thread.currentThread().interrupt();
             }
           }
+          final Protocol protocol = request.protocolFor(peer);
           final MessageData message = request.message(peer);
-          final MessageData raw = respond(request.protocol(), message);
+          final MessageData raw = respond(protocol, message);
           // eth responses reach requests already unwrapped, snap ones keep their request id
           final MessageData response =
-              request.protocol() == Protocol.SNAP ? raw.wrapMessageData(BigInteger.ONE) : raw;
+              protocol == Protocol.SNAP ? raw.wrapMessageData(BigInteger.ONE) : raw;
           try {
             return new PeerResponse<>(request.decode(response, peer), peer);
           } catch (final SyncRequest.EmptyResponseException e) {
@@ -187,6 +201,11 @@ public final class FakeSnapNetwork implements RequestSender {
       return handler.apply(message);
     }
     if (protocol != Protocol.SNAP) {
+      if (message.getCode() == EthProtocolMessages.GET_BLOCK_ACCESS_LISTS) {
+        return ethBlockAccessListsResponse(
+            org.hyperledger.besu.ethereum.eth.messages.GetBlockAccessListsMessage.readFrom(
+                message));
+      }
       throw new IllegalArgumentException("no handler for eth code " + message.getCode());
     }
     return switch (message.getCode()) {
@@ -198,6 +217,32 @@ public final class FakeSnapNetwork implements RequestSender {
       default ->
           throw new IllegalArgumentException("no handler for snap code " + message.getCode());
     };
+  }
+
+  // the next peer, in turn, that can serve the request; eth task filters need real peer state
+  private EthPeer nextPeer(final SyncRequest<?> request) {
+    for (int i = 0; i < peers.size(); i++) {
+      final EthPeer peer = peers.get(Math.floorMod(nextPeer.getAndIncrement(), peers.size()));
+      if (request.protocol() == Protocol.ETH || request.canServe(peer)) {
+        return peer;
+      }
+    }
+    return null;
+  }
+
+  private static EthPeer peer(final Capability snap, final Capability eth) {
+    final EthPeer peer = mock(EthPeer.class);
+    when(peer.getAgreedCapabilities()).thenReturn(Set.of(snap, eth));
+    return peer;
+  }
+
+  private MessageData ethBlockAccessListsResponse(
+      final org.hyperledger.besu.ethereum.eth.messages.GetBlockAccessListsMessage message) {
+    final List<Optional<BlockAccessList>> out = new ArrayList<>();
+    for (final Hash hash : message.blockHashes()) {
+      out.add(Optional.ofNullable(blockAccessLists.get(hash)).map(BlockAccessList::fromBytes));
+    }
+    return org.hyperledger.besu.ethereum.eth.messages.BlockAccessListsMessage.create(out);
   }
 
   private MessageData blockAccessListsResponse(final GetBlockAccessListsMessage message) {

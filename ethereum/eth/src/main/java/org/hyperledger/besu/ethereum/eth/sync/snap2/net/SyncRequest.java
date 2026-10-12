@@ -42,6 +42,11 @@ public interface SyncRequest<T> {
 
   Protocol protocol();
 
+  /** Returns the protocol used with a given peer, by default {@link #protocol()}. */
+  default Protocol protocolFor(final EthPeer peer) {
+    return protocol();
+  }
+
   Priority priority();
 
   /** Short name used in logs and metrics. */

@@ -19,6 +19,10 @@ import org.hyperledger.besu.ethereum.chain.DefaultBlockchain;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
+import org.hyperledger.besu.ethereum.eth.EthProtocol;
+import org.hyperledger.besu.ethereum.eth.SnapProtocol;
+import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.manager.EthPeerImmutableAttributes;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.sync.TrailingPeerRequirements;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
@@ -40,6 +44,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
@@ -48,6 +53,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -235,10 +241,7 @@ public final class Snap2SyncController implements SnapSyncController {
     if (scheduler.peerCount(Protocol.SNAP) >= config.minPeers()) {
       return CompletableFuture.completedFuture(null);
     }
-    LOG.info(
-        "Waiting for {} snap/2 peers, {} connected peers so far",
-        config.minPeers(),
-        ethPeers.peerCount());
+    LOG.info("Waiting for {} snap peers, {}", config.minPeers(), peerSummary());
     return delay(5).thenCompose(unused -> waitForPeers());
   }
 
@@ -855,13 +858,32 @@ public final class Snap2SyncController implements SnapSyncController {
         return;
       }
       LOG.info(
-          "SNAP2 sync progress: {}, {} pivot moves, {} snap/2 peers",
-          attempt.progress(),
-          moves,
-          scheduler.peerCount(Protocol.SNAP));
+          "SNAP2 sync progress: {}, {} pivot moves, {}", attempt.progress(), moves, peerSummary());
     } catch (final RuntimeException e) {
       LOG.debug("Failed to log the SNAP2 progress", e);
     }
+  }
+
+  // what the connected peers can serve: snap ranges, and block access lists over snap/2 or eth/71
+  private String peerSummary() {
+    int peers = 0;
+    int snap1 = 0;
+    int snap2 = 0;
+    int eth71 = 0;
+    for (final EthPeer peer :
+        ethPeers.streamAvailablePeers().map(EthPeerImmutableAttributes::ethPeer).toList()) {
+      final Set<Capability> capabilities = peer.getAgreedCapabilities();
+      peers++;
+      if (capabilities.contains(SnapProtocol.SNAP2)) {
+        snap2++;
+      } else if (capabilities.contains(SnapProtocol.SNAP1)) {
+        snap1++;
+      }
+      if (capabilities.stream().anyMatch(EthProtocol::isEth71Compatible)) {
+        eth71++;
+      }
+    }
+    return String.format("%d peers (snap/1 %d, snap/2 %d, eth/71 %d)", peers, snap1, snap2, eth71);
   }
 
   private void shutdown() {
