@@ -75,6 +75,12 @@ final class StateServers {
     return true;
   }
 
+  /** Returns whether a peer ever served state. */
+  boolean hasServed(final EthPeer peer) {
+    final Answers record = answers.get(peer);
+    return record != null && record.servedEpoch >= 0;
+  }
+
   /** Returns the peers left out at this time, forgetting the disconnected ones. */
   Set<EthPeer> excluded(final long now) {
     answers.keySet().removeIf(EthPeer::isDisconnected);

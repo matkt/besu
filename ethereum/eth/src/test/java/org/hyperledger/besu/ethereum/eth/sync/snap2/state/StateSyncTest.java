@@ -153,11 +153,15 @@ class StateSyncTest {
   @EnumSource(Format.class)
   void detectsAStalePivot(final Format format) throws Exception {
     final Random random = new Random(5);
-    final TestWorld world = TestWorld.random(random, 300, 2, 400);
+    final TestWorld world = TestWorld.random(random, 1500, 4, 800);
+    network.serve(world);
+    network.latency(4);
     final Storages storages = SyncStorageFixture.create(format);
     stateSync = new StateSync(storages.sync(), network, config());
-    // nobody serves this root
     stateSync.start(header(7, world.root()));
+    waitForProgress(1);
+    // the peers that served this root stop serving it, as when it gets too old
+    network.forget(world.root());
 
     final long deadline = System.currentTimeMillis() + 20_000;
     while (!stateSync.isPivotStale() && System.currentTimeMillis() < deadline) {

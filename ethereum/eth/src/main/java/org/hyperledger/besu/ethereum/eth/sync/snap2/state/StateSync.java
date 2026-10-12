@@ -888,6 +888,10 @@ public final class StateSync {
       emptyPeers.remove(peer);
       return;
     }
+    // a peer that never served state says nothing about the age of the pivot
+    if (!servers.hasServed(peer)) {
+      return;
+    }
     consecutiveEmpty++;
     emptyPeers.add(peer);
     final int candidates = Math.max(1, scheduler.peerCount(Protocol.SNAP) - excluded.size());
