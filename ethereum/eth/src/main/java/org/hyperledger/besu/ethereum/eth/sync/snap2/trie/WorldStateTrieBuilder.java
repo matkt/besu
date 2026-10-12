@@ -15,8 +15,8 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;

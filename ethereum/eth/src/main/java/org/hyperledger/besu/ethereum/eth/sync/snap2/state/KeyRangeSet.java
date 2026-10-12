@@ -16,9 +16,9 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Optional;
 import java.util.TreeMap;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes32;
 
 /** Thread-safe set of disjoint, inclusive key ranges; adjacent ranges are merged. */
@@ -82,16 +82,9 @@ public final class KeyRangeSet {
     return total;
   }
 
-  /** Returns the end of the range holding {@code key}, if any. */
-  public synchronized Optional<Bytes32> rangeEnd(final Bytes32 key) {
-    final Map.Entry<Bytes32, Bytes32> floor = ranges.floorEntry(key);
-    return floor != null && floor.getValue().compareTo(key) >= 0
-        ? Optional.of(floor.getValue())
-        : Optional.empty();
-  }
-
   /** Returns a copy of the ranges, keyed by start. */
-  public synchronized NavigableMap<Bytes32, Bytes32> snapshot() {
+  @VisibleForTesting
+  synchronized NavigableMap<Bytes32, Bytes32> snapshot() {
     return new TreeMap<>(ranges);
   }
 

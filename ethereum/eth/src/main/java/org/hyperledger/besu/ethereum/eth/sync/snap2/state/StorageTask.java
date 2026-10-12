@@ -78,8 +78,4 @@ public final class StorageTask {
   public boolean isComplete() {
     return covered.isFull();
   }
-
-  public KeyRangeSet covered() {
-    return covered;
-  }
 }

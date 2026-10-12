@@ -262,8 +262,7 @@ public final class RequestScheduler implements RequestSender {
     return adapted > 0 ? adapted : peerCount(protocol) * (int) INITIAL_LANE_LIMIT;
   }
 
-  /** Runs a task after a delay on the scheduler loop. */
-  public ScheduledFuture<?> schedule(final Runnable task, final Duration delay) {
+  private ScheduledFuture<?> schedule(final Runnable task, final Duration delay) {
     return loop.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
   }
 

@@ -22,7 +22,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPee
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageRetry;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.StorageRetry;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;

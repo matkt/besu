@@ -51,7 +51,6 @@ public final class StackTrie {
   private int itemDepth;
   private Bytes itemRlp;
   private Bytes itemRef;
-  private long leaves;
 
   /**
    * Creates a stack trie.
@@ -66,13 +65,7 @@ public final class StackTrie {
   }
 
   /** Item left after building a partition, to be added to an enclosing stack trie. */
-  public record Item(int kind, Bytes32 key, int depth, Bytes value, Bytes rlp, Bytes ref) {
-
-    /** Returns whether the partition held a single leaf. */
-    public boolean isLeaf() {
-      return kind == LEAF;
-    }
-  }
+  public record Item(int kind, Bytes32 key, int depth, Bytes value, Bytes rlp, Bytes ref) {}
 
   /**
    * Adds a leaf.
@@ -82,7 +75,6 @@ public final class StackTrie {
    */
   public void addLeaf(final Bytes32 key, final Bytes value) {
     insert(key.toArrayUnsafe(), LEAF, 64, value, null, null);
-    leaves++;
   }
 
   /**
@@ -102,11 +94,6 @@ public final class StackTrie {
     } else {
       insert(item.key().toArrayUnsafe(), BRANCH, item.depth(), null, item.rlp(), item.ref());
     }
-  }
-
-  /** Returns the number of leaves added so far. */
-  public long leafCount() {
-    return leaves;
   }
 
   /** Returns whether nothing was added. */

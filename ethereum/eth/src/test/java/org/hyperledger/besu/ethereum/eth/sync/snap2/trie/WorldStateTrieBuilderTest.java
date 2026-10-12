@@ -16,12 +16,12 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStateStorage;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Format;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Storages;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.World;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.World;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 

@@ -48,19 +48,6 @@ public final class Keys {
     return Optional.empty();
   }
 
-  /** Returns the key right before {@code key}, which must not be {@link #MIN}. */
-  public static Bytes32 previous(final Bytes32 key) {
-    final byte[] out = key.toArray();
-    for (int i = 31; i >= 0; i--) {
-      if (out[i] != 0) {
-        out[i]--;
-        return Bytes32.wrap(out);
-      }
-      out[i] = (byte) 0xff;
-    }
-    throw new IllegalArgumentException("no key before the smallest key");
-  }
-
   /** Splits {@code [from, to]} into at most {@code parts} contiguous ranges of similar size. */
   public static List<Bytes32[]> split(final Bytes32 from, final Bytes32 to, final int parts) {
     final BigInteger start = from.toUnsignedBigInteger();

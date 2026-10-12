@@ -48,9 +48,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
    */
   record Result(List<Slots> accounts) {}
 
-  final int epoch;
-  private final long pivotNumber;
-  final Bytes32 root;
+  final StateSync.Pivot pivot;
   final List<StorageTask> tasks;
   final List<Bytes32> storageRoots;
   final Bytes32 origin;
@@ -59,17 +57,13 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
   private final long bytes;
 
   StorageRangesRequest(
-      final int epoch,
-      final long pivotNumber,
-      final Bytes32 root,
+      final StateSync.Pivot pivot,
       final List<StorageTask> tasks,
       final Bytes32 origin,
       final Bytes32 limit,
       final RangeTask chunk,
       final long bytes) {
-    this.epoch = epoch;
-    this.pivotNumber = pivotNumber;
-    this.root = root;
+    this.pivot = pivot;
     this.tasks = tasks;
     this.storageRoots = tasks.stream().map(StorageTask::storageRoot).toList();
     this.origin = origin;
@@ -90,7 +84,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
 
   @Override
   public long minimumPeerHeight() {
-    return pivotNumber;
+    return pivot.header().getNumber();
   }
 
   @Override
@@ -101,7 +95,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
   @Override
   public MessageData message(final EthPeer peer) {
     return SnapMessages.getStorageRanges(
-        root, tasks.stream().map(StorageTask::accountHash).toList(), origin, limit, bytes);
+        pivot.root(), tasks.stream().map(StorageTask::accountHash).toList(), origin, limit, bytes);
   }
 
   @Override
@@ -109,7 +103,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
     final SnapMessages.StorageRanges ranges = SnapMessages.storageRanges(response);
     final int served = ranges.slotHashes().size();
     if (served == 0) {
-      throw new EmptyResponseException("no storage for root " + root);
+      throw new EmptyResponseException("no storage for root " + pivot.root());
     }
     if (served > tasks.size()) {
       throw new InvalidResponseException("more storage ranges than requested", true);

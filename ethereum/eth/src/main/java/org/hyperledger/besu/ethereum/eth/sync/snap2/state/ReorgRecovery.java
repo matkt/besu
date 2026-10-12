@@ -18,7 +18,8 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff.AccountChange;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
@@ -31,6 +32,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -81,26 +83,24 @@ public final class ReorgRecovery {
   /** Recovers to the canonical pivot {@code newPivot}. */
   public CompletableFuture<Void> recover(
       final BlockHeader newPivot, final StateDiff orphaned, final StateDiff canonical) {
-    final int[] epoch = new int[1];
     final Plan plan =
         stateSync.exclusively(
             () -> {
               final Plan computed = plan(orphaned, canonical, stateSync.coverage());
               StateDiffApplier.apply(canonical, storage, stateSync.coverage());
               stateSync.switchPivot(newPivot);
-              epoch[0] = stateSync.pivot().epoch();
               return computed;
             });
+    final StateSync.Pivot pivot = stateSync.pivot();
     LOG.info(
         "Recovering from a reorg below the pivot: refetching {} accounts and {} slots at block {}",
         plan.accounts().size(),
         plan.slots().values().stream().mapToInt(NavigableSet::size).sum(),
         newPivot.getNumber());
-    final Bytes32 root = Bytes32.wrap(newPivot.getStateRoot().getBytes());
     final Map<Bytes32, Optional<Bytes32>> storageRoots = new ConcurrentHashMap<>();
     final List<CompletableFuture<Void>> accounts = new ArrayList<>();
     for (final Bytes32 account : plan.accounts()) {
-      accounts.add(refetchAccount(epoch[0], root, account, storageRoots));
+      accounts.add(refetchAccount(pivot, account, storageRoots));
     }
     return CompletableFuture.allOf(accounts.toArray(CompletableFuture[]::new))
         .thenCompose(
@@ -117,11 +117,7 @@ public final class ReorgRecovery {
                                           slot ->
                                               slots.add(
                                                   refetchSlot(
-                                                      epoch[0],
-                                                      root,
-                                                      account,
-                                                      storageRoot,
-                                                      slot)))));
+                                                      pivot, account, storageRoot, slot)))));
               return CompletableFuture.allOf(slots.toArray(CompletableFuture[]::new));
             });
   }
@@ -163,19 +159,11 @@ public final class ReorgRecovery {
   }
 
   private CompletableFuture<Void> refetchAccount(
-      final int epoch,
-      final Bytes32 root,
+      final StateSync.Pivot pivot,
       final Bytes32 hash,
       final Map<Bytes32, Optional<Bytes32>> storageRoots) {
     final AccountRangeRequest request =
-        new AccountRangeRequest(
-            epoch,
-            stateSync.pivot().header().getNumber(),
-            root,
-            hash,
-            hash,
-            REFETCH_BYTES,
-            "account_refetch");
+        new AccountRangeRequest(pivot, hash, hash, REFETCH_BYTES, "account_refetch");
     return sender
         .submitWithRetries(request, ATTEMPTS)
         .thenAccept(
@@ -184,7 +172,7 @@ public final class ReorgRecovery {
               final boolean exists =
                   !result.hashes().isEmpty() && result.hashes().getFirst().equals(hash);
               write(
-                  epoch,
+                  pivot,
                   batch -> {
                     final StorageTask task = stateSync.coverage().storageTask(hash);
                     if (!exists) {
@@ -213,21 +201,13 @@ public final class ReorgRecovery {
   }
 
   private CompletableFuture<Void> refetchSlot(
-      final int epoch,
-      final Bytes32 root,
+      final StateSync.Pivot pivot,
       final Bytes32 account,
       final Bytes32 storageRoot,
       final Bytes32 slot) {
     final StorageRangesRequest request =
         new StorageRangesRequest(
-            epoch,
-            stateSync.pivot().header().getNumber(),
-            root,
-            List.of(new StorageTask(account, storageRoot)),
-            slot,
-            slot,
-            null,
-            REFETCH_BYTES);
+            pivot, List.of(new StorageTask(account, storageRoot)), slot, slot, null, REFETCH_BYTES);
     return sender
         .submitWithRetries(request, ATTEMPTS)
         .thenAccept(
@@ -236,7 +216,7 @@ public final class ReorgRecovery {
               final boolean exists =
                   !slots.hashes().isEmpty() && slots.hashes().getFirst().equals(slot);
               write(
-                  epoch,
+                  pivot,
                   batch -> {
                     if (exists) {
                       batch.putStorage(
@@ -248,25 +228,23 @@ public final class ReorgRecovery {
                       // a storage trie built for the downloaded slots no longer matches
                       storage
                           .getAccount(account)
-                          .map(StateDiffApplier.Accounts::decode)
+                          .map(Accounts::decode)
                           .ifPresent(
                               value ->
                                   batch.putAccount(
                                       account,
-                                      StateDiffApplier.Accounts.encode(
-                                          StateDiffApplier.Accounts.withStorageRoot(
-                                              value,
-                                              StateDiffApplier.Accounts.UNKNOWN_STORAGE_ROOT))));
+                                      Accounts.encode(
+                                          Accounts.withStorageRoot(
+                                              value, Accounts.UNKNOWN_STORAGE_ROOT))));
                     }
                   });
             });
   }
 
-  private void write(
-      final int epoch, final java.util.function.Consumer<SyncStateStorage.Batch> writes) {
+  private void write(final StateSync.Pivot pivot, final Consumer<SyncStateStorage.Batch> writes) {
     final boolean written =
         stateSync.withPivot(
-            epoch,
+            pivot.epoch(),
             () -> {
               final SyncStateStorage.Batch batch = storage.batch();
               writes.accept(batch);

@@ -17,13 +17,13 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff.AccountChange;
-import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.Map;
 import java.util.Optional;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
@@ -73,7 +73,7 @@ public final class StateDiffApplier {
       final Optional<PmtStateTrieAccountValue> existing =
           storage.getAccount(accountHash).map(Accounts::decode);
       final StorageTask task = coverage.storageTask(accountHash);
-      PmtStateTrieAccountValue updated = Accounts.update(existing, change);
+      PmtStateTrieAccountValue updated = updated(existing, change);
       if (!change.storage().isEmpty() && task == null) {
         // a storage trie built for these slots no longer matches, the final build redoes it
         updated = Accounts.withStorageRoot(updated, Accounts.UNKNOWN_STORAGE_ROOT);
@@ -122,46 +122,17 @@ public final class StateDiffApplier {
     return new Outcome(applied, skipped, deleted, slots, stale);
   }
 
-  /** Account encoding helpers. */
-  public static final class Accounts {
-    /** Storage root of an account whose slots changed once its storage was downloaded. */
-    public static final Hash UNKNOWN_STORAGE_ROOT = Hash.ZERO;
-
-    private Accounts() {}
-
-    public static PmtStateTrieAccountValue withStorageRoot(
-        final PmtStateTrieAccountValue account, final Hash storageRoot) {
-      return new PmtStateTrieAccountValue(
-          account.getNonce(), account.getBalance(), storageRoot, account.getCodeHash());
-    }
-
-    public static PmtStateTrieAccountValue decode(final Bytes rlp) {
-      return PmtStateTrieAccountValue.readFrom(RLP.input(rlp));
-    }
-
-    public static Bytes encode(final PmtStateTrieAccountValue account) {
-      return RLP.encode(account::writeTo);
-    }
-
-    public static boolean isEmpty(final PmtStateTrieAccountValue account) {
-      return account.getNonce() == 0
-          && account.getBalance().isZero()
-          && account.getCodeHash().equals(Hash.EMPTY);
-    }
-
-    /** Applies the changed fields of an account; the storage root is left as it was. */
-    public static PmtStateTrieAccountValue update(
-        final Optional<PmtStateTrieAccountValue> existing, final AccountChange change) {
-      final long nonce = change.nonce().orElse(existing.map(a -> a.getNonce()).orElse(0L));
-      final Wei balance =
-          change.balance().orElse(existing.map(a -> a.getBalance()).orElse(Wei.ZERO));
-      final Hash codeHash =
-          change
-              .code()
-              .map(code -> code.isEmpty() ? Hash.EMPTY : Hash.hash(code))
-              .orElse(existing.map(a -> a.getCodeHash()).orElse(Hash.EMPTY));
-      final Hash storageRoot = existing.map(a -> a.getStorageRoot()).orElse(Hash.EMPTY_TRIE_HASH);
-      return new PmtStateTrieAccountValue(nonce, balance, storageRoot, codeHash);
-    }
+  // the changed fields of an account; the storage root is left as it was
+  private static PmtStateTrieAccountValue updated(
+      final Optional<PmtStateTrieAccountValue> existing, final AccountChange change) {
+    final long nonce = change.nonce().orElse(existing.map(a -> a.getNonce()).orElse(0L));
+    final Wei balance = change.balance().orElse(existing.map(a -> a.getBalance()).orElse(Wei.ZERO));
+    final Hash codeHash =
+        change
+            .code()
+            .map(code -> code.isEmpty() ? Hash.EMPTY : Hash.hash(code))
+            .orElse(existing.map(a -> a.getCodeHash()).orElse(Hash.EMPTY));
+    final Hash storageRoot = existing.map(a -> a.getStorageRoot()).orElse(Hash.EMPTY_TRIE_HASH);
+    return new PmtStateTrieAccountValue(nonce, balance, storageRoot, codeHash);
   }
 }

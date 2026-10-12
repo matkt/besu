@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
-import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.tuweni.bytes.Bytes32;
@@ -44,10 +43,6 @@ public final class StateCoverage {
 
   public StorageTask removeStorageTask(final Bytes32 accountHash) {
     return storage.remove(accountHash);
-  }
-
-  public Collection<StorageTask> storageTasks() {
-    return storage.values();
   }
 
   public int pendingStorageCount() {

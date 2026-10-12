@@ -12,11 +12,11 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
+package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StackTrie;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 
 import java.util.Optional;
@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory;
  * node is written last, and only if the account still has the storage root that was built, which is
  * checked exclusive with pivot moves: a move changing the slots marks the root unknown.
  */
-final class StorageTries {
+public final class StorageTries {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageTries.class);
   private static final int MAX_QUEUED = 1_000_000;
@@ -57,7 +57,7 @@ final class StorageTries {
    *
    * @param withoutMoves runs an action exclusive with pivot moves, false once the sync stopped
    */
-  StorageTries(
+  public StorageTries(
       final SyncStateStorage storage, final Predicate<Runnable> withoutMoves, final int threads) {
     this.storage = storage;
     this.withoutMoves = withoutMoves;
@@ -70,24 +70,24 @@ final class StorageTries {
   }
 
   /** Queues an account whose storage is downloaded; when too many wait, the final build does it. */
-  void completed(final Bytes32 accountHash) {
+  public void completed(final Bytes32 accountHash) {
     if (!stopped) {
       queue.offer(accountHash.copy());
     }
   }
 
   /** Returns the number of storage tries built. */
-  long built() {
+  public long built() {
     return built.get();
   }
 
   /** Returns the number of accounts waiting for their storage trie. */
-  int queued() {
+  public int queued() {
     return queue.size();
   }
 
   /** Stops building and waits for the builds in progress to give up. */
-  void stop() {
+  public void stop() {
     stopped = true;
     queue.clear();
     workers.shutdownNow();

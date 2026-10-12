@@ -22,7 +22,9 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTries;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
@@ -42,6 +44,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -223,6 +226,11 @@ public final class StateSync {
     }
   }
 
+  /** Returns the number of peers left out of state requests because they serve no state. */
+  public int peersWithoutState() {
+    return excludedCount;
+  }
+
   /** Returns the number of storage tries built while downloading. */
   public long storageTriesBuilt() {
     return tries.built();
@@ -234,7 +242,7 @@ public final class StateSync {
   }
 
   /** Runs a write on the flat state exclusive with every download write. */
-  public <T> T exclusively(final java.util.function.Supplier<T> write) {
+  public <T> T exclusively(final Supplier<T> write) {
     pivotLock.writeLock().lock();
     try {
       if (stopped) {
@@ -292,35 +300,6 @@ public final class StateSync {
         codes.get(),
         coverage.pendingStorageCount(),
         excludedCount);
-  }
-
-  /** Returns the download bookkeeping, for diagnostics. */
-  public String diagnostics() {
-    final CompletableFuture<String> out = new CompletableFuture<>();
-    execute(
-        () ->
-            out.complete(
-                String.format(
-                    "epoch=%d stale=%s accountTasksLeft=%d inFlight[acc=%d sto=%d code=%d ref=%d] storageQueue=%d refreshQueue=%d chunked=%d codeQueue=%d codesInFlight=%d pendingStorage=%d coverage=%s",
-                    pivot.epoch(),
-                    pivotStale,
-                    accountTasks.stream().filter(t -> !t.done).count(),
-                    accountsInFlight,
-                    storageInFlight,
-                    codesRequestsInFlight,
-                    refreshesInFlight,
-                    storageQueue.size(),
-                    refreshQueue.size(),
-                    chunked.size(),
-                    codeQueue.size(),
-                    codesInFlight.size(),
-                    coverage.pendingStorageCount(),
-                    coverage.accounts().snapshot().size())));
-    try {
-      return out.get(5, TimeUnit.SECONDS);
-    } catch (final Exception e) {
-      return "unavailable: " + e;
-    }
   }
 
   public long downloadedAccounts() {
@@ -469,13 +448,7 @@ public final class StateSync {
     accountsInFlight++;
     final AccountRangeRequest request =
         new AccountRangeRequest(
-            current.epoch(),
-            current.header().getNumber(),
-            current.root(),
-            task.next,
-            task.limit,
-            config.responseBytes(),
-            "account_range");
+            current, task.next, task.limit, config.responseBytes(), "account_range");
     scheduler
         .submit(request, excluded)
         .whenComplete(
@@ -489,9 +462,9 @@ public final class StateSync {
                     task.inFlight = false;
                     accountsInFlight--;
                     if (error != null) {
-                      onFailure(error, request.epoch);
+                      onFailure(error, request.pivot.epoch());
                     } else {
-                      onServed(response.peer(), request.epoch);
+                      onServed(response.peer(), request.pivot.epoch());
                     }
                     if (persisted != null) {
                       if (persisted.done) {
@@ -518,7 +491,7 @@ public final class StateSync {
     final boolean[] done = new boolean[1];
     final boolean persisted =
         withPivot(
-            request.epoch,
+            request.pivot.epoch(),
             () -> {
               final SyncStateStorage.Batch batch = storage.batch();
               int count = 0;
@@ -576,15 +549,7 @@ public final class StateSync {
     storageInFlight++;
     batch.forEach(task -> task.inFlight++);
     final StorageRangesRequest request =
-        new StorageRangesRequest(
-            current.epoch(),
-            current.header().getNumber(),
-            current.root(),
-            batch,
-            Keys.MIN,
-            Keys.MAX,
-            null,
-            config.responseBytes());
+        new StorageRangesRequest(current, batch, Keys.MIN, Keys.MAX, null, config.responseBytes());
     submitStorage(request);
   }
 
@@ -595,14 +560,7 @@ public final class StateSync {
     chunk.inFlight = true;
     final StorageRangesRequest request =
         new StorageRangesRequest(
-            current.epoch(),
-            current.header().getNumber(),
-            current.root(),
-            List.of(task),
-            chunk.next,
-            chunk.limit,
-            chunk,
-            config.responseBytes());
+            current, List.of(task), chunk.next, chunk.limit, chunk, config.responseBytes());
     submitStorage(request);
   }
 
@@ -623,9 +581,9 @@ public final class StateSync {
                       request.chunk.inFlight = false;
                     }
                     if (error != null) {
-                      onFailure(error, request.epoch);
+                      onFailure(error, request.pivot.epoch());
                     } else {
-                      onServed(response.peer(), request.epoch);
+                      onServed(response.peer(), request.pivot.epoch());
                     }
                     afterStorage(request, persisted);
                     dispatch();
@@ -639,7 +597,7 @@ public final class StateSync {
       final StorageRangesRequest request, final StorageRangesRequest.Result result) {
     final StoragePersisted[] out = new StoragePersisted[1];
     withPivot(
-        request.epoch,
+        request.pivot.epoch(),
         () -> {
           final SyncStateStorage.Batch batch = storage.batch();
           Bytes32 lastSlot = null;
@@ -732,13 +690,7 @@ public final class StateSync {
     refreshesInFlight++;
     final AccountRangeRequest request =
         new AccountRangeRequest(
-            current.epoch(),
-            current.header().getNumber(),
-            current.root(),
-            task.accountHash(),
-            task.accountHash(),
-            REFRESH_BYTES,
-            "account_refresh");
+            current, task.accountHash(), task.accountHash(), REFRESH_BYTES, "account_refresh");
     scheduler
         .submit(request, excluded)
         .whenComplete(
@@ -751,9 +703,9 @@ public final class StateSync {
                     task.refreshing = false;
                     refreshesInFlight--;
                     if (error != null) {
-                      onFailure(error, request.epoch);
+                      onFailure(error, request.pivot.epoch());
                     } else {
-                      onServed(response.peer(), request.epoch);
+                      onServed(response.peer(), request.pivot.epoch());
                     }
                     if (isPending(task) && task.chunks.isEmpty()) {
                       queueStorage(task);
@@ -768,7 +720,7 @@ public final class StateSync {
       final StorageTask task,
       final AccountRangeRequest.Result result) {
     return withPivot(
-        request.epoch,
+        request.pivot.epoch(),
         () -> {
           if (!isPending(task)) {
             return;
@@ -846,8 +798,7 @@ public final class StateSync {
   }
 
   // a failed write is retried like a discarded response, and never skips the bookkeeping
-  private <R> R persistSafely(
-      final java.util.function.Supplier<R> persist, final SyncRequest<?> request) {
+  private <R> R persistSafely(final Supplier<R> persist, final SyncRequest<?> request) {
     try {
       return persist.get();
     } catch (final RuntimeException e) {
@@ -903,11 +854,6 @@ public final class StateSync {
           pivot.header().getNumber());
       pivotStale = true;
     }
-  }
-
-  /** Returns the number of peers left out of state requests because they serve no state. */
-  public int peersWithoutState() {
-    return excludedCount;
   }
 
   private boolean checkCompletion() {

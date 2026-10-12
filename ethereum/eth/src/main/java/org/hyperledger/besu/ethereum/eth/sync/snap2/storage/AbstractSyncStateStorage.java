@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
+package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
@@ -35,7 +35,7 @@ import org.apache.tuweni.bytes.Bytes32;
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   private static final byte[] ZEROS = new byte[32];
-  private static final byte[] ONES = Keys.MAX.toArray();
+  private static final byte[] ONES = Bytes32.fromHexString("ff".repeat(32)).toArray();
 
   protected final SegmentedKeyValueStorage flat;
   protected final SegmentIdentifier accountSegment;

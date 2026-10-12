@@ -22,8 +22,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2Configuration;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Format;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Storages;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 

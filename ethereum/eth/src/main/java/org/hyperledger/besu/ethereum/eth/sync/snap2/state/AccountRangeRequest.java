@@ -37,25 +37,19 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
    */
   record Result(List<Bytes32> hashes, List<Bytes> accounts, boolean hasMore) {}
 
-  final int epoch;
-  private final long pivotNumber;
-  final Bytes32 root;
+  final StateSync.Pivot pivot;
   final Bytes32 origin;
   final Bytes32 limit;
   private final long bytes;
   private final String name;
 
   AccountRangeRequest(
-      final int epoch,
-      final long pivotNumber,
-      final Bytes32 root,
+      final StateSync.Pivot pivot,
       final Bytes32 origin,
       final Bytes32 limit,
       final long bytes,
       final String name) {
-    this.epoch = epoch;
-    this.pivotNumber = pivotNumber;
-    this.root = root;
+    this.pivot = pivot;
     this.origin = origin;
     this.limit = limit;
     this.bytes = bytes;
@@ -74,7 +68,7 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
 
   @Override
   public long minimumPeerHeight() {
-    return pivotNumber;
+    return pivot.header().getNumber();
   }
 
   @Override
@@ -84,17 +78,17 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
 
   @Override
   public MessageData message(final EthPeer peer) {
-    return SnapMessages.getAccountRange(root, origin, limit, bytes);
+    return SnapMessages.getAccountRange(pivot.root(), origin, limit, bytes);
   }
 
   @Override
   public Result decode(final MessageData response, final EthPeer peer) {
     final SnapMessages.AccountRange range = SnapMessages.accountRange(response);
     if (range.hashes().isEmpty() && range.proof().isEmpty()) {
-      throw new EmptyResponseException("no account range for root " + root);
+      throw new EmptyResponseException("no account range for root " + pivot.root());
     }
     final RangeProof.Result verified =
-        RangeProof.verify(root, origin, range.hashes(), range.accounts(), range.proof());
+        RangeProof.verify(pivot.root(), origin, range.hashes(), range.accounts(), range.proof());
     if (!verified.valid()) {
       throw new InvalidResponseException("invalid account range proof", true);
     }

@@ -29,7 +29,4 @@ public interface ChainHeadSource {
   default Optional<BlockHeader> knownHeader(final Hash hash) {
     return Optional.empty();
   }
-
-  /** Stops following the head. */
-  default void close() {}
 }

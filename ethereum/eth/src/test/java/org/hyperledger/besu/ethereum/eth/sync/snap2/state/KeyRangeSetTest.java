@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import static java.util.Map.entry;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -35,17 +36,14 @@ class KeyRangeSetTest {
     set.add(key(25), key(40));
     set.add(key(50), key(60));
 
-    assertThat(set.snapshot())
-        .containsExactly(
-            java.util.Map.entry(key(10), key(40)), java.util.Map.entry(key(50), key(60)));
+    assertThat(set.snapshot()).containsExactly(entry(key(10), key(40)), entry(key(50), key(60)));
     assertThat(set.contains(key(10))).isTrue();
     assertThat(set.contains(key(40))).isTrue();
     assertThat(set.contains(key(41))).isFalse();
     assertThat(set.contains(key(9))).isFalse();
-    assertThat(set.rangeEnd(key(15))).contains(key(40));
 
     set.add(key(41), key(49));
-    assertThat(set.snapshot()).containsExactly(java.util.Map.entry(key(10), key(60)));
+    assertThat(set.snapshot()).containsExactly(entry(key(10), key(60)));
   }
 
   @Test
@@ -65,6 +63,5 @@ class KeyRangeSetTest {
   void stepsKeys() {
     assertThat(Keys.next(Keys.MAX)).isEmpty();
     assertThat(Keys.next(key(0xff))).contains(key(0x100));
-    assertThat(Keys.previous(key(0x100))).isEqualTo(key(0xff));
   }
 }
