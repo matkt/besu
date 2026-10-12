@@ -244,6 +244,20 @@ public final class ReorgRecovery {
                     } else {
                       batch.removeStorage(account, slot);
                     }
+                    if (stateSync.coverage().storageTask(account) == null) {
+                      // a storage trie built for the downloaded slots no longer matches
+                      storage
+                          .getAccount(account)
+                          .map(StateDiffApplier.Accounts::decode)
+                          .ifPresent(
+                              value ->
+                                  batch.putAccount(
+                                      account,
+                                      StateDiffApplier.Accounts.encode(
+                                          StateDiffApplier.Accounts.withStorageRoot(
+                                              value,
+                                              StateDiffApplier.Accounts.UNKNOWN_STORAGE_ROOT))));
+                    }
                   });
             });
   }

@@ -18,8 +18,10 @@ import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Optional;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -62,23 +64,85 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
   public void scan(final Bytes32 from, final Bytes32 to, final ScanVisitor visitor) {
     try (Stream<Pair<byte[], byte[]>> accounts =
             flat.streamFromKey(accountSegment, from.toArrayUnsafe(), to.toArrayUnsafe());
-        Stream<Pair<byte[], byte[]>> slots =
-            flat.streamFromKey(
-                storageSegment,
-                concat(from.toArrayUnsafe(), ZEROS),
-                concat(to.toArrayUnsafe(), ONES))) {
+        SlotCursor slots =
+            new SlotCursor(concat(from.toArrayUnsafe(), ZEROS), concat(to.toArrayUnsafe(), ONES))) {
       final Iterator<Pair<byte[], byte[]>> accountIterator = accounts.iterator();
-      final PeekingIterator<Pair<byte[], byte[]>> slotIterator =
-          Iterators.peekingIterator(slots.iterator());
       while (accountIterator.hasNext()) {
         final Pair<byte[], byte[]> account = accountIterator.next();
         final byte[] accountKey = account.getKey();
-        visitSlots(slotIterator, accountKey, false, visitor);
-        visitor.onAccount(Bytes32.wrap(accountKey), Bytes.wrap(account.getValue()));
-        visitSlots(slotIterator, accountKey, true, visitor);
+        visitSlots(slots.iterator, accountKey, false, visitor);
+        if (visitor.onAccount(Bytes32.wrap(accountKey), Bytes.wrap(account.getValue()))) {
+          visitSlots(slots.iterator, accountKey, true, visitor);
+        } else {
+          slots.skip(accountKey);
+        }
       }
-      visitSlots(slotIterator, ONES, true, visitor);
+      visitSlots(slots.iterator, ONES, true, visitor);
     }
+  }
+
+  @Override
+  public void forEachSlotValue(final Bytes32 accountHash, final BiConsumer<Bytes32, Bytes> slots) {
+    final byte[] prefix = accountHash.toArrayUnsafe();
+    try (Stream<Pair<byte[], byte[]>> stream =
+        flat.streamFromKey(storageSegment, concat(prefix, ZEROS), concat(prefix, ONES))) {
+      stream.forEach(
+          slot ->
+              slots.accept(
+                  Bytes32.wrap(Arrays.copyOfRange(slot.getKey(), 32, 64)),
+                  Bytes.wrap(slot.getValue())));
+    }
+  }
+
+  // the slots of a scan, which can jump over the slots of an account without reading them
+  private final class SlotCursor implements AutoCloseable {
+    private final byte[] end;
+    private Stream<Pair<byte[], byte[]>> stream;
+    private PeekingIterator<Pair<byte[], byte[]>> iterator;
+
+    private SlotCursor(final byte[] start, final byte[] end) {
+      this.end = end;
+      open(start);
+    }
+
+    private void open(final byte[] start) {
+      stream =
+          Arrays.compareUnsigned(start, end) > 0
+              ? Stream.empty()
+              : flat.streamFromKey(storageSegment, start, end);
+      iterator = Iterators.peekingIterator(stream.iterator());
+    }
+
+    private void skip(final byte[] accountKey) {
+      if (!iterator.hasNext()
+          || Arrays.compareUnsigned(iterator.peek().getKey(), 0, 32, accountKey, 0, 32) != 0) {
+        return;
+      }
+      stream.close();
+      final byte[] next = increment(accountKey);
+      if (next == null) {
+        stream = Stream.empty();
+        iterator = Iterators.peekingIterator(Collections.emptyIterator());
+      } else {
+        open(concat(next, ZEROS));
+      }
+    }
+
+    @Override
+    public void close() {
+      stream.close();
+    }
+  }
+
+  // the next 32-byte key, or null after the last one
+  private static byte[] increment(final byte[] key) {
+    final byte[] next = key.clone();
+    for (int i = next.length - 1; i >= 0; i--) {
+      if (++next[i] != 0) {
+        return next;
+      }
+    }
+    return null;
   }
 
   @Override

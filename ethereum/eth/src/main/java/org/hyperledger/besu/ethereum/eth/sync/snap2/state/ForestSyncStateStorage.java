@@ -108,6 +108,11 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
   }
 
   @Override
+  public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
+    return forest.getAccountStorageTrieNode(storageRoot).isPresent();
+  }
+
+  @Override
   public TrieWriter trieWriter() {
     return new TrieWriter() {
       private ForestWorldStateKeyValueStorage.Updater updater;

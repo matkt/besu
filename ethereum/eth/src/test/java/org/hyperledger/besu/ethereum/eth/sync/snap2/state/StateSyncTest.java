@@ -77,8 +77,12 @@ class StateSyncTest {
     stateSync = new StateSync(storages.sync(), network, config());
 
     stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
+    waitForStorageTries();
 
-    assertThat(buildRoot(storages)).isEqualTo(world.root());
+    final WorldStateTrieBuilder.Result built = build(storages);
+    assertThat(built.root()).isEqualTo(world.root());
+    // storages complete while downloading get their trie right away
+    assertThat(built.keptStorageTries()).isPositive();
   }
 
   static Stream<Arguments> formatsAndSeeds() {
@@ -180,8 +184,21 @@ class StateSyncTest {
     }
   }
 
-  private static Bytes32 buildRoot(final Storages storages) {
-    return new WorldStateTrieBuilder(storages.sync(), 2).build().root();
+  private Bytes32 buildRoot(final Storages storages) {
+    return build(storages).root();
+  }
+
+  // the download stops first, as it does before the final build
+  private WorldStateTrieBuilder.Result build(final Storages storages) {
+    stateSync.stop();
+    return new WorldStateTrieBuilder(storages.sync(), 2).build();
+  }
+
+  private void waitForStorageTries() throws InterruptedException {
+    final long deadline = System.currentTimeMillis() + 20_000;
+    while (stateSync.storageTriesQueued() > 0 && System.currentTimeMillis() < deadline) {
+      Thread.sleep(10);
+    }
   }
 
   private static BlockHeader header(final long number, final Bytes32 root) {

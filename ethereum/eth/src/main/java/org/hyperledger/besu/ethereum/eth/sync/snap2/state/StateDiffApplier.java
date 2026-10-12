@@ -72,8 +72,12 @@ public final class StateDiffApplier {
       }
       final Optional<PmtStateTrieAccountValue> existing =
           storage.getAccount(accountHash).map(Accounts::decode);
-      final PmtStateTrieAccountValue updated = Accounts.update(existing, change);
       final StorageTask task = coverage.storageTask(accountHash);
+      PmtStateTrieAccountValue updated = Accounts.update(existing, change);
+      if (!change.storage().isEmpty() && task == null) {
+        // a storage trie built for these slots no longer matches, the final build redoes it
+        updated = Accounts.withStorageRoot(updated, Accounts.UNKNOWN_STORAGE_ROOT);
+      }
 
       if (change.code().isPresent() && !change.code().get().isEmpty()) {
         batch.putCode(
@@ -120,7 +124,16 @@ public final class StateDiffApplier {
 
   /** Account encoding helpers. */
   public static final class Accounts {
+    /** Storage root of an account whose slots changed once its storage was downloaded. */
+    public static final Hash UNKNOWN_STORAGE_ROOT = Hash.ZERO;
+
     private Accounts() {}
+
+    public static PmtStateTrieAccountValue withStorageRoot(
+        final PmtStateTrieAccountValue account, final Hash storageRoot) {
+      return new PmtStateTrieAccountValue(
+          account.getNonce(), account.getBalance(), storageRoot, account.getCodeHash());
+    }
 
     public static PmtStateTrieAccountValue decode(final Bytes rlp) {
       return PmtStateTrieAccountValue.readFrom(RLP.input(rlp));

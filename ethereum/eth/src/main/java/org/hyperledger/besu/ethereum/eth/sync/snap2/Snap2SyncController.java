@@ -781,9 +781,10 @@ public final class Snap2SyncController implements SnapSyncController {
       storage.saveWorldState(pivot, built.rootNode());
       storage.completeSync();
       LOG.info(
-          "World state of block {} is complete: {} accounts, {} slots",
+          "World state of block {} is complete: {} accounts, {} storage tries kept from the download, {} slots read for the others",
           pivot.getNumber(),
           built.accounts(),
+          built.keptStorageTries(),
           built.slots());
       trieBuilder = null;
       return pivot;
@@ -924,6 +925,16 @@ public final class Snap2SyncController implements SnapSyncController {
         "snap2_peers_without_state",
         "Peers left out of state requests because they answer nothing for the pivot",
         () -> attemptValue(attempt -> attempt.stateSync.peersWithoutState()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_storage_tries_built",
+        "Storage tries SNAP2 built while downloading",
+        () -> attemptValue(attempt -> attempt.stateSync.storageTriesBuilt()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_storage_tries_queued",
+        "Downloaded storages waiting for their trie",
+        () -> attemptValue(attempt -> attempt.stateSync.storageTriesQueued()));
     metricsSystem.createLongGauge(
         category,
         "snap2_trie_accounts_processed",

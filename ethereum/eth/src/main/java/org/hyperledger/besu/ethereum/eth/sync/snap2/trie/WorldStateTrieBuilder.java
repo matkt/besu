@@ -37,8 +37,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Builds the account trie and every storage trie from the flat state, in parallel over the 256
+ * Builds the account trie and the storage tries from the flat state, in parallel over the 256
  * first-byte partitions of the account key space, and fixes the storage roots of the flat accounts.
+ * A storage trie already written for the storage root of its account, while downloading, is kept
+ * and its slots are not read.
  */
 public final class WorldStateTrieBuilder {
 
@@ -50,6 +52,7 @@ public final class WorldStateTrieBuilder {
   private final int threads;
   private final AtomicLong accounts = new AtomicLong();
   private final AtomicLong slots = new AtomicLong();
+  private final AtomicLong keptStorageTries = new AtomicLong();
   private final AtomicBoolean cancelled = new AtomicBoolean();
 
   public WorldStateTrieBuilder(final SyncStateStorage storage, final int threads) {
@@ -63,9 +66,11 @@ public final class WorldStateTrieBuilder {
    * @param root the state root
    * @param rootNode the encoding of the root node
    * @param accounts the number of accounts
-   * @param slots the number of storage slots
+   * @param slots the number of storage slots read to build tries
+   * @param keptStorageTries the number of storage tries built while downloading and kept
    */
-  public record Result(Bytes32 root, Bytes rootNode, long accounts, long slots) {}
+  public record Result(
+      Bytes32 root, Bytes rootNode, long accounts, long slots, long keptStorageTries) {}
 
   /** Returns the number of accounts processed so far. */
   public long accountsProcessed() {
@@ -111,7 +116,7 @@ public final class WorldStateTrieBuilder {
       }
       final Bytes32 root = top.rootHash();
       writer.commit();
-      return new Result(root, rootNode[0], accounts.get(), slots.get());
+      return new Result(root, rootNode[0], accounts.get(), slots.get(), keptStorageTries.get());
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new CancellationException("trie build interrupted");
@@ -155,16 +160,26 @@ public final class WorldStateTrieBuilder {
     }
 
     @Override
-    public void onAccount(final Bytes32 hash, final Bytes rlp) {
+    public boolean onAccount(final Bytes32 hash, final Bytes rlp) {
       finishAccount();
       if (cancelled.get()) {
         throw new CancellationException("trie build cancelled");
+      }
+      final Hash storageRoot = Accounts.decode(rlp).getStorageRoot();
+      if (!storageRoot.equals(Hash.EMPTY_TRIE_HASH)
+          && !storageRoot.equals(Accounts.UNKNOWN_STORAGE_ROOT)
+          && storage.hasStorageTrie(hash, Bytes32.wrap(storageRoot.getBytes()))) {
+        accountTrie.addLeaf(hash, rlp);
+        accounts.incrementAndGet();
+        keptStorageTries.incrementAndGet();
+        return false;
       }
       accountHash = hash;
       account = rlp;
       storageTrie =
           new StackTrie(
               (location, nodeHash, node) -> writer.storageNode(hash, location, nodeHash, node));
+      return true;
     }
 
     @Override

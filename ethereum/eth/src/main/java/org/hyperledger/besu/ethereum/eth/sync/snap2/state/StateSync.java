@@ -93,6 +93,7 @@ public final class StateSync {
   private final Set<Bytes32> seenCodes = new HashSet<>();
   private final Set<EthPeer> emptyPeers = new HashSet<>();
   private final StateServers servers = new StateServers();
+  private final StorageTries tries;
   // peers left out of state requests, refreshed on each dispatch
   private Set<EthPeer> excluded = Set.of();
   private volatile int excludedCount;
@@ -116,6 +117,8 @@ public final class StateSync {
     this.loop =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("snap2-state").daemon().factory());
+    this.tries =
+        new StorageTries(storage, this::withoutMoves, Math.max(1, config.trieBuildThreads() / 4));
   }
 
   /** Starts downloading the state of the given pivot. */
@@ -206,6 +209,30 @@ public final class StateSync {
     }
   }
 
+  // runs an action exclusive with pivot moves, unless the download stopped
+  private boolean withoutMoves(final Runnable action) {
+    pivotLock.readLock().lock();
+    try {
+      if (stopped) {
+        return false;
+      }
+      action.run();
+      return true;
+    } finally {
+      pivotLock.readLock().unlock();
+    }
+  }
+
+  /** Returns the number of storage tries built while downloading. */
+  public long storageTriesBuilt() {
+    return tries.built();
+  }
+
+  /** Returns the number of downloaded storages waiting for their trie. */
+  public int storageTriesQueued() {
+    return tries.queued();
+  }
+
   /** Runs a write on the flat state exclusive with every download write. */
   public <T> T exclusively(final java.util.function.Supplier<T> write) {
     pivotLock.writeLock().lock();
@@ -251,6 +278,7 @@ public final class StateSync {
       pivotLock.writeLock().unlock();
     }
     loop.shutdownNow();
+    tries.stop();
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
@@ -640,6 +668,7 @@ public final class StateSync {
               task.cover(request.origin, complete ? request.limit : last);
               if (task.isComplete()) {
                 coverage.removeStorageTask(task.accountHash());
+                tries.completed(task.accountHash());
               }
             }
             lastSlot = last;

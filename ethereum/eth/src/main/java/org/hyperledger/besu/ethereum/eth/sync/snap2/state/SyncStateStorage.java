@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 
 import java.util.Optional;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -48,6 +49,12 @@ public interface SyncStateStorage {
 
   /** Visits the hashes of the slots stored for an account, without loading them all. */
   void forEachSlot(Bytes32 accountHash, Consumer<Bytes32> slotHashes);
+
+  /** Visits the slots stored for an account in key order, with their stored values. */
+  void forEachSlotValue(Bytes32 accountHash, BiConsumer<Bytes32, Bytes> slots);
+
+  /** Returns whether the storage trie of an account with this root is completely written. */
+  boolean hasStorageTrie(Bytes32 accountHash, Bytes32 storageRoot);
 
   /** Removes every slot of an account, committing in bounded batches. */
   default void deleteStorage(final Bytes32 accountHash) {
@@ -96,7 +103,8 @@ public interface SyncStateStorage {
 
   /** Visitor of the flat state. */
   interface ScanVisitor {
-    void onAccount(Bytes32 accountHash, Bytes account);
+    /** Visits an account and returns whether its slots are to be visited too. */
+    boolean onAccount(Bytes32 accountHash, Bytes account);
 
     void onSlot(Bytes32 accountHash, Bytes32 slotHash, Bytes value);
   }

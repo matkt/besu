@@ -91,6 +91,13 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
   }
 
   @Override
+  public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
+    return bonsai
+        .getTrieNode(TrieNodeKey.of(Hash.wrap(accountHash), Bytes.EMPTY), storageRoot)
+        .isPresent();
+  }
+
+  @Override
   public TrieWriter trieWriter() {
     return new TrieWriter() {
       private BonsaiWorldStateKeyValueStorage.Updater updater;

@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.SyncStorageFixture.Storages;
@@ -27,6 +29,7 @@ import java.util.Random;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -70,6 +73,43 @@ class WorldStateTrieBuilderTest {
                   SyncStorageFixture.decode(storages.sync().getAccount(hash)).orElseThrow();
               assertThat(flat.getStorageRoot().getBytes()).isEqualTo(world.storageRoot(hash));
             });
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void keepsTheStorageTriesWrittenAndRebuildsTheChangedOnes(final Format format) {
+    final Storages storages = SyncStorageFixture.create(format);
+    final World world = SyncStorageFixture.randomWorld(new Random(7), 500);
+    world.writeFlat(storages.sync());
+    new WorldStateTrieBuilder(storages.sync(), 2).build();
+    final long withStorage =
+        world.storage.values().stream().filter(slots -> !slots.isEmpty()).count();
+
+    // a slot changes after its trie was written, as in a pivot move
+    final Bytes32 changed =
+        world.storage.entrySet().stream()
+            .filter(entry -> !entry.getValue().isEmpty())
+            .findFirst()
+            .orElseThrow()
+            .getKey();
+    final Bytes32 slot = world.storage.get(changed).firstKey();
+    world.storage.get(changed).put(slot, UInt256.valueOf(424242));
+    final SyncStateStorage.Batch batch = storages.sync().batch();
+    batch.putStorage(changed, slot, UInt256.valueOf(424242));
+    batch.putAccount(
+        changed,
+        Accounts.encode(
+            Accounts.withStorageRoot(
+                SyncStorageFixture.decode(storages.sync().getAccount(changed)).orElseThrow(),
+                Accounts.UNKNOWN_STORAGE_ROOT)));
+    batch.commit();
+
+    final WorldStateTrieBuilder.Result result =
+        new WorldStateTrieBuilder(storages.sync(), 2).build();
+
+    assertThat(result.root()).isEqualTo(world.root());
+    assertThat(result.keptStorageTries()).isEqualTo(withStorage - 1);
+    assertThat(result.slots()).isEqualTo(world.storage.get(changed).size());
   }
 
   @ParameterizedTest
