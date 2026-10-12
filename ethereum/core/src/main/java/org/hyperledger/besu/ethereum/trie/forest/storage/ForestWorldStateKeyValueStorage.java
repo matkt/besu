@@ -22,6 +22,7 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.WorldStateKeyValueStorage;
 import org.hyperledger.besu.util.Subscribers;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -29,7 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -44,7 +45,8 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   private final Subscribers<NodesAddedListener> nodeAddedListeners = Subscribers.create();
   private final KeyValueStorage keyValueStorage;
-  private final ReentrantLock lock = new ReentrantLock();
+  // Commits share the read lock and run concurrently; prune takes the write lock.
+  private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
   public ForestWorldStateKeyValueStorage(final KeyValueStorage keyValueStorage) {
     this.keyValueStorage = keyValueStorage;
@@ -97,7 +99,7 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   @Override
   public Updater updater() {
-    return new Updater(lock, keyValueStorage.startTransaction(), nodeAddedListeners);
+    return new Updater(lock.readLock(), keyValueStorage.startTransaction(), nodeAddedListeners);
   }
 
   public long prune(final Predicate<byte[]> inUseCheck) {
@@ -105,13 +107,13 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     try (final Stream<byte[]> entry = keyValueStorage.streamKeys()) {
       entry.forEach(
           key -> {
-            lock.lock();
+            lock.writeLock().lock();
             try {
               if (!inUseCheck.test(key) && keyValueStorage.tryDelete(key)) {
                 prunedKeys.incrementAndGet();
               }
             } finally {
-              lock.unlock();
+              lock.writeLock().unlock();
             }
           });
     }
@@ -132,8 +134,8 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     private final KeyValueStorageTransaction transaction;
     private final Subscribers<NodesAddedListener> nodeAddedListeners;
     private final Set<Bytes32> addedNodes = new HashSet<>();
-    // A TransactionDB put locks its key until the commit, so writes are only applied by commit,
-    // under the storage lock: open updaters writing the same content-addressed node never block.
+    // A TransactionDB put locks its key until the commit, so writes are only applied by commit:
+    // open updaters writing the same content-addressed node never block each other.
     private final Map<Bytes, Optional<Bytes>> pendingWrites = new LinkedHashMap<>();
     private final Lock lock;
 
@@ -207,11 +209,17 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     public void commit() {
       lock.lock();
       try {
-        pendingWrites.forEach(
-            (key, value) ->
-                value.ifPresentOrElse(
-                    v -> transaction.put(key.toArrayUnsafe(), v.toArrayUnsafe()),
-                    () -> transaction.remove(key.toArrayUnsafe())));
+        // Concurrent commits lock their keys in the same sorted order, so they cannot deadlock.
+        pendingWrites.entrySet().stream()
+            .map(entry -> Map.entry(entry.getKey().toArrayUnsafe(), entry.getValue()))
+            .sorted(Map.Entry.comparingByKey((a, b) -> Arrays.compareUnsigned(a, b)))
+            .forEach(
+                entry ->
+                    entry
+                        .getValue()
+                        .ifPresentOrElse(
+                            value -> transaction.put(entry.getKey(), value.toArrayUnsafe()),
+                            () -> transaction.remove(entry.getKey())));
         nodeAddedListeners.forEach(listener -> listener.onNodesAdded(addedNodes));
         transaction.commit();
       } finally {
