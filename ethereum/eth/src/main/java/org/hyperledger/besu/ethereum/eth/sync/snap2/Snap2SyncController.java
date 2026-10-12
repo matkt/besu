@@ -930,6 +930,11 @@ public final class Snap2SyncController implements SnapSyncController {
         () -> attemptValue(attempt -> attempt.stateSync.coverage().pendingStorageCount()));
     metricsSystem.createLongGauge(
         category,
+        "snap2_peers_without_state",
+        "Peers left out of state requests because they answer nothing for the pivot",
+        () -> attemptValue(attempt -> attempt.stateSync.peersWithoutState()));
+    metricsSystem.createLongGauge(
+        category,
         "snap2_trie_accounts_processed",
         "Accounts added to the tries SNAP2 is building",
         () -> attemptValue(attempt -> attempt.trieProgress(true)));

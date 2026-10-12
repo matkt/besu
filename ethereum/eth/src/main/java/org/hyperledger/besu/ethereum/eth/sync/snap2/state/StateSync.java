@@ -61,6 +61,7 @@ public final class StateSync {
   private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
   private static final int REFRESH_BYTES = 4096;
   private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
+  private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
 
   /** Current pivot; responses requested at another epoch are discarded. */
@@ -91,6 +92,10 @@ public final class StateSync {
   private final Set<Bytes32> codesInFlight = new HashSet<>();
   private final Set<Bytes32> seenCodes = new HashSet<>();
   private final Set<EthPeer> emptyPeers = new HashSet<>();
+  private final StateServers servers = new StateServers();
+  // peers left out of state requests, refreshed on each dispatch
+  private Set<EthPeer> excluded = Set.of();
+  private volatile int excludedCount;
   private int accountsInFlight;
   private int storageInFlight;
   private int codesRequestsInFlight;
@@ -252,12 +257,13 @@ public final class StateSync {
   /** Returns a one-line progress summary. */
   public String progress() {
     return String.format(
-        "accounts %d (%.2f%% of key space), slots %d, bytecodes %d, pending storages %d",
+        "accounts %d (%.2f%% of key space), slots %d, bytecodes %d, pending storages %d, %d peers left out",
         accounts.get(),
         coverage.accounts().coverage() * 100,
         slots.get(),
         codes.get(),
-        coverage.pendingStorageCount());
+        coverage.pendingStorageCount(),
+        excludedCount);
   }
 
   /** Returns the download bookkeeping, for diagnostics. */
@@ -333,6 +339,8 @@ public final class StateSync {
     if (pivotStale || paused) {
       return;
     }
+    excluded = servers.excluded(System.nanoTime());
+    excludedCount = excluded.size();
     final Pivot current = pivot;
     final int capacity = Math.max(1, scheduler.capacity(Protocol.SNAP));
     final int target = capacity + capacity / 4;
@@ -440,7 +448,7 @@ public final class StateSync {
             config.responseBytes(),
             "account_range");
     scheduler
-        .submit(request)
+        .submit(request, excluded)
         .whenComplete(
             (response, error) -> {
               final AccountsPersisted persisted =
@@ -452,9 +460,11 @@ public final class StateSync {
                     task.inFlight = false;
                     accountsInFlight--;
                     if (error != null) {
-                      onFailure(error);
-                    } else if (persisted != null) {
-                      onSuccess();
+                      onFailure(error, request.epoch);
+                    } else {
+                      onServed(response.peer(), request.epoch);
+                    }
+                    if (persisted != null) {
                       if (persisted.done) {
                         task.done = true;
                       } else {
@@ -567,7 +577,7 @@ public final class StateSync {
 
   private void submitStorage(final StorageRangesRequest request) {
     scheduler
-        .submit(request)
+        .submit(request, excluded)
         .whenComplete(
             (response, error) -> {
               final StoragePersisted persisted =
@@ -582,9 +592,9 @@ public final class StateSync {
                       request.chunk.inFlight = false;
                     }
                     if (error != null) {
-                      onFailure(error);
-                    } else if (persisted != null) {
-                      onSuccess();
+                      onFailure(error, request.epoch);
+                    } else {
+                      onServed(response.peer(), request.epoch);
                     }
                     afterStorage(request, persisted);
                     dispatch();
@@ -697,22 +707,20 @@ public final class StateSync {
             REFRESH_BYTES,
             "account_refresh");
     scheduler
-        .submit(request)
+        .submit(request, excluded)
         .whenComplete(
             (response, error) -> {
-              final boolean persisted =
-                  error == null
-                      && Boolean.TRUE.equals(
-                          persistSafely(
-                              () -> persistRefresh(request, task, response.value()), request));
+              if (error == null) {
+                persistSafely(() -> persistRefresh(request, task, response.value()), request);
+              }
               execute(
                   () -> {
                     task.refreshing = false;
                     refreshesInFlight--;
                     if (error != null) {
-                      onFailure(error);
-                    } else if (persisted) {
-                      onSuccess();
+                      onFailure(error, request.epoch);
+                    } else {
+                      onServed(response.peer(), request.epoch);
                     }
                     if (isPending(task) && task.chunks.isEmpty()) {
                       queueStorage(task);
@@ -788,7 +796,7 @@ public final class StateSync {
                         .filter(hash -> !received.containsKey(hash))
                         .forEach(codeQueue::add);
                     if (error != null) {
-                      onFailure(error);
+                      onFailure(error, NO_EPOCH);
                     }
                     dispatch();
                   });
@@ -815,30 +823,54 @@ public final class StateSync {
     }
   }
 
-  private void onSuccess() {
-    consecutiveEmpty = 0;
-    emptyPeers.clear();
+  private void onServed(final EthPeer peer, final int epoch) {
+    servers.served(peer, epoch);
+    if (epoch == pivot.epoch()) {
+      consecutiveEmpty = 0;
+      emptyPeers.clear();
+    }
   }
 
-  private void onFailure(final Throwable error) {
+  // empty answers of peers that serve the state tell that the pivot is too old
+  private void onFailure(final Throwable error, final int epoch) {
     RequestFailedException.from(error)
         .ifPresentOrElse(
             failure -> {
-              if (failure.reason() == RequestFailedException.Reason.EMPTY) {
-                consecutiveEmpty++;
-                failure.peer().ifPresent(emptyPeers::add);
-                if (consecutiveEmpty >= EMPTY_RESPONSES_FOR_STALE_PIVOT
-                    && emptyPeers.size() >= Math.min(3, scheduler.peerCount(Protocol.SNAP))
-                    && !pivotStale) {
-                  LOG.info(
-                      "Peers stopped serving the state of block {}, the pivot must move",
-                      pivot.header().getNumber());
-                  pivotStale = true;
-                }
+              if (failure.reason() == RequestFailedException.Reason.EMPTY
+                  && epoch == pivot.epoch()
+                  && failure.peer().isPresent()) {
+                onEmpty(failure.peer().get(), epoch);
               }
               LOG.trace("State request failed: {}", failure.getMessage());
             },
             () -> LOG.debug("State request failed", error));
+  }
+
+  private void onEmpty(final EthPeer peer, final int epoch) {
+    if (servers.empty(peer, epoch, System.nanoTime())) {
+      LOG.debug(
+          "{} does not serve the state of block {}, leaving it out for a while",
+          peer.getLoggableId(),
+          pivot.header().getNumber());
+      emptyPeers.remove(peer);
+      return;
+    }
+    consecutiveEmpty++;
+    emptyPeers.add(peer);
+    final int candidates = Math.max(1, scheduler.peerCount(Protocol.SNAP) - excluded.size());
+    if (consecutiveEmpty >= EMPTY_RESPONSES_FOR_STALE_PIVOT
+        && emptyPeers.size() >= Math.min(3, candidates)
+        && !pivotStale) {
+      LOG.info(
+          "Peers stopped serving the state of block {}, the pivot must move",
+          pivot.header().getNumber());
+      pivotStale = true;
+    }
+  }
+
+  /** Returns the number of peers left out of state requests because they serve no state. */
+  public int peersWithoutState() {
+    return excludedCount;
   }
 
   private boolean checkCompletion() {

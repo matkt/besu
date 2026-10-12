@@ -83,6 +83,8 @@ public final class FakeSnapNetwork implements RequestSender {
   private final Map<String, Function<MessageData, MessageData>> handlers =
       new ConcurrentHashMap<>();
   private final Map<Hash, Bytes> blockAccessLists = new ConcurrentHashMap<>();
+  private final Set<EthPeer> withoutState = ConcurrentHashMap.newKeySet();
+  private final Map<EthPeer, AtomicLong> stateRequests = new ConcurrentHashMap<>();
   private volatile int maxResponseBytes = Integer.MAX_VALUE;
   private volatile long latencyMillis;
 
@@ -127,6 +129,21 @@ public final class FakeSnapNetwork implements RequestSender {
     return requests.get();
   }
 
+  /** Makes a peer answer every account and storage range request with nothing. */
+  public void serveNoState(final int peer) {
+    withoutState.add(peers.get(peer));
+  }
+
+  /** Returns the account and storage range requests a peer received. */
+  public long stateRequestsTo(final EthPeer peer) {
+    return stateRequests.getOrDefault(peer, new AtomicLong()).get();
+  }
+
+  /** Returns the account and storage range requests all peers received. */
+  public long stateRequestCount() {
+    return stateRequests.values().stream().mapToLong(AtomicLong::get).sum();
+  }
+
   public List<EthPeer> peers() {
     return peers;
   }
@@ -134,7 +151,7 @@ public final class FakeSnapNetwork implements RequestSender {
   @Override
   public <T> CompletableFuture<PeerResponse<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
-    final EthPeer peer = nextPeer(request);
+    final EthPeer peer = nextPeer(request, excluded);
     if (peer == null) {
       return CompletableFuture.failedFuture(
           new RequestFailedException(RequestFailedException.Reason.NO_PEER, null, "no peer"));
@@ -151,7 +168,10 @@ public final class FakeSnapNetwork implements RequestSender {
           }
           final Protocol protocol = request.protocolFor(peer);
           final MessageData message = request.message(peer);
-          final MessageData raw = respond(protocol, message);
+          final MessageData raw =
+              protocol == Protocol.SNAP && isStateRequest(message)
+                  ? stateResponse(peer, message)
+                  : respond(protocol, message);
           // eth responses reach requests already unwrapped, snap ones keep their request id
           final MessageData response =
               protocol == Protocol.SNAP ? raw.wrapMessageData(BigInteger.ONE) : raw;
@@ -220,14 +240,30 @@ public final class FakeSnapNetwork implements RequestSender {
   }
 
   // the next peer, in turn, that can serve the request; eth task filters need real peer state
-  private EthPeer nextPeer(final SyncRequest<?> request) {
+  private EthPeer nextPeer(final SyncRequest<?> request, final Set<EthPeer> excluded) {
     for (int i = 0; i < peers.size(); i++) {
       final EthPeer peer = peers.get(Math.floorMod(nextPeer.getAndIncrement(), peers.size()));
-      if (request.protocol() == Protocol.ETH || request.canServe(peer)) {
+      if (!excluded.contains(peer)
+          && (request.protocol() == Protocol.ETH || request.canServe(peer))) {
         return peer;
       }
     }
     return null;
+  }
+
+  private static boolean isStateRequest(final MessageData message) {
+    return message.getCode() == SnapV2.GET_ACCOUNT_RANGE
+        || message.getCode() == SnapV2.GET_STORAGE_RANGE;
+  }
+
+  private MessageData stateResponse(final EthPeer peer, final MessageData message) {
+    stateRequests.computeIfAbsent(peer, p -> new AtomicLong()).incrementAndGet();
+    if (!withoutState.contains(peer)) {
+      return respond(Protocol.SNAP, message);
+    }
+    return message.getCode() == SnapV2.GET_ACCOUNT_RANGE
+        ? AccountRangeMessage.create(new TreeMap<>(), List.of())
+        : StorageRangeMessage.create(new kotlin.collections.ArrayDeque<>(), List.of());
   }
 
   private static EthPeer peer(final Capability snap, final Capability eth) {

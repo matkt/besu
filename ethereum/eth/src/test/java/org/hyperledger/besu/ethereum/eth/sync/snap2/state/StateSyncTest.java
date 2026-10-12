@@ -129,6 +129,24 @@ class StateSyncTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
+  void leavesOutAPeerThatServesNoState(final Format format) throws Exception {
+    final TestWorld world = TestWorld.random(new Random(13), 800, 3, 400);
+    network.serve(world);
+    network.serveNoState(1);
+    final Storages storages = SyncStorageFixture.create(format);
+    stateSync = new StateSync(storages.sync(), network, config());
+
+    stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
+
+    assertThat(buildRoot(storages)).isEqualTo(world.root());
+    // its empty answers neither stalled the pivot nor kept it busy
+    assertThat(stateSync.isPivotStale()).isFalse();
+    assertThat(network.stateRequestsTo(network.peers().get(1)))
+        .isLessThan(network.stateRequestCount() / 10);
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
   void detectsAStalePivot(final Format format) throws Exception {
     final Random random = new Random(5);
     final TestWorld world = TestWorld.random(random, 300, 2, 400);
