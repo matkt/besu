@@ -92,6 +92,8 @@ public final class RequestScheduler implements RequestSender {
   private final ScheduledExecutorService loop;
   private final ExecutorService workers;
   private final LabelledMetric<Counter> requestCounter;
+  private final LabelledMetric<Counter> responseBytes;
+  private final LabelledMetric<Counter> responseMillis;
 
   private final PriorityQueue<Pending<?>> queue =
       new PriorityQueue<>(
@@ -102,6 +104,9 @@ public final class RequestScheduler implements RequestSender {
   private final long connectSubscription;
   private volatile int snapCapacity;
   private volatile int ethCapacity;
+  private volatile int snapInFlight;
+  private volatile int ethInFlight;
+  private volatile int queued;
   private volatile boolean stopped;
 
   public RequestScheduler(
@@ -129,6 +134,39 @@ public final class RequestScheduler implements RequestSender {
             "Requests sent by the SNAP2 sync, by type and outcome",
             "request",
             "outcome");
+    this.responseBytes =
+        metricsSystem.createLabelledCounter(
+            BesuMetricCategory.SYNCHRONIZER,
+            "snap2_response_bytes_total",
+            "Bytes of the responses received by the SNAP2 sync, by request type",
+            "request");
+    this.responseMillis =
+        metricsSystem.createLabelledCounter(
+            BesuMetricCategory.SYNCHRONIZER,
+            "snap2_response_milliseconds_total",
+            "Time peers took to answer SNAP2 requests, by request type",
+            "request");
+    final var inFlight =
+        metricsSystem.createLabelledSuppliedGauge(
+            BesuMetricCategory.SYNCHRONIZER,
+            "snap2_requests_in_flight",
+            "Requests of the SNAP2 sync waiting for an answer, by protocol",
+            "protocol");
+    inFlight.labels(() -> snapInFlight, "snap");
+    inFlight.labels(() -> ethInFlight, "eth");
+    final var capacity =
+        metricsSystem.createLabelledSuppliedGauge(
+            BesuMetricCategory.SYNCHRONIZER,
+            "snap2_request_capacity",
+            "Requests the peers currently accept from the SNAP2 sync, by protocol",
+            "protocol");
+    capacity.labels(() -> snapCapacity, "snap");
+    capacity.labels(() -> ethCapacity, "eth");
+    metricsSystem.createIntegerGauge(
+        BesuMetricCategory.SYNCHRONIZER,
+        "snap2_requests_queued",
+        "Requests of the SNAP2 sync waiting for a peer",
+        () -> queued);
     ethPeers.subscribeDisconnect(peer -> execute(() -> peers.remove(peer)));
     this.connectSubscription = ethPeers.subscribeConnect(peer -> execute(this::dispatch));
     loop.scheduleWithFixedDelay(this::dispatchSafely, 1, 1, TimeUnit.SECONDS);
@@ -296,14 +334,21 @@ public final class RequestScheduler implements RequestSender {
   private void updateCapacities(final List<PeerState> candidates) {
     int snap = 0;
     int eth = 0;
+    int snapBusy = 0;
+    int ethBusy = 0;
     for (final PeerState state : candidates) {
       eth += state.eth.slots();
+      ethBusy += state.eth.inFlight;
+      snapBusy += state.snap.inFlight;
       if (speaks(state.peer, Protocol.SNAP)) {
         snap += state.snap.slots();
       }
     }
     snapCapacity = snap;
     ethCapacity = eth;
+    snapInFlight = snapBusy;
+    ethInFlight = ethBusy;
+    queued = queue.size();
   }
 
   private PeerState select(
@@ -425,6 +470,8 @@ public final class RequestScheduler implements RequestSender {
                   }
                   attempt.peer.record(result, size, elapsedMillis, System.nanoTime());
                   countRequest(request, result);
+                  responseBytes.labels(request.name()).inc(size);
+                  responseMillis.labels(request.name()).inc(elapsedMillis);
                   dispatch();
                 });
           });

@@ -45,6 +45,7 @@ import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
+import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
@@ -61,7 +62,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.ToLongFunction;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -121,8 +126,9 @@ public final class Snap2SyncController implements SnapSyncController {
   private BalFetcher balFetcher;
   private volatile Attempt current;
   private volatile boolean stopped;
-  private int restarts;
-  private long moves;
+  private final AtomicInteger restarts = new AtomicInteger();
+  private final AtomicLong moves = new AtomicLong();
+  private final AtomicLong reorgs = new AtomicLong();
 
   public Snap2SyncController(
       final Snap2Configuration config,
@@ -201,6 +207,7 @@ public final class Snap2SyncController implements SnapSyncController {
     scheduler = senders.get();
     fetcher = new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest());
     balFetcher = new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), 60);
+    registerMetrics();
     control.scheduleWithFixedDelay(
         this::logProgress, PROGRESS_LOG_SECONDS, PROGRESS_LOG_SECONDS, TimeUnit.SECONDS);
     control.scheduleWithFixedDelay(
@@ -223,11 +230,11 @@ public final class Snap2SyncController implements SnapSyncController {
                 failed.cancel();
               }
               if (stopped
-                  || restarts >= MAX_RESTARTS
+                  || restarts.get() >= MAX_RESTARTS
                   || !(unwrap(error) instanceof RestartException restart)) {
                 return CompletableFuture.failedFuture(error);
               }
-              restarts++;
+              restarts.incrementAndGet();
               LOG.warn("Restarting the SNAP2 sync from scratch: {}", restart.getMessage());
               return run(failed == null ? resume : failed.resume(restart.canonicalUpTo()));
             },
@@ -624,7 +631,7 @@ public final class Snap2SyncController implements SnapSyncController {
               })
           .thenCompose(
               outcome -> {
-                moves++;
+                moves.incrementAndGet();
                 LOG.info(
                     "Moved the pivot to block {}: {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots",
                     target.getNumber(),
@@ -669,6 +676,7 @@ public final class Snap2SyncController implements SnapSyncController {
                     orphanedChain.stream()
                         .filter(header -> header.getNumber() > ancestor.getNumber())
                         .toList();
+                reorgs.incrementAndGet();
                 LOG.warn(
                     "Chain reorganised below the pivot {}: common ancestor {}, {} orphaned blocks, new pivot {}",
                     pivot.getNumber(),
@@ -800,6 +808,29 @@ public final class Snap2SyncController implements SnapSyncController {
       return pivot;
     }
 
+    private long pivotNumber() {
+      final StateSync.Pivot pivot = stateSync.pivot();
+      return pivot == null ? 0 : pivot.header().getNumber();
+    }
+
+    private long lowestStoredHeader() {
+      final HeaderBackfill headers = backfill;
+      return headers == null ? 0 : headers.lowestStored();
+    }
+
+    private long importedUpTo() {
+      final BlockImporter blocks = importer;
+      return blocks == null ? 0 : blocks.nextBlock() - 1;
+    }
+
+    private long trieProgress(final boolean accounts) {
+      final WorldStateTrieBuilder builder = trieBuilder;
+      if (builder == null) {
+        return 0;
+      }
+      return accounts ? builder.accountsProcessed() : builder.slotsProcessed();
+    }
+
     private String progress() {
       final WorldStateTrieBuilder builder = trieBuilder;
       final HeaderBackfill headers = backfill;
@@ -858,10 +889,122 @@ public final class Snap2SyncController implements SnapSyncController {
         return;
       }
       LOG.info(
-          "SNAP2 sync progress: {}, {} pivot moves, {}", attempt.progress(), moves, peerSummary());
+          "SNAP2 sync progress: {}, {} pivot moves, {}",
+          attempt.progress(),
+          moves.get(),
+          peerSummary());
     } catch (final RuntimeException e) {
       LOG.debug("Failed to log the SNAP2 progress", e);
     }
+  }
+
+  private void registerMetrics() {
+    final BesuMetricCategory category = BesuMetricCategory.SYNCHRONIZER;
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_pivot_block",
+        "Block of the SNAP2 pivot",
+        () -> attemptValue(Attempt::pivotNumber));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_headers_lowest_stored",
+        "Lowest block header stored by the SNAP2 header download",
+        () -> attemptValue(Attempt::lowestStoredHeader));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_blocks_imported",
+        "Highest block whose body and receipts SNAP2 imported",
+        () -> attemptValue(Attempt::importedUpTo));
+    metricsSystem.createGauge(
+        category,
+        "snap2_account_coverage",
+        "Share of the account key space SNAP2 downloaded, from 0 to 1",
+        () -> {
+          final Attempt attempt = current;
+          return attempt == null ? 0 : attempt.stateSync.coverage().accounts().coverage();
+        });
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_pending_storages",
+        "Accounts whose storage SNAP2 still has to download",
+        () -> attemptValue(attempt -> attempt.stateSync.coverage().pendingStorageCount()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_trie_accounts_processed",
+        "Accounts added to the tries SNAP2 is building",
+        () -> attemptValue(attempt -> attempt.trieProgress(true)));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_trie_slots_processed",
+        "Storage slots added to the tries SNAP2 is building",
+        () -> attemptValue(attempt -> attempt.trieProgress(false)));
+    metricsSystem.createCounter(
+        category,
+        "snap2_accounts_downloaded_total",
+        "Accounts downloaded by SNAP2",
+        () -> attemptValue(attempt -> attempt.stateSync.downloadedAccounts()));
+    metricsSystem.createCounter(
+        category,
+        "snap2_slots_downloaded_total",
+        "Storage slots downloaded by SNAP2",
+        () -> attemptValue(attempt -> attempt.stateSync.downloadedSlots()));
+    metricsSystem.createCounter(
+        category,
+        "snap2_bytecodes_downloaded_total",
+        "Bytecodes downloaded by SNAP2",
+        () -> attemptValue(attempt -> attempt.stateSync.downloadedCodes()));
+    metricsSystem.createCounter(
+        category, "snap2_pivot_moves_total", "Pivot moves of SNAP2", moves::get);
+    metricsSystem.createCounter(
+        category, "snap2_reorgs_total", "Reorgs below the SNAP2 pivot", reorgs::get);
+    metricsSystem.createCounter(
+        category, "snap2_restarts_total", "Times SNAP2 started over", restarts::get);
+    final var stage =
+        metricsSystem.createLabelledSuppliedGauge(
+            category, "snap2_stage", "Current SNAP2 stage, 1 for the active one", "stage");
+    for (final String name : List.of("waiting", "state", "tries", "chain")) {
+      stage.labels(() -> name.equals(stage()) ? 1 : 0, name);
+    }
+    final var peers =
+        metricsSystem.createLabelledSuppliedGauge(
+            category, "snap2_peers", "Connected peers by what they serve to SNAP2", "capability");
+    peers.labels(() -> countPeers(capabilities -> true), "all");
+    peers.labels(
+        () -> countPeers(capabilities -> capabilities.contains(SnapProtocol.SNAP1)), "snap1");
+    peers.labels(
+        () -> countPeers(capabilities -> capabilities.contains(SnapProtocol.SNAP2)), "snap2");
+    peers.labels(
+        () ->
+            countPeers(
+                capabilities -> capabilities.stream().anyMatch(EthProtocol::isEth71Compatible)),
+        "eth71");
+  }
+
+  // a value of the current attempt, 0 before the first one
+  private long attemptValue(final ToLongFunction<Attempt> value) {
+    final Attempt attempt = current;
+    return attempt == null ? 0 : value.applyAsLong(attempt);
+  }
+
+  private String stage() {
+    final Attempt attempt = current;
+    if (attempt == null) {
+      return "waiting";
+    } else if (attempt.finalTarget >= 0) {
+      return "chain";
+    } else if (attempt.trieBuilder != null) {
+      return "tries";
+    }
+    return "state";
+  }
+
+  private int countPeers(final Predicate<Set<Capability>> filter) {
+    return (int)
+        ethPeers
+            .streamAvailablePeers()
+            .map(EthPeerImmutableAttributes::ethPeer)
+            .filter(peer -> filter.test(peer.getAgreedCapabilities()))
+            .count();
   }
 
   // what the connected peers can serve: snap ranges, and block access lists over snap/2 or eth/71
