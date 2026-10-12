@@ -38,6 +38,11 @@ public interface RequestSender {
   /** Returns the number of usable peers for a protocol. */
   int peerCount(Protocol protocol);
 
+  /** Returns the highest chain height announced by a connected peer, 0 if unknown. */
+  default long bestPeerHeight() {
+    return 0;
+  }
+
   /** Returns the request capacity of the usable peers of a protocol. */
   int capacity(Protocol protocol);
 

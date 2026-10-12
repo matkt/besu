@@ -33,14 +33,25 @@ public final class PeerTaskRequest<T> implements SyncRequest<T> {
   private final Supplier<PeerTask<T>> tasks;
   private final Priority priority;
   private final String name;
+  private final long minimumPeerHeight;
   private final PeerTask<T> template;
   private volatile PeerTask<T> current;
 
   public PeerTaskRequest(
       final Supplier<PeerTask<T>> tasks, final Priority priority, final String name) {
+    this(tasks, priority, name, 0);
+  }
+
+  /** Creates a request only sent to peers that announced at least the given chain height. */
+  public PeerTaskRequest(
+      final Supplier<PeerTask<T>> tasks,
+      final Priority priority,
+      final String name,
+      final long minimumPeerHeight) {
     this.tasks = tasks;
     this.priority = priority;
     this.name = name;
+    this.minimumPeerHeight = minimumPeerHeight;
     this.template = tasks.get();
   }
 
@@ -57,6 +68,11 @@ public final class PeerTaskRequest<T> implements SyncRequest<T> {
   @Override
   public String name() {
     return name;
+  }
+
+  @Override
+  public long minimumPeerHeight() {
+    return minimumPeerHeight;
   }
 
   @Override

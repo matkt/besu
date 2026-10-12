@@ -63,6 +63,11 @@ public interface SyncRequest<T> {
    */
   T decode(MessageData response, EthPeer peer);
 
+  /** Returns the chain height a peer must have announced to serve this request, 0 if any. */
+  default long minimumPeerHeight() {
+    return 0;
+  }
+
   /** Returns whether the peer can serve this request, beyond protocol support. */
   default boolean canServe(final EthPeer peer) {
     return true;

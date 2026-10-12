@@ -49,6 +49,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
   record Result(List<Slots> accounts) {}
 
   final int epoch;
+  private final long pivotNumber;
   final Bytes32 root;
   final List<StorageTask> tasks;
   final List<Bytes32> storageRoots;
@@ -59,6 +60,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
 
   StorageRangesRequest(
       final int epoch,
+      final long pivotNumber,
       final Bytes32 root,
       final List<StorageTask> tasks,
       final Bytes32 origin,
@@ -66,6 +68,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
       final RangeTask chunk,
       final long bytes) {
     this.epoch = epoch;
+    this.pivotNumber = pivotNumber;
     this.root = root;
     this.tasks = tasks;
     this.storageRoots = tasks.stream().map(StorageTask::storageRoot).toList();
@@ -83,6 +86,11 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
   @Override
   public Priority priority() {
     return Priority.STATE;
+  }
+
+  @Override
+  public long minimumPeerHeight() {
+    return pivotNumber;
   }
 
   @Override

@@ -442,6 +442,7 @@ public final class StateSync {
     final AccountRangeRequest request =
         new AccountRangeRequest(
             current.epoch(),
+            current.header().getNumber(),
             current.root(),
             task.next,
             task.limit,
@@ -549,6 +550,7 @@ public final class StateSync {
     final StorageRangesRequest request =
         new StorageRangesRequest(
             current.epoch(),
+            current.header().getNumber(),
             current.root(),
             batch,
             Keys.MIN,
@@ -566,6 +568,7 @@ public final class StateSync {
     final StorageRangesRequest request =
         new StorageRangesRequest(
             current.epoch(),
+            current.header().getNumber(),
             current.root(),
             List.of(task),
             chunk.next,
@@ -701,6 +704,7 @@ public final class StateSync {
     final AccountRangeRequest request =
         new AccountRangeRequest(
             current.epoch(),
+            current.header().getNumber(),
             current.root(),
             task.accountHash(),
             task.accountHash(),

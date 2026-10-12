@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 public final class HeaderFetcher {
 
   private static final int ATTEMPTS = 10;
+  private static final long HEAD_TOLERANCE = 8;
 
   private final RequestSender sender;
   private final ProtocolSchedule protocolSchedule;
@@ -54,10 +55,13 @@ public final class HeaderFetcher {
 
   /** Returns the header with the given hash. */
   public CompletableFuture<BlockHeader> byHash(final Hash hash, final Priority priority) {
+    // a head just announced is only known by the peers closest to the tip
+    final long recent =
+        priority == Priority.PIVOT ? Math.max(0, sender.bestPeerHeight() - HEAD_TOLERANCE) : 0;
     return heads
         .knownHeader(hash)
         .map(CompletableFuture::completedFuture)
-        .orElseGet(() -> fetch(hash, 1, priority).thenApply(List::getFirst));
+        .orElseGet(() -> fetch(hash, 1, priority, recent).thenApply(List::getFirst));
   }
 
   /**
@@ -83,7 +87,7 @@ public final class HeaderFetcher {
       return CompletableFuture.completedFuture(descending);
     }
     final int count = (int) Math.min(headersPerRequest, cursor.getNumber() - lowest);
-    return fetch(cursor.getParentHash(), count, priority)
+    return fetch(cursor.getParentHash(), count, priority, cursor.getNumber() - 1)
         .thenCompose(
             headers -> {
               for (final BlockHeader header : headers) {
@@ -98,7 +102,7 @@ public final class HeaderFetcher {
 
   // headers from the given hash going down, the first one checked against the hash
   private CompletableFuture<List<BlockHeader>> fetch(
-      final Hash hash, final int count, final Priority priority) {
+      final Hash hash, final int count, final Priority priority, final long minimumPeerHeight) {
     return sender
         .submitWithRetries(
             new PeerTaskRequest<>(
@@ -106,7 +110,8 @@ public final class HeaderFetcher {
                     new GetHeadersFromPeerTask(
                         hash, count, 0, Direction.REVERSE, 0, protocolSchedule),
                 priority,
-                "headers"),
+                "headers",
+                minimumPeerHeight),
             ATTEMPTS)
         .thenApply(response -> response.value());
   }

@@ -246,6 +246,15 @@ public final class RequestScheduler implements RequestSender {
   }
 
   @Override
+  public long bestPeerHeight() {
+    return ethPeers
+        .streamAvailablePeers()
+        .mapToLong(peer -> peer.ethPeer().chainState().getEstimatedHeight())
+        .max()
+        .orElse(0);
+  }
+
+  @Override
   public int capacity(final Protocol protocol) {
     final int adapted = protocol == Protocol.SNAP ? snapCapacity : ethCapacity;
     return adapted > 0 ? adapted : peerCount(protocol) * (int) INITIAL_LANE_LIMIT;
@@ -355,10 +364,12 @@ public final class RequestScheduler implements RequestSender {
       final Pending<?> pending, final List<PeerState> candidates, final long now) {
     PeerState best = null;
     double bestScore = -1;
+    final long minimumHeight = pending.request.minimumPeerHeight();
     for (final PeerState state : candidates) {
       final Protocol protocol = pending.request.protocolFor(state.peer);
       final Lane lane = state.lane(protocol);
       if (state.peer.isDisconnected()
+          || behind(state.peer, minimumHeight)
           || state.backoffUntil > now
           || pending.excluded.contains(state.peer)
           || !lane.hasRoom()
@@ -441,11 +452,12 @@ public final class RequestScheduler implements RequestSender {
             } catch (final EmptyResponseException e) {
               outcome = "empty";
               LOG.debug(
-                  "Empty {} ({} bytes) from {} {}: {}",
+                  "Empty {} ({} bytes) from {} {} at height {}: {}",
                   request.name(),
                   size,
                   peer.getLoggableId(),
                   peer.getConnection().getPeerInfo().getClientId(),
+                  peer.chainState().getEstimatedHeight(),
                   e.getMessage());
               attempt.pending.future.completeExceptionally(failure(EMPTY, peer, e.getMessage()));
             } catch (final InvalidResponseException e) {
@@ -533,6 +545,15 @@ public final class RequestScheduler implements RequestSender {
 
   private void countRequest(final SyncRequest<?> request, final String outcome) {
     requestCounter.labels(request.name(), outcome).inc();
+  }
+
+  // a peer that announced a lower head, still syncing for instance, cannot serve the request
+  private static boolean behind(final EthPeer peer, final long minimumHeight) {
+    if (minimumHeight <= 0) {
+      return false;
+    }
+    final long height = peer.chainState().getEstimatedHeight();
+    return height > 0 && height < minimumHeight;
   }
 
   // range requests are the same in snap/1 and snap/2, so any snap peer serves them

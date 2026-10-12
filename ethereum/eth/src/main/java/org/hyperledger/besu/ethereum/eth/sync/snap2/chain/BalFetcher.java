@@ -215,6 +215,11 @@ public final class BalFetcher {
     }
 
     @Override
+    public long minimumPeerHeight() {
+      return headers.getLast().getNumber();
+    }
+
+    @Override
     public boolean canServe(final EthPeer peer) {
       return peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2)
           || peer.getAgreedCapabilities().stream().anyMatch(EthProtocol::isEth71Compatible);

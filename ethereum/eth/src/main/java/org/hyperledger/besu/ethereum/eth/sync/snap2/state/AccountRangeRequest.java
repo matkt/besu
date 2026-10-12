@@ -38,6 +38,7 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
   record Result(List<Bytes32> hashes, List<Bytes> accounts, boolean hasMore) {}
 
   final int epoch;
+  private final long pivotNumber;
   final Bytes32 root;
   final Bytes32 origin;
   final Bytes32 limit;
@@ -46,12 +47,14 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
 
   AccountRangeRequest(
       final int epoch,
+      final long pivotNumber,
       final Bytes32 root,
       final Bytes32 origin,
       final Bytes32 limit,
       final long bytes,
       final String name) {
     this.epoch = epoch;
+    this.pivotNumber = pivotNumber;
     this.root = root;
     this.origin = origin;
     this.limit = limit;
@@ -67,6 +70,11 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
   @Override
   public Priority priority() {
     return Priority.STATE;
+  }
+
+  @Override
+  public long minimumPeerHeight() {
+    return pivotNumber;
   }
 
   @Override

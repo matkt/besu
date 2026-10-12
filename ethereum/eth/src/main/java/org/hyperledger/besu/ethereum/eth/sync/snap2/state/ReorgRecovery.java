@@ -168,7 +168,14 @@ public final class ReorgRecovery {
       final Bytes32 hash,
       final Map<Bytes32, Optional<Bytes32>> storageRoots) {
     final AccountRangeRequest request =
-        new AccountRangeRequest(epoch, root, hash, hash, REFETCH_BYTES, "account_refetch");
+        new AccountRangeRequest(
+            epoch,
+            stateSync.pivot().header().getNumber(),
+            root,
+            hash,
+            hash,
+            REFETCH_BYTES,
+            "account_refetch");
     return sender
         .submitWithRetries(request, ATTEMPTS)
         .thenAccept(
@@ -214,6 +221,7 @@ public final class ReorgRecovery {
     final StorageRangesRequest request =
         new StorageRangesRequest(
             epoch,
+            stateSync.pivot().header().getNumber(),
             root,
             List.of(new StorageTask(account, storageRoot)),
             slot,
