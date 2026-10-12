@@ -32,6 +32,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -110,6 +111,24 @@ class RequestSchedulerTest {
         .extracting(BlockHeader::getNumber)
         .containsExactly(3L, 4L);
     assertThat(peer.getEthPeer().isDisconnected()).isFalse();
+  }
+
+  @Test
+  void givesBackTheSlotOfARequestNeverAnswered() throws Exception {
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> lost = scheduler.submit(headers(1, 2));
+    assertThatThrownBy(() -> lost.get(5, TimeUnit.SECONDS))
+        .isInstanceOf(ExecutionException.class)
+        .hasCauseInstanceOf(RequestFailedException.class);
+    // the peer drops it without ever answering
+    peer.respond((capability, ethPeer, message) -> Optional.empty());
+
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> next = scheduler.submit(headers(3, 2));
+    peer.respondWhileOtherThreadsWork(
+        RespondingEthPeer.blockchainResponder(blockchain), () -> !next.isDone());
+
+    assertThat(next.get(5, TimeUnit.SECONDS).value())
+        .extracting(BlockHeader::getNumber)
+        .containsExactly(3L, 4L);
   }
 
   private PeerTaskRequest<List<BlockHeader>> headers(final long first, final int count) {

@@ -78,6 +78,8 @@ public final class RequestScheduler implements RequestSender {
   private static final double INITIAL_LANE_LIMIT = 2;
   private static final int MAX_BACKOFF_SECONDS = 30;
   private static final int CONSECUTIVE_FAILURES_BEFORE_DISCONNECT = 12;
+  // announced heights lag, so a peer that looks behind is only picked when no other peer can be
+  private static final double BEHIND_PENALTY = 1e-3;
 
   private static final int PENDING = 0;
   private static final int DONE = 1;
@@ -369,7 +371,6 @@ public final class RequestScheduler implements RequestSender {
       final Protocol protocol = pending.request.protocolFor(state.peer);
       final Lane lane = state.lane(protocol);
       if (state.peer.isDisconnected()
-          || behind(state.peer, minimumHeight)
           || state.backoffUntil > now
           || pending.excluded.contains(state.peer)
           || !lane.hasRoom()
@@ -377,7 +378,10 @@ public final class RequestScheduler implements RequestSender {
           || !pending.request.canServe(state.peer)) {
         continue;
       }
-      final double score = state.throughput / (lane.inFlight + 1);
+      final double score =
+          state.throughput
+              / (lane.inFlight + 1)
+              * (behind(state.peer, minimumHeight) ? BEHIND_PENALTY : 1);
       if (score > bestScore) {
         best = state;
         bestScore = score;
@@ -523,11 +527,21 @@ public final class RequestScheduler implements RequestSender {
     countRequest(attempt.pending.request, "timeout");
     attempt.pending.future.completeExceptionally(
         failure(TIMEOUT, state.peer, attempt.pending.request.name() + " timed out"));
+    loop.schedule(() -> abandon(attempt), timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (state.consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_DISCONNECT) {
       LOG.debug("Disconnecting {} after repeated timeouts", state.peer.getLoggableId());
       state.peer.disconnect(DisconnectReason.TIMEOUT);
     }
     dispatch();
+  }
+
+  // a request still unanswered long after its timeout gives its slot back
+  private void abandon(final Attempt<?> attempt) {
+    if (attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
+      attempt.lane.abandoned--;
+      attempt.stream.close();
+      dispatch();
+    }
   }
 
   private void punish(
@@ -547,7 +561,7 @@ public final class RequestScheduler implements RequestSender {
     requestCounter.labels(request.name(), outcome).inc();
   }
 
-  // a peer that announced a lower head, still syncing for instance, cannot serve the request
+  // a peer that announced a lower head may be syncing, or may just not have announced more
   private static boolean behind(final EthPeer peer, final long minimumHeight) {
     if (minimumHeight <= 0) {
       return false;
