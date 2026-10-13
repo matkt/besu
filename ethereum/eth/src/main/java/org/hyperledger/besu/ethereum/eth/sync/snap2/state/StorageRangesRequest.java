@@ -102,25 +102,39 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
   public Result decode(final MessageData response, final EthPeer peer) {
     final SnapMessages.StorageRanges ranges = SnapMessages.storageRanges(response);
     final int served = ranges.slotHashes().size();
-    if (served == 0) {
-      throw new EmptyResponseException("no storage for root " + pivot.root());
-    }
     if (served > tasks.size()) {
       throw new InvalidResponseException("more storage ranges than requested", true);
     }
+    if (served == 0) {
+      if (ranges.proof().isEmpty()) {
+        throw new EmptyResponseException("no storage for root " + pivot.root());
+      }
+      // a proof alone proves that the first account has no slot from the origin on
+      return new Result(List.of(verify(0, List.of(), List.of(), ranges.proof())));
+    }
     final List<Slots> accounts = new ArrayList<>(served);
     for (int i = 0; i < served; i++) {
-      final List<Bytes32> hashes = ranges.slotHashes().get(i);
-      final List<Bytes> values = ranges.slotValues().get(i);
       final boolean proven = i == served - 1 && !ranges.proof().isEmpty();
-      final RangeProof.Result verified =
-          RangeProof.verify(
-              storageRoots.get(i), origin, hashes, values, proven ? ranges.proof() : List.of());
-      if (!verified.valid()) {
-        throw new InvalidResponseException("invalid storage range", true);
-      }
-      accounts.add(new Slots(hashes, values, !verified.hasMore()));
+      accounts.add(
+          verify(
+              i,
+              ranges.slotHashes().get(i),
+              ranges.slotValues().get(i),
+              proven ? ranges.proof() : List.of()));
     }
     return new Result(accounts);
+  }
+
+  private Slots verify(
+      final int index,
+      final List<Bytes32> hashes,
+      final List<Bytes> values,
+      final List<Bytes> proof) {
+    final RangeProof.Result verified =
+        RangeProof.verify(storageRoots.get(index), origin, hashes, values, proof);
+    if (!verified.valid()) {
+      throw new InvalidResponseException("invalid storage range", true);
+    }
+    return new Slots(hashes, values, !verified.hasMore());
   }
 }

@@ -363,7 +363,10 @@ public final class FakeSnapNetwork implements RequestSender {
           break;
         }
       }
-      slots.add(out);
+      // like geth, an account without slots in the range gets no slot list
+      if (!out.isEmpty()) {
+        slots.add(out);
+      }
       if (truncated || !origin.isZero()) {
         return StorageRangeMessage.create(
             slots,
