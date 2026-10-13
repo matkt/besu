@@ -28,7 +28,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTries;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
-import java.math.BigInteger;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -62,6 +61,8 @@ public final class StateSync {
   private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
+  private static final int BYTES_PER_SLOT = 64;
+  private static final double KEY_SPACE = Math.pow(2, 256);
 
   /** Current pivot; responses requested at another epoch are discarded. */
   public record Pivot(int epoch, BlockHeader header) {
@@ -584,7 +585,8 @@ public final class StateSync {
             });
   }
 
-  private record StoragePersisted(int served, Bytes32 lastSlot, boolean lastComplete, int slots) {}
+  private record StoragePersisted(
+      int served, Bytes32 lastSlot, boolean lastComplete, int lastReturned, int slots) {}
 
   private StoragePersisted persistStorage(
       final StorageRangesRequest request, final StorageRangesRequest.Result result) {
@@ -594,6 +596,7 @@ public final class StateSync {
           final SyncStateStorage.Batch batch = storage.batch();
           Bytes32 lastSlot = null;
           boolean lastComplete = true;
+          int lastReturned = 0;
           int count = 0;
           for (int i = 0; i < result.accounts().size(); i++) {
             final StorageTask task = request.tasks.get(i);
@@ -623,10 +626,12 @@ public final class StateSync {
             }
             lastSlot = last;
             lastComplete = complete;
+            lastReturned = returned.size();
           }
           batch.commit();
           slots.addAndGet(count);
-          return new StoragePersisted(result.accounts().size(), lastSlot, lastComplete, count);
+          return new StoragePersisted(
+              result.accounts().size(), lastSlot, lastComplete, lastReturned, count);
         });
   }
 
@@ -652,24 +657,22 @@ public final class StateSync {
         continue;
       }
       if (i == served - 1) {
-        splitIntoChunks(task, persisted.lastSlot);
+        splitIntoChunks(task, persisted.lastSlot, persisted.lastReturned);
       } else {
         queueStorage(task);
       }
     }
   }
 
-  // a storage too large for one response is downloaded in parallel slot ranges
-  private void splitIntoChunks(final StorageTask task, final Bytes32 lastSlot) {
+  // a storage too large for one response is downloaded in parallel slot ranges, as many as the
+  // density of the slots returned so far suggests: a small storage cut short stays in one range
+  private void splitIntoChunks(final StorageTask task, final Bytes32 lastSlot, final int returned) {
     final Bytes32 start = Keys.next(lastSlot).orElseThrow();
-    // one response covered [0, lastSlot], the rest needs about as many responses as it is wide
-    final BigInteger span = lastSlot.toUnsignedBigInteger().add(BigInteger.ONE);
-    final BigInteger remaining =
-        Keys.MAX.toUnsignedBigInteger().subtract(lastSlot.toUnsignedBigInteger());
-    final long estimatedRequests =
-        remaining.divide(span).min(BigInteger.valueOf(1L << 20)).longValue();
+    final double covered = lastSlot.toUnsignedBigInteger().doubleValue() / KEY_SPACE;
+    final double remainingSlots = returned * (1 - covered) / covered;
+    final double requests = remainingSlots * BYTES_PER_SLOT / config.responseBytes();
     final int parts =
-        (int) Math.max(1, Math.min(config.maxStorageChunks(), (estimatedRequests + 3) / 4));
+        (int) Math.max(1, Math.min(config.maxStorageChunks(), Math.ceil(requests / 4)));
     for (final Bytes32[] range : Keys.split(start, Keys.MAX, parts)) {
       task.chunks.add(new RangeTask(range[0], range[1]));
     }
