@@ -106,8 +106,12 @@ class RequestSchedulerTest {
         .isInstanceOf(ExecutionException.class)
         .hasCauseInstanceOf(RequestFailedException.class);
 
-    // the late response is absorbed, and the peer keeps serving
+    // the late response is absorbed, not counted as the answer to an unknown request
+    final int score = peer.getEthPeer().getReputation().getScore();
     peer.respond(RespondingEthPeer.blockchainResponder(blockchain));
+    assertThat(peer.getEthPeer().getReputation().getScore()).isEqualTo(score);
+
+    // and the peer keeps serving
     final CompletableFuture<PeerResponse<List<BlockHeader>>> next = scheduler.submit(headers(3, 2));
     peer.respondWhileOtherThreadsWork(
         RespondingEthPeer.blockchainResponder(blockchain), () -> !next.isDone());

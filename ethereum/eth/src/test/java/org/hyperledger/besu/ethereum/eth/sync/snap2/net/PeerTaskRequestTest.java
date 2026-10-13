@@ -14,7 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -24,9 +26,13 @@ import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.core.SyncBlock;
 import org.hyperledger.besu.ethereum.eth.EthProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskValidationResponse;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncBlockBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.messages.BlockBodiesMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
 
 import java.util.List;
 import java.util.Set;
@@ -52,5 +58,46 @@ class PeerTaskRequestTest {
 
     assertThatThrownBy(() -> request.decode(BlockBodiesMessage.create(List.of()), peer))
         .isInstanceOf(SyncRequest.EmptyResponseException.class);
+  }
+
+  @Test
+  void treatsAResultWithNothingInItAsEmpty() throws Exception {
+    final PeerTaskRequest<String> request =
+        requestValidatedAs(PeerTaskValidationResponse.NO_RESULTS_RETURNED);
+
+    assertThatThrownBy(() -> request.decode(mock(MessageData.class), peer()))
+        .isInstanceOf(SyncRequest.EmptyResponseException.class);
+  }
+
+  @Test
+  void rejectsAResultTheTaskFindsWrongWithItsDisconnectReason() throws Exception {
+    final PeerTaskRequest<String> request =
+        requestValidatedAs(PeerTaskValidationResponse.NON_SEQUENTIAL_HEADERS_RETURNED);
+
+    assertThatThrownBy(() -> request.decode(mock(MessageData.class), peer()))
+        .isInstanceOfSatisfying(
+            SyncRequest.InvalidResponseException.class,
+            e ->
+                assertThat(e.disconnectReason())
+                    .contains(DisconnectReason.BREACH_OF_PROTOCOL_NON_SEQUENTIAL_HEADERS));
+  }
+
+  // a task whose response decodes to a result the task then validates as given
+  @SuppressWarnings("unchecked")
+  private static PeerTaskRequest<String> requestValidatedAs(
+      final PeerTaskValidationResponse validation) throws Exception {
+    final PeerTask<String> task = mock(PeerTask.class);
+    when(task.processResponse(any(), any())).thenReturn("result");
+    when(task.validateResult("result")).thenReturn(validation);
+    final PeerTaskRequest<String> request =
+        new PeerTaskRequest<>(() -> task, Priority.CHAIN, "task");
+    request.message(peer());
+    return request;
+  }
+
+  private static EthPeer peer() {
+    final EthPeer peer = mock(EthPeer.class);
+    when(peer.getAgreedCapabilities()).thenReturn(Set.of(EthProtocol.LATEST));
+    return peer;
   }
 }

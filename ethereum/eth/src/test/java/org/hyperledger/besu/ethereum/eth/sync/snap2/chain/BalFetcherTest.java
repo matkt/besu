@@ -31,7 +31,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -67,7 +66,7 @@ class BalFetcherTest {
     chain.extend(12);
     network.serveNoBlockAccessLists(ETH71_ONLY);
 
-    final List<BlockHeader> headers = headers(12);
+    final List<BlockHeader> headers = chain.headers(1, 12);
 
     assertMatch(headers, fetcher.fetch(headers).join());
   }
@@ -78,7 +77,7 @@ class BalFetcherTest {
     network.serveNoBlockAccessLists(SNAP2_ETH71);
     network.serveNoBlockAccessLists(SNAP2_ETH68);
 
-    final List<BlockHeader> headers = headers(12);
+    final List<BlockHeader> headers = chain.headers(1, 12);
 
     assertMatch(headers, fetcher.fetch(headers).join());
   }
@@ -90,7 +89,7 @@ class BalFetcherTest {
     network.serveNoBlockAccessLists(ETH71_ONLY);
     network.serveNoBlockAccessLists(SNAP2_ETH68);
 
-    assertThatThrownBy(() -> fetcher.fetch(headers(4), 1).join())
+    assertThatThrownBy(() -> fetcher.fetch(chain.headers(1, 4), 1).join())
         .rootCause()
         .isInstanceOf(IllegalStateException.class)
         .hasMessageStartingWith("no peer served the block access list");
@@ -130,14 +129,6 @@ class BalFetcherTest {
         .isTrue();
     assertThat(request.canServe(peer(SnapProtocol.SNAP1, EthProtocolVersion.V68.getCapability())))
         .isFalse();
-  }
-
-  private List<BlockHeader> headers(final int count) {
-    final List<BlockHeader> headers = new ArrayList<>();
-    for (int number = 1; number <= count; number++) {
-      headers.add(chain.header(number));
-    }
-    return headers;
   }
 
   private static void assertMatch(final List<BlockHeader> headers, final List<Bytes> lists) {

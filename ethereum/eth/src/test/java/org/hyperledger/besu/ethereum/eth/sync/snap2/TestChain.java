@@ -138,6 +138,11 @@ public final class TestChain implements ChainHeadSource {
     return headers.get((int) number);
   }
 
+  /** Returns the headers from {@code from} to {@code to}, both included. */
+  public synchronized List<BlockHeader> headers(final long from, final long to) {
+    return List.copyOf(headers.subList((int) from, (int) to + 1));
+  }
+
   public synchronized TestWorld world(final long number) {
     return worlds.get((int) number);
   }

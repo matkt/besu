@@ -29,7 +29,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -73,7 +72,7 @@ class HeaderBackfillTest {
   @Test
   void followsTheTrustedHeaderWhenPeersServeAnotherChain() {
     chain.extend(60);
-    final List<BlockHeader> trusted = headers(1, 60);
+    final List<BlockHeader> trusted = chain.headers(1, 60);
     // the peers moved to a fork from block 31, which they serve by number
     chain.reorg(30, 30);
     final HeaderBackfill backfill = backfill(chain.header(0), trusted.getLast());
@@ -127,13 +126,5 @@ class HeaderBackfillTest {
         10,
         3,
         new NoOpMetricsSystem());
-  }
-
-  private List<BlockHeader> headers(final long from, final long to) {
-    final List<BlockHeader> headers = new ArrayList<>();
-    for (long number = from; number <= to; number++) {
-      headers.add(chain.header(number));
-    }
-    return headers;
   }
 }

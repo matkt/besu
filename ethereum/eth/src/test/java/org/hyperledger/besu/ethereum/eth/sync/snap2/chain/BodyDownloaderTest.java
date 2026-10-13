@@ -23,7 +23,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
-import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
@@ -31,8 +30,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.TestChain;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -86,7 +83,7 @@ class BodyDownloaderTest {
     // the two highest ranges are in flight with the headers of the first fork
     await().atMost(Duration.ofSeconds(10)).until(() -> network.requestCount() >= 2);
     chain.reorg(30, 10);
-    blockchain.storeBlockHeaders(headers(31, 40));
+    blockchain.storeBlockHeaders(chain.headers(31, 40));
     network.releaseResponses();
 
     awaitStoredUpTo(bodies, 40);
@@ -101,7 +98,7 @@ class BodyDownloaderTest {
     awaitStoredUpTo(bodies, 40);
 
     chain.reorg(30, 10);
-    blockchain.storeBlockHeaders(headers(31, 40));
+    blockchain.storeBlockHeaders(chain.headers(31, 40));
     bodies.rewind(31);
 
     assertThat(bodies.storedUpTo(40)).isFalse();
@@ -189,16 +186,8 @@ class BodyDownloaderTest {
   private MutableBlockchain blockchainWithHeaders(final long head) {
     final MutableBlockchain withHeaders =
         InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
-    withHeaders.storeBlockHeaders(headers(1, head));
+    withHeaders.storeBlockHeaders(chain.headers(1, head));
     return withHeaders;
-  }
-
-  private List<BlockHeader> headers(final long from, final long to) {
-    final List<BlockHeader> headers = new ArrayList<>();
-    for (long number = from; number <= to; number++) {
-      headers.add(chain.header(number));
-    }
-    return headers;
   }
 
   private void assertCanonicalBodies(final long head) {

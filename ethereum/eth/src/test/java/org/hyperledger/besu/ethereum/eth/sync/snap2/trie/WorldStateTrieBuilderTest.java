@@ -166,6 +166,7 @@ class WorldStateTrieBuilderTest {
     SyncStorageFixture.randomWorld(new Random(3), 2000).writeFlat(storages.sync());
     final SyncStateStorage storage = spy(storages.sync());
     final IllegalStateException diskFailure = new IllegalStateException("disk failure");
+    final WorldStateTrieBuilder builder = new WorldStateTrieBuilder(storage, 4);
     final CountDownLatch failed = new CountDownLatch(1);
     final CountDownLatch secondEnded = new CountDownLatch(1);
     final AtomicBoolean secondCompleted = new AtomicBoolean();
@@ -180,8 +181,9 @@ class WorldStateTrieBuilderTest {
                 return invocation.callRealMethod();
               }
               try {
-                // a database scan ignores interrupts
+                // a database scan ignores interrupts, and this one starts after the failure
                 Uninterruptibles.awaitUninterruptibly(failed);
+                awaitCancellation(builder);
                 invocation.callRealMethod();
                 secondCompleted.set(true);
                 return null;
@@ -192,8 +194,17 @@ class WorldStateTrieBuilderTest {
         .when(storage)
         .scan(any(), any(), any());
 
-    assertThatThrownBy(() -> new WorldStateTrieBuilder(storage, 4).build()).isSameAs(diskFailure);
+    assertThatThrownBy(builder::build).isSameAs(diskFailure);
     assertThat(secondEnded.await(10, TimeUnit.SECONDS)).isTrue();
     assertThat(secondCompleted).isFalse();
+  }
+
+  // the failing partition cancels the build right after failing; long enough for a missed
+  // cancellation to let the other partition complete
+  private static void awaitCancellation(final WorldStateTrieBuilder builder) {
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+    while (!builder.isCancelled() && System.nanoTime() < deadline) {
+      Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
+    }
   }
 }

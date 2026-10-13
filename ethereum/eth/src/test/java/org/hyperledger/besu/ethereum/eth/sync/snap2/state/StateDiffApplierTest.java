@@ -122,13 +122,47 @@ class StateDiffApplierTest {
     assertThat(storage.hasCode(Bytes32.wrap(Hash.hash(CODE).getBytes()))).isTrue();
   }
 
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void forgetsTheStorageRootOfACompleteStorageItChanges(final Format format) {
+    final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
+    final StateCoverage coverage = new StateCoverage();
+    final Hash builtRoot = Hash.hash(Bytes.of(1));
+    final SyncStateStorage.Batch batch = storage.batch();
+    batch.putAccount(hash(A), account(1, 100, builtRoot, Hash.EMPTY));
+    batch.putAccount(hash(B), account(1, 100, builtRoot, Hash.EMPTY));
+    batch.commit();
+    coverage.accounts().add(hash(A), hash(A));
+    coverage.accounts().add(hash(B), hash(B));
+    // A's storage is complete, its trie possibly built; B's is still downloading
+    coverage.addStorageTask(new StorageTask(hash(B), Bytes32.wrap(builtRoot.getBytes())));
+
+    final StateDiff diff = new StateDiff();
+    diff.add(
+        new BlockAccessList(
+            List.of(
+                changes(A, List.of(slot(S1, 7)), List.of(), List.of(), List.of()),
+                changes(B, List.of(slot(S1, 7)), List.of(), List.of(), List.of()))));
+    StateDiffApplier.apply(diff, storage, coverage);
+
+    // a trie built for A's former slots no longer matches: the final build redoes it
+    assertThat(read(storage, A).getStorageRoot()).isEqualTo(Accounts.UNKNOWN_STORAGE_ROOT);
+    // the download learns B's new root instead
+    assertThat(read(storage, B).getStorageRoot()).isEqualTo(builtRoot);
+  }
+
   private static PmtStateTrieAccountValue read(final SyncStateStorage storage, final Address a) {
     return Accounts.decode(storage.getAccount(hash(a)).orElseThrow());
   }
 
   private static Bytes account(final long nonce, final long balance, final Hash codeHash) {
+    return account(nonce, balance, Hash.EMPTY_TRIE_HASH, codeHash);
+  }
+
+  private static Bytes account(
+      final long nonce, final long balance, final Hash storageRoot, final Hash codeHash) {
     return Accounts.encode(
-        new PmtStateTrieAccountValue(nonce, Wei.of(balance), Hash.EMPTY_TRIE_HASH, codeHash));
+        new PmtStateTrieAccountValue(nonce, Wei.of(balance), storageRoot, codeHash));
   }
 
   private static AccountChanges changes(

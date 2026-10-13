@@ -30,7 +30,9 @@ import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.NavigableMap;
+import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import kotlin.collections.ArrayDeque;
 import org.apache.tuweni.bytes.Bytes;
@@ -41,12 +43,18 @@ import org.junit.jupiter.api.Test;
 class StorageRangesRequestTest {
 
   private static final Bytes32 ACCOUNT = Bytes32.fromHexString("0x01");
+  private static final Bytes32 OTHER_ACCOUNT = Bytes32.fromHexString("0x02");
   private final SimpleMerklePatriciaTrie<Bytes32, Bytes> storage =
+      new SimpleMerklePatriciaTrie<>(Function.identity());
+  private final SimpleMerklePatriciaTrie<Bytes32, Bytes> other =
       new SimpleMerklePatriciaTrie<>(Function.identity());
 
   StorageRangesRequestTest() {
     for (int i = 1; i <= 3; i++) {
       storage.put(slot(i * 0x40), RLP.encodeOne(UInt256.valueOf(i).trimLeadingZeros()));
+    }
+    for (int i = 1; i <= 4; i++) {
+      other.put(slot(i * 0x30), RLP.encodeOne(UInt256.valueOf(10 + i).trimLeadingZeros()));
     }
   }
 
@@ -77,6 +85,70 @@ class StorageRangesRequestTest {
 
     assertThatThrownBy(() -> chunk(slot(0xd0)).decode(nothing, peer()))
         .isInstanceOf(SyncRequest.EmptyResponseException.class);
+  }
+
+  @Test
+  void rejectsMoreStoragesThanRequested() {
+    final MessageData twoStorages =
+        response(List.of(slots(storage, 3), slots(other, 4)), List.of());
+
+    assertThatThrownBy(() -> chunk(RangeManager.MIN_RANGE).decode(twoStorages, peer()))
+        .isInstanceOf(SyncRequest.InvalidResponseException.class)
+        .hasMessageContaining("more storage ranges than requested");
+  }
+
+  // the proof covers only the last storage, which the response cuts short
+  @Test
+  void acceptsACompleteStorageThenOneCutShortWithItsProof() {
+    final NavigableMap<Bytes32, Bytes> firstTwo = slots(other, 2);
+    final List<Bytes> proof =
+        Stream.of(RangeManager.MIN_RANGE, firstTwo.lastKey())
+            .flatMap(key -> other.getValueWithProof(key).getProofRelatedNodes().stream())
+            .distinct()
+            .toList();
+
+    final StorageRangesRequest.Result result =
+        twoStorages().decode(response(List.of(slots(storage, 3), firstTwo), proof), peer());
+
+    assertThat(result.accounts()).hasSize(2);
+    assertThat(result.accounts().get(0).complete()).isTrue();
+    assertThat(result.accounts().get(1).hashes()).containsExactlyElementsOf(firstTwo.keySet());
+    assertThat(result.accounts().get(1).complete()).isFalse();
+  }
+
+  @Test
+  void rejectsAStorageCutShortWithoutItsProof() {
+    final MessageData cutShort = response(List.of(slots(storage, 3), slots(other, 2)), List.of());
+
+    assertThatThrownBy(() -> twoStorages().decode(cutShort, peer()))
+        .isInstanceOf(SyncRequest.InvalidResponseException.class);
+  }
+
+  // the whole storages of two accounts, as a batch asks them
+  private StorageRangesRequest twoStorages() {
+    final StateSync.Pivot pivot =
+        new StateSync.Pivot(0, new BlockHeaderTestFixture().number(1).buildHeader());
+    return new StorageRangesRequest(
+        pivot,
+        List.of(
+            new StorageTask(ACCOUNT, storage.getRootHash()),
+            new StorageTask(OTHER_ACCOUNT, other.getRootHash())),
+        RangeManager.MIN_RANGE,
+        RangeManager.MAX_RANGE,
+        null,
+        4096);
+  }
+
+  // the first slots of a storage, in key order
+  private static NavigableMap<Bytes32, Bytes> slots(
+      final SimpleMerklePatriciaTrie<Bytes32, Bytes> trie, final int count) {
+    return new TreeMap<>(trie.entriesFrom(RangeManager.MIN_RANGE, count));
+  }
+
+  private static MessageData response(
+      final List<NavigableMap<Bytes32, Bytes>> slots, final List<Bytes> proof) {
+    return StorageRangeMessage.create(new ArrayDeque<>(slots), proof)
+        .wrapMessageData(BigInteger.ONE);
   }
 
   private StorageRangesRequest chunk(final Bytes32 origin) {

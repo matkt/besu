@@ -154,12 +154,24 @@ class StateSyncTest {
   @ParameterizedTest
   @MethodSource("formatsAndSeeds")
   void followsAMovingPivot(final Format format, final long seed) throws Exception {
+    followMovingPivot(format, seed, config());
+  }
+
+  // the moves rewrite slots of storages whose trie is already built
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void followsAMovingPivotWhileBuildingStorageTries(final Format format) throws Exception {
+    followMovingPivot(format, 11, config().toBuilder().storageTriesWhileDownloading(true).build());
+  }
+
+  private void followMovingPivot(
+      final Format format, final long seed, final Snap2Configuration config) throws Exception {
     final Random random = new Random(seed);
     TestWorld world = TestWorld.random(random, 1500, 6, 800);
     network.serve(world);
     network.latency(4);
     final Storages storages = SyncStorageFixture.create(format);
-    stateSync = new StateSync(storages.sync(), network, config());
+    stateSync = new StateSync(storages.sync(), network, config);
     final var completion = stateSync.start(header(100, world.root()));
 
     long block = 100;

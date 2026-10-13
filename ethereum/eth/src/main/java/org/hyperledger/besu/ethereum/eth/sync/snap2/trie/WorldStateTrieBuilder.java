@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
@@ -90,6 +91,11 @@ public final class WorldStateTrieBuilder {
   /** Stops a running build, which then throws a {@link CancellationException}. */
   public void cancel() {
     cancelled.set(true);
+  }
+
+  @VisibleForTesting
+  boolean isCancelled() {
+    return cancelled.get();
   }
 
   /** Builds the tries and writes their nodes. */
