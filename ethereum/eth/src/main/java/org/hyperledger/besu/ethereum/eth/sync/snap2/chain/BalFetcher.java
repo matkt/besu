@@ -99,97 +99,117 @@ public final class BalFetcher {
                     + " has no block access list, snap/2 cannot sync it"));
       }
     }
-    final Map<Hash, Bytes> received = new HashMap<>();
-    final CompletableFuture<List<Bytes>> result = new CompletableFuture<>();
-    round(headers, received, new HashMap<>(), 0, rounds, result);
-    return result;
+    final Fetch fetch = new Fetch(headers, rounds);
+    fetch.round(0);
+    return fetch.result;
   }
 
   public void stop() {
     timer.shutdownNow();
   }
 
-  private void round(
-      final List<BlockHeader> headers,
-      final Map<Hash, Bytes> received,
-      final Map<Hash, Set<EthPeer>> lacking,
-      final int round,
-      final int rounds,
-      final CompletableFuture<List<Bytes>> result) {
-    final List<BlockHeader> missing =
-        headers.stream().filter(header -> !received.containsKey(header.getHash())).toList();
-    if (missing.isEmpty()) {
-      result.complete(headers.stream().map(header -> received.get(header.getHash())).toList());
-      return;
+  /** The lists of some headers, asked in rounds, each round to peers that did not lack them. */
+  private final class Fetch {
+    private final List<BlockHeader> headers;
+    private final int rounds;
+    private final CompletableFuture<List<Bytes>> result = new CompletableFuture<>();
+    // guarded by this
+    private final Map<Hash, Bytes> received = new HashMap<>();
+    private final Map<Hash, Set<EthPeer>> lacking = new HashMap<>();
+
+    private Fetch(final List<BlockHeader> headers, final int rounds) {
+      this.headers = headers;
+      this.rounds = rounds;
     }
-    if (round >= rounds) {
-      result.completeExceptionally(
-          new IllegalStateException(
-              "no peer served the block access list of block " + missing.getFirst().getNumber()));
-      return;
+
+    private void round(final int round) {
+      final List<BlockHeader> missing = missing();
+      if (missing.isEmpty()) {
+        result.complete(lists());
+        return;
+      }
+      if (round >= rounds) {
+        result.completeExceptionally(
+            new IllegalStateException(
+                "no peer served the block access list of block " + missing.getFirst().getNumber()));
+        return;
+      }
+      final List<CompletableFuture<Void>> requests = new ArrayList<>();
+      for (int i = 0; i < missing.size(); i += batchSize) {
+        requests.add(request(missing.subList(i, Math.min(missing.size(), i + batchSize))));
+      }
+      CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new))
+          .whenComplete((unused, error) -> next(round, missing));
     }
-    final List<CompletableFuture<Void>> requests = new ArrayList<>();
-    for (int i = 0; i < missing.size(); i += batchSize) {
-      final List<BlockHeader> batch = missing.subList(i, Math.min(missing.size(), i + batchSize));
+
+    private CompletableFuture<Void> request(final List<BlockHeader> batch) {
+      return sender
+          .submit(new BalRequest(batch, responseBytes), excluded(batch))
+          .handle(
+              (response, error) -> {
+                if (error == null) {
+                  record(batch, response.value(), response.peer());
+                } else {
+                  RequestFailedException.from(error)
+                      .flatMap(RequestFailedException::peer)
+                      .ifPresent(peer -> record(batch, Map.of(), peer));
+                }
+                return null;
+              });
+    }
+
+    // a round that received nothing waits, peers that lacked the lists may catch up meanwhile
+    private void next(final int round, final List<BlockHeader> missing) {
+      if (receivedAny(missing)) {
+        round(round + 1);
+        return;
+      }
+      LOG.debug("No block access list received in round {}, retrying", round);
+      if (round % 5 == 4) {
+        forgetLacking();
+      }
+      try {
+        timer.schedule(
+            () -> round(round + 1),
+            Duration.ofSeconds(Math.min(10, 1 + round)).toMillis(),
+            TimeUnit.MILLISECONDS);
+      } catch (final RuntimeException e) {
+        result.completeExceptionally(e);
+      }
+    }
+
+    // keeps the lists the peer sent, and notes it lacked the others
+    private synchronized void record(
+        final List<BlockHeader> batch, final Map<Hash, Bytes> lists, final EthPeer peer) {
+      received.putAll(lists);
+      for (final BlockHeader header : batch) {
+        if (!lists.containsKey(header.getHash())) {
+          lacking.computeIfAbsent(header.getHash(), hash -> new HashSet<>()).add(peer);
+        }
+      }
+    }
+
+    private synchronized Set<EthPeer> excluded(final List<BlockHeader> batch) {
       final Set<EthPeer> excluded = new HashSet<>();
       batch.forEach(header -> excluded.addAll(lacking.getOrDefault(header.getHash(), Set.of())));
-      requests.add(
-          sender
-              .submit(new BalRequest(batch, responseBytes), excluded)
-              .handle(
-                  (response, error) -> {
-                    synchronized (received) {
-                      if (error == null) {
-                        received.putAll(response.value());
-                        batch.stream()
-                            .filter(header -> !response.value().containsKey(header.getHash()))
-                            .forEach(
-                                header ->
-                                    lacking
-                                        .computeIfAbsent(header.getHash(), h -> new HashSet<>())
-                                        .add(response.peer()));
-                      } else {
-                        RequestFailedException.from(error)
-                            .flatMap(RequestFailedException::peer)
-                            .ifPresent(
-                                peer ->
-                                    batch.forEach(
-                                        header ->
-                                            lacking
-                                                .computeIfAbsent(
-                                                    header.getHash(), h -> new HashSet<>())
-                                                .add(peer)));
-                      }
-                    }
-                    return null;
-                  }));
+      return excluded;
     }
-    CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new))
-        .whenComplete(
-            (unused, error) -> {
-              final boolean progressed;
-              synchronized (received) {
-                progressed =
-                    missing.stream().anyMatch(header -> received.containsKey(header.getHash()));
-              }
-              if (progressed) {
-                round(headers, received, lacking, round + 1, rounds, result);
-              } else {
-                // nobody had them yet, peers that lacked them may have caught up since
-                LOG.debug("No block access list received in round {}, retrying", round);
-                if (round % 5 == 4) {
-                  lacking.clear();
-                }
-                try {
-                  timer.schedule(
-                      () -> round(headers, received, lacking, round + 1, rounds, result),
-                      Duration.ofSeconds(Math.min(10, 1 + round)).toMillis(),
-                      TimeUnit.MILLISECONDS);
-                } catch (final RuntimeException e) {
-                  result.completeExceptionally(e);
-                }
-              }
-            });
+
+    private synchronized List<BlockHeader> missing() {
+      return headers.stream().filter(header -> !received.containsKey(header.getHash())).toList();
+    }
+
+    private synchronized boolean receivedAny(final List<BlockHeader> missing) {
+      return missing.stream().anyMatch(header -> received.containsKey(header.getHash()));
+    }
+
+    private synchronized List<Bytes> lists() {
+      return headers.stream().map(header -> received.get(header.getHash())).toList();
+    }
+
+    private synchronized void forgetLacking() {
+      lacking.clear();
+    }
   }
 
   /** Requests block access lists by block hash; each returned list is checked. */
