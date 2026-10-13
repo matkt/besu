@@ -106,7 +106,8 @@ public interface MutableBlockchain extends Blockchain {
 
   /**
    * Stores the bodies and receipts of blocks whose headers are stored, in any order and from any
-   * thread, without updating the chain state; see {@link #unsafeSetSyncChainHead}.
+   * thread, without updating the chain state. They skip the write-ahead log until {@link
+   * #unsafeSetSyncChainHead} flushes them.
    *
    * @param blocksAndReceipts The blocks and receipts to store
    * @param indexTransactions Boolean whether to index transactions

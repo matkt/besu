@@ -725,11 +725,10 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     return batchTransaction(false);
   }
 
-  // RocksDB refuses writes without log while it recycles log files: they keep their log then
   @Override
   public SegmentedKeyValueStorageTransaction startUnloggedBatchTransaction()
       throws StorageException {
-    return batchTransaction(options.recycleLogFileNum() == 0);
+    return batchTransaction(true);
   }
 
   private SegmentedKeyValueStorageTransaction batchTransaction(final boolean unlogged) {
@@ -747,8 +746,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   @Override
   public void flush() throws StorageException {
     throwIfClosed();
-    try (final FlushOptions options = new FlushOptions().setWaitForFlush(true)) {
-      getDB().flush(options, columnHandles);
+    try (final FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
+      getDB().flush(flushOptions, columnHandles);
     } catch (final RocksDBException e) {
       throw new StorageException(e);
     }

@@ -26,17 +26,12 @@ import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A transaction committed as one write batch. Unlike a {@link RocksDBTransaction}, its writes are
  * not checked for conflicts with concurrent ones, so it only suits writers that never conflict.
  */
 public class RocksDBWriteBatchTransaction implements SegmentedKeyValueStorageTransaction {
-  private static final Logger LOG = LoggerFactory.getLogger(RocksDBWriteBatchTransaction.class);
-  private static final int DISK_FULL_EXIT_CODE = 1;
-
   private final Function<SegmentIdentifier, ColumnFamilyHandle> columnFamilyMapper;
   private final RocksDB db;
   private final WriteBatch batch = new WriteBatch();
@@ -67,7 +62,7 @@ public class RocksDBWriteBatchTransaction implements SegmentedKeyValueStorageTra
     try (final OperationTimer.TimingContext ignored = metrics.getWriteLatency().startTimer()) {
       batch.put(columnFamilyMapper.apply(segmentId), key, value);
     } catch (final RocksDBException e) {
-      throw failure(e);
+      throw RocksDBTransaction.storageException(e);
     }
   }
 
@@ -76,7 +71,7 @@ public class RocksDBWriteBatchTransaction implements SegmentedKeyValueStorageTra
     try (final OperationTimer.TimingContext ignored = metrics.getRemoveLatency().startTimer()) {
       batch.delete(columnFamilyMapper.apply(segmentId), key);
     } catch (final RocksDBException e) {
-      throw failure(e);
+      throw RocksDBTransaction.storageException(e);
     }
   }
 
@@ -85,7 +80,7 @@ public class RocksDBWriteBatchTransaction implements SegmentedKeyValueStorageTra
     try (final OperationTimer.TimingContext ignored = metrics.getCommitLatency().startTimer()) {
       db.write(options, batch);
     } catch (final RocksDBException e) {
-      throw failure(e);
+      throw RocksDBTransaction.storageException(e);
     } finally {
       close();
     }
@@ -93,25 +88,13 @@ public class RocksDBWriteBatchTransaction implements SegmentedKeyValueStorageTra
 
   @Override
   public void rollback() {
-    try {
-      batch.clear();
-      metrics.getRollbackCount().inc();
-    } finally {
-      close();
-    }
+    metrics.getRollbackCount().inc();
+    close();
   }
 
   @Override
   public void close() {
     batch.close();
     options.close();
-  }
-
-  private static StorageException failure(final RocksDBException e) {
-    if (RocksDBTransaction.isDiskFull(e)) {
-      LOG.error("Disk full detected: {}", e.getMessage(), e);
-      System.exit(DISK_FULL_EXIT_CODE);
-    }
-    return new StorageException(e);
   }
 }

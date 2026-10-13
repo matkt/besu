@@ -63,8 +63,8 @@ public interface BlockchainStorage {
   }
 
   /**
-   * Returns a batch updater whose writes skip the write-ahead log, lost on a crash before the next
-   * {@link #flush()}.
+   * Returns a batch updater whose block data skips the write-ahead log, lost on a crash before the
+   * next {@link #flush()}. The variables, such as the chain head, keep the log.
    */
   default Updater unloggedUpdater() {
     return batchUpdater();
