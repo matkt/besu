@@ -92,7 +92,8 @@ class HeaderBackfillTest {
     final HeaderBackfill backfill = backfill(otherFloor, chain.header(20));
 
     assertThatThrownBy(() -> backfill.run(executor).join())
-        .hasMessageContaining("the header chain does not lead to block 5");
+        .hasCauseInstanceOf(HeaderBackfill.WrongChainException.class)
+        .hasMessageContaining("does not lead to block 5");
   }
 
   @Test

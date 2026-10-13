@@ -15,15 +15,18 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
+import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
@@ -41,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -182,6 +186,30 @@ class Snap2SyncControllerTest {
         .accountLeaves()
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
     assertThat(controller.metrics().restarts()).isPositive();
+  }
+
+  @Test
+  void stopsWhenTheTrustedChainDoesNotLeadToTheLocalGenesis() {
+    final Random random = new Random(37);
+    final TestChain chain =
+        new TestChain(random, TestWorld.random(random, 200, 2, 100), network, 24, 6);
+    chain.extend(40);
+    // the node was set up for another network
+    final MutableBlockchain blockchain =
+        InMemoryKeyValueStorageProvider.createInMemoryBlockchain(
+            new BlockDataGenerator(5).genesisBlock());
+    controller =
+        controller(
+            chain,
+            blockchain,
+            SyncStorageFixture.create(Format.BONSAI),
+            new Snap2Marker(dataDirectory));
+
+    final CompletableFuture<SnapSyncProcessState> result = controller.start();
+
+    // it fails at once, instead of downloading the state of a chain it cannot link
+    assertThatThrownBy(() -> result.get(30, TimeUnit.SECONDS))
+        .hasCauseInstanceOf(HeaderBackfill.WrongChainException.class);
   }
 
   private static void awaitStored(final MutableBlockchain blockchain, final BlockHeader header) {

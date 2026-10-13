@@ -75,7 +75,8 @@ final class SyncAttempt {
   private final BlockHeader firstPivot;
   private final Resume resume;
   private final StateSync stateSync;
-  private final CompletableFuture<BlockHeader> restart = new CompletableFuture<>();
+  // fails when the attempt must end early, to start over or to stop the sync
+  private final CompletableFuture<BlockHeader> aborted = new CompletableFuture<>();
   private final CompletableFuture<Void> headersDone = new CompletableFuture<>();
   private BlockHeader floor;
   // the total difficulty stored with every header above a proof-of-stake floor
@@ -96,7 +97,7 @@ final class SyncAttempt {
     this.resume = resume;
   }
 
-  /** Starts the attempt; it completes with the final pivot, or fails to ask for a restart. */
+  /** Starts the attempt; it completes with the final pivot, or fails with a restart or an error. */
   CompletableFuture<BlockHeader> start() {
     floor = chainFloor();
     prepareChain();
@@ -140,10 +141,10 @@ final class SyncAttempt {
                   LOG.info("SNAP2 sync complete at block {}", finalPivot.getNumber());
                   return finalPivot;
                 });
-    // either the sync completes, or an unrecoverable reorg asks for a restart
+    // either the sync completes, or the attempt ends early
     final CompletableFuture<BlockHeader> outcome = new CompletableFuture<>();
     FutureUtils.propagateResult(main, outcome);
-    restart.whenComplete(
+    aborted.whenComplete(
         (unused, error) -> {
           if (error != null) {
             outcome.completeExceptionally(error);
@@ -264,6 +265,9 @@ final class SyncAttempt {
               }
               if (error == null) {
                 headersDone.complete(null);
+              } else if (Futures.unwrap(error)
+                  instanceof HeaderBackfill.WrongChainException wrong) {
+                aborted.completeExceptionally(wrong);
               } else {
                 LOG.warn(
                     "Header download failed, resuming: {}", Futures.unwrap(error).getMessage());
@@ -323,7 +327,8 @@ final class SyncAttempt {
 
   /** Moves the pivot if the head went far enough or peers stopped serving it. */
   void maybeMove() {
-    if (inactive() || finalizing || moving) {
+    // nothing to move before the state download starts at the first pivot
+    if (inactive() || finalizing || moving || stateSync.pivot() == null) {
       return;
     }
     final Optional<Hash> head = context.heads().headHash();
@@ -347,7 +352,7 @@ final class SyncAttempt {
             });
   }
 
-  // forced, it also checks the pivot is still canonical even if it does not need to move
+  // forced, it also checks the pivot is still canonical when the head is above it
   private CompletableFuture<Void> moveTowards(final BlockHeader head, final boolean force) {
     if (inactive()) {
       return abandoned();
@@ -450,7 +455,7 @@ final class SyncAttempt {
             error -> {
               if (Futures.unwrap(error) instanceof RestartException restartError) {
                 // the state cannot be recovered: start over
-                restart.completeExceptionally(restartError);
+                aborted.completeExceptionally(restartError);
               }
               return CompletableFuture.failedFuture(error);
             });

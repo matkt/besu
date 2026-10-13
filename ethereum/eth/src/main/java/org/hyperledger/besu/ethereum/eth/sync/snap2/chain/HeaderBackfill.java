@@ -123,12 +123,12 @@ public final class HeaderBackfill {
     return done.thenRun(
         () -> {
           if (!expected.equals(floor.getHash())) {
-            throw new IllegalStateException(
-                "the header chain does not lead to block "
+            throw new WrongChainException(
+                "the chain of the trusted head does not lead to block "
                     + floor.getNumber()
                     + " "
                     + floor.getHash()
-                    + ", peers follow another chain");
+                    + ", the consensus client follows another chain");
           }
           LOG.info("Block headers down to block {} stored", floor.getNumber() + 1);
         });
@@ -221,6 +221,13 @@ public final class HeaderBackfill {
         .thenCompose(header -> fetcher.chainDown(header, low, Priority.HEADERS))
         .join()
         .reversed();
+  }
+
+  /** The trusted headers lead to another block than the floor, which no retry changes. */
+  public static final class WrongChainException extends IllegalStateException {
+    WrongChainException(final String message) {
+      super(message);
+    }
   }
 
   /**
