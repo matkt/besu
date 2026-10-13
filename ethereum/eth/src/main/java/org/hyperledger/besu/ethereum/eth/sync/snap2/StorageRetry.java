@@ -12,7 +12,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
+package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
@@ -20,10 +20,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Retries idempotent writes. Under heavy concurrent writes, RocksDB optimistic transactions may
- * fail to commit because the memtable no longer holds what is needed to check them for conflicts.
+ * Retries idempotent writes in a transaction. Under heavy concurrent writes, RocksDB optimistic
+ * transactions may fail to commit because the memtable no longer holds what is needed to check them
+ * for conflicts; write batches are never checked.
  */
-public final class StorageRetry {
+final class StorageRetry {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageRetry.class);
   private static final int ATTEMPTS = 6;
@@ -31,7 +32,7 @@ public final class StorageRetry {
   private StorageRetry() {}
 
   /** Runs a write, which must start its own transaction, until it commits. */
-  public static void run(final Runnable write) {
+  static void run(final Runnable write) {
     for (int attempt = 1; ; attempt++) {
       try {
         write.run();

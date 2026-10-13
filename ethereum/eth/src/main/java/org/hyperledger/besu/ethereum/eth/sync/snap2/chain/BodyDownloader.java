@@ -27,7 +27,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.StorageRetry;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
 
@@ -219,8 +218,7 @@ public final class BodyDownloader {
         .whenComplete((blocks, error) -> downloaded())
         .thenApplyAsync(
             blocks -> {
-              StorageRetry.run(
-                  () -> blockchain.unsafeStoreSyncBodiesAndReceipts(blocks, indexTransactions));
+              blockchain.unsafeStoreSyncBodiesAndReceipts(blocks, indexTransactions);
               return blocks;
             },
             writer)

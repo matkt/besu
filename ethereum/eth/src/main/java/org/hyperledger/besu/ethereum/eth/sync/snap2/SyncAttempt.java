@@ -26,7 +26,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.ReorgRecovery;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.StorageRetry;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
@@ -225,7 +224,7 @@ final class SyncAttempt {
   }
 
   private void storeHeaders(final List<BlockHeader> headers) {
-    StorageRetry.run(() -> writeHeaders(headers));
+    writeHeaders(headers);
     indexedUpTo = Math.max(indexedUpTo, headers.getLast().getNumber());
   }
 
@@ -714,6 +713,6 @@ final class SyncAttempt {
     for (int i = 0; i < headers.size(); i++) {
       accessLists.put(headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));
     }
-    StorageRetry.run(() -> context.blockchain().unsafeStoreSyncBlockAccessLists(accessLists));
+    context.blockchain().unsafeStoreSyncBlockAccessLists(accessLists);
   }
 }
