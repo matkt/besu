@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -199,14 +201,10 @@ class RangeProofTest {
   }
 
   private static Bytes32 keyBefore(final Bytes32 key) {
-    return Bytes32.leftPad(
-        Bytes.wrap(key.toUnsignedBigInteger().subtract(java.math.BigInteger.ONE).toByteArray())
-            .trimLeadingZeros());
+    return UInt256.fromBytes(key).subtract(1).toBytes();
   }
 
   private static Bytes32 keyAfter(final Bytes32 key) {
-    return Bytes32.leftPad(
-        Bytes.wrap(key.toUnsignedBigInteger().add(java.math.BigInteger.ONE).toByteArray())
-            .trimLeadingZeros());
+    return Keys.next(key).orElseThrow();
   }
 }
