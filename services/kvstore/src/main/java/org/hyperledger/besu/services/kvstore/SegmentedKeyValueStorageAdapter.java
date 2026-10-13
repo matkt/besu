@@ -139,7 +139,7 @@ public class SegmentedKeyValueStorageAdapter implements KeyValueStorage {
 
   @Override
   public void flush() throws StorageException {
-    storage.flush();
+    storage.flush(segmentIdentifier);
   }
 
   @Override

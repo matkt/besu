@@ -54,10 +54,10 @@ public class SegmentedKeyValueStorageAdapterTest {
   }
 
   @Test
-  public void flushesTheWholeStorage() {
+  public void flushesItsSegmentOnly() {
     adapter.flush();
 
-    assertThat(segmented.calls).containsExactly("flush");
+    assertThat(segmented.calls).containsExactly("flush FOO");
   }
 
   // records the transactions the adapter starts
@@ -79,6 +79,11 @@ public class SegmentedKeyValueStorageAdapterTest {
     @Override
     public void flush() {
       calls.add("flush");
+    }
+
+    @Override
+    public void flush(final SegmentIdentifier segment) {
+      calls.add("flush " + segment.getName());
     }
   }
 

@@ -111,6 +111,21 @@ public class KeyValueStoragePrefixedKeyBlockchainStorageTest {
   }
 
   @Test
+  public void keepsTheBlockTheBodiesAreStoredFromInTheVariables() {
+    final var storage =
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            kvBlockchain, variablesStorage, blockHeaderFunctions, false);
+    assertThat(storage.getBodiesFrom()).isEmpty();
+
+    final Updater updater = storage.updater();
+    updater.setBodiesFrom(1_234_567L);
+    updater.commit();
+
+    assertThat(storage.getBodiesFrom()).contains(1_234_567L);
+    assertThat(variablesStorage.getBodiesFrom()).contains(1_234_567L);
+  }
+
+  @Test
   public void migrationToVariablesStorage() {
     populateBlockchainStorage(kvBlockchain, variableValues);
 

@@ -165,6 +165,17 @@ public interface SegmentedKeyValueStorage extends Closeable {
   default void flush() throws StorageException {}
 
   /**
+   * Persists the writes of one segment still held in memory, including those that skipped the
+   * write-ahead log, leaving the memory of the other segments alone.
+   *
+   * @param segment the segment to persist
+   * @throws StorageException the storage exception
+   */
+  default void flush(final SegmentIdentifier segment) throws StorageException {
+    flush();
+  }
+
+  /**
    * Starts adding entries to a segment in increasing key order, written to a file then added to the
    * segment at once, without going through the memtable and its compactions. Storage that cannot
    * add files falls back to a batch transaction.

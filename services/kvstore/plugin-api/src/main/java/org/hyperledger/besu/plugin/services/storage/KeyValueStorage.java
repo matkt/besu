@@ -162,8 +162,8 @@ public interface KeyValueStorage extends Closeable {
   }
 
   /**
-   * Persists the writes still held in memory by the whole database behind this storage, including
-   * those that skipped the write-ahead log.
+   * Persists the writes still held in memory by this storage, including those that skipped the
+   * write-ahead log.
    *
    * @throws StorageException problem encountered when flushing.
    */

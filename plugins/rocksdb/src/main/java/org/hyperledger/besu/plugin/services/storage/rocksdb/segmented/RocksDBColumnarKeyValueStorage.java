@@ -780,6 +780,17 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     }
   }
 
+  // writes the memtable of one segment to disk, leaving the others to fill up as usual
+  @Override
+  public void flush(final SegmentIdentifier segment) throws StorageException {
+    throwIfClosed();
+    try (final FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
+      getDB().flush(flushOptions, safeColumnHandle(segment));
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
   void throwIfClosed() {
     if (closed.get()) {
       LOG.error("Attempting to use a closed RocksDbKeyValueStorage");

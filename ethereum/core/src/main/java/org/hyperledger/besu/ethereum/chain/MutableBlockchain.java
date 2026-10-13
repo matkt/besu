@@ -129,6 +129,14 @@ public interface MutableBlockchain extends Blockchain {
   void unsafeSetSyncChainHead(BlockHeader from, BlockHeader to);
 
   /**
+   * Records that every block from {@code blockNumber} up to the chain head has its body and
+   * receipts stored, once the ones that skipped the write-ahead log are persisted.
+   *
+   * @param blockNumber the lowest block whose body and receipts are stored
+   */
+  void unsafeSetBodiesFrom(long blockNumber);
+
+  /**
    * Stores the access lists of blocks whose headers are stored, without updating the chain state.
    * They skip the write-ahead log until {@link #unsafeSetSyncChainHead} flushes them.
    *

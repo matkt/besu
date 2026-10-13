@@ -407,6 +407,11 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
+  public Optional<Long> getBodiesFrom() {
+    return blockchainStorage.getBodiesFrom();
+  }
+
+  @Override
   public Hash getChainHeadHash() {
     return chainHeader.getHash();
   }
@@ -809,6 +814,15 @@ public class DefaultBlockchain implements MutableBlockchain {
     // the synced blocks skipped the write-ahead log: on disk before the head points at them
     blockchainStorage.flush();
     unsafeSetChainHead(to, total);
+  }
+
+  @Override
+  public void unsafeSetBodiesFrom(final long blockNumber) {
+    // the bodies skipped the write-ahead log: on disk before the record covers them
+    blockchainStorage.flush();
+    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    updater.setBodiesFrom(blockNumber);
+    updater.commit();
   }
 
   // reads every header above from, checking its parent link, and writes its total difficulty

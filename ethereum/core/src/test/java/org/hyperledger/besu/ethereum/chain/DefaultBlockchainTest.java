@@ -18,7 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -70,6 +72,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 public class DefaultBlockchainTest {
 
@@ -402,19 +405,34 @@ public class DefaultBlockchainTest {
         .contains(chain.floorDifficulty);
   }
 
+  @Test
+  public void recordsTheBlockTheBodiesAreStoredFromOnceTheyAreOnDisk() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    final KeyValueStorage chainKv = chain.chainKv;
+    chain.blockchain.storeBlockHeaders(chain.headers(), chain.floorDifficulty);
+    chain.storeBodies();
+    assertThat(chain.blockchain.getBodiesFrom()).isEmpty();
+
+    chain.blockchain.unsafeSetBodiesFrom(2);
+
+    final InOrder order = inOrder(chainKv);
+    order.verify(chainKv).flush();
+    order.verify(chainKv).startTransaction();
+    assertThat(chain.blockchain.getBodiesFrom()).contains(2L);
+  }
+
   // a checkpoint at the first proof-of-stake block, then blocks of difficulty zero
   private final class ProofOfStakeChain {
     private final BlockDataGenerator gen = new BlockDataGenerator();
     private final Difficulty floorDifficulty = Difficulty.of(17);
+    private final KeyValueStorage chainKv = spy(new InMemoryKeyValueStorage());
     private final DefaultBlockchain blockchain;
     private final BlockHeader floor;
     private final List<Block> blocks = new ArrayList<>();
 
     private ProofOfStakeChain() {
       final Block genesis = gen.genesisBlock();
-      blockchain =
-          createMutableBlockchain(
-              new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesis);
+      blockchain = createMutableBlockchain(chainKv, new InMemoryKeyValueStorage(), genesis);
       Block parent =
           gen.block(
               new BlockDataGenerator.BlockOptions()
