@@ -75,6 +75,7 @@ public class SnapSyncConfiguration {
   public static final Boolean DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED = Boolean.TRUE;
 
   public static final BackfillMode DEFAULT_SNAP2_BACKFILL_MODE = BackfillMode.MEDIUM;
+  public static final Boolean DEFAULT_SNAP2_SORTED_INGEST_ENABLED = Boolean.FALSE;
 
   public static SnapSyncConfiguration getDefault() {
     return ImmutableSnapSyncConfiguration.builder().build();
@@ -138,5 +139,10 @@ public class SnapSyncConfiguration {
   @Value.Default
   public BackfillMode getSnap2BackfillMode() {
     return DEFAULT_SNAP2_BACKFILL_MODE;
+  }
+
+  @Value.Default
+  public Boolean isSnap2SortedIngestEnabled() {
+    return DEFAULT_SNAP2_SORTED_INGEST_ENABLED;
   }
 }
