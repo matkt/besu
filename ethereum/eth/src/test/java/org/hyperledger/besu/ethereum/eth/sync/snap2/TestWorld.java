@@ -76,7 +76,8 @@ public final class TestWorld {
       final Account account = new Account();
       account.nonce = random.nextInt(100);
       account.balance = Wei.of(1 + random.nextInt(1_000_000));
-      if (random.nextInt(3) == 0) {
+      // the first accounts get the large storages
+      if (i < largeStorages || random.nextInt(3) == 0) {
         account.code = randomBytes(random, 1 + random.nextInt(300));
         final int slots = i < largeStorages ? largeSize : random.nextInt(8);
         for (int s = 0; s < slots; s++) {
@@ -219,17 +220,10 @@ public final class TestWorld {
     return trie.getRootHash();
   }
 
-  public int size() {
-    return accounts.size();
-  }
-
   private static NavigableMap<Bytes32, Bytes> storageLeaves(final Account account) {
     final TreeMap<Bytes32, Bytes> out = new TreeMap<>();
     account.storage.forEach(
-        (key, value) ->
-            out.put(
-                Bytes32.wrap(new StorageSlotKey(key).getSlotHash().getBytes()),
-                RLP.encodeOne(value.trimLeadingZeros())));
+        (key, value) -> out.put(slotHash(key), RLP.encodeOne(value.trimLeadingZeros())));
     return out;
   }
 
@@ -252,6 +246,10 @@ public final class TestWorld {
 
   public static Bytes32 hash(final Address address) {
     return Bytes32.wrap(address.addressHash().getBytes());
+  }
+
+  public static Bytes32 slotHash(final UInt256 key) {
+    return Bytes32.wrap(new StorageSlotKey(key).getSlotHash().getBytes());
   }
 
   private static Address randomAddress(final Random random) {

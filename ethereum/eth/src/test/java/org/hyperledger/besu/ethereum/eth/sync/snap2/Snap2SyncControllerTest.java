@@ -60,6 +60,7 @@ class Snap2SyncControllerTest {
       controller.stop();
     }
     network.stop();
+    assertThat(network.unagreedRequests()).isEmpty();
   }
 
   @ParameterizedTest
@@ -205,7 +206,6 @@ class Snap2SyncControllerTest {
             .storageBatchSize(16)
             .maxStorageChunks(8)
             .codeBatchSize(8)
-            .requestTimeout(Duration.ofSeconds(5))
             .workerThreads(2)
             .trieBuildThreads(2)
             .pollInterval(Duration.ofMillis(100))

@@ -64,7 +64,6 @@ class StateSyncTest {
         .storageBatchSize(8)
         .maxStorageChunks(8)
         .codeBatchSize(4)
-        .requestTimeout(Duration.ofSeconds(5))
         .workerThreads(2)
         .trieBuildThreads(2)
         .build();

@@ -16,8 +16,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork.peer;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -31,13 +30,11 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.TestChain;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
-import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
-import java.util.Set;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.AfterEach;
@@ -62,6 +59,7 @@ class BalFetcherTest {
   void tearDown() {
     fetcher.stop();
     network.stop();
+    assertThat(network.unagreedRequests()).isEmpty();
   }
 
   @Test
@@ -147,11 +145,5 @@ class BalFetcherTest {
     for (int i = 0; i < headers.size(); i++) {
       assertThat(Optional.of(Hash.hash(lists.get(i)))).isEqualTo(headers.get(i).getBalHash());
     }
-  }
-
-  private static EthPeer peer(final Capability snap, final Capability eth) {
-    final EthPeer peer = mock(EthPeer.class);
-    when(peer.getAgreedCapabilities()).thenReturn(Set.of(snap, eth));
-    return peer;
   }
 }

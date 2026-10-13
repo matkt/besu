@@ -18,6 +18,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.eth.EthProtocol;
 import org.hyperledger.besu.ethereum.eth.EthProtocolVersion;
 import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.ChainState;
@@ -54,6 +55,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -81,6 +83,7 @@ public final class FakeSnapNetwork implements RequestSender {
           peer(SnapProtocol.SNAP2, EthProtocolVersion.V68.getCapability()));
   private final AtomicInteger nextPeer = new AtomicInteger();
   private final AtomicLong requests = new AtomicLong();
+  private final List<String> unagreedRequests = new CopyOnWriteArrayList<>();
   private final Map<String, Function<MessageData, MessageData>> handlers =
       new ConcurrentHashMap<>();
   private final Map<Hash, Bytes> blockAccessLists = new ConcurrentHashMap<>();
@@ -155,6 +158,11 @@ public final class FakeSnapNetwork implements RequestSender {
     return peers;
   }
 
+  /** Returns the requests sent over a protocol version their peer did not agree. */
+  public List<String> unagreedRequests() {
+    return unagreedRequests;
+  }
+
   @Override
   public <T> CompletableFuture<PeerResponse<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
@@ -174,7 +182,11 @@ public final class FakeSnapNetwork implements RequestSender {
             }
           }
           final Protocol protocol = request.protocolFor(peer);
-          final MessageData raw = response(peer, protocol, request.message(peer));
+          final MessageData message = request.message(peer);
+          if (!agreed(peer, protocol, message)) {
+            unagreedRequests.add(request.name() + " over " + protocol);
+          }
+          final MessageData raw = response(peer, protocol, message);
           // eth responses reach requests already unwrapped, snap ones keep their request id
           final MessageData response =
               protocol == Protocol.SNAP ? raw.wrapMessageData(BigInteger.ONE) : raw;
@@ -271,6 +283,19 @@ public final class FakeSnapNetwork implements RequestSender {
     return null;
   }
 
+  // block access lists need snap/2 or eth/71, the rest any snap or eth version
+  private static boolean agreed(
+      final EthPeer peer, final Protocol protocol, final MessageData message) {
+    final Set<Capability> capabilities = peer.getAgreedCapabilities();
+    if (protocol == Protocol.SNAP) {
+      return message.getCode() == SnapV2.GET_BLOCK_ACCESS_LISTS
+          ? capabilities.contains(SnapProtocol.SNAP2)
+          : SnapProtocol.isAgreed(capabilities);
+    }
+    return message.getCode() != EthProtocolMessages.GET_BLOCK_ACCESS_LISTS
+        || capabilities.stream().anyMatch(EthProtocol::isEth71Compatible);
+  }
+
   private static boolean isStateRequest(final MessageData message) {
     return message.getCode() == SnapV2.GET_ACCOUNT_RANGE
         || message.getCode() == SnapV2.GET_STORAGE_RANGE;
@@ -286,7 +311,8 @@ public final class FakeSnapNetwork implements RequestSender {
         : StorageRangeMessage.create(new kotlin.collections.ArrayDeque<>(), List.of());
   }
 
-  private static EthPeer peer(final Capability snap, final Capability eth) {
+  /** A mock peer that agreed the given snap and eth versions. */
+  public static EthPeer peer(final Capability snap, final Capability eth) {
     final EthPeer peer = mock(EthPeer.class);
     when(peer.getAgreedCapabilities()).thenReturn(Set.of(snap, eth));
     // header tasks report the heights they see to the peer

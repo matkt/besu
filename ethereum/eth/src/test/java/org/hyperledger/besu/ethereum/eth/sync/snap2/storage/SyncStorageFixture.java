@@ -185,17 +185,17 @@ public final class SyncStorageFixture {
     return world;
   }
 
-  public static Bytes32 randomKey(final Random random) {
+  private static Bytes32 randomKey(final Random random) {
     return Bytes32.wrap(randomBytes(random, 32));
   }
 
-  public static Bytes randomBytes(final Random random, final int size) {
+  private static Bytes randomBytes(final Random random, final int size) {
     final byte[] bytes = new byte[size];
     random.nextBytes(bytes);
     return Bytes.wrap(bytes);
   }
 
-  public static Bytes encodeSlot(final UInt256 value) {
+  private static Bytes encodeSlot(final UInt256 value) {
     return RLP.encodeOne(value.trimLeadingZeros());
   }
 }
