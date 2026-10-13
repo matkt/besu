@@ -20,7 +20,6 @@ import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackfillMode;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
-import org.hyperledger.besu.util.number.PositiveNumber;
 
 import java.net.URI;
 import java.util.Arrays;
@@ -92,7 +91,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       "--Xsnapsync-synchronizer-trienode-count-per-request";
   private static final String SNAP_TRANSACTION_INDEXING_ENABLED_FLAG =
       "--snapsync-synchronizer-transaction-indexing-enabled";
-  private static final String SNAP2_ACCOUNT_RANGES_FLAG = "--Xsnap2-account-ranges";
   private static final String SNAP2_BACKFILL_MODE_FLAG = "--Xsnap2-backfill-mode";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
@@ -415,15 +413,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       SnapSyncConfiguration.DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED;
 
   @CommandLine.Option(
-      names = {SNAP2_ACCOUNT_RANGES_FLAG},
-      hidden = true,
-      paramLabel = "<INTEGER>",
-      description =
-          "Ranges the SNAP2 sync splits the account key space into, downloaded lowest first (default: ${DEFAULT-VALUE})")
-  private PositiveNumber snap2AccountRanges =
-      PositiveNumber.fromInt(SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES);
-
-  @CommandLine.Option(
       names = {SNAP2_BACKFILL_MODE_FLAG},
       hidden = true,
       paramLabel = "<MODE>",
@@ -562,8 +551,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         config.getSnapSyncConfiguration().getMaxConcurrentSnapRequestsGlobal();
     options.snapTransactionIndexingEnabled =
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
-    options.snap2AccountRanges =
-        PositiveNumber.fromInt(config.getSnapSyncConfiguration().getSnap2AccountRanges());
     options.snap2BackfillMode = config.getSnapSyncConfiguration().getSnap2BackfillMode();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
@@ -610,7 +597,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .maxConcurrentSnapRequestsPerPeer(snapsyncServerMaxConcurrentRequestsPerPeer)
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
-            .snap2AccountRanges(snap2AccountRanges.getValue())
             .snap2BackfillMode(snap2BackfillMode)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
@@ -689,8 +675,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapsyncServerMaxConcurrentRequests),
             SNAP_TRANSACTION_INDEXING_ENABLED_FLAG,
             OptionParser.format(snapTransactionIndexingEnabled),
-            SNAP2_ACCOUNT_RANGES_FLAG,
-            OptionParser.format(snap2AccountRanges.getValue()),
             SNAP2_BACKFILL_MODE_FLAG,
             snap2BackfillMode.name(),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,

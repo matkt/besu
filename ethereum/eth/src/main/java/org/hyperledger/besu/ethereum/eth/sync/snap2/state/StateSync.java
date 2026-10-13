@@ -139,9 +139,9 @@ public final class StateSync {
     this.tries = new StorageTries(storage, storageTrieThreads(config));
   }
 
-  // one thread, two on large machines: the download keeps the cores and the disk
+  // one thread per four cores, at most four: the download keeps the rest
   private static int storageTrieThreads(final Snap2Configuration config) {
-    return Math.max(1, Math.min(2, config.trieBuildThreads() / 8));
+    return Math.max(1, Math.min(4, config.trieBuildThreads() / 4));
   }
 
   /** Starts downloading the state of the given pivot. */

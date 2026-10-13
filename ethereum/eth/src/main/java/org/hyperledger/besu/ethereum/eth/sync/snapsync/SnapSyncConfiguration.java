@@ -74,8 +74,6 @@ public class SnapSyncConfiguration {
   public static final Boolean DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED = Boolean.FALSE;
   public static final Boolean DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED = Boolean.TRUE;
 
-  // SNAP2 downloads small account ranges lowest first, so that the state is written in key order
-  public static final int DEFAULT_SNAP2_ACCOUNT_RANGES = 65_536;
   public static final BackfillMode DEFAULT_SNAP2_BACKFILL_MODE = BackfillMode.MEDIUM;
 
   public static SnapSyncConfiguration getDefault() {
@@ -135,11 +133,6 @@ public class SnapSyncConfiguration {
   @Value.Default
   public Boolean isSnapSyncTransactionIndexingEnabled() {
     return DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED;
-  }
-
-  @Value.Default
-  public int getSnap2AccountRanges() {
-    return DEFAULT_SNAP2_ACCOUNT_RANGES;
   }
 
   @Value.Default

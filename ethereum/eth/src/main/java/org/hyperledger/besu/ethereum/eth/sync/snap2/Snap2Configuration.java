@@ -14,8 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
-import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
-
 import java.time.Duration;
 
 /**
@@ -71,7 +69,7 @@ public record Snap2Configuration(
     return new Snap2Configuration(
         64,
         32,
-        SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES,
+        65_536,
         512 * 1024,
         2 * 1024 * 1024,
         32,
