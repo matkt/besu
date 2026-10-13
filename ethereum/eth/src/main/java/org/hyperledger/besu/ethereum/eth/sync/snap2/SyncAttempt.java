@@ -692,7 +692,7 @@ final class SyncAttempt {
     if (blockchain instanceof DefaultBlockchain defaultBlockchain) {
       StorageRetry.run(
           () -> {
-            final var updater = defaultBlockchain.getBlockchainStorage().updater();
+            final var updater = defaultBlockchain.getBlockchainStorage().batchUpdater();
             for (int i = 0; i < headers.size(); i++) {
               updater.putSyncBlockAccessList(
                   headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));

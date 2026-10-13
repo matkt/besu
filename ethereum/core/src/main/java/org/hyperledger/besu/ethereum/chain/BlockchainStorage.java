@@ -57,6 +57,11 @@ public interface BlockchainStorage {
 
   Updater updater();
 
+  /** Returns an updater committed as one write batch, for writes that never conflict. */
+  default Updater batchUpdater() {
+    return updater();
+  }
+
   interface Updater {
 
     void putBlockHeader(Hash blockHash, BlockHeader blockHeader);

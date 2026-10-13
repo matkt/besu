@@ -193,10 +193,11 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     bonsai.clearCrossBlockCache();
   }
 
+  // the sync is the only writer, so its writes skip the conflict checks of a transaction
   private BonsaiWorldStateKeyValueStorage.Updater newUpdater() {
     return new BonsaiWorldStateKeyValueStorage.Updater(
-        flat.startTransaction(),
-        bonsai.getTrieLogStorage().startTransaction(),
+        flat.startBatchTransaction(),
+        bonsai.getTrieLogStorage().startBatchTransaction(),
         bonsai.getFlatDbStrategy(),
         flat,
         bonsai.getTrieNodeStrategy());

@@ -196,6 +196,12 @@ public class KeyValueStoragePrefixedKeyBlockchainStorage implements BlockchainSt
         blockchainStorage.startTransaction(), variablesStorage.updater(), receiptCompaction);
   }
 
+  @Override
+  public Updater batchUpdater() {
+    return new Updater(
+        blockchainStorage.startBatchTransaction(), variablesStorage.updater(), receiptCompaction);
+  }
+
   private List<TransactionReceipt> rlpDecodeTransactionReceipts(final Bytes bytes) {
     return RLP.input(bytes).readList(in -> TransactionReceiptDecoder.readFrom(in, true));
   }

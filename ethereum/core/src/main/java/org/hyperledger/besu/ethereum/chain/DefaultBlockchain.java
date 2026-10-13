@@ -602,7 +602,7 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @Override
   public void storeBlockHeaders(final List<BlockHeader> blockHeaders) {
-    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     blockHeaders.forEach(
         header -> {
           final Hash hash = header.getHash();
@@ -765,7 +765,7 @@ public class DefaultBlockchain implements MutableBlockchain {
                             .toList())
                 .toList()
             : List.of();
-    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     for (int i = 0; i < blocksAndReceipts.size(); i++) {
       final SyncBlockWithReceipts blockAndReceipts = blocksAndReceipts.get(i);
       final Hash blockHash = blockAndReceipts.getHeader().getHash();
@@ -786,7 +786,7 @@ public class DefaultBlockchain implements MutableBlockchain {
             .orElseThrow(
                 () ->
                     new IllegalStateException("no total difficulty for block " + from.getNumber()));
-    BlockchainStorage.Updater updater = blockchainStorage.updater();
+    BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     Hash parent = from.getHash();
     for (long number = from.getNumber() + 1; number <= to.getNumber(); number++) {
       final long n = number;
@@ -803,7 +803,7 @@ public class DefaultBlockchain implements MutableBlockchain {
       parent = header.getHash();
       if (number % 10_000 == 0) {
         updater.commit();
-        updater = blockchainStorage.updater();
+        updater = blockchainStorage.batchUpdater();
       }
     }
     if (!parent.equals(to.getHash())) {
