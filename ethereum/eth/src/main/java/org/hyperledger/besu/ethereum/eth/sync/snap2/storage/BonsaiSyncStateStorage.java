@@ -186,6 +186,11 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
   }
 
   @Override
+  public void flush() {
+    flat.flush();
+  }
+
+  @Override
   public void completeSync() {
     if (bonsai.getFlatDbMode() != FlatDbMode.FULL) {
       bonsai.upgradeToFullFlatDbMode();
@@ -193,11 +198,11 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     bonsai.clearCrossBlockCache();
   }
 
-  // the sync is the only writer, so its writes skip the conflict checks of a transaction
+  // the sync is the only writer, its writes skip the conflict checks and the write-ahead log
   private BonsaiWorldStateKeyValueStorage.Updater newUpdater() {
     return new BonsaiWorldStateKeyValueStorage.Updater(
-        flat.startBatchTransaction(),
-        bonsai.getTrieLogStorage().startBatchTransaction(),
+        flat.startUnloggedBatchTransaction(),
+        bonsai.getTrieLogStorage().startUnloggedBatchTransaction(),
         bonsai.getFlatDbStrategy(),
         flat,
         bonsai.getTrieNodeStrategy());

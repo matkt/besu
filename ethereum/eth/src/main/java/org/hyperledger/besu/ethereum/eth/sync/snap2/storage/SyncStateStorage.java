@@ -85,6 +85,9 @@ public interface SyncStateStorage {
   /** Releases what the sync no longer needs once the world state is complete. */
   void completeSync();
 
+  /** Persists the writes still in memory, which skip the write-ahead log. */
+  void flush();
+
   /** Batch of flat writes. */
   interface Batch {
     void putAccount(Bytes32 accountHash, Bytes account);

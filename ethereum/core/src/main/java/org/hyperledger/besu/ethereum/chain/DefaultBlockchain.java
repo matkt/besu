@@ -765,7 +765,7 @@ public class DefaultBlockchain implements MutableBlockchain {
                             .toList())
                 .toList()
             : List.of();
-    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
+    final BlockchainStorage.Updater updater = blockchainStorage.unloggedUpdater();
     for (int i = 0; i < blocksAndReceipts.size(); i++) {
       final SyncBlockWithReceipts blockAndReceipts = blocksAndReceipts.get(i);
       final Hash blockHash = blockAndReceipts.getHeader().getHash();
@@ -786,7 +786,7 @@ public class DefaultBlockchain implements MutableBlockchain {
             .orElseThrow(
                 () ->
                     new IllegalStateException("no total difficulty for block " + from.getNumber()));
-    BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
+    BlockchainStorage.Updater updater = blockchainStorage.unloggedUpdater();
     Hash parent = from.getHash();
     for (long number = from.getNumber() + 1; number <= to.getNumber(); number++) {
       final long n = number;
@@ -803,14 +803,18 @@ public class DefaultBlockchain implements MutableBlockchain {
       parent = header.getHash();
       if (number % 10_000 == 0) {
         updater.commit();
-        updater = blockchainStorage.batchUpdater();
+        updater = blockchainStorage.unloggedUpdater();
       }
     }
     if (!parent.equals(to.getHash())) {
       throw new IllegalStateException("block " + to.getNumber() + " is not canonical");
     }
-    updater.setChainHead(to.getHash());
     updater.commit();
+    // the synced blocks skipped the write-ahead log: on disk before the head points at them
+    blockchainStorage.flush();
+    final BlockchainStorage.Updater head = blockchainStorage.updater();
+    head.setChainHead(to.getHash());
+    head.commit();
     chainHeadTransactionCount =
         blockchainStorage
             .getBlockBody(to.getHash())

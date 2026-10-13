@@ -591,6 +591,8 @@ final class SyncAttempt {
     }
     storage.saveWorldState(pivot, built.rootNode());
     storage.completeSync();
+    // the state skipped the write-ahead log
+    storage.flush();
     LOG.info(
         "World state of block {} is complete: {} accounts, {} storage tries kept from the download, {} slots read for the others",
         pivot.getNumber(),
@@ -692,7 +694,7 @@ final class SyncAttempt {
     if (blockchain instanceof DefaultBlockchain defaultBlockchain) {
       StorageRetry.run(
           () -> {
-            final var updater = defaultBlockchain.getBlockchainStorage().batchUpdater();
+            final var updater = defaultBlockchain.getBlockchainStorage().unloggedUpdater();
             for (int i = 0; i < headers.size(); i++) {
               updater.putSyncBlockAccessList(
                   headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));

@@ -62,6 +62,17 @@ public interface BlockchainStorage {
     return updater();
   }
 
+  /**
+   * Returns a batch updater whose writes skip the write-ahead log, lost on a crash before the next
+   * {@link #flush()}.
+   */
+  default Updater unloggedUpdater() {
+    return batchUpdater();
+  }
+
+  /** Persists the writes still held in memory, including those that skipped the log. */
+  default void flush() {}
+
   interface Updater {
 
     void putBlockHeader(Hash blockHash, BlockHeader blockHeader);

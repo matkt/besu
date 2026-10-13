@@ -61,7 +61,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
 
   @Override
   public Batch batch() {
-    final SegmentedKeyValueStorageTransaction tx = flat.startBatchTransaction();
+    final SegmentedKeyValueStorageTransaction tx = flat.startUnloggedBatchTransaction();
     return new Batch() {
       private ForestWorldStateKeyValueStorage.Updater codeUpdater;
 
@@ -92,7 +92,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
       @Override
       public void putCode(final Bytes32 accountHash, final Bytes32 codeHash, final Bytes code) {
         if (codeUpdater == null) {
-          codeUpdater = forest.batchUpdater();
+          codeUpdater = forest.unloggedUpdater();
         }
         codeUpdater.putCode(codeHash, code);
       }
@@ -142,7 +142,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
 
       private ForestWorldStateKeyValueStorage.Updater updater() {
         if (updater == null) {
-          updater = forest.batchUpdater();
+          updater = forest.unloggedUpdater();
         }
         return updater;
       }
@@ -158,7 +158,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
 
   @Override
   public void saveWorldState(final BlockHeader header, final Bytes rootNode) {
-    final ForestWorldStateKeyValueStorage.Updater updater = forest.batchUpdater();
+    final ForestWorldStateKeyValueStorage.Updater updater = forest.unloggedUpdater();
     updater.saveWorldState(Bytes32.wrap(header.getStateRoot().getBytes()), rootNode);
     updater.commit();
   }
@@ -167,6 +167,12 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
   public void prepareForSync() {
     // nodes are keyed by hash, so the existing world state can stay
     clearStaging();
+  }
+
+  @Override
+  public void flush() {
+    flat.flush();
+    forest.flush();
   }
 
   @Override
