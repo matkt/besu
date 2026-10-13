@@ -70,8 +70,10 @@ public final class ReorgRecovery {
     final Plan plan =
         stateSync.exclusively(
             () -> {
-              final Plan computed = plan(orphaned, canonical, stateSync.coverage());
-              StateDiffApplier.apply(canonical, storage, stateSync.coverage());
+              final StateCoverage coverage = stateSync.coverage();
+              final Plan computed = plan(orphaned, canonical, coverage);
+              markStaleRoots(orphaned, coverage);
+              StateDiffApplier.apply(canonical, storage, coverage);
               stateSync.switchPivot(newPivot);
               return computed;
             });
@@ -81,29 +83,14 @@ public final class ReorgRecovery {
         plan.accounts().size(),
         plan.slots().values().stream().mapToInt(NavigableSet::size).sum(),
         newPivot.getNumber());
-    final Map<Bytes32, Optional<Bytes32>> storageRoots = new ConcurrentHashMap<>();
+    // the storage roots at the new pivot of the refetched accounts that still have storage
+    final Map<Bytes32, Bytes32> storageRoots = new ConcurrentHashMap<>();
     final List<CompletableFuture<Void>> accounts = new ArrayList<>();
     for (final Bytes32 account : plan.accounts()) {
       accounts.add(refetchAccount(pivot, account, storageRoots));
     }
     return CompletableFuture.allOf(accounts.toArray(CompletableFuture[]::new))
-        .thenCompose(
-            unused -> {
-              final List<CompletableFuture<Void>> slots = new ArrayList<>();
-              plan.slots()
-                  .forEach(
-                      (account, slotHashes) ->
-                          storageRoots
-                              .getOrDefault(account, Optional.empty())
-                              .ifPresent(
-                                  storageRoot ->
-                                      slotHashes.forEach(
-                                          slot ->
-                                              slots.add(
-                                                  refetchSlot(
-                                                      pivot, account, storageRoot, slot)))));
-              return CompletableFuture.allOf(slots.toArray(CompletableFuture[]::new));
-            });
+        .thenCompose(unused -> refetchSlots(pivot, plan, storageRoots));
   }
 
   static Plan plan(
@@ -128,10 +115,6 @@ public final class ReorgRecovery {
           orphanedSlots.add(slot);
         }
       }
-      if (task != null && !old.storage().isEmpty()) {
-        // its root was learned on the orphaned fork
-        task.markRootStale();
-      }
       if (fields || !orphanedSlots.isEmpty()) {
         accounts.add(hash);
       }
@@ -142,10 +125,18 @@ public final class ReorgRecovery {
     return new Plan(accounts, slots);
   }
 
+  // the storages being downloaded learned their root on the orphaned fork
+  static void markStaleRoots(final StateDiff orphaned, final StateCoverage coverage) {
+    for (final AccountChange old : orphaned.accounts().values()) {
+      final StorageTask task = coverage.storageTask(old.accountHash());
+      if (task != null && !old.storage().isEmpty()) {
+        task.markRootStale();
+      }
+    }
+  }
+
   private CompletableFuture<Void> refetchAccount(
-      final StateSync.Pivot pivot,
-      final Bytes32 hash,
-      final Map<Bytes32, Optional<Bytes32>> storageRoots) {
+      final StateSync.Pivot pivot, final Bytes32 hash, final Map<Bytes32, Bytes32> storageRoots) {
     final AccountRangeRequest request =
         new AccountRangeRequest(pivot, hash, hash, StateSync.SINGLE_ITEM_BYTES, "account_refetch");
     return sender
@@ -155,11 +146,25 @@ public final class ReorgRecovery {
                 write(
                     pivot,
                     batch ->
-                        storageRoots.put(
-                            hash,
-                            stateSync
-                                .writeRefetchedAccount(batch, hash, response.value())
-                                .map(Bytes32::copy))));
+                        stateSync
+                            .writeRefetchedAccount(batch, hash, response.value())
+                            .ifPresent(root -> storageRoots.put(hash, root.copy()))));
+  }
+
+  // the slots of an account gone or without storage at the new pivot are already removed
+  private CompletableFuture<Void> refetchSlots(
+      final StateSync.Pivot pivot, final Plan plan, final Map<Bytes32, Bytes32> storageRoots) {
+    final List<CompletableFuture<Void>> slots = new ArrayList<>();
+    plan.slots()
+        .forEach(
+            (account, slotHashes) -> {
+              final Bytes32 storageRoot = storageRoots.get(account);
+              if (storageRoot != null) {
+                slotHashes.forEach(
+                    slot -> slots.add(refetchSlot(pivot, account, storageRoot, slot)));
+              }
+            });
+    return CompletableFuture.allOf(slots.toArray(CompletableFuture[]::new));
   }
 
   private CompletableFuture<Void> refetchSlot(
@@ -193,19 +198,22 @@ public final class ReorgRecovery {
                     }
                     if (stateSync.coverage().storageTask(account) == null) {
                       // a storage trie built for the downloaded slots no longer matches
-                      storage
-                          .getAccount(account)
-                          .map(Accounts::decode)
-                          .ifPresent(
-                              value ->
-                                  batch.putAccount(
-                                      account,
-                                      Accounts.encode(
-                                          Accounts.withStorageRoot(
-                                              value, Accounts.UNKNOWN_STORAGE_ROOT))));
+                      forgetStorageRoot(batch, account);
                     }
                   });
             });
+  }
+
+  private void forgetStorageRoot(final SyncStateStorage.Batch batch, final Bytes32 account) {
+    storage
+        .getAccount(account)
+        .map(Accounts::decode)
+        .ifPresent(
+            value ->
+                batch.putAccount(
+                    account,
+                    Accounts.encode(
+                        Accounts.withStorageRoot(value, Accounts.UNKNOWN_STORAGE_ROOT))));
   }
 
   private void write(final StateSync.Pivot pivot, final Consumer<SyncStateStorage.Batch> writes) {

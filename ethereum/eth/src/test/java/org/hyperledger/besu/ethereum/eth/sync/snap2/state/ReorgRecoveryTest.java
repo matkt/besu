@@ -50,13 +50,12 @@ class ReorgRecoveryTest {
   void refetchesWhatOnlyTheOrphanedForkChanged() {
     final StateCoverage coverage = new StateCoverage();
     coverage.accounts().add(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
-    // the contract's storage is half downloaded
+    // the contract's storage is downloaded up to SLOT_BOTH, whose hash is between the others
     final StorageTask task = new StorageTask(hash(CONTRACT), Bytes32.ZERO);
-    final Bytes32 inside = slotHash(SLOT_ORPHANED);
-    task.cover(RangeManager.MIN_RANGE, inside);
+    task.cover(RangeManager.MIN_RANGE, slotHash(SLOT_BOTH));
     coverage.addStorageTask(task);
-    final Bytes32 outside = slotHash(SLOT_OUTSIDE);
-    final boolean outsideCovered = task.covers(outside);
+    assertThat(task.covers(slotHash(SLOT_ORPHANED))).isTrue();
+    assertThat(task.covers(slotHash(SLOT_OUTSIDE))).isFalse();
 
     final StateDiff orphaned = new StateDiff();
     orphaned.add(
@@ -90,14 +89,32 @@ class ReorgRecoveryTest {
     final ReorgRecovery.Plan plan = ReorgRecovery.plan(orphaned, canonical, coverage);
 
     assertThat(plan.accounts())
-        .containsExactlyInAnyOrder(hash(CHARLIE), hash(DAVE), hash(CONTRACT))
-        .doesNotContain(hash(ALICE), hash(GRACE), hash(BOB));
-    assertThat(plan.slots().get(hash(CONTRACT)))
-        .contains(inside)
-        .doesNotContain(slotHash(SLOT_BOTH));
-    assertThat(plan.slots().get(hash(CONTRACT)).contains(outside)).isEqualTo(outsideCovered);
-    // the storage root of the contract was learned on the orphaned fork
-    assertThat(task.isRootStale()).isTrue();
+        .containsExactlyInAnyOrder(hash(CHARLIE), hash(DAVE), hash(CONTRACT));
+    // the slot both forks wrote comes from the canonical lists, the one not downloaded yet from
+    // the download
+    assertThat(plan.slots()).containsOnlyKeys(hash(CONTRACT));
+    assertThat(plan.slots().get(hash(CONTRACT))).containsExactly(slotHash(SLOT_ORPHANED));
+  }
+
+  @Test
+  void marksTheStorageRootsLearnedOnTheOrphanedForkStale() {
+    final StateCoverage coverage = new StateCoverage();
+    coverage.accounts().add(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
+    final StorageTask written = new StorageTask(hash(CONTRACT), Bytes32.ZERO);
+    final StorageTask untouched = new StorageTask(hash(BOB), Bytes32.ZERO);
+    coverage.addStorageTask(written);
+    coverage.addStorageTask(untouched);
+    final StateDiff orphaned = new StateDiff();
+    orphaned.add(
+        new BlockAccessList(
+            List.of(
+                account(BOB, List.of(new BalanceChange(1, Wei.of(5))), List.of(), List.of()),
+                account(CONTRACT, List.of(), List.of(), List.of(slot(SLOT_ORPHANED, 2))))));
+
+    ReorgRecovery.markStaleRoots(orphaned, coverage);
+
+    assertThat(written.isRootStale()).isTrue();
+    assertThat(untouched.isRootStale()).isFalse();
   }
 
   @Test
