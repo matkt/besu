@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
@@ -154,9 +155,18 @@ public final class StateSync {
     return pivot;
   }
 
-  /** Returns what the flat state holds. */
-  public StateCoverage coverage() {
+  StateCoverage coverage() {
     return coverage;
+  }
+
+  /** Returns the share of the account key space downloaded, from 0 to 1. */
+  public double accountCoverage() {
+    return coverage.accounts().coverage();
+  }
+
+  /** Returns the number of accounts whose storage is still to download. */
+  public int pendingStorageCount() {
+    return coverage.pendingStorageCount();
   }
 
   /** Returns whether peers stopped serving the state of the pivot. */
@@ -165,7 +175,8 @@ public final class StateSync {
   }
 
   /** Returns whether every account, slot and bytecode of the pivot is persisted. */
-  public boolean isComplete() {
+  @VisibleForTesting
+  boolean isComplete() {
     return completion.isDone() && !completion.isCompletedExceptionally();
   }
 
@@ -197,7 +208,7 @@ public final class StateSync {
    *
    * @return false if the pivot moved and nothing was run
    */
-  public boolean withPivot(final int epoch, final Runnable write) {
+  boolean withPivot(final int epoch, final Runnable write) {
     return atPivot(
             epoch,
             () -> {
@@ -248,7 +259,7 @@ public final class StateSync {
   }
 
   /** Runs a write on the flat state exclusive with every download write. */
-  public <T> T exclusively(final Supplier<T> write) {
+  <T> T exclusively(final Supplier<T> write) {
     pivotLock.writeLock().lock();
     try {
       if (stopped) {
@@ -609,7 +620,7 @@ public final class StateSync {
   }
 
   private record StoragePersisted(
-      int served, Bytes32 lastSlot, boolean lastComplete, int lastReturned, int slots) {}
+      int served, Bytes32 lastSlot, boolean lastComplete, int lastReturned) {}
 
   private StoragePersisted persistStorage(
       final StorageRangesRequest request, final StorageRangesRequest.Result result) {
@@ -652,7 +663,7 @@ public final class StateSync {
           covered.forEach(range -> cover(range.task(), request.origin, range.end()));
           slots.addAndGet(count);
           return new StoragePersisted(
-              result.accounts().size(), lastSlot, lastComplete, lastReturned, count);
+              result.accounts().size(), lastSlot, lastComplete, lastReturned);
         });
   }
 

@@ -425,12 +425,13 @@ final class SyncAttempt {
             outcome -> {
               metrics.pivotMoved();
               LOG.info(
-                  "Moved the pivot to block {}: {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots",
+                  "Moved the pivot to block {}: {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots, {} storages to refresh",
                   target.getNumber(),
                   outcome.applied(),
                   outcome.skipped(),
                   outcome.deleted(),
-                  outcome.slots());
+                  outcome.slots(),
+                  outcome.staleStorage());
               return applyStep(headers, from + MAX_BLOCKS_PER_MOVE);
             });
   }

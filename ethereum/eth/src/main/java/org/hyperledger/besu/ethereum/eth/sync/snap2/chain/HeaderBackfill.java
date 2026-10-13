@@ -48,7 +48,6 @@ import org.slf4j.LoggerFactory;
 public final class HeaderBackfill {
 
   private static final Logger LOG = LoggerFactory.getLogger(HeaderBackfill.class);
-  private static final int ATTEMPTS = 10;
 
   private final RequestSender sender;
   private final ProtocolSchedule protocolSchedule;
@@ -162,8 +161,7 @@ public final class HeaderBackfill {
                     new GetHeadersFromPeerTask(
                         high, count, 0, Direction.REVERSE, 0, protocolSchedule),
                 Priority.HEADERS,
-                "headers"),
-            ATTEMPTS)
+                "headers"))
         .thenCompose(
             response -> {
               final List<BlockHeader> headers = response.value();
@@ -230,7 +228,7 @@ public final class HeaderBackfill {
    * @param segment the segment
    * @param headers the headers, highest first
    */
-  record Fetched(Segment segment, List<BlockHeader> headers) {}
+  private record Fetched(Segment segment, List<BlockHeader> headers) {}
 
   /**
    * A segment of block numbers, both included.
@@ -238,7 +236,7 @@ public final class HeaderBackfill {
    * @param high the highest block
    * @param low the lowest block
    */
-  record Segment(long high, long low) {}
+  private record Segment(long high, long low) {}
 
   private static final class Segments implements Iterator<Segment> {
     private final long low;

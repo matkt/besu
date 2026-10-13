@@ -94,13 +94,13 @@ final class Snap2Metrics {
         "Share of the account key space SNAP2 downloaded, from 0 to 1",
         () -> {
           final SyncAttempt attempt = current.get();
-          return attempt == null ? 0 : attempt.stateSync().coverage().accounts().coverage();
+          return attempt == null ? 0 : attempt.stateSync().accountCoverage();
         });
     metricsSystem.createLongGauge(
         category,
         "snap2_pending_storages",
         "Accounts whose storage SNAP2 still has to download",
-        () -> attemptValue(attempt -> attempt.stateSync().coverage().pendingStorageCount()));
+        () -> attemptValue(attempt -> attempt.stateSync().pendingStorageCount()));
     metricsSystem.createLongGauge(
         category,
         "snap2_peers_without_state",

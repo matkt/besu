@@ -44,7 +44,6 @@ import org.slf4j.LoggerFactory;
 public final class ReorgRecovery {
 
   private static final Logger LOG = LoggerFactory.getLogger(ReorgRecovery.class);
-  private static final int ATTEMPTS = 10;
 
   private final StateSync stateSync;
   private final SyncStateStorage storage;
@@ -150,7 +149,7 @@ public final class ReorgRecovery {
     final AccountRangeRequest request =
         new AccountRangeRequest(pivot, hash, hash, StateSync.SINGLE_ITEM_BYTES, "account_refetch");
     return sender
-        .submitWithRetries(request, ATTEMPTS)
+        .submitWithRetries(request)
         .thenAccept(
             response ->
                 write(
@@ -177,7 +176,7 @@ public final class ReorgRecovery {
             null,
             StateSync.SINGLE_ITEM_BYTES);
     return sender
-        .submitWithRetries(request, ATTEMPTS)
+        .submitWithRetries(request)
         .thenAccept(
             response -> {
               final StorageRangesRequest.Slots slots = response.value().accounts().getFirst();

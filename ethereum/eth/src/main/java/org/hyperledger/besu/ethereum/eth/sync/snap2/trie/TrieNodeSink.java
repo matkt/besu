@@ -19,7 +19,7 @@ import org.apache.tuweni.bytes.Bytes32;
 
 /** Receives the hashed trie nodes produced while building a trie. */
 @FunctionalInterface
-public interface TrieNodeSink {
+interface TrieNodeSink {
 
   /**
    * Called once per node referenced by hash, children before parents.

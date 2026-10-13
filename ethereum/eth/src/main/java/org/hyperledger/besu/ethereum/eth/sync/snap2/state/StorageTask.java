@@ -23,7 +23,7 @@ import org.apache.tuweni.bytes.Bytes32;
  * Storage of an account that is not yet fully downloaded: the slot ranges already persisted and the
  * storage root responses are verified against.
  */
-public final class StorageTask {
+final class StorageTask {
 
   private final Bytes32 accountHash;
   private volatile Bytes32 storageRoot;
@@ -37,7 +37,7 @@ public final class StorageTask {
   int inFlight;
   boolean refreshing;
 
-  public StorageTask(final Bytes32 accountHash, final Bytes32 storageRoot) {
+  StorageTask(final Bytes32 accountHash, final Bytes32 storageRoot) {
     // copies, as hashes decoded from a response slice the whole message
     this.accountHash = accountHash.copy();
     this.storageRoot = storageRoot.copy();

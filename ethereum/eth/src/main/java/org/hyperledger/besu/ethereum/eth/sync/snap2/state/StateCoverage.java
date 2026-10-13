@@ -22,7 +22,7 @@ import org.apache.tuweni.bytes.Bytes32;
  * What the flat state holds at the current pivot: the persisted account ranges and, for accounts in
  * them whose storage is not complete yet, the persisted slot ranges.
  */
-public final class StateCoverage {
+final class StateCoverage {
 
   private final KeyRangeSet accounts = new KeyRangeSet();
   private final ConcurrentHashMap<Bytes32, StorageTask> storage = new ConcurrentHashMap<>();
@@ -41,8 +41,8 @@ public final class StateCoverage {
     storage.put(task.accountHash(), task);
   }
 
-  public StorageTask removeStorageTask(final Bytes32 accountHash) {
-    return storage.remove(accountHash);
+  public void removeStorageTask(final Bytes32 accountHash) {
+    storage.remove(accountHash);
   }
 
   public int pendingStorageCount() {

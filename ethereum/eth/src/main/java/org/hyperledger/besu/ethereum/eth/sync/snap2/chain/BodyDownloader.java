@@ -51,7 +51,6 @@ import org.slf4j.LoggerFactory;
 public final class BodyDownloader {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyDownloader.class);
-  private static final int ATTEMPTS = 10;
   // peers cap a body response around 2 MiB
   private static final double RANGE_BODY_BYTES = 2 * 1024 * 1024;
   private static final int MIN_RANGE_BLOCKS = 8;
@@ -265,8 +264,7 @@ public final class BodyDownloader {
                 () -> new GetSyncBlockBodiesFromPeerTask(request, protocolSchedule, 0),
                 Priority.CHAIN,
                 "bodies",
-                request.getLast().getNumber()),
-            ATTEMPTS)
+                request.getLast().getNumber()))
         .thenCompose(
             response -> {
               collected.addAll(response.value());
@@ -307,8 +305,7 @@ public final class BodyDownloader {
                 () -> new GetSyncReceiptsFromPeerTask(request, protocolSchedule, receiptEncoder),
                 Priority.CHAIN,
                 "receipts",
-                remaining.getLast().getHeader().getNumber()),
-            ATTEMPTS)
+                remaining.getLast().getHeader().getNumber()))
         .thenCompose(
             response -> {
               final GetSyncReceiptsFromPeerTask.Response value = response.value();

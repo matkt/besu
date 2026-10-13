@@ -52,12 +52,14 @@ import org.slf4j.LoggerFactory;
  * head and follows it through block access lists, then builds the tries once the state is complete.
  * One run is a {@link SyncAttempt}; the sync starts over when the state cannot be recovered.
  */
-public final class Snap2SyncController implements SnapSyncController {
+final class Snap2SyncController implements SnapSyncController {
 
   private static final Logger LOG = LoggerFactory.getLogger(Snap2SyncController.class);
   private static final int MAX_RESTARTS = 3;
   private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
   private static final long PROGRESS_LOG_SECONDS = 30;
+  // rounds of requests before a block access list counts as unavailable
+  private static final int BAL_ROUNDS = 60;
 
   private final Snap2Configuration config;
   private final ProtocolSchedule protocolSchedule;
@@ -85,7 +87,7 @@ public final class Snap2SyncController implements SnapSyncController {
   private volatile SyncAttempt current;
   private volatile boolean stopped;
 
-  public Snap2SyncController(
+  Snap2SyncController(
       final Snap2Configuration config,
       final ProtocolSchedule protocolSchedule,
       final MutableBlockchain blockchain,
@@ -176,7 +178,7 @@ public final class Snap2SyncController implements SnapSyncController {
             indexTransactions,
             scheduler,
             new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest()),
-            new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), 60),
+            new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), BAL_ROUNDS),
             executor,
             control,
             () -> stopped,

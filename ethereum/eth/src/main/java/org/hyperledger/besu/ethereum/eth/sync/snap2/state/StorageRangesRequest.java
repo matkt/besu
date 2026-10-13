@@ -53,7 +53,7 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
 
   final StateSync.Pivot pivot;
   final List<StorageTask> tasks;
-  final List<Bytes32> storageRoots;
+  private final List<Bytes32> storageRoots;
   final Bytes32 origin;
   final Bytes32 limit;
   final RangeTask chunk;

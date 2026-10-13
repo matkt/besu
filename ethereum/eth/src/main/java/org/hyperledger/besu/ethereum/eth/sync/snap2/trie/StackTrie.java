@@ -28,7 +28,7 @@ import org.apache.tuweni.bytes.Bytes32;
  * Builds a trie from keys added in increasing order, keeping only its right edge in memory. It also
  * takes built or sealed subtrees, to assemble partitioned builds and range proofs.
  */
-public final class StackTrie {
+final class StackTrie {
 
   private static final int NONE = -1;
   private static final int LEAF = 0;
@@ -90,11 +90,6 @@ public final class StackTrie {
     } else {
       insert(item.key().toArrayUnsafe(), BRANCH, item.depth(), null, item.rlp(), item.ref());
     }
-  }
-
-  /** Returns whether nothing was added. */
-  public boolean isEmpty() {
-    return kind == NONE;
   }
 
   /**

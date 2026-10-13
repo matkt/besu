@@ -25,7 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes32;
 
 /** Thread-safe set of disjoint, inclusive key ranges; adjacent ranges are merged. */
-public final class KeyRangeSet {
+final class KeyRangeSet {
 
   private final TreeMap<Bytes32, Bytes32> ranges = new TreeMap<>();
 
@@ -69,11 +69,6 @@ public final class KeyRangeSet {
     return ranges.size() == 1
         && ranges.firstKey().equals(RangeManager.MIN_RANGE)
         && ranges.firstEntry().getValue().equals(RangeManager.MAX_RANGE);
-  }
-
-  /** Returns whether nothing is covered. */
-  public synchronized boolean isEmpty() {
-    return ranges.isEmpty();
   }
 
   /** Returns the share of the key space covered. */

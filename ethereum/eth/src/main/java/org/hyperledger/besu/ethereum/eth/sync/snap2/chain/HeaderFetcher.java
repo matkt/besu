@@ -34,7 +34,6 @@ import java.util.concurrent.CompletableFuture;
  */
 public final class HeaderFetcher {
 
-  private static final int ATTEMPTS = 10;
   private static final long HEAD_TOLERANCE = 8;
 
   private final RequestSender sender;
@@ -111,8 +110,7 @@ public final class HeaderFetcher {
                         hash, count, 0, Direction.REVERSE, 0, protocolSchedule),
                 priority,
                 "headers",
-                minimumPeerHeight),
-            ATTEMPTS)
+                minimumPeerHeight))
         .thenApply(response -> response.value());
   }
 }

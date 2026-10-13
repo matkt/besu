@@ -19,14 +19,12 @@ import org.apache.tuweni.bytes.Bytes32;
 /** A key range downloaded with consecutive requests, each one resuming after the previous. */
 final class RangeTask {
 
-  final Bytes32 origin;
   final Bytes32 limit;
   Bytes32 next;
   boolean inFlight;
   boolean done;
 
   RangeTask(final Bytes32 origin, final Bytes32 limit) {
-    this.origin = origin;
     this.limit = limit;
     this.next = origin;
   }

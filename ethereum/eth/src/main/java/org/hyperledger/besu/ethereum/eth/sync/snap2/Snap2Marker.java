@@ -23,7 +23,7 @@ import java.nio.file.Path;
  * File marking a SNAP2 sync in progress. A node restarted while it exists has an incomplete world
  * state and syncs again from scratch.
  */
-public final class Snap2Marker {
+final class Snap2Marker {
 
   private final Path file;
 

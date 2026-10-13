@@ -96,7 +96,7 @@ public record Snap2Configuration(
     return new Builder(this);
   }
 
-  /** Builder of configurations, mostly for tests. */
+  /** Builder of configurations, for tests. */
   public static final class Builder {
     private int accountChunks;
     private int responseBytes;

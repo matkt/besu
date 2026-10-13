@@ -35,6 +35,11 @@ public interface RequestSender {
   /** Sends a request until a peer answers it correctly, switching peer after each failure. */
   <T> CompletableFuture<PeerResponse<T>> submitWithRetries(SyncRequest<T> request, int attempts);
 
+  /** Sends a request the sync cannot do without, with the default number of attempts. */
+  default <T> CompletableFuture<PeerResponse<T>> submitWithRetries(final SyncRequest<T> request) {
+    return submitWithRetries(request, 10);
+  }
+
   /** Returns the number of usable peers for a protocol. */
   int peerCount(Protocol protocol);
 

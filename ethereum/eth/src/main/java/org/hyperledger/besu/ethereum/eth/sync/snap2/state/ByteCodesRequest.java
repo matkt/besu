@@ -14,11 +14,11 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.messages.snap.ByteCodesMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.GetByteCodesMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.NodeEncoding;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
 import java.math.BigInteger;
@@ -33,7 +33,7 @@ import org.apache.tuweni.bytes.Bytes32;
 /** Requests bytecodes by hash; returned codes keep the request order and may skip some. */
 final class ByteCodesRequest implements SyncRequest<Map<Bytes32, Bytes>> {
 
-  final List<Bytes32> codeHashes;
+  private final List<Bytes32> codeHashes;
   private final long bytes;
 
   ByteCodesRequest(final List<Bytes32> codeHashes, final long bytes) {
@@ -70,7 +70,7 @@ final class ByteCodesRequest implements SyncRequest<Map<Bytes32, Bytes>> {
     final Map<Bytes32, Bytes> out = new LinkedHashMap<>();
     int next = 0;
     for (final Bytes code : codes) {
-      final Bytes32 hash = NodeEncoding.keccak(code);
+      final Bytes32 hash = Bytes32.wrap(Hash.hash(code).getBytes());
       while (next < codeHashes.size() && !codeHashes.get(next).equals(hash)) {
         next++;
       }

@@ -19,6 +19,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
@@ -32,6 +33,7 @@ public interface SyncStateStorage {
   Optional<Bytes> getAccount(Bytes32 accountHash);
 
   /** Returns the stored value of a slot, possibly without its leading zeros. */
+  @VisibleForTesting
   Optional<Bytes> getStorage(Bytes32 accountHash, Bytes32 slotHash);
 
   /** Returns whether a bytecode is already stored. */

@@ -20,7 +20,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /** Allocation-light RLP encoding of Merkle Patricia trie nodes over 32-byte keys. */
-public final class NodeEncoding {
+final class NodeEncoding {
 
   /** Encoding of an empty child or of an empty branch value. */
   public static final byte EMPTY = (byte) 0x80;
