@@ -19,9 +19,13 @@ import org.hyperledger.besu.ethereum.eth.manager.EthPeerImmutableAttributes;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.InvalidPeerTaskResponseException;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.MalformedRlpFromPeerException;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResponseCode;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskValidationResponse;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -104,8 +108,12 @@ public final class PeerTaskRequest<T> implements SyncRequest<T> {
     }
     if (validation != PeerTaskValidationResponse.RESULTS_VALID_AND_GOOD) {
       throw new InvalidResponseException(
-          name + ": " + validation, validation.getDisconnectReason().isPresent());
+          name + ": " + validation, validation.getDisconnectReason().orElse(null));
     }
+    // as the peer task executor does, e.g. to learn the chain height of the peer
+    task.postProcessResult(
+        new PeerTaskExecutorResult<>(
+            Optional.ofNullable(result), PeerTaskExecutorResponseCode.SUCCESS, List.of(peer)));
     return result;
   }
 }

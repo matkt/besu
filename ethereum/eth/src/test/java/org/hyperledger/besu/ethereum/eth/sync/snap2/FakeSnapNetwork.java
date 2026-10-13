@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.EthProtocolVersion;
 import org.hyperledger.besu.ethereum.eth.SnapProtocol;
+import org.hyperledger.besu.ethereum.eth.manager.ChainState;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.messages.EthProtocolMessages;
 import org.hyperledger.besu.ethereum.eth.messages.snap.AccountRangeMessage;
@@ -288,6 +289,8 @@ public final class FakeSnapNetwork implements RequestSender {
   private static EthPeer peer(final Capability snap, final Capability eth) {
     final EthPeer peer = mock(EthPeer.class);
     when(peer.getAgreedCapabilities()).thenReturn(Set.of(snap, eth));
+    // header tasks report the heights they see to the peer
+    when(peer.chainState()).thenReturn(new ChainState());
     return peer;
   }
 

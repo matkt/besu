@@ -66,13 +66,14 @@ public final class Snap2SyncFactory {
     final MutableBlockchain blockchain = protocolContext.getBlockchain();
     final Snap2Marker marker = new Snap2Marker(dataDirectory);
     final long floor = syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L);
-    if (!marker.exists() && blockchain.getChainHeadBlockNumber() > floor) {
+    if (syncState.isResyncNeeded()) {
+      LOG.info("World state resync requested, syncing it again with SNAP2");
+    } else if (marker.exists()) {
+      LOG.info("A previous SNAP2 sync did not finish, syncing the world state again");
+    } else if (blockchain.getChainHeadBlockNumber() > floor) {
       LOG.info(
           "Chain head is block {}, no SNAP2 sync needed", blockchain.getChainHeadBlockNumber());
       return Optional.empty();
-    }
-    if (marker.exists()) {
-      LOG.info("A previous SNAP2 sync did not finish, syncing the world state again");
     }
     final ChainHeadSource heads =
         pivotBlockSelector instanceof ChainHeadSource source

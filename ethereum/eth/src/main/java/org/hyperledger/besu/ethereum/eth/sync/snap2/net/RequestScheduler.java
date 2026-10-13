@@ -45,16 +45,20 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,14 +74,29 @@ public final class RequestScheduler implements RequestSender {
   private static final double INITIAL_THROUGHPUT = 64; // bytes per millisecond
   private static final double INITIAL_LANE_LIMIT = 2;
   private static final int MAX_BACKOFF_SECONDS = 30;
-  private static final int CONSECUTIVE_FAILURES_BEFORE_DISCONNECT = 12;
+  private static final int CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT = 12;
   // announced heights lag, so a peer that looks behind is only picked when no other peer can be
   private static final double BEHIND_PENALTY = 1e-3;
 
-  private static final int PENDING = 0;
-  private static final int DONE = 1;
-  private static final int TIMED_OUT = 2;
-  private static final int RELEASED = 3;
+  private enum AttemptState {
+    PENDING,
+    DONE,
+    TIMED_OUT,
+    RELEASED
+  }
+
+  /** How a request ended, also its metric label. */
+  private enum Outcome {
+    SUCCESS,
+    EMPTY,
+    INVALID,
+    ERROR,
+    TIMEOUT,
+    DISCONNECTED,
+    NO_PEER;
+
+    private final String label = name().toLowerCase(Locale.ROOT);
+  }
 
   private final EthPeers ethPeers;
   private final Duration timeout;
@@ -95,6 +114,8 @@ public final class RequestScheduler implements RequestSender {
           Comparator.<Pending<?>>comparingInt(p -> p.request.priority().ordinal())
               .thenComparingLong(p -> p.sequence));
   private final Map<EthPeer, PeerState> peers = new HashMap<>();
+  // every request not yet answered, failed when the scheduler stops
+  private final Set<CompletableFuture<?>> outstanding = ConcurrentHashMap.newKeySet();
   private long sequence;
   private final long connectSubscription;
   private volatile int snapCapacity;
@@ -177,9 +198,11 @@ public final class RequestScheduler implements RequestSender {
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
     final Pending<T> pending = new Pending<>(request, Set.copyOf(excluded));
     if (stopped) {
-      pending.future.completeExceptionally(failure(STOPPED, null, "scheduler stopped"));
+      pending.future.completeExceptionally(stoppedFailure());
       return pending.future;
     }
+    outstanding.add(pending.future);
+    pending.future.whenComplete((response, error) -> outstanding.remove(pending.future));
     execute(
         () -> {
           pending.sequence = sequence++;
@@ -220,9 +243,13 @@ public final class RequestScheduler implements RequestSender {
               if (failure.reason() == NO_PEER) {
                 // every peer may have been tried, start over after a pause
                 excluded.clear();
-                schedule(
-                    () -> attempt(request, excluded, attemptsLeft - 1, result),
-                    Duration.ofSeconds(1));
+                try {
+                  schedule(
+                      () -> attempt(request, excluded, attemptsLeft - 1, result),
+                      Duration.ofSeconds(1));
+                } catch (final RejectedExecutionException stopping) {
+                  result.completeExceptionally(stoppedFailure());
+                }
               } else {
                 failure.peer().ifPresent(excluded::add);
                 attempt(request, excluded, attemptsLeft - 1, result);
@@ -259,26 +286,21 @@ public final class RequestScheduler implements RequestSender {
     return loop.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
   }
 
-  /** Stops dispatching and fails every queued request. */
+  /** Stops dispatching and fails every request not yet answered. */
   @Override
   public void stop() {
     stopped = true;
     ethPeers.unsubscribeConnect(connectSubscription);
-    execute(
-        () -> {
-          Pending<?> pending;
-          while ((pending = queue.poll()) != null) {
-            pending.future.completeExceptionally(failure(STOPPED, null, "scheduler stopped"));
-          }
-        });
     loop.shutdown();
     workers.shutdownNow();
+    final RequestFailedException failure = stoppedFailure();
+    outstanding.forEach(future -> future.completeExceptionally(failure));
   }
 
   private void execute(final Runnable task) {
     if (!loop.isShutdown()) {
       try {
-        loop.execute(task);
+        loop.execute(() -> runLogged(task));
       } catch (final RuntimeException e) {
         LOG.trace("Scheduler loop rejected a task", e);
       }
@@ -286,10 +308,15 @@ public final class RequestScheduler implements RequestSender {
   }
 
   private void dispatchSafely() {
+    runLogged(this::dispatch);
+  }
+
+  // a scheduled executor keeps the exceptions of its tasks to itself
+  private static void runLogged(final Runnable task) {
     try {
-      dispatch();
+      task.run();
     } catch (final RuntimeException e) {
-      LOG.warn("SNAP2 request dispatch failed", e);
+      LOG.warn("SNAP2 scheduler task failed", e);
     }
   }
 
@@ -310,23 +337,26 @@ public final class RequestScheduler implements RequestSender {
     }
 
     final List<Pending<?>> deferred = new ArrayList<>();
-    Pending<?> pending;
-    while ((pending = queue.poll()) != null) {
-      if (pending.future.isDone()) {
-        continue;
+    try {
+      Pending<?> pending;
+      while ((pending = queue.poll()) != null) {
+        if (pending.future.isDone()) {
+          continue;
+        }
+        final PeerState peer = select(pending, candidates, now);
+        if (peer != null) {
+          send(pending, peer);
+        } else if (now - pending.queuedAt > queueTimeout.toNanos()) {
+          countRequest(pending.request, Outcome.NO_PEER);
+          pending.future.completeExceptionally(
+              failure(NO_PEER, null, "no peer could serve " + pending.request.name()));
+        } else {
+          deferred.add(pending);
+        }
       }
-      final PeerState peer = select(pending, candidates, now);
-      if (peer != null) {
-        send(pending, peer);
-      } else if (now - pending.queuedAt > queueTimeout.toNanos()) {
-        countRequest(pending.request, "no_peer");
-        pending.future.completeExceptionally(
-            failure(NO_PEER, null, "no peer could serve " + pending.request.name()));
-      } else {
-        deferred.add(pending);
-      }
+    } finally {
+      queue.addAll(deferred);
     }
-    queue.addAll(deferred);
   }
 
   private PeerState newPeerState(final EthPeer peer) {
@@ -362,16 +392,11 @@ public final class RequestScheduler implements RequestSender {
     for (final PeerState state : candidates) {
       final Protocol protocol = pending.request.protocolFor(state.peer);
       final Lane lane = state.lane(protocol);
-      if (state.peer.isDisconnected()
-          || state.backoffUntil > now
-          || pending.excluded.contains(state.peer)
-          || !lane.hasRoom()
-          || !speaks(state.peer, protocol)
-          || !pending.request.canServe(state.peer)) {
+      if (!canTake(state, lane, protocol, pending, now)) {
         continue;
       }
       final double score =
-          state.throughput
+          lane.throughput
               / (lane.inFlight + 1)
               * (behind(state.peer, minimumHeight) ? BEHIND_PENALTY : 1);
       if (score > bestScore) {
@@ -380,6 +405,19 @@ public final class RequestScheduler implements RequestSender {
       }
     }
     return best;
+  }
+
+  private static boolean canTake(
+      final PeerState state,
+      final Lane lane,
+      final Protocol protocol,
+      final Pending<?> pending,
+      final long now) {
+    return !state.peer.isDisconnected()
+        && lane.isOpen(now)
+        && !pending.excluded.contains(state.peer)
+        && speaks(state.peer, protocol)
+        && pending.request.canServe(state.peer);
   }
 
   private <T> void send(final Pending<T> pending, final PeerState state) {
@@ -395,7 +433,7 @@ public final class RequestScheduler implements RequestSender {
       LOG.debug("Failed to send {} to {}", request.name(), peer.getLoggableId(), e);
     }
     if (stream == null) {
-      state.backoff(System.nanoTime());
+      state.lane(protocol).backoff(System.nanoTime());
       queue.add(pending.excluding(peer));
       return;
     }
@@ -415,8 +453,8 @@ public final class RequestScheduler implements RequestSender {
   }
 
   private <T> void onMessage(final Attempt<T> attempt, final MessageData message) {
-    final boolean answered = attempt.state.compareAndSet(PENDING, DONE);
-    if (!answered && attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
+    final boolean answered = attempt.state.compareAndSet(AttemptState.PENDING, AttemptState.DONE);
+    if (!answered && attempt.state.compareAndSet(AttemptState.TIMED_OUT, AttemptState.RELEASED)) {
       execute(
           () -> {
             attempt.lane.abandoned--;
@@ -440,13 +478,14 @@ public final class RequestScheduler implements RequestSender {
     try {
       workers.execute(
           () -> {
-            String outcome;
+            Outcome outcome;
             try {
               final T value = request.decode(message, peer);
+              peer.recordUsefulResponse();
               attempt.pending.future.complete(new PeerResponse<>(value, peer));
-              outcome = "success";
+              outcome = Outcome.SUCCESS;
             } catch (final EmptyResponseException e) {
-              outcome = "empty";
+              outcome = Outcome.EMPTY;
               LOG.debug(
                   "Empty {} ({} bytes) from {} {} at height {}: {}",
                   request.name(),
@@ -457,26 +496,30 @@ public final class RequestScheduler implements RequestSender {
                   e.getMessage());
               attempt.pending.future.completeExceptionally(failure(EMPTY, peer, e.getMessage()));
             } catch (final InvalidResponseException e) {
-              outcome = "invalid";
-              punish(peer, request, e.getMessage(), e.shouldDisconnect());
+              outcome = Outcome.INVALID;
+              punish(peer, request, e.getMessage(), e.disconnectReason());
               attempt.pending.future.completeExceptionally(failure(INVALID, peer, e.getMessage()));
             } catch (final RLPException | IllegalArgumentException e) {
-              outcome = "invalid";
-              punish(peer, request, e.getMessage(), true);
+              outcome = Outcome.INVALID;
+              punish(
+                  peer,
+                  request,
+                  e.getMessage(),
+                  Optional.of(DisconnectReason.BREACH_OF_PROTOCOL_MALFORMED_MESSAGE_RECEIVED));
               attempt.pending.future.completeExceptionally(failure(INVALID, peer, e.toString()));
             } catch (final RuntimeException e) {
-              outcome = "error";
+              outcome = Outcome.ERROR;
               LOG.warn("Failed to process {} from {}", request.name(), peer.getLoggableId(), e);
               attempt.pending.future.completeExceptionally(failure(INVALID, peer, e.toString()));
             }
-            final String result = outcome;
+            final Outcome result = outcome;
             execute(
                 () -> {
                   attempt.lane.inFlight--;
-                  if ("success".equals(result)) {
-                    attempt.lane.grow();
+                  attempt.lane.record(result, size, elapsedMillis, System.nanoTime());
+                  if (result == Outcome.SUCCESS) {
+                    attempt.peer.consecutiveTimeouts = 0;
                   }
-                  attempt.peer.record(result, size, elapsedMillis, System.nanoTime());
                   countRequest(request, result);
                   responseBytes.labels(request.name()).inc(size);
                   responseMillis.labels(request.name()).inc(elapsedMillis);
@@ -484,12 +527,12 @@ public final class RequestScheduler implements RequestSender {
                 });
           });
     } catch (final RuntimeException rejected) {
-      attempt.pending.future.completeExceptionally(failure(STOPPED, peer, "scheduler stopped"));
+      attempt.pending.future.completeExceptionally(stoppedFailure());
     }
   }
 
   private void onClosed(final Attempt<?> attempt) {
-    if (attempt.state.compareAndSet(PENDING, DONE)) {
+    if (attempt.state.compareAndSet(AttemptState.PENDING, AttemptState.DONE)) {
       final ScheduledFuture<?> timeoutTask = attempt.timeoutTask;
       if (timeoutTask != null) {
         timeoutTask.cancel(false);
@@ -499,28 +542,29 @@ public final class RequestScheduler implements RequestSender {
       execute(
           () -> {
             attempt.lane.inFlight--;
-            countRequest(attempt.pending.request, "disconnected");
+            countRequest(attempt.pending.request, Outcome.DISCONNECTED);
             dispatch();
           });
-    } else if (attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
+    } else if (attempt.state.compareAndSet(AttemptState.TIMED_OUT, AttemptState.RELEASED)) {
       execute(() -> attempt.lane.abandoned--);
     }
   }
 
   private void onTimeout(final Attempt<?> attempt) {
-    if (!attempt.state.compareAndSet(PENDING, TIMED_OUT)) {
+    if (!attempt.state.compareAndSet(AttemptState.PENDING, AttemptState.TIMED_OUT)) {
       return;
     }
     final PeerState state = attempt.peer;
     attempt.lane.inFlight--;
     attempt.lane.abandoned++;
     attempt.lane.shrink();
-    state.record("timeout", 0, timeout.toMillis(), System.nanoTime());
-    countRequest(attempt.pending.request, "timeout");
+    attempt.lane.record(Outcome.TIMEOUT, 0, timeout.toMillis(), System.nanoTime());
+    state.consecutiveTimeouts++;
+    countRequest(attempt.pending.request, Outcome.TIMEOUT);
     attempt.pending.future.completeExceptionally(
         failure(TIMEOUT, state.peer, attempt.pending.request.name() + " timed out"));
     loop.schedule(() -> abandon(attempt), timeout.toMillis(), TimeUnit.MILLISECONDS);
-    if (state.consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_DISCONNECT) {
+    if (state.consecutiveTimeouts >= CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT) {
       LOG.debug("Disconnecting {} after repeated timeouts", state.peer.getLoggableId());
       state.peer.disconnect(DisconnectReason.TIMEOUT);
     }
@@ -529,7 +573,7 @@ public final class RequestScheduler implements RequestSender {
 
   // a request still unanswered long after its timeout gives its slot back
   private void abandon(final Attempt<?> attempt) {
-    if (attempt.state.compareAndSet(TIMED_OUT, RELEASED)) {
+    if (attempt.state.compareAndSet(AttemptState.TIMED_OUT, AttemptState.RELEASED)) {
       attempt.lane.abandoned--;
       attempt.stream.close();
       dispatch();
@@ -540,17 +584,13 @@ public final class RequestScheduler implements RequestSender {
       final EthPeer peer,
       final SyncRequest<?> request,
       final String reason,
-      final boolean disconnect) {
+      final Optional<DisconnectReason> disconnect) {
     LOG.debug("Invalid {} from {}: {}", request.name(), peer.getLoggableId(), reason);
-    if (disconnect) {
-      peer.disconnect(DisconnectReason.BREACH_OF_PROTOCOL_MALFORMED_MESSAGE_RECEIVED);
-    } else {
-      peer.recordUselessResponse(request.name());
-    }
+    disconnect.ifPresentOrElse(peer::disconnect, () -> peer.recordUselessResponse(request.name()));
   }
 
-  private void countRequest(final SyncRequest<?> request, final String outcome) {
-    requestCounter.labels(request.name(), outcome).inc();
+  private void countRequest(final SyncRequest<?> request, final Outcome outcome) {
+    requestCounter.labels(request.name(), outcome.label).inc();
   }
 
   // a peer that announced a lower head may be syncing, or may just not have announced more
@@ -576,6 +616,10 @@ public final class RequestScheduler implements RequestSender {
   private static RequestFailedException failure(
       final RequestFailedException.Reason reason, final EthPeer peer, final String message) {
     return new RequestFailedException(reason, peer, message);
+  }
+
+  private static RequestFailedException stoppedFailure() {
+    return failure(STOPPED, null, "scheduler stopped");
   }
 
   private static final class Pending<T> {
@@ -614,7 +658,7 @@ public final class RequestScheduler implements RequestSender {
     private final Lane lane;
     private final ResponseStream stream;
     private final long startedAt;
-    private final AtomicInteger state = new AtomicInteger(PENDING);
+    private final AtomicReference<AttemptState> state = new AtomicReference<>(AttemptState.PENDING);
     private volatile ScheduledFuture<?> timeoutTask;
 
     private Attempt(
@@ -631,12 +675,18 @@ public final class RequestScheduler implements RequestSender {
     }
   }
 
-  /** Requests of one protocol to one peer, with an adaptive limit. */
+  /**
+   * Requests of one protocol to one peer, with an adaptive limit. A peer serving one protocol badly
+   * keeps serving the other.
+   */
   private static final class Lane {
     private final int max;
     private double limit;
     private int inFlight;
     private int abandoned;
+    private double throughput = INITIAL_THROUGHPUT;
+    private int consecutiveFailures;
+    private long backoffUntil;
 
     private Lane(final int max) {
       this.max = Math.max(1, max);
@@ -647,8 +697,35 @@ public final class RequestScheduler implements RequestSender {
       return (int) limit;
     }
 
-    private boolean hasRoom() {
-      return inFlight + abandoned < slots();
+    // not backing off, with a free slot
+    private boolean isOpen(final long now) {
+      return backoffUntil <= now && inFlight + abandoned < slots();
+    }
+
+    private void record(
+        final Outcome outcome, final int size, final long elapsedMillis, final long now) {
+      switch (outcome) {
+        case SUCCESS -> {
+          consecutiveFailures = 0;
+          throughput = 0.8 * throughput + 0.2 * ((double) size / elapsedMillis);
+          grow();
+        }
+        case EMPTY -> {
+          throughput *= 0.9;
+          backoff(now);
+        }
+        default -> {
+          throughput *= 0.7;
+          backoff(now);
+        }
+      }
+    }
+
+    private void backoff(final long now) {
+      consecutiveFailures++;
+      final long seconds =
+          Math.min(MAX_BACKOFF_SECONDS, 1L << Math.min(consecutiveFailures - 1, 5));
+      backoffUntil = now + TimeUnit.SECONDS.toNanos(seconds);
     }
 
     // additive increase: about one more slot per window of answered requests
@@ -667,9 +744,7 @@ public final class RequestScheduler implements RequestSender {
     private final EthPeer peer;
     private final Lane snap;
     private final Lane eth;
-    private int consecutiveFailures;
-    private long backoffUntil;
-    private double throughput = INITIAL_THROUGHPUT;
+    private int consecutiveTimeouts;
 
     private PeerState(final EthPeer peer, final int maxSnap, final int maxEth) {
       this.peer = peer;
@@ -679,31 +754,6 @@ public final class RequestScheduler implements RequestSender {
 
     private Lane lane(final Protocol protocol) {
       return protocol == Protocol.SNAP ? snap : eth;
-    }
-
-    private void record(
-        final String outcome, final int size, final long elapsedMillis, final long now) {
-      switch (outcome) {
-        case "success" -> {
-          consecutiveFailures = 0;
-          throughput = 0.8 * throughput + 0.2 * ((double) size / elapsedMillis);
-        }
-        case "empty" -> {
-          throughput *= 0.9;
-          backoff(now);
-        }
-        default -> {
-          throughput *= 0.7;
-          backoff(now);
-        }
-      }
-    }
-
-    private void backoff(final long now) {
-      consecutiveFailures++;
-      final long seconds =
-          Math.min(MAX_BACKOFF_SECONDS, 1L << Math.min(consecutiveFailures - 1, 5));
-      backoffUntil = now + TimeUnit.SECONDS.toNanos(seconds);
     }
   }
 }

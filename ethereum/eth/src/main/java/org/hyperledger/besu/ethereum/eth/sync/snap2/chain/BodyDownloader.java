@@ -213,12 +213,20 @@ public final class BodyDownloader {
     if (blocks != null) {
       measure(blocks);
     }
-    if (blocks != null
-        && canonical(blocks.getFirst().getHeader())
-        && canonical(blocks.getLast().getHeader())) {
+    if (blocks != null && canonical(blocks)) {
       stored.add(from, to);
     }
     dispatch();
+  }
+
+  // linked end to end, so not read across a reorg, and still on the canonical chain
+  private boolean canonical(final List<SyncBlockWithReceipts> blocks) {
+    for (int i = 1; i < blocks.size(); i++) {
+      if (!blocks.get(i).getHeader().getParentHash().equals(blocks.get(i - 1).getHash())) {
+        return false;
+      }
+    }
+    return canonical(blocks.getFirst().getHeader()) && canonical(blocks.getLast().getHeader());
   }
 
   private boolean canonical(final BlockHeader header) {

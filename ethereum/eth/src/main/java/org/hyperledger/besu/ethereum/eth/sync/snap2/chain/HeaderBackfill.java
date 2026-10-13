@@ -185,10 +185,9 @@ public final class HeaderBackfill {
             });
   }
 
-  private synchronized void verifyAndStore(final Fetched fetched) {
-    if (stopped) {
-      throw new IllegalStateException("header download stopped");
-    }
+  // refetching runs outside the lock, which only keeps a stopped download from storing
+  private void verifyAndStore(final Fetched fetched) {
+    throwIfStopped();
     final long low = fetched.segment().low();
     List<BlockHeader> headers = fetched.headers();
     if (headers.isEmpty() || !headers.getFirst().getHash().equals(expected)) {
@@ -202,9 +201,18 @@ public final class HeaderBackfill {
       headers = complete;
     }
     final List<BlockHeader> verified = headers;
-    StorageRetry.run(() -> blockchain.storeBlockHeaders(verified));
+    synchronized (this) {
+      throwIfStopped();
+      StorageRetry.run(() -> blockchain.storeBlockHeaders(verified));
+    }
     expected = verified.getLast().getParentHash();
     lowestStored = verified.getLast().getNumber();
+  }
+
+  private void throwIfStopped() {
+    if (stopped) {
+      throw new IllegalStateException("header download stopped");
+    }
   }
 
   // the trusted chain from the header with this hash down to low, highest first

@@ -304,6 +304,11 @@ final class SyncAttempt {
                                           new IllegalStateException(
                                               "lost the lowest stored header")));
                         }
+                      })
+                  .exceptionally(
+                      resumeError -> {
+                        headersDone.completeExceptionally(resumeError);
+                        return null;
                       });
             });
   }

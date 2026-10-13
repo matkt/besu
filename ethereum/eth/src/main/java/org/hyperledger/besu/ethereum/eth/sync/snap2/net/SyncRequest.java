@@ -16,6 +16,9 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
 
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage.DisconnectReason;
+
+import java.util.Optional;
 
 /**
  * A request sent to one peer through the {@link RequestScheduler}.
@@ -84,16 +87,24 @@ public interface SyncRequest<T> {
 
   /** The response is malformed or does not match what was requested. */
   final class InvalidResponseException extends RuntimeException {
-    private final boolean disconnect;
+    private final DisconnectReason disconnect;
 
+    /** A wrong response, also a malformed message that disconnects the peer if so asked. */
     public InvalidResponseException(final String message, final boolean disconnect) {
+      this(
+          message,
+          disconnect ? DisconnectReason.BREACH_OF_PROTOCOL_MALFORMED_MESSAGE_RECEIVED : null);
+    }
+
+    /** A wrong response that disconnects the peer for the given reason, unless null. */
+    public InvalidResponseException(final String message, final DisconnectReason disconnect) {
       super(message, null, false, false);
       this.disconnect = disconnect;
     }
 
-    /** Returns whether the peer deserves a disconnection rather than a lower score. */
-    public boolean shouldDisconnect() {
-      return disconnect;
+    /** Returns why the peer deserves a disconnection, or empty for a lower score only. */
+    public Optional<DisconnectReason> disconnectReason() {
+      return Optional.ofNullable(disconnect);
     }
   }
 }
