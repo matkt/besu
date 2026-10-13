@@ -92,7 +92,9 @@ public final class StorageTries {
     queue.clear();
     workers.shutdownNow();
     try {
-      workers.awaitTermination(1, TimeUnit.MINUTES);
+      if (!workers.awaitTermination(1, TimeUnit.MINUTES)) {
+        LOG.warn("Storage trie builds still running a minute after they were stopped");
+      }
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }

@@ -29,8 +29,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -48,6 +50,7 @@ public final class WorldStateTrieBuilder {
   private static final Logger LOG = LoggerFactory.getLogger(WorldStateTrieBuilder.class);
   private static final int PARTITIONS = 256;
   private static final int ACCOUNTS_PER_COMMIT = 10_000;
+  private static final int SLOTS_PER_CANCEL_CHECK = 65_536;
 
   private final SyncStateStorage storage;
   private final int threads;
@@ -55,6 +58,7 @@ public final class WorldStateTrieBuilder {
   private final AtomicLong slots = new AtomicLong();
   private final AtomicLong keptStorageTries = new AtomicLong();
   private final AtomicBoolean cancelled = new AtomicBoolean();
+  private final AtomicReference<RuntimeException> failure = new AtomicReference<>();
 
   public WorldStateTrieBuilder(final SyncStateStorage storage, final int threads) {
     this.storage = storage;
@@ -119,15 +123,27 @@ public final class WorldStateTrieBuilder {
       writer.commit();
       return new Result(root, rootNode[0], accounts.get(), slots.get(), keptStorageTries.get());
     } catch (final InterruptedException e) {
+      cancel();
       Thread.currentThread().interrupt();
       throw new CancellationException("trie build interrupted");
     } catch (final ExecutionException e) {
-      if (e.getCause() instanceof RuntimeException runtimeException) {
-        throw runtimeException;
-      }
-      throw new IllegalStateException("trie build failed", e.getCause());
+      cancel();
+      final RuntimeException first = failure.get();
+      throw first != null ? first : new IllegalStateException("trie build failed", e.getCause());
     } finally {
       executor.shutdownNow();
+      awaitPartitions(executor);
+    }
+  }
+
+  // no partition writes once the build returned
+  private static void awaitPartitions(final ExecutorService executor) {
+    try {
+      if (!executor.awaitTermination(1, TimeUnit.MINUTES)) {
+        LOG.warn("Trie build partitions still running a minute after the build stopped");
+      }
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -136,14 +152,21 @@ public final class WorldStateTrieBuilder {
     final byte[] to = RangeManager.MAX_RANGE.toArray();
     from[0] = (byte) prefix;
     to[0] = (byte) prefix;
-    final SyncStateStorage.TrieWriter writer = storage.trieWriter();
-    final PartitionVisitor visitor = new PartitionVisitor(writer);
-    storage.scan(Bytes32.wrap(from), Bytes32.wrap(to), visitor);
-    visitor.finishAccount();
-    final StackTrie.Item item = visitor.accountTrie.finishAsItem();
-    visitor.commitFixes();
-    writer.commit();
-    return item;
+    try {
+      final SyncStateStorage.TrieWriter writer = storage.trieWriter();
+      final PartitionVisitor visitor = new PartitionVisitor(writer);
+      storage.scan(Bytes32.wrap(from), Bytes32.wrap(to), visitor);
+      visitor.finishAccount();
+      final StackTrie.Item item = visitor.accountTrie.finishAsItem();
+      visitor.commitFixes();
+      writer.commit();
+      return item;
+    } catch (final RuntimeException e) {
+      // the other partitions stop too, and the build reports the first failure
+      failure.compareAndSet(null, e);
+      cancel();
+      throw e;
+    }
   }
 
   private final class PartitionVisitor implements SyncStateStorage.ScanVisitor {
@@ -154,6 +177,7 @@ public final class WorldStateTrieBuilder {
     private Bytes32 accountHash;
     private Bytes account;
     private StackTrie storageTrie;
+    private long partitionSlots;
 
     private PartitionVisitor(final SyncStateStorage.TrieWriter writer) {
       this.writer = writer;
@@ -188,6 +212,9 @@ public final class WorldStateTrieBuilder {
         LOG.debug("Dropping slot {} of missing account {}", slotHash, slotAccount);
         fixes().removeStorage(slotAccount, slotHash);
         return;
+      }
+      if (++partitionSlots % SLOTS_PER_CANCEL_CHECK == 0 && cancelled.get()) {
+        throw new CancellationException("trie build cancelled");
       }
       storageTrie.addLeaf(slotHash, RLP.encodeOne(value.trimLeadingZeros()));
       slots.incrementAndGet();

@@ -15,6 +15,10 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
@@ -26,10 +30,15 @@ import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -125,5 +134,42 @@ class WorldStateTrieBuilderTest {
 
       assertThat(result.root()).isEqualTo(world.root());
     }
+  }
+
+  @Test
+  void stopsEveryPartitionWhenOneFails() throws InterruptedException {
+    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+    SyncStorageFixture.randomWorld(new Random(3), 2000).writeFlat(storages.sync());
+    final SyncStateStorage storage = spy(storages.sync());
+    final IllegalStateException diskFailure = new IllegalStateException("disk failure");
+    final CountDownLatch failed = new CountDownLatch(1);
+    final CountDownLatch secondEnded = new CountDownLatch(1);
+    final AtomicBoolean secondCompleted = new AtomicBoolean();
+    doAnswer(
+            invocation -> {
+              final Bytes32 from = invocation.getArgument(0);
+              if (from.get(0) == 0) {
+                failed.countDown();
+                throw diskFailure;
+              }
+              if (from.get(0) != 1) {
+                return invocation.callRealMethod();
+              }
+              try {
+                // a database scan ignores interrupts
+                Uninterruptibles.awaitUninterruptibly(failed);
+                invocation.callRealMethod();
+                secondCompleted.set(true);
+                return null;
+              } finally {
+                secondEnded.countDown();
+              }
+            })
+        .when(storage)
+        .scan(any(), any(), any());
+
+    assertThatThrownBy(() -> new WorldStateTrieBuilder(storage, 4).build()).isSameAs(diskFailure);
+    assertThat(secondEnded.await(10, TimeUnit.SECONDS)).isTrue();
+    assertThat(secondCompleted).isFalse();
   }
 }
