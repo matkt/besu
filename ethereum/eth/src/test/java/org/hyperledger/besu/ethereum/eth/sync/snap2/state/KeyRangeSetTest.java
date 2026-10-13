@@ -33,6 +33,21 @@ class KeyRangeSetTest {
   }
 
   @Test
+  void measuresTheShareOfTheKeySpace() {
+    assertThat(KeyRangeSet.fraction(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE)).isEqualTo(1.0);
+    assertThat(KeyRangeSet.fraction(RangeManager.MIN_RANGE, key(0))).isLessThan(1e-70);
+  }
+
+  @Test
+  void mergesTheRangesOnBothSidesOfACarry() {
+    final KeyRangeSet set = new KeyRangeSet();
+    set.add(key(0x10), key(0xff));
+    set.add(key(0x100), key(0x1ff));
+
+    assertThat(set.snapshot()).containsExactly(entry(key(0x10), key(0x1ff)));
+  }
+
+  @Test
   void mergesAdjacentAndOverlappingRanges() {
     final KeyRangeSet set = new KeyRangeSet();
     set.add(key(10), key(20));

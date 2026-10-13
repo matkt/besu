@@ -31,7 +31,6 @@ import java.util.function.Function;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.MutableBytes;
-import org.apache.tuweni.units.bigints.UInt256;
 
 /**
  * This class helps to generate ranges according to several parameters (the start and the end of the
@@ -266,7 +265,12 @@ public class RangeManager {
    * the maximum value (overflow); callers paginating trie entries use the empty result to stop.
    */
   public static Optional<Bytes32> incrementBytes32(final Bytes32 value) {
-    final UInt256 incremented = UInt256.fromBytes(value).add(UInt256.ONE);
-    return incremented.isZero() ? Optional.empty() : Optional.of(incremented);
+    final byte[] next = value.toArray();
+    for (int i = next.length - 1; i >= 0; i--) {
+      if (++next[i] != 0) {
+        return Optional.of(Bytes32.wrap(next));
+      }
+    }
+    return Optional.empty();
   }
 }

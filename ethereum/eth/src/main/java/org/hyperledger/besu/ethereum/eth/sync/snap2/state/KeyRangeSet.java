@@ -14,9 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 
+import java.math.BigInteger;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -27,7 +27,16 @@ import org.apache.tuweni.bytes.Bytes32;
 /** Thread-safe set of disjoint, inclusive key ranges; adjacent ranges are merged. */
 final class KeyRangeSet {
 
+  private static final double KEY_SPACE = BigInteger.ONE.shiftLeft(256).doubleValue();
+
   private final TreeMap<Bytes32, Bytes32> ranges = new TreeMap<>();
+
+  /** Returns the share of the key space covered by {@code [from, to]}. */
+  static double fraction(final Bytes32 from, final Bytes32 to) {
+    final BigInteger size =
+        to.toUnsignedBigInteger().subtract(from.toUnsignedBigInteger()).add(BigInteger.ONE);
+    return size.doubleValue() / KEY_SPACE;
+  }
 
   /** Adds {@code [start, end]}. */
   public synchronized void add(final Bytes32 start, final Bytes32 end) {
@@ -75,7 +84,7 @@ final class KeyRangeSet {
   public synchronized double coverage() {
     double total = 0;
     for (final Map.Entry<Bytes32, Bytes32> range : ranges.entrySet()) {
-      total += Keys.fraction(range.getKey(), range.getValue());
+      total += fraction(range.getKey(), range.getValue());
     }
     return total;
   }
@@ -88,6 +97,7 @@ final class KeyRangeSet {
 
   // whether a range ending at end touches or overlaps a range starting at start
   private static boolean touches(final Bytes32 end, final Bytes32 start) {
-    return end.compareTo(start) >= 0 || Keys.next(end).map(start::equals).orElse(true);
+    return end.compareTo(start) >= 0
+        || RangeManager.incrementBytes32(end).map(start::equals).orElse(true);
   }
 }

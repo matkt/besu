@@ -122,7 +122,7 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
         return;
       }
       stream.close();
-      final Optional<Bytes32> next = Keys.next(Bytes32.wrap(accountKey));
+      final Optional<Bytes32> next = RangeManager.incrementBytes32(Bytes32.wrap(accountKey));
       if (next.isEmpty()) {
         stream = Stream.empty();
         iterator = Iterators.peekingIterator(Collections.emptyIterator());

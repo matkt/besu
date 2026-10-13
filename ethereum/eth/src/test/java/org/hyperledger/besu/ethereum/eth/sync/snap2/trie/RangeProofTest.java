@@ -16,7 +16,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 
 import java.util.ArrayList;
@@ -205,6 +205,6 @@ class RangeProofTest {
   }
 
   private static Bytes32 keyAfter(final Bytes32 key) {
-    return Keys.next(key).orElseThrow();
+    return RangeManager.incrementBytes32(key).orElseThrow();
   }
 }

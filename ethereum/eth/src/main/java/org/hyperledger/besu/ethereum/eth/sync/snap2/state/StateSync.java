@@ -23,7 +23,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTries;
 import org.hyperledger.besu.ethereum.rlp.RLP;
@@ -498,7 +497,7 @@ public final class StateSync {
             if (persisted.done) {
               task.done = true;
             } else {
-              task.next = Keys.next(persisted.coveredEnd).orElseThrow();
+              task.next = RangeManager.incrementBytes32(persisted.coveredEnd).orElseThrow();
             }
             persisted.storageTasks.forEach(this::queueStorage);
             persisted.codeHashes.forEach(this::queueCode);
@@ -706,7 +705,7 @@ public final class StateSync {
         if (persisted.lastComplete) {
           chunk.done = true;
         } else {
-          chunk.next = Keys.next(persisted.lastSlot).orElseThrow();
+          chunk.next = RangeManager.incrementBytes32(persisted.lastSlot).orElseThrow();
         }
       }
       return;
@@ -729,8 +728,8 @@ public final class StateSync {
   // a storage too large for one response is downloaded in parallel slot ranges, as many as the
   // density of the slots returned so far suggests: a small storage cut short stays in one range
   private void splitIntoChunks(final StorageTask task, final Bytes32 lastSlot, final int returned) {
-    final Bytes32 start = Keys.next(lastSlot).orElseThrow();
-    final double covered = Keys.fraction(RangeManager.MIN_RANGE, lastSlot);
+    final Bytes32 start = RangeManager.incrementBytes32(lastSlot).orElseThrow();
+    final double covered = KeyRangeSet.fraction(RangeManager.MIN_RANGE, lastSlot);
     final double remainingSlots = returned * (1 - covered) / covered;
     final double requests = remainingSlots * BYTES_PER_SLOT / config.responseBytes();
     final int parts =
