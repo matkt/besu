@@ -112,7 +112,8 @@ final class SyncAttempt {
             context.config().bodiesPerRequest(),
             context.config().maxBodyRanges(),
             context.indexTransactions(),
-            context.executor());
+            context.executor(),
+            context.writer());
     final CompletableFuture<Void> blocks = bodyLoop();
 
     final CompletableFuture<BlockHeader> main =

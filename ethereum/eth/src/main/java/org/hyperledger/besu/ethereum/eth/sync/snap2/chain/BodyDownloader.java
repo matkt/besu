@@ -67,6 +67,7 @@ public final class BodyDownloader {
   private final int maxRanges;
   private final long memory = Math.min(MAX_MEMORY, Runtime.getRuntime().maxMemory() / 16);
   private final boolean indexTransactions;
+  private final Executor executor;
   private final Executor writer;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
@@ -92,7 +93,8 @@ public final class BodyDownloader {
    * @param floor the highest block whose body is not needed, its total difficulty stored
    * @param maxRangeBlocks most blocks per range
    * @param maxRanges most ranges downloaded at once
-   * @param writer runs the reads of headers and the writes of bodies
+   * @param executor runs the reads of headers
+   * @param writer stores the downloaded blocks, its threads bounding the stores running at once
    */
   public BodyDownloader(
       final RequestSender sender,
@@ -102,6 +104,7 @@ public final class BodyDownloader {
       final int maxRangeBlocks,
       final int maxRanges,
       final boolean indexTransactions,
+      final Executor executor,
       final Executor writer) {
     this.sender = sender;
     this.protocolSchedule = protocolSchedule;
@@ -110,6 +113,7 @@ public final class BodyDownloader {
     this.maxRangeBlocks = maxRangeBlocks;
     this.maxRanges = maxRanges;
     this.indexTransactions = indexTransactions;
+    this.executor = executor;
     this.writer = writer;
   }
 
@@ -208,7 +212,7 @@ public final class BodyDownloader {
   }
 
   private void fetch(final long from, final long to) {
-    CompletableFuture.supplyAsync(() -> headers(from, to), writer)
+    CompletableFuture.supplyAsync(() -> headers(from, to), executor)
         .thenCompose(this::bodies)
         .thenCompose(this::receipts)
         // a range being stored no longer waits for peers, it only holds memory
@@ -234,7 +238,7 @@ public final class BodyDownloader {
     }
     LOG.debug("Bodies of blocks {} to {} failed, retrying: {}", from, to, error.getMessage());
     // a failed range waits a little before being asked again
-    CompletableFuture.delayedExecutor(1, TimeUnit.SECONDS, writer)
+    CompletableFuture.delayedExecutor(1, TimeUnit.SECONDS, executor)
         .execute(() -> release(from, to, null));
   }
 

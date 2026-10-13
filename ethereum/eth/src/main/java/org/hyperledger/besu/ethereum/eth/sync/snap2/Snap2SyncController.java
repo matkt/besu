@@ -61,6 +61,7 @@ final class Snap2SyncController implements SnapSyncController {
   private static final long PROGRESS_LOG_SECONDS = 30;
   // rounds of requests before a block access list counts as unavailable
   private static final int BAL_ROUNDS = 60;
+  private static final int STORE_THREADS = 4;
 
   private final Snap2Configuration config;
   private final ProtocolSchedule protocolSchedule;
@@ -78,6 +79,10 @@ final class Snap2SyncController implements SnapSyncController {
 
   private final ExecutorService executor =
       Executors.newCachedThreadPool(Thread.ofPlatform().name("snap2-sync-", 0).daemon().factory());
+  // the downloaded blocks queue for a few threads, rather than each holding one on a slow disk
+  private final ExecutorService writer =
+      Executors.newFixedThreadPool(
+          STORE_THREADS, Thread.ofPlatform().name("snap2-store-", 0).daemon().factory());
   private final ScheduledExecutorService control =
       Executors.newSingleThreadScheduledExecutor(
           Thread.ofPlatform().name("snap2-control").daemon().factory());
@@ -186,6 +191,7 @@ final class Snap2SyncController implements SnapSyncController {
             new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest()),
             new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), BAL_ROUNDS),
             executor,
+            writer,
             control,
             () -> stopped,
             metrics);
@@ -319,5 +325,6 @@ final class Snap2SyncController implements SnapSyncController {
     }
     control.shutdownNow();
     executor.shutdownNow();
+    writer.shutdownNow();
   }
 }

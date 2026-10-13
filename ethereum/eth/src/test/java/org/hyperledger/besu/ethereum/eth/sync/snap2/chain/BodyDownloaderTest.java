@@ -49,12 +49,15 @@ class BodyDownloaderTest {
   private final FakeSnapNetwork network = new FakeSnapNetwork();
   private final TestChain chain =
       new TestChain(random, TestWorld.random(random, 20, 0, 0), network, 1, 1);
-  private final ExecutorService writer = Executors.newFixedThreadPool(4);
+  private final ExecutorService executor = Executors.newFixedThreadPool(4);
+  // one thread, so that a store in progress holds back every other store
+  private final ExecutorService writer = Executors.newSingleThreadExecutor();
   private MutableBlockchain blockchain;
 
   @AfterEach
   void tearDown() {
     network.stop();
+    executor.shutdownNow();
     writer.shutdownNow();
   }
 
@@ -121,11 +124,11 @@ class BodyDownloaderTest {
         .unsafeStoreSyncBodiesAndReceipts(any(), anyBoolean());
     final BodyDownloader bodies =
         new BodyDownloader(
-            network, ProtocolScheduleFixture.MAINNET, blockchain, 0, 5, 2, false, writer);
+            network, ProtocolScheduleFixture.MAINNET, blockchain, 0, 5, 2, false, executor, writer);
 
     bodies.download(1, 40);
 
-    // the two ranges allowed on the network move on while the first ones wait to be stored
+    // the two ranges allowed on the network move on while the first ones wait for the writer
     await().atMost(Duration.ofSeconds(10)).until(() -> network.requestCount() >= 4);
     storesHeld.countDown();
     awaitStoredUpTo(bodies, 40);
@@ -179,6 +182,7 @@ class BodyDownloaderTest {
         maxRangeBlocks,
         maxRanges,
         false,
+        executor,
         writer);
   }
 

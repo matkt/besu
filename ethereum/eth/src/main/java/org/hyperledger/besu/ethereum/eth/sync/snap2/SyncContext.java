@@ -49,6 +49,7 @@ record SyncContext(
     HeaderFetcher fetcher,
     BalFetcher balFetcher,
     ExecutorService executor,
+    ExecutorService writer,
     ScheduledExecutorService control,
     BooleanSupplier stopped,
     Snap2Metrics metrics) {}
