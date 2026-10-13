@@ -119,9 +119,7 @@ public final class StorageTries {
 
   private void build(final Bytes32 accountHash, final SyncStateStorage.TrieWriter writer) {
     final Optional<Hash> expected = storageRoot(accountHash);
-    if (expected.isEmpty()
-        || expected.get().equals(Hash.EMPTY_TRIE_HASH)
-        || expected.get().equals(Accounts.UNKNOWN_STORAGE_ROOT)) {
+    if (expected.isEmpty() || !Accounts.hasBuildableStorage(expected.get())) {
       return;
     }
     final Bytes[] rootNode = new Bytes[1];

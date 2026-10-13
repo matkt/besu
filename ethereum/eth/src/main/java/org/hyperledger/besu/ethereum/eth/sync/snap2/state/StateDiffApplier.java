@@ -80,8 +80,7 @@ public final class StateDiffApplier {
       }
 
       if (change.code().isPresent() && !change.code().get().isEmpty()) {
-        batch.putCode(
-            accountHash, Bytes32.wrap(updated.getCodeHash().getBytes()), change.code().get());
+        batch.putCode(Bytes32.wrap(updated.getCodeHash().getBytes()), change.code().get());
       }
       if (Accounts.isEmpty(updated)) {
         // EIP-161 and EIP-7523: an empty account does not exist

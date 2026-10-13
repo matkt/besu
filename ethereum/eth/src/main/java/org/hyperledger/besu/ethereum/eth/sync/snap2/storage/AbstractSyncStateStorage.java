@@ -23,7 +23,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Iterators;
@@ -35,6 +34,9 @@ import org.apache.tuweni.bytes.Bytes32;
 /** Flat state kept in two segments: accounts keyed by hash and slots keyed by both hashes. */
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
+  // bounds the write batch a writer keeps before committing
+  protected static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
+  private static final int DELETES_PER_COMMIT = 10_000;
   private static final byte[] ZEROS = new byte[32];
   private static final byte[] ONES = RangeManager.MAX_RANGE.toArray();
 
@@ -136,12 +138,21 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
   }
 
   @Override
-  public void forEachSlot(final Bytes32 accountHash, final Consumer<Bytes32> slotHashes) {
+  public void deleteStorage(final Bytes32 accountHash) {
     final byte[] prefix = accountHash.toArrayUnsafe();
     try (Stream<Pair<byte[], byte[]>> slots =
         flat.streamFromKey(storageSegment, concat(prefix, ZEROS), concat(prefix, ONES))) {
-      slots.forEach(
-          slot -> slotHashes.accept(Bytes32.wrap(Arrays.copyOfRange(slot.getKey(), 32, 64))));
+      Batch batch = batch();
+      int pending = 0;
+      for (final Iterator<Pair<byte[], byte[]>> it = slots.iterator(); it.hasNext(); ) {
+        batch.removeStorage(accountHash, Bytes32.wrap(it.next().getKey(), 32));
+        if (++pending == DELETES_PER_COMMIT) {
+          batch.commit();
+          batch = batch();
+          pending = 0;
+        }
+      }
+      batch.commit();
     }
   }
 

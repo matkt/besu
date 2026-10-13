@@ -42,6 +42,11 @@ public final class Accounts {
         account.getNonce(), account.getBalance(), storageRoot, account.getCodeHash());
   }
 
+  /** Returns whether a storage trie can be built for this root: neither empty nor unknown. */
+  public static boolean hasBuildableStorage(final Hash storageRoot) {
+    return !storageRoot.equals(Hash.EMPTY_TRIE_HASH) && !storageRoot.equals(UNKNOWN_STORAGE_ROOT);
+  }
+
   /** Returns whether the account is empty in the EIP-161 sense. */
   public static boolean isEmpty(final PmtStateTrieAccountValue account) {
     return account.getNonce() == 0

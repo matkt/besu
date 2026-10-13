@@ -167,8 +167,7 @@ public final class WorldStateTrieBuilder {
         throw new CancellationException("trie build cancelled");
       }
       final Hash storageRoot = Accounts.decode(rlp).getStorageRoot();
-      if (!storageRoot.equals(Hash.EMPTY_TRIE_HASH)
-          && !storageRoot.equals(Accounts.UNKNOWN_STORAGE_ROOT)
+      if (Accounts.hasBuildableStorage(storageRoot)
           && storage.hasStorageTrie(hash, Bytes32.wrap(storageRoot.getBytes()))) {
         accountTrie.addLeaf(hash, rlp);
         accounts.incrementAndGet();
@@ -202,13 +201,7 @@ public final class WorldStateTrieBuilder {
       final PmtStateTrieAccountValue value = Accounts.decode(account);
       Bytes leaf = account;
       if (!value.getStorageRoot().getBytes().equals(storageRoot)) {
-        leaf =
-            Accounts.encode(
-                new PmtStateTrieAccountValue(
-                    value.getNonce(),
-                    value.getBalance(),
-                    Hash.wrap(storageRoot),
-                    value.getCodeHash()));
+        leaf = Accounts.encode(Accounts.withStorageRoot(value, Hash.wrap(storageRoot)));
         fixes().putAccount(accountHash, leaf);
       }
       accountTrie.addLeaf(accountHash, leaf);

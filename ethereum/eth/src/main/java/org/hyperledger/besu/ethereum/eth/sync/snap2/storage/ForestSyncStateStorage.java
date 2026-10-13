@@ -35,9 +35,6 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
 
-  // bounds the write batch each builder thread keeps before committing
-  private static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
-
   private final ForestWorldStateKeyValueStorage forest;
 
   public ForestSyncStateStorage(
@@ -90,7 +87,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
       }
 
       @Override
-      public void putCode(final Bytes32 accountHash, final Bytes32 codeHash, final Bytes code) {
+      public void putCode(final Bytes32 codeHash, final Bytes code) {
         if (codeUpdater == null) {
           codeUpdater = forest.unloggedUpdater();
         }

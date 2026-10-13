@@ -25,19 +25,13 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Consumer;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /** Sync storage writing straight into the Bonsai flat database and trie node store. */
 public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
-
-  // bounds the write batch each builder thread keeps before committing
-  private static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
 
   private final BonsaiWorldStateKeyValueStorage bonsai;
 
@@ -51,61 +45,41 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     return flat.containsKey(CODE_STORAGE, codeHash.toArrayUnsafe());
   }
 
-  // writes are kept until the commit, which applies them in one short transaction and retries it
   @Override
   public Batch batch() {
+    final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
+    final SegmentedKeyValueStorageTransaction tx = updater.getWorldStateTransaction();
     return new Batch() {
-      private final List<Consumer<BonsaiWorldStateKeyValueStorage.Updater>> writes =
-          new ArrayList<>();
-
       @Override
       public void putAccount(final Bytes32 accountHash, final Bytes account) {
-        final byte[] key = accountHash.toArray();
-        final byte[] value = account.toArray();
-        writes.add(
-            updater -> updater.getWorldStateTransaction().put(ACCOUNT_INFO_STATE, key, value));
+        tx.put(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe(), account.toArrayUnsafe());
       }
 
       @Override
       public void removeAccount(final Bytes32 accountHash) {
-        final byte[] key = accountHash.toArray();
-        writes.add(updater -> updater.getWorldStateTransaction().remove(ACCOUNT_INFO_STATE, key));
+        tx.remove(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe());
       }
 
       @Override
       public void putStorage(
           final Bytes32 accountHash, final Bytes32 slotHash, final Bytes32 value) {
-        final byte[] key = slotKey(accountHash, slotHash);
-        final byte[] stored = value.toArray();
-        writes.add(
-            updater ->
-                updater.getWorldStateTransaction().put(ACCOUNT_STORAGE_STORAGE, key, stored));
+        tx.put(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash), value.toArrayUnsafe());
       }
 
       @Override
       public void removeStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
-        final byte[] key = slotKey(accountHash, slotHash);
-        writes.add(
-            updater -> updater.getWorldStateTransaction().remove(ACCOUNT_STORAGE_STORAGE, key));
+        tx.remove(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash));
       }
 
+      // stored by code hash, which prepareForSync requires
       @Override
-      public void putCode(final Bytes32 accountHash, final Bytes32 codeHash, final Bytes code) {
-        final Hash account = Hash.wrap(accountHash.copy());
-        final Hash hash = Hash.wrap(codeHash.copy());
-        final Bytes copy = code.copy();
-        writes.add(updater -> updater.putCode(account, hash, copy));
+      public void putCode(final Bytes32 codeHash, final Bytes code) {
+        updater.putCode(Hash.ZERO, Hash.wrap(codeHash), code);
       }
 
       @Override
       public void commit() {
-        StorageRetry.run(
-            () -> {
-              final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
-              writes.forEach(write -> write.accept(updater));
-              updater.commitComposedOnly();
-            });
-        writes.clear();
+        updater.commitComposedOnly();
       }
     };
   }
@@ -117,43 +91,37 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
         .isPresent();
   }
 
-  // nodes are kept until the commit, which writes them in one short transaction and retries it
   @Override
   public TrieWriter trieWriter() {
     return new TrieWriter() {
-      private final List<Bytes[]> nodes = new ArrayList<>();
+      private BonsaiWorldStateKeyValueStorage.Updater updater;
       private long pendingBytes;
 
       @Override
       public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        add(location.copy(), hash, rlp);
+        put(location, hash, rlp);
       }
 
       @Override
       public void storageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        add(TrieNodeKey.of(Hash.wrap(accountHash), location).copy(), hash, rlp);
+        put(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
       }
 
       @Override
       public void commit() {
-        if (nodes.isEmpty()) {
-          return;
+        if (updater != null) {
+          updater.commitComposedOnly();
+          updater = null;
+          pendingBytes = 0;
         }
-        StorageRetry.run(
-            () -> {
-              final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
-              for (final Bytes[] node : nodes) {
-                updater.putTrieNode(node[0], Bytes32.wrap(node[1]), node[2]);
-              }
-              updater.commitComposedOnly();
-            });
-        nodes.clear();
-        pendingBytes = 0;
       }
 
-      private void add(final Bytes key, final Bytes32 hash, final Bytes rlp) {
-        nodes.add(new Bytes[] {key, hash.copy(), rlp.copy()});
+      private void put(final Bytes key, final Bytes32 hash, final Bytes rlp) {
+        if (updater == null) {
+          updater = newUpdater();
+        }
+        updater.putTrieNode(key, hash, rlp);
         pendingBytes += key.size() + rlp.size();
         if (pendingBytes >= BYTES_PER_COMMIT) {
           commit();

@@ -14,14 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
-import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff.AccountChange;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +32,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
-import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +45,6 @@ public final class ReorgRecovery {
 
   private static final Logger LOG = LoggerFactory.getLogger(ReorgRecovery.class);
   private static final int ATTEMPTS = 10;
-  private static final int REFETCH_BYTES = 4096;
 
   private final StateSync stateSync;
   private final SyncStateStorage storage;
@@ -152,41 +148,19 @@ public final class ReorgRecovery {
       final Bytes32 hash,
       final Map<Bytes32, Optional<Bytes32>> storageRoots) {
     final AccountRangeRequest request =
-        new AccountRangeRequest(pivot, hash, hash, REFETCH_BYTES, "account_refetch");
+        new AccountRangeRequest(pivot, hash, hash, StateSync.SINGLE_ITEM_BYTES, "account_refetch");
     return sender
         .submitWithRetries(request, ATTEMPTS)
         .thenAccept(
-            response -> {
-              final AccountRangeRequest.Result result = response.value();
-              final boolean exists =
-                  !result.hashes().isEmpty() && result.hashes().getFirst().equals(hash);
-              write(
-                  pivot,
-                  batch -> {
-                    final StorageTask task = stateSync.coverage().storageTask(hash);
-                    if (!exists) {
-                      batch.removeAccount(hash);
-                      storage.deleteStorage(hash);
-                      stateSync.coverage().removeStorageTask(hash);
-                      storageRoots.put(hash, Optional.empty());
-                      return;
-                    }
-                    final Bytes account = result.accounts().getFirst();
-                    final PmtStateTrieAccountValue value = Accounts.decode(account);
-                    batch.putAccount(hash, account);
-                    final Bytes32 storageRoot = Bytes32.wrap(value.getStorageRoot().getBytes());
-                    if (value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
-                      storage.deleteStorage(hash);
-                      stateSync.coverage().removeStorageTask(hash);
-                      storageRoots.put(hash, Optional.empty());
-                    } else {
-                      if (task != null) {
-                        task.refreshRoot(storageRoot);
-                      }
-                      storageRoots.put(hash, Optional.of(storageRoot.copy()));
-                    }
-                  });
-            });
+            response ->
+                write(
+                    pivot,
+                    batch ->
+                        storageRoots.put(
+                            hash,
+                            stateSync
+                                .writeRefetchedAccount(batch, hash, response.value())
+                                .map(Bytes32::copy))));
   }
 
   private CompletableFuture<Void> refetchSlot(
@@ -196,7 +170,12 @@ public final class ReorgRecovery {
       final Bytes32 slot) {
     final StorageRangesRequest request =
         new StorageRangesRequest(
-            pivot, List.of(new StorageTask(account, storageRoot)), slot, slot, null, REFETCH_BYTES);
+            pivot,
+            List.of(new StorageTask(account, storageRoot)),
+            slot,
+            slot,
+            null,
+            StateSync.SINGLE_ITEM_BYTES);
     return sender
         .submitWithRetries(request, ATTEMPTS)
         .thenAccept(

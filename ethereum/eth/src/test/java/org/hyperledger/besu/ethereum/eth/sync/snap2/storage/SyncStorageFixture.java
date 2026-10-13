@@ -150,7 +150,7 @@ public final class SyncStorageFixture {
       storage.forEach(
           (account, slots) ->
               slots.forEach((slot, value) -> batch.putStorage(account, slot, value)));
-      codes.forEach((codeHash, code) -> batch.putCode(Bytes32.ZERO, codeHash, code));
+      codes.forEach((codeHash, code) -> batch.putCode(codeHash, code));
       batch.commit();
     }
   }

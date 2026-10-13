@@ -37,6 +37,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -60,7 +61,8 @@ import org.slf4j.LoggerFactory;
 public final class StateSync {
 
   private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
-  private static final int REFRESH_BYTES = 4096;
+  // response size of a request for one account or one slot
+  static final int SINGLE_ITEM_BYTES = 4096;
   private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
@@ -713,7 +715,7 @@ public final class StateSync {
     refreshesInFlight++;
     final AccountRangeRequest request =
         new AccountRangeRequest(
-            current, task.accountHash(), task.accountHash(), REFRESH_BYTES, "account_refresh");
+            current, task.accountHash(), task.accountHash(), SINGLE_ITEM_BYTES, "account_refresh");
     scheduler
         .submit(request, excluded)
         .whenCompleteAsync(
@@ -749,26 +751,43 @@ public final class StateSync {
           if (!isPending(task)) {
             return;
           }
-          final Bytes32 hash = task.accountHash();
           final SyncStateStorage.Batch batch = storage.batch();
-          if (result.hashes().isEmpty() || !result.hashes().getFirst().equals(hash)) {
-            LOG.debug("Account {} no longer exists at the pivot, dropping it", hash);
-            batch.removeAccount(hash);
-            storage.deleteStorage(hash);
-            coverage.removeStorageTask(hash);
-          } else {
-            final Bytes account = result.accounts().getFirst();
-            final PmtStateTrieAccountValue value = Accounts.decode(account);
-            batch.putAccount(hash, account);
-            if (value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
-              storage.deleteStorage(hash);
-              coverage.removeStorageTask(hash);
-            } else {
-              task.refreshRoot(Bytes32.wrap(value.getStorageRoot().getBytes()));
-            }
-          }
+          writeRefetchedAccount(batch, task.accountHash(), result);
           batch.commit();
         });
+  }
+
+  /**
+   * Writes an account fetched again at the pivot, or removes it if it is gone; its storage task
+   * follows. Callers hold the pivot lock.
+   *
+   * @return the storage root of the account, empty if it has no storage
+   */
+  Optional<Bytes32> writeRefetchedAccount(
+      final SyncStateStorage.Batch batch,
+      final Bytes32 hash,
+      final AccountRangeRequest.Result result) {
+    if (!result.startsWith(hash)) {
+      LOG.debug("Account {} no longer exists at the pivot, dropping it", hash);
+      batch.removeAccount(hash);
+      storage.deleteStorage(hash);
+      coverage.removeStorageTask(hash);
+      return Optional.empty();
+    }
+    final Bytes account = result.accounts().getFirst();
+    batch.putAccount(hash, account);
+    final Hash storageRoot = Accounts.decode(account).getStorageRoot();
+    if (storageRoot.equals(Hash.EMPTY_TRIE_HASH)) {
+      storage.deleteStorage(hash);
+      coverage.removeStorageTask(hash);
+      return Optional.empty();
+    }
+    final Bytes32 root = Bytes32.wrap(storageRoot.getBytes());
+    final StorageTask task = coverage.storageTask(hash);
+    if (task != null) {
+      task.refreshRoot(root);
+    }
+    return Optional.of(root);
   }
 
   private boolean sendCodes() {
@@ -828,7 +847,7 @@ public final class StateSync {
         withoutMoves(
             () -> {
               final SyncStateStorage.Batch batch = storage.batch();
-              received.forEach((hash, code) -> batch.putCode(Bytes32.ZERO, hash, code));
+              received.forEach((hash, code) -> batch.putCode(hash, code));
               batch.commit();
             });
     if (!written) {

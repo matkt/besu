@@ -18,7 +18,6 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 
 import java.util.Optional;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -47,9 +46,6 @@ public interface SyncStateStorage {
    */
   void scan(Bytes32 from, Bytes32 to, ScanVisitor visitor);
 
-  /** Visits the hashes of the slots stored for an account, without loading them all. */
-  void forEachSlot(Bytes32 accountHash, Consumer<Bytes32> slotHashes);
-
   /** Visits the slots stored for an account in key order, with their stored values. */
   void forEachSlotValue(Bytes32 accountHash, BiConsumer<Bytes32, Bytes> slots);
 
@@ -57,21 +53,7 @@ public interface SyncStateStorage {
   boolean hasStorageTrie(Bytes32 accountHash, Bytes32 storageRoot);
 
   /** Removes every slot of an account, committing in bounded batches. */
-  default void deleteStorage(final Bytes32 accountHash) {
-    final Batch[] batch = {batch()};
-    final int[] pending = {0};
-    forEachSlot(
-        accountHash,
-        slot -> {
-          batch[0].removeStorage(accountHash, slot);
-          if (++pending[0] >= 10_000) {
-            batch[0].commit();
-            batch[0] = batch();
-            pending[0] = 0;
-          }
-        });
-    batch[0].commit();
-  }
+  void deleteStorage(Bytes32 accountHash);
 
   /** Creates a writer of trie nodes, not shared between threads. */
   TrieWriter trieWriter();
@@ -99,7 +81,7 @@ public interface SyncStateStorage {
 
     void removeStorage(Bytes32 accountHash, Bytes32 slotHash);
 
-    void putCode(Bytes32 accountHash, Bytes32 codeHash, Bytes code);
+    void putCode(Bytes32 codeHash, Bytes code);
 
     void commit();
   }

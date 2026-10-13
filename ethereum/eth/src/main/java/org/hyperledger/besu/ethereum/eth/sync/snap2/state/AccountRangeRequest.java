@@ -38,7 +38,12 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
    * @param accounts the full account encodings
    * @param hasMore whether accounts exist after the last one
    */
-  record Result(List<Bytes32> hashes, List<Bytes> accounts, boolean hasMore) {}
+  record Result(List<Bytes32> hashes, List<Bytes> accounts, boolean hasMore) {
+    /** Returns whether the first account served is this one, as when asked for it alone. */
+    boolean startsWith(final Bytes32 hash) {
+      return !hashes.isEmpty() && hashes.getFirst().equals(hash);
+    }
+  }
 
   final StateSync.Pivot pivot;
   final Bytes32 origin;
