@@ -24,7 +24,8 @@ public interface SortedWriter {
    *
    * @param key the key
    * @param value the value
-   * @throws StorageException problem encountered when writing the entry
+   * @throws StorageException problem encountered when writing the entry, or a key not above the
+   *     previous one
    */
   void put(byte[] key, byte[] value) throws StorageException;
 

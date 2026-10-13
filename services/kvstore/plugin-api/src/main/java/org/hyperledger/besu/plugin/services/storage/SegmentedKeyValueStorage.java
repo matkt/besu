@@ -192,7 +192,7 @@ public interface SegmentedKeyValueStorage extends Closeable {
       @Override
       public void put(final byte[] key, final byte[] value) {
         if (last != null && Arrays.compareUnsigned(key, last) <= 0) {
-          throw new IllegalArgumentException("keys must be added in increasing order");
+          throw new StorageException("keys must be added in increasing order");
         }
         last = key;
         transaction.put(segment, key, value);

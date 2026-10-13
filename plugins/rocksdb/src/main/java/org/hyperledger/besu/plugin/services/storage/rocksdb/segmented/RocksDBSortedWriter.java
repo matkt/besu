@@ -27,7 +27,6 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import org.rocksdb.EnvOptions;
-import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.SstFileWriter;
@@ -41,7 +40,6 @@ final class RocksDBSortedWriter implements SortedWriter {
   private final RocksDBColumnarKeyValueStorage storage;
   private final SegmentIdentifier segment;
   private final Path file;
-  // the ingestion only accepts files written with the column family's own options
   private final Options options;
   private final EnvOptions envOptions = new EnvOptions();
   private final SstFileWriter writer;
@@ -54,7 +52,7 @@ final class RocksDBSortedWriter implements SortedWriter {
     this.storage = storage;
     this.segment = segment;
     this.file = directory.resolve(UUID.randomUUID() + ".sst");
-    this.options = new Options(storage.options, storage.columnFamilyOptions(segment));
+    this.options = storage.sstFileOptions(segment);
     this.writer = new SstFileWriter(envOptions, options);
     try {
       Files.createDirectories(directory);
@@ -103,13 +101,7 @@ final class RocksDBSortedWriter implements SortedWriter {
       // RocksDB refuses to finish a file without entries, and there is nothing to add anyway
       if (!empty) {
         writer.finish();
-        try (final IngestExternalFileOptions ingest =
-            new IngestExternalFileOptions().setMoveFiles(true)) {
-          storage
-              .getDB()
-              .ingestExternalFile(
-                  storage.safeColumnHandle(segment), List.of(file.toString()), ingest);
-        }
+        storage.ingest(segment, List.of(file.toString()), true);
       }
     } catch (final RocksDBException e) {
       throw new StorageException(e);
