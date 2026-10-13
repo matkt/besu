@@ -604,9 +604,7 @@ public final class RequestScheduler implements RequestSender {
 
   // range requests are the same in snap/1 and snap/2, so any snap peer serves them
   private static boolean speaks(final EthPeer peer, final Protocol protocol) {
-    return protocol == Protocol.ETH
-        || peer.getAgreedCapabilities().stream()
-            .anyMatch(capability -> SnapProtocol.NAME.equals(capability.getName()));
+    return protocol == Protocol.ETH || SnapProtocol.isAgreed(peer.getAgreedCapabilities());
   }
 
   private static String protocolName(final Protocol protocol) {

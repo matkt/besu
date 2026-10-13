@@ -665,9 +665,7 @@ public class EthPeers implements PeerSelector {
                       });
             } else if (syncMode == SyncMode.SNAP2) {
               // any snap peer serves the state ranges; see snapRank for the preferred ones
-              peer.setIsServingSnap(
-                  peer.getAgreedCapabilities().stream()
-                      .anyMatch(capability -> SnapProtocol.NAME.equals(capability.getName())));
+              peer.setIsServingSnap(SnapProtocol.isAgreed(peer.getAgreedCapabilities()));
               isServingSnapFuture = CompletableFuture.completedFuture(null);
             } else {
               isServingSnapFuture = CompletableFuture.completedFuture(null);
@@ -865,7 +863,11 @@ public class EthPeers implements PeerSelector {
     final Bytes id = peer.getId();
     if (!randomPeerPriority) {
 
-      if (peerCount() >= peerUpperBound && !madeRoomForSnap2Sync(peer)) {
+      final Optional<EthPeer> worseSnapPeer =
+          peerCount() >= peerUpperBound ? worseSnapPeer(peer) : Optional.empty();
+      if (worseSnapPeer.isPresent()) {
+        replacePeer(worseSnapPeer.get(), peer);
+      } else if (peerCount() >= peerUpperBound) {
         final long numSnapServers = numberOfSnapServers();
         final boolean inboundLimitExceeded = inboundInitiatedConnectionLimitExceeded();
         // three reasons why we would disconnect an existing peer to accommodate the new peer
@@ -887,30 +889,13 @@ public class EthPeers implements PeerSelector {
               .filter(inboundLimitExceeded ? p -> p.isInboundInitiated() : p -> true)
               .min(MOST_USEFUL_PEER)
               .ifPresentOrElse(
-                  pe -> {
-                    pe.ethPeer().disconnect(DisconnectMessage.DisconnectReason.TOO_MANY_PEERS);
-                    LOG.atTrace()
-                        .setMessage("Disconnecting peer {} to be replaced by prioritised peer {}")
-                        .addArgument(pe.ethPeer().getLoggableId())
-                        .addArgument(peer.getLoggableId())
-                        .log();
-                  },
+                  pe -> replacePeer(pe.ethPeer(), peer),
                   () -> // disconnect the least useful peer
                   activeConnections.values().stream()
                           .filter(p -> !canExceedPeerLimits(p.getId()))
                           .map(EthPeerImmutableAttributes::from)
                           .min(MOST_USEFUL_PEER)
-                          .ifPresent(
-                              p -> {
-                                p.ethPeer()
-                                    .disconnect(DisconnectMessage.DisconnectReason.TOO_MANY_PEERS);
-                                LOG.atTrace()
-                                    .setMessage(
-                                        "Disconnecting peer {} to be replaced by prioritised peer {}")
-                                    .addArgument(p.ethPeer().getLoggableId())
-                                    .addArgument(peer.getLoggableId())
-                                    .log();
-                              }));
+                          .ifPresent(p -> replacePeer(p.ethPeer(), peer)));
         } else {
           LOG.atTrace()
               .setMessage(
@@ -958,9 +943,10 @@ public class EthPeers implements PeerSelector {
 
   private boolean needMoreSnapServers() {
     if (syncMode == SyncMode.SNAP2) {
-      // keeps looking for better peers until every peer serves snap/2
+      // keeps looking for better peers while one it may replace does not serve snap/2
       return snapServerPeersNeeded
-          && activeConnections.values().stream().anyMatch(p -> snapRank(p) < SNAP2_RANK);
+          && activeConnections.values().stream()
+              .anyMatch(p -> !canExceedPeerLimits(p.getId()) && snapRank(p) < SNAP2_RANK);
     }
     return snapServerPeersNeeded && numberOfSnapServers() < snapServerTargetNumber;
   }
@@ -974,10 +960,10 @@ public class EthPeers implements PeerSelector {
     return peer.getAgreedCapabilities().contains(SnapProtocol.SNAP2) ? SNAP2_RANK : 1;
   }
 
-  // on a full peer list, a SNAP2 sync swaps the lowest ranked peer for a better ranked one
-  private boolean madeRoomForSnap2Sync(final EthPeer peer) {
+  // the lowest ranked peer a SNAP2 sync replaces by a better ranked one
+  private Optional<EthPeer> worseSnapPeer(final EthPeer peer) {
     if (syncMode != SyncMode.SNAP2 || !snapServerPeersNeeded) {
-      return false;
+      return Optional.empty();
     }
     final int rank = snapRank(peer);
     return activeConnections.values().stream()
@@ -986,17 +972,16 @@ public class EthPeers implements PeerSelector {
         .min(
             Comparator.comparingInt((EthPeerImmutableAttributes p) -> snapRank(p.ethPeer()))
                 .thenComparing(MOST_USEFUL_PEER))
-        .map(
-            replaced -> {
-              replaced.ethPeer().disconnect(DisconnectMessage.DisconnectReason.TOO_MANY_PEERS);
-              LOG.atTrace()
-                  .setMessage("Replacing peer {} by the better snap peer {}")
-                  .addArgument(replaced.ethPeer().getLoggableId())
-                  .addArgument(peer.getLoggableId())
-                  .log();
-              return true;
-            })
-        .orElse(false);
+        .map(EthPeerImmutableAttributes::ethPeer);
+  }
+
+  private void replacePeer(final EthPeer replaced, final EthPeer peer) {
+    replaced.disconnect(DisconnectMessage.DisconnectReason.TOO_MANY_PEERS);
+    LOG.atTrace()
+        .setMessage("Disconnecting peer {} to be replaced by prioritised peer {}")
+        .addArgument(replaced.getLoggableId())
+        .addArgument(peer.getLoggableId())
+        .log();
   }
 
   private long numberOfSnapServers() {

@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.eth.messages.BlockBodiesMessage;
 import org.hyperledger.besu.ethereum.eth.sync.ChainHeadTracker;
 import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.p2p.peers.Peer;
+import org.hyperledger.besu.ethereum.p2p.rlpx.RlpxAgent;
 import org.hyperledger.besu.ethereum.p2p.rlpx.connections.PeerConnection;
 import org.hyperledger.besu.ethereum.p2p.rlpx.connections.PeerConnection.PeerNotConnected;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
@@ -474,6 +475,28 @@ public class EthPeersTest {
                 .streamAvailablePeers()
                 .filter(p -> p.ethPeer().getAgreedCapabilities().contains(SnapProtocol.SNAP2)))
         .hasSize(1);
+  }
+
+  @Test
+  public void snap2SyncStopsLookingForPeersWhenOnlyAStaticPeerLacksSnap2() {
+    final EthProtocolManager snap2Manager =
+        EthProtocolManagerTestBuilder.builder().setSyncMode(SyncMode.SNAP2).build();
+    final EthPeers snap2Peers = snap2Manager.ethContext().getEthPeers();
+    snap2Peers.snapServerPeersNeeded(true);
+    final EthPeer staticPeer = peer(snap2Manager, null);
+    final RlpxAgent rlpxAgent = mock(RlpxAgent.class);
+    when(rlpxAgent.canExceedConnectionLimits(staticPeer.getId())).thenReturn(true);
+    snap2Peers.setRlpxAgent(rlpxAgent);
+    assertThat(snap2Peers.addPeerToEthPeers(staticPeer)).isTrue();
+    while (snap2Peers.peerCount() < snap2Peers.getMaxPeers()) {
+      assertThat(snap2Peers.addPeerToEthPeers(peer(snap2Manager, SnapProtocol.SNAP2))).isTrue();
+    }
+
+    // the static peer cannot be replaced, so a new candidate brings nothing
+    final Peer candidate = mock(Peer.class);
+    when(candidate.getId()).thenReturn(Bytes.random(EthPeers.NODE_ID_LENGTH));
+    assertThat(snap2Peers.gatePeerConnection(candidate, false))
+        .contains(DisconnectReason.TOO_MANY_PEERS);
   }
 
   // a peer serving snap with the given version, or no snap
