@@ -32,14 +32,15 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,8 +53,8 @@ import org.slf4j.LoggerFactory;
 public final class BodyDownloader {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyDownloader.class);
-  // peers cap a body response around 2 MiB
-  private static final double RANGE_BODY_BYTES = 2 * 1024 * 1024;
+  // peers cap a body or receipt response around 2 MiB
+  private static final double RESPONSE_BYTES = 2 * 1024 * 1024;
   private static final int MIN_RANGE_BLOCKS = 8;
   private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
   private static final long MAX_MEMORY = 1L << 30;
@@ -77,7 +78,9 @@ public final class BodyDownloader {
   private final BlockRanges fetching = new BlockRanges();
   private long lowest;
   private long highest = -1;
-  private int running;
+  // ranges waiting for peers, and ranges in memory, downloaded or being stored
+  private int downloading;
+  private int held;
   private boolean closed;
   // averages of the stored blocks, without and with their receipts
   private double bodyBytes = INITIAL_BLOCK_BYTES;
@@ -162,30 +165,33 @@ public final class BodyDownloader {
 
   private void dispatch() {
     final int rangeBlocks = rangeBlocks();
-    final int ranges = ranges(rangeBlocks);
-    while (!closed && running < ranges) {
+    final int slots = sender.capacity(Protocol.ETH);
+    // enough ranges to keep every eth slot of the peers busy, within the memory budget
+    final int network = Math.max(1, Math.min(maxRanges, slots + slots / 4));
+    final int inMemory = (int) Math.max(1, memory / (rangeBlocks * Math.max(1, blockBytes)));
+    while (!closed && downloading < network && held < inMemory) {
       final long[] range = BlockRanges.highestGap(stored, fetching, lowest, highest, rangeBlocks);
       if (range == null) {
         return;
       }
       fetching.add(range[0], range[1]);
-      running++;
+      downloading++;
+      held++;
       fetch(range[0], range[1]);
     }
   }
 
   // about one full body response, so many blocks when they are small
   private int rangeBlocks() {
-    final double blocks = RANGE_BODY_BYTES / Math.max(1, bodyBytes);
+    final double blocks = RESPONSE_BYTES / Math.max(1, bodyBytes);
     return (int)
         Math.max(Math.min(MIN_RANGE_BLOCKS, maxRangeBlocks), Math.min(maxRangeBlocks, blocks));
   }
 
-  // enough ranges to keep every eth slot of the peers busy, within the memory budget
-  private int ranges(final int rangeBlocks) {
-    final int slots = sender.capacity(Protocol.ETH);
-    final double byMemory = memory / (rangeBlocks * Math.max(1, blockBytes));
-    return (int) Math.max(1, Math.min(maxRanges, Math.min(slots + slots / 4, byMemory)));
+  // blocks whose receipts fill about one response, from the measured receipt sizes
+  private synchronized int receiptBlocks() {
+    final double receiptBytes = blockBytes - bodyBytes;
+    return (int) Math.max(1, receiptBytes > 0 ? RESPONSE_BYTES / receiptBytes : maxRangeBlocks);
   }
 
   private void measure(final List<SyncBlockWithReceipts> blocks) {
@@ -205,6 +211,8 @@ public final class BodyDownloader {
     CompletableFuture.supplyAsync(() -> headers(from, to), writer)
         .thenCompose(this::bodies)
         .thenCompose(this::receipts)
+        // a range being stored no longer waits for peers, it only holds memory
+        .whenComplete((blocks, error) -> downloaded())
         .thenApplyAsync(
             blocks -> {
               StorageRetry.run(
@@ -230,11 +238,16 @@ public final class BodyDownloader {
         .execute(() -> release(from, to, null));
   }
 
+  private synchronized void downloaded() {
+    downloading--;
+    dispatch();
+  }
+
   // a range stored for headers a reorg replaced since is downloaded again
   private synchronized void release(
       final long from, final long to, final List<SyncBlockWithReceipts> blocks) {
     fetching.remove(from, to);
-    running--;
+    held--;
     if (blocks != null) {
       measure(blocks);
     }
@@ -303,7 +316,7 @@ public final class BodyDownloader {
   }
 
   private CompletableFuture<List<SyncBlockWithReceipts>> receipts(final List<SyncBlock> blocks) {
-    final Map<Hash, List<SyncTransactionReceipt>> receipts = new HashMap<>();
+    final Map<Hash, List<SyncTransactionReceipt>> receipts = new ConcurrentHashMap<>();
     final List<SyncBlock> needed = new ArrayList<>();
     for (final SyncBlock block : blocks) {
       if (block.getHeader().getReceiptsRoot().equals(Hash.EMPTY_TRIE_HASH)) {
@@ -312,7 +325,12 @@ public final class BodyDownloader {
         needed.add(block);
       }
     }
-    return receiptsFrom(needed, List.of(), receipts)
+    // about one response per group, the groups asked in parallel
+    final CompletableFuture<?>[] groups =
+        Lists.partition(needed, receiptBlocks()).stream()
+            .map(group -> receiptsFrom(group, List.of(), receipts))
+            .toArray(CompletableFuture[]::new);
+    return CompletableFuture.allOf(groups)
         .thenApply(
             unused ->
                 blocks.stream()

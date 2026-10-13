@@ -17,6 +17,10 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -30,6 +34,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -103,6 +108,31 @@ class BodyDownloaderTest {
   }
 
   @Test
+  void keepsDownloadingWhileEarlierRangesAreStored() {
+    chain.extend(40);
+    final CountDownLatch storesHeld = new CountDownLatch(1);
+    blockchain = spy(blockchainWithHeaders(40));
+    doAnswer(
+            invocation -> {
+              storesHeld.await();
+              return invocation.callRealMethod();
+            })
+        .when(blockchain)
+        .unsafeStoreSyncBodiesAndReceipts(any(), anyBoolean());
+    final BodyDownloader bodies =
+        new BodyDownloader(
+            network, ProtocolScheduleFixture.MAINNET, blockchain, 0, 5, 2, false, writer);
+
+    bodies.download(1, 40);
+
+    // the two ranges allowed on the network move on while the first ones wait to be stored
+    await().atMost(Duration.ofSeconds(10)).until(() -> network.requestCount() >= 4);
+    storesHeld.countDown();
+    awaitStoredUpTo(bodies, 40);
+    assertCanonicalBodies(40);
+  }
+
+  @Test
   void checksThatTheStoredBlocksLinkUpToTheHead() {
     chain.extend(50);
     final BodyDownloader bodies = downloader(50, 10);
@@ -140,8 +170,7 @@ class BodyDownloaderTest {
 
   private BodyDownloader downloader(
       final long head, final long floor, final int maxRangeBlocks, final int maxRanges) {
-    blockchain = InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
-    blockchain.storeBlockHeaders(headers(1, head));
+    blockchain = blockchainWithHeaders(head);
     return new BodyDownloader(
         network,
         ProtocolScheduleFixture.MAINNET,
@@ -151,6 +180,13 @@ class BodyDownloaderTest {
         maxRanges,
         false,
         writer);
+  }
+
+  private MutableBlockchain blockchainWithHeaders(final long head) {
+    final MutableBlockchain withHeaders =
+        InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
+    withHeaders.storeBlockHeaders(headers(1, head));
+    return withHeaders;
   }
 
   private List<BlockHeader> headers(final long from, final long to) {
