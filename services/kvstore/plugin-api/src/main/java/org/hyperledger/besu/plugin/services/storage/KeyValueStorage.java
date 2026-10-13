@@ -138,6 +138,18 @@ public interface KeyValueStorage extends Closeable {
   KeyValueStorageTransaction startTransaction() throws StorageException;
 
   /**
+   * Begins a transaction committed as one write batch, without checking its writes for conflicts
+   * with concurrent ones, for writers that never conflict. Storage without conflict checks falls
+   * back to {@link #startTransaction()}.
+   *
+   * @return transaction to sequence key-value operations.
+   * @throws StorageException problem encountered when starting a new transaction.
+   */
+  default KeyValueStorageTransaction startBatchTransaction() throws StorageException {
+    return startTransaction();
+  }
+
+  /**
    * Return Whether the underlying storage is closed.
    *
    * @return boolean indicating whether the storage is closed.
