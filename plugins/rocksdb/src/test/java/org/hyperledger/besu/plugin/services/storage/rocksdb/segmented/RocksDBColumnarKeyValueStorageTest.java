@@ -576,6 +576,25 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
   }
 
   @Test
+  public void unloggedWritesToAClearedSegmentSurviveAFlushAndAReopen(@TempDir final Path path)
+      throws Exception {
+    final List<SegmentIdentifier> segments = List.of(TestSegment.DEFAULT, TestSegment.FOO);
+    final SegmentedKeyValueStorage store = createSegmentedStore(path, segments, List.of());
+    // a clear replaces the column family and closes its former handle
+    store.clear(TestSegment.FOO);
+    final SegmentedKeyValueStorageTransaction tx = store.startUnloggedBatchTransaction();
+    tx.put(TestSegment.FOO, bytesFromHexString("0001"), bytesFromHexString("0FFF"));
+    tx.commit();
+    store.flush();
+    store.close();
+
+    final SegmentedKeyValueStorage reopened = createSegmentedStore(path, segments, List.of());
+    assertThat(reopened.get(TestSegment.FOO, bytesFromHexString("0001")))
+        .contains(bytesFromHexString("0FFF"));
+    reopened.close();
+  }
+
+  @Test
   public void sortedWriterAddsItsEntriesAtOnceAsAFile() throws Exception {
     final RocksDBColumnarKeyValueStorage store =
         (RocksDBColumnarKeyValueStorage) createSegmentedStore();

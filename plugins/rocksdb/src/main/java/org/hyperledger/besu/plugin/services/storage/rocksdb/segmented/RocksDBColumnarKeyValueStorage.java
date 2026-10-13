@@ -755,8 +755,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   @Override
   public void flush() throws StorageException {
     throwIfClosed();
+    // the current handles, as a clear replaces the handle of its segment
+    final List<ColumnFamilyHandle> handles =
+        getColumnHandlesBySegmentIdentifier().values().stream()
+            .map(RocksDbSegmentIdentifier::get)
+            .toList();
     try (final FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
-      getDB().flush(flushOptions, columnHandles);
+      getDB().flush(flushOptions, handles);
     } catch (final RocksDBException e) {
       throw new StorageException(e);
     }
