@@ -99,12 +99,24 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
         put(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
       }
 
+      // a failed commit leaves the writer empty
       @Override
       public void commit() {
-        if (updater != null) {
-          updater.commitComposedOnly();
-          updater = null;
-          pendingBytes = 0;
+        final BonsaiWorldStateKeyValueStorage.Updater pending = updater;
+        updater = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.commitComposedOnly();
+        }
+      }
+
+      @Override
+      public void abort() {
+        final BonsaiWorldStateKeyValueStorage.Updater pending = updater;
+        updater = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.rollback();
         }
       }
 

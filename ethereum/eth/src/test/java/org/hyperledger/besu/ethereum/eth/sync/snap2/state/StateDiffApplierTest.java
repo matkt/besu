@@ -73,9 +73,9 @@ class StateDiffApplierTest {
     final Bytes32 s1 = slotHash(S1);
     final Bytes32 s2 = slotHash(S2);
     if (s1.compareTo(s2) < 0) {
-      task.cover(RangeManager.MIN_RANGE, s1);
+      task.cover(RangeManager.MIN_RANGE, s1, 0);
     } else {
-      task.cover(s1, RangeManager.MAX_RANGE);
+      task.cover(s1, RangeManager.MAX_RANGE, 0);
     }
     coverage.addStorageTask(task);
 

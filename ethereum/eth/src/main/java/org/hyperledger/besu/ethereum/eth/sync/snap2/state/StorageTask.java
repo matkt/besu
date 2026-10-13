@@ -29,6 +29,7 @@ final class StorageTask {
   private volatile Bytes32 storageRoot;
   private volatile boolean rootStale;
   private final KeyRangeSet covered = new KeyRangeSet();
+  private long slots;
 
   // download state, only touched by the state downloader
   final List<RangeTask> chunks = new ArrayList<>();
@@ -71,12 +72,18 @@ final class StorageTask {
     return covered.contains(slotHash);
   }
 
-  /** Covers a slot range; returns true for the one call that completes the storage. */
-  public synchronized boolean cover(final Bytes32 from, final Bytes32 to) {
+  /** Covers a slot range holding some slots; returns true for the call that completes it. */
+  public synchronized boolean cover(final Bytes32 from, final Bytes32 to, final int slots) {
     if (covered.isFull()) {
       return false;
     }
     covered.add(from, to);
+    this.slots += slots;
     return covered.isFull();
+  }
+
+  /** Returns the number of slots stored. */
+  public synchronized long slots() {
+    return slots;
   }
 }

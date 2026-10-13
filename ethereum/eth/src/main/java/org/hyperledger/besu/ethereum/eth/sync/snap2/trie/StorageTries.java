@@ -19,14 +19,13 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 
-import java.util.Optional;
+import java.util.Comparator;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Predicate;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -34,34 +33,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Builds the storage trie of each account as soon as its storage is downloaded, while the rest of
- * the state downloads, so that the final build only redoes the storages changed since. The root
- * node is written last, and only if the account still has the storage root that was built, which is
- * checked exclusive with pivot moves: a move changing the slots marks the root unknown.
+ * Builds the storage tries of the downloaded storages, largest first, while the rest of the state
+ * downloads. A move changing a storage marks its root unknown, so the final build redoes it.
  */
 public final class StorageTries {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageTries.class);
-  private static final int MAX_QUEUED = 1_000_000;
+  // past it the smallest are left to the final build, which reads them in one pass
+  private static final int MAX_QUEUED = 100_000;
   private static final int SLOTS_PER_STOP_CHECK = 65_536;
 
   private final SyncStateStorage storage;
-  private final Predicate<Runnable> withoutMoves;
   private final ExecutorService workers;
-  private final LinkedBlockingQueue<Bytes32> queue = new LinkedBlockingQueue<>(MAX_QUEUED);
+  // guarded by this
+  private final TreeSet<Pending> queue =
+      new TreeSet<>(
+          Comparator.comparingLong(Pending::slots).reversed().thenComparing(Pending::accountHash));
   private final AtomicLong built = new AtomicLong();
   private final AtomicLong left = new AtomicLong();
   private volatile boolean stopped;
 
-  /**
-   * Creates the builder.
-   *
-   * @param withoutMoves runs an action exclusive with pivot moves, false once the sync stopped
-   */
-  public StorageTries(
-      final SyncStateStorage storage, final Predicate<Runnable> withoutMoves, final int threads) {
+  private record Pending(Bytes32 accountHash, Bytes32 storageRoot, long slots) {}
+
+  public StorageTries(final SyncStateStorage storage, final int threads) {
     this.storage = storage;
-    this.withoutMoves = withoutMoves;
     this.workers =
         Executors.newFixedThreadPool(
             threads, Thread.ofPlatform().name("snap2-storage-trie-", 0).daemon().factory());
@@ -70,11 +65,18 @@ public final class StorageTries {
     }
   }
 
-  /** Queues an account whose storage is downloaded; when too many wait, the final build does it. */
-  public void completed(final Bytes32 accountHash) {
-    if (!stopped && !queue.offer(accountHash.copy())) {
+  /** Queues a downloaded storage, with the root its slots were verified against. */
+  public synchronized void completed(
+      final Bytes32 accountHash, final Bytes32 storageRoot, final long slots) {
+    if (stopped) {
+      return;
+    }
+    queue.add(new Pending(accountHash.copy(), storageRoot.copy(), slots));
+    if (queue.size() > MAX_QUEUED) {
+      queue.pollLast();
       left.incrementAndGet();
     }
+    notify();
   }
 
   /** Returns the number of storage tries built. */
@@ -82,8 +84,8 @@ public final class StorageTries {
     return built.get();
   }
 
-  /** Returns the number of accounts waiting for their storage trie. */
-  public int queued() {
+  /** Returns the number of storages waiting for their trie. */
+  public synchronized int queued() {
     return queue.size();
   }
 
@@ -92,10 +94,13 @@ public final class StorageTries {
     return left.get();
   }
 
-  /** Stops building and waits for the builds in progress to give up. */
+  /** Stops building, once the builds in progress wrote what they built. */
   public void stop() {
-    stopped = true;
-    queue.clear();
+    synchronized (this) {
+      stopped = true;
+      queue.clear();
+      notifyAll();
+    }
     workers.shutdownNow();
     try {
       if (!workers.awaitTermination(1, TimeUnit.MINUTES)) {
@@ -109,27 +114,53 @@ public final class StorageTries {
   private void run() {
     // its writes give way to the download's when the storage falls behind
     final SyncStateStorage.TrieWriter writer = storage.backgroundTrieWriter();
-    while (!stopped) {
-      final Bytes32 account;
-      try {
-        account = queue.take();
-      } catch (final InterruptedException e) {
-        return;
+    try {
+      for (Pending next = next(writer); next != null; next = next(writer)) {
+        try {
+          build(next, writer);
+        } catch (final CancellationException e) {
+          return;
+        } catch (final RuntimeException e) {
+          left.incrementAndGet();
+          LOG.debug(
+              "Storage trie of {} left to the final build: {}", next.accountHash(), e.getMessage());
+        }
       }
-      try {
-        build(account, writer);
-      } catch (final CancellationException e) {
-        return;
-      } catch (final RuntimeException e) {
-        left.incrementAndGet();
-        LOG.debug("Storage trie of {} left to the final build: {}", account, e.getMessage());
-      }
+    } catch (final InterruptedException e) {
+      // stopped while waiting
+    } finally {
+      commit(writer);
     }
   }
 
-  private void build(final Bytes32 accountHash, final SyncStateStorage.TrieWriter writer) {
-    final Optional<Hash> expected = storageRoot(accountHash);
-    if (expected.isEmpty() || !Accounts.hasBuildableStorage(expected.get())) {
+  // the next storage to build, null once stopped; the batched writes are committed when idle
+  private Pending next(final SyncStateStorage.TrieWriter writer) throws InterruptedException {
+    synchronized (this) {
+      if (!queue.isEmpty()) {
+        return queue.pollFirst();
+      }
+    }
+    commit(writer);
+    synchronized (this) {
+      while (!stopped && queue.isEmpty()) {
+        wait();
+      }
+      return stopped ? null : queue.pollFirst();
+    }
+  }
+
+  // a failed write leaves the storages batched in it to the final build
+  private static void commit(final SyncStateStorage.TrieWriter writer) {
+    try {
+      writer.commit();
+    } catch (final RuntimeException e) {
+      LOG.debug("Storage tries left to the final build: {}", e.getMessage());
+    }
+  }
+
+  private void build(final Pending pending, final SyncStateStorage.TrieWriter writer) {
+    final Bytes32 accountHash = pending.accountHash();
+    if (!Accounts.hasBuildableStorage(Hash.wrap(pending.storageRoot()))) {
       return;
     }
     final Bytes[] rootNode = new Bytes[1];
@@ -152,36 +183,17 @@ public final class StorageTries {
           trie.addLeaf(slot, RLP.encodeOne(value.trimLeadingZeros()));
         });
     final Bytes32 root = trie.rootHash();
-    writer.commit();
-    if (!root.equals(expected.get().getBytes())) {
+    if (!root.equals(pending.storageRoot())) {
       left.incrementAndGet();
       LOG.debug(
           "Storage of {} gives root {} instead of {}, left to the final build",
           accountHash,
           root,
-          expected.get());
+          pending.storageRoot());
       return;
     }
-    final boolean running =
-        withoutMoves.test(
-            () -> {
-              // a pivot move during the build may have changed the slots
-              if (storageRoot(accountHash)
-                  .map(current -> current.getBytes().equals(root))
-                  .orElse(false)) {
-                writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
-                writer.commit();
-                built.incrementAndGet();
-              } else {
-                left.incrementAndGet();
-              }
-            });
-    if (!running) {
-      throw new CancellationException("storage tries stopped");
-    }
-  }
-
-  private Optional<Hash> storageRoot(final Bytes32 accountHash) {
-    return storage.getAccount(accountHash).map(Accounts::decode).map(a -> a.getStorageRoot());
+    // last, so that a root node is only found with the nodes below it
+    writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
+    built.incrementAndGet();
   }
 }

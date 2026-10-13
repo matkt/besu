@@ -111,5 +111,8 @@ public interface SyncStateStorage {
     void storageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
 
     void commit();
+
+    /** Drops the nodes not committed yet. */
+    void abort();
   }
 }

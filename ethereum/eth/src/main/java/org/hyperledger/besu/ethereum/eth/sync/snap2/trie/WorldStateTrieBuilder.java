@@ -163,8 +163,8 @@ public final class WorldStateTrieBuilder {
     final byte[] to = RangeManager.MAX_RANGE.toArray();
     from[0] = (byte) prefix;
     to[0] = (byte) prefix;
+    final SyncStateStorage.TrieWriter writer = storage.trieWriter();
     try {
-      final SyncStateStorage.TrieWriter writer = storage.trieWriter();
       final PartitionVisitor visitor = new PartitionVisitor(writer);
       storage.scan(Bytes32.wrap(from), Bytes32.wrap(to), visitor);
       visitor.finishAccount();
@@ -176,6 +176,7 @@ public final class WorldStateTrieBuilder {
       // the other partitions stop too, and the build reports the first failure
       failure.compareAndSet(null, e);
       cancel();
+      writer.abort();
       throw e;
     }
   }

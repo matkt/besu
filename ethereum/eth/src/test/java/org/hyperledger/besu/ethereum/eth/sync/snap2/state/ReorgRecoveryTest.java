@@ -54,7 +54,7 @@ class ReorgRecoveryTest {
     coverage.accounts().add(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
     // the contract's storage is downloaded up to SLOT_BOTH, whose hash is between the others
     final StorageTask task = new StorageTask(hash(CONTRACT), Bytes32.ZERO);
-    task.cover(RangeManager.MIN_RANGE, slotHash(SLOT_BOTH));
+    task.cover(RangeManager.MIN_RANGE, slotHash(SLOT_BOTH), 0);
     coverage.addStorageTask(task);
     assertThat(task.covers(slotHash(SLOT_ORPHANED))).isTrue();
     assertThat(task.covers(slotHash(SLOT_OUTSIDE))).isFalse();

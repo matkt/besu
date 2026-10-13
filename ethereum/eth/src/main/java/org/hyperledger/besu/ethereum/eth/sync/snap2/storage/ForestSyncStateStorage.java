@@ -110,12 +110,24 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
         maybeCommit(32 + rlp.size());
       }
 
+      // a failed commit leaves the writer empty
       @Override
       public void commit() {
-        if (updater != null) {
-          updater.commit();
-          updater = null;
-          pendingBytes = 0;
+        final ForestWorldStateKeyValueStorage.Updater pending = updater;
+        updater = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.commit();
+        }
+      }
+
+      @Override
+      public void abort() {
+        final ForestWorldStateKeyValueStorage.Updater pending = updater;
+        updater = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.rollback();
         }
       }
 

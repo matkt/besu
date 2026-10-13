@@ -136,7 +136,7 @@ public final class StateSync {
         Executors.newFixedThreadPool(
             Math.max(2, config.workerThreads()),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
-    this.tries = new StorageTries(storage, this::withoutMoves, storageTrieThreads(config));
+    this.tries = new StorageTries(storage, storageTrieThreads(config));
   }
 
   // one thread, two on large machines: the download keeps the cores and the disk
@@ -660,6 +660,7 @@ public final class StateSync {
           for (int i = 0; i < result.accounts().size(); i++) {
             final StorageTask task = request.tasks.get(i);
             final StorageRangesRequest.Slots accountSlots = result.accounts().get(i);
+            int stored = 0;
             for (int s = 0; s < accountSlots.hashes().size(); s++) {
               final Bytes32 slotHash = accountSlots.hashes().get(s);
               if (slotHash.compareTo(request.limit) > 0) {
@@ -668,6 +669,7 @@ public final class StateSync {
               final Bytes32 value = Bytes32.leftPad(RLP.decodeOne(accountSlots.values().get(s)));
               if (isPending(task) && !value.isZero()) {
                 batch.putStorage(task.accountHash(), slotHash, value);
+                stored++;
               }
               count++;
             }
@@ -677,27 +679,28 @@ public final class StateSync {
             final boolean complete =
                 accountSlots.complete() || last == null || last.compareTo(request.limit) >= 0;
             if (isPending(task)) {
-              covered.add(new Covered(task, complete ? request.limit : last));
+              covered.add(new Covered(task, complete ? request.limit : last, stored));
             }
             lastSlot = last;
             lastComplete = complete;
             lastReturned = returned.size();
           }
           batch.commit();
-          covered.forEach(range -> cover(range.task(), request.origin, range.end()));
+          covered.forEach(range -> cover(range.task(), request.origin, range.end(), range.slots()));
           slots.addAndGet(count);
           return new StoragePersisted(
               result.accounts().size(), lastSlot, lastComplete, lastReturned);
         });
   }
 
-  private record Covered(StorageTask task, Bytes32 end) {}
+  private record Covered(StorageTask task, Bytes32 end, int slots) {}
 
   // a complete storage can get its trie built from the written slots
-  private void cover(final StorageTask task, final Bytes32 origin, final Bytes32 end) {
-    if (task.cover(origin, end)) {
+  private void cover(
+      final StorageTask task, final Bytes32 origin, final Bytes32 end, final int slots) {
+    if (task.cover(origin, end, slots)) {
       coverage.removeStorageTask(task.accountHash());
-      tries.completed(task.accountHash());
+      tries.completed(task.accountHash(), task.storageRoot(), task.slots());
     }
   }
 
