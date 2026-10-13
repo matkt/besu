@@ -128,11 +128,6 @@ public final class FakeSnapNetwork implements RequestSender {
     blockAccessLists.put(blockHash, rlp);
   }
 
-  /** Stops serving the block access list of a block, as if every peer pruned it. */
-  public void forgetBlockAccessList(final Hash blockHash) {
-    blockAccessLists.remove(blockHash);
-  }
-
   public long requestCount() {
     return requests.get();
   }

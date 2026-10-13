@@ -31,15 +31,12 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
-import com.google.common.annotations.VisibleForTesting;
-
 /** Metrics of a SNAP2 sync, read from its current attempt, and a summary of its peers. */
 final class Snap2Metrics {
 
   private final EthPeers ethPeers;
   private final Supplier<SyncAttempt> current;
   private final AtomicLong moves = new AtomicLong();
-  private final AtomicLong reorgs = new AtomicLong();
   private final AtomicInteger restarts = new AtomicInteger();
 
   Snap2Metrics(final EthPeers ethPeers, final Supplier<SyncAttempt> current) {
@@ -49,10 +46,6 @@ final class Snap2Metrics {
 
   void pivotMoved() {
     moves.incrementAndGet();
-  }
-
-  void reorged() {
-    reorgs.incrementAndGet();
   }
 
   void restarted() {
@@ -65,11 +58,6 @@ final class Snap2Metrics {
 
   long pivotMoves() {
     return moves.get();
-  }
-
-  @VisibleForTesting
-  long reorgs() {
-    return reorgs.get();
   }
 
   /** Registers the gauges and counters. */
@@ -150,8 +138,6 @@ final class Snap2Metrics {
         () -> attemptValue(attempt -> attempt.stateSync().downloadedCodes()));
     metricsSystem.createCounter(
         category, "snap2_pivot_moves_total", "Pivot moves of SNAP2", moves::get);
-    metricsSystem.createCounter(
-        category, "snap2_reorgs_total", "Reorgs below the SNAP2 pivot", reorgs::get);
     metricsSystem.createCounter(
         category, "snap2_restarts_total", "Times SNAP2 started over", restarts::get);
     final var stage =

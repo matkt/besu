@@ -81,15 +81,6 @@ public final class BalFetcher {
    * @return the raw lists, in the order of the headers
    */
   public CompletableFuture<List<Bytes>> fetch(final List<BlockHeader> headers) {
-    return fetch(headers, maxRounds);
-  }
-
-  /**
-   * Fetches the block access lists of the given headers, giving up after {@code rounds} rounds.
-   *
-   * @return the raw lists, in the order of the headers
-   */
-  public CompletableFuture<List<Bytes>> fetch(final List<BlockHeader> headers, final int rounds) {
     for (final BlockHeader header : headers) {
       if (header.getBalHash().isEmpty()) {
         return CompletableFuture.failedFuture(
@@ -99,7 +90,7 @@ public final class BalFetcher {
                     + " has no block access list, snap/2 cannot sync it"));
       }
     }
-    final Fetch fetch = new Fetch(headers, rounds);
+    final Fetch fetch = new Fetch(headers, maxRounds);
     fetch.round(0);
     return fetch.result;
   }

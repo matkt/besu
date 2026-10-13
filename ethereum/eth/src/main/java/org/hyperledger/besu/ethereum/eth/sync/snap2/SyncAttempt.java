@@ -30,7 +30,6 @@ import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.ReorgRecovery;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
@@ -41,7 +40,6 @@ import org.hyperledger.besu.util.FutureUtils;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,7 +48,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -59,26 +56,19 @@ import org.slf4j.LoggerFactory;
 
 /**
  * One run of the SNAP2 sync from a pivot, owning its download components: the state download, the
- * header back-fill, the pivot moves and reorg recoveries, the final trie build and the download of
- * the bodies of a window below the final pivot. An abandoned attempt stops all its components and
- * never touches the next one.
+ * header back-fill, the pivot moves, the final trie build and the download of the bodies of a
+ * window below the final pivot. An abandoned attempt stops all its components and never touches the
+ * next one.
  */
 final class SyncAttempt {
 
   private static final Logger LOG = LoggerFactory.getLogger(SyncAttempt.class);
   private static final int MAX_BLOCKS_PER_MOVE = 128;
-  private static final int MAX_REORG_DEPTH = 1024;
-  // orphaned lists are optional for peers: when none has them, start over instead of waiting
-  private static final int ORPHANED_BAL_ROUNDS = 4;
 
   /** What a new attempt keeps from a failed one: the highest header it indexed. */
   record Resume(long indexedUpTo) {
     static final Resume NONE = new Resume(-1);
   }
-
-  /** The blocks a reorg orphaned above the common ancestor, and the new ones up to the pivot. */
-  private record Reorg(
-      BlockHeader ancestor, List<BlockHeader> orphaned, List<BlockHeader> newFork) {}
 
   private final SyncContext context;
   private final BlockHeader firstPivot;
@@ -387,7 +377,11 @@ final class SyncAttempt {
         .thenCompose(
             chain -> {
               if (!chain.getFirst().getParentHash().equals(pivot.getHash())) {
-                return recoverFromReorg(head, chain);
+                // below the pivot, past finality: start over rather than unwind the state
+                final RestartException restart =
+                    new RestartException("the chain reorganised below the pivot");
+                aborted.completeExceptionally(restart);
+                return CompletableFuture.failedFuture(restart);
               }
               final long target = head.getNumber() - context.config().pivotDistance();
               if (target <= pivot.getNumber()) {
@@ -448,111 +442,6 @@ final class SyncAttempt {
                   count(outcome.staleStorage()));
               return applyStep(headers, from + MAX_BLOCKS_PER_MOVE);
             });
-  }
-
-  private CompletableFuture<Void> recoverFromReorg(
-      final BlockHeader head, final List<BlockHeader> newChain) {
-    final BlockHeader pivot = stateSync.pivot().header();
-    final long lowest = Math.max(floor.getNumber() + 1, pivot.getNumber() - MAX_REORG_DEPTH);
-    // both branches down to the same height, the orphaned one walked from our pivot by hash
-    final CompletableFuture<List<BlockHeader>> canonicalPart =
-        context.fetcher().chainDown(newChain.getFirst(), lowest, Priority.PIVOT);
-    final CompletableFuture<List<BlockHeader>> orphanedPart =
-        context.fetcher().chainDown(pivot, lowest, Priority.PIVOT);
-    return canonicalPart
-        .thenCombine(
-            orphanedPart,
-            (lower, orphaned) -> {
-              final List<BlockHeader> canonical = new ArrayList<>(lower);
-              canonical.addAll(newChain.subList(1, newChain.size()));
-              return reorg(head, canonical, orphaned);
-            })
-        .thenCompose(reorg -> recover(pivot, reorg))
-        .exceptionallyCompose(
-            error -> {
-              if (Futures.unwrap(error) instanceof RestartException restartError) {
-                // the state cannot be recovered: start over
-                aborted.completeExceptionally(restartError);
-              }
-              return CompletableFuture.failedFuture(error);
-            });
-  }
-
-  // splits both branches at their common ancestor, the new one up to the new pivot
-  private Reorg reorg(
-      final BlockHeader head, final List<BlockHeader> canonical, final List<BlockHeader> orphaned) {
-    final int ancestorIndex = commonAncestor(canonical, orphaned);
-    if (ancestorIndex < 0) {
-      throw new RestartException(
-          "the chain reorganised deeper than " + MAX_REORG_DEPTH + " blocks");
-    }
-    final BlockHeader ancestor = canonical.get(ancestorIndex);
-    final long target =
-        Math.max(ancestor.getNumber() + 1, head.getNumber() - context.config().pivotDistance());
-    return new Reorg(
-        ancestor,
-        orphaned.stream().filter(header -> header.getNumber() > ancestor.getNumber()).toList(),
-        canonical.subList(
-            ancestorIndex + 1, (int) (ancestorIndex + 1 + target - ancestor.getNumber())));
-  }
-
-  // fetches the lists of both branches, then moves the chain and the state to the new one
-  private CompletableFuture<Void> recover(final BlockHeader pivot, final Reorg reorg) {
-    context.metrics().reorged();
-    LOG.warn(
-        "SNAP2 reorg below the pivot {} | common ancestor {}, {} orphaned blocks, new pivot {}",
-        block(pivot.getNumber()),
-        block(reorg.ancestor().getNumber()),
-        reorg.orphaned().size(),
-        block(reorg.newFork().getLast().getNumber()));
-    final CompletableFuture<List<Bytes>> orphanedLists =
-        context
-            .balFetcher()
-            .fetch(reorg.orphaned(), ORPHANED_BAL_ROUNDS)
-            .exceptionallyCompose(
-                error ->
-                    CompletableFuture.failedFuture(
-                        new RestartException("orphaned block access lists are unavailable")));
-    final CompletableFuture<List<Bytes>> newLists = context.balFetcher().fetch(reorg.newFork());
-    return orphanedLists
-        .thenCombine(newLists, (orphaned, fresh) -> switchBranch(pivot, reorg, orphaned, fresh))
-        .thenCompose(Function.identity())
-        .exceptionallyCompose(
-            error -> {
-              final Throwable cause = Futures.unwrap(error);
-              if (cause instanceof RestartException || cause instanceof CancellationException) {
-                return CompletableFuture.failedFuture(error);
-              }
-              return CompletableFuture.failedFuture(
-                  new RestartException("reorg recovery failed: " + cause.getMessage()));
-            });
-  }
-
-  private CompletableFuture<Void> switchBranch(
-      final BlockHeader pivot,
-      final Reorg reorg,
-      final List<Bytes> orphanedLists,
-      final List<Bytes> newLists) {
-    if (inactive()) {
-      return abandoned();
-    }
-    final long ancestor = reorg.ancestor().getNumber();
-    final BlockHeader newPivot = reorg.newFork().getLast();
-    if (backfill.lowestStored() > ancestor + 1) {
-      // the download in progress follows the orphaned branch
-      startBackfill(reorg.newFork().getFirst());
-    }
-    storeHeaders(reorg.newFork());
-    if (pivot.getNumber() > newPivot.getNumber()) {
-      StorageRetry.run(
-          () ->
-              context
-                  .blockchain()
-                  .unsafeRemoveCanonicalIndexRange(newPivot.getNumber(), pivot.getNumber()));
-    }
-    storeBlockAccessLists(reorg.newFork(), newLists);
-    return new ReorgRecovery(stateSync, context.storage(), context.scheduler())
-        .recover(newPivot, fold(orphanedLists), fold(newLists));
   }
 
   // stops moving the pivot and waits for a move in progress
@@ -762,20 +651,6 @@ final class SyncAttempt {
 
   private CompletableFuture<Void> delay(final Duration delay) {
     return Futures.delay(delay, context.executor());
-  }
-
-  // index of the highest header of the canonical branch that is also on the orphaned one
-  private static int commonAncestor(
-      final List<BlockHeader> canonical, final List<BlockHeader> orphaned) {
-    final Map<Long, Hash> orphanedHashes = new HashMap<>();
-    orphaned.forEach(header -> orphanedHashes.put(header.getNumber(), header.getHash()));
-    for (int i = canonical.size() - 1; i >= 0; i--) {
-      final BlockHeader header = canonical.get(i);
-      if (header.getHash().equals(orphanedHashes.get(header.getNumber()))) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   private static StateDiff fold(final List<Bytes> lists) {

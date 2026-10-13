@@ -110,7 +110,6 @@ class Snap2SyncControllerTest {
         .accountLeaves()
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
     assertThat(controller.metrics().pivotMoves()).isPositive();
-    assertThat(controller.metrics().reorgs()).isZero();
     assertThat(controller.metrics().restarts()).isZero();
     controller.deletePivotSyncState();
     assertThat(marker.exists()).isFalse();
@@ -118,45 +117,7 @@ class Snap2SyncControllerTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
-  void recoversFromAReorgBelowThePivot(final Format format) throws Exception {
-    final Random random = new Random(29);
-    network.maxResponseBytes(4096);
-    network.latency(25);
-    final TestChain chain =
-        new TestChain(random, TestWorld.random(random, 1500, 6, 1200), network, 24, 6);
-    chain.extend(40);
-    final MutableBlockchain blockchain =
-        InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
-    final Storages storages = SyncStorageFixture.create(format);
-    controller = controller(chain, blockchain, storages, new Snap2Marker(dataDirectory));
-
-    final CompletableFuture<SnapSyncProcessState> result = controller.start();
-    // once the pivot 32 is chosen, the chain reorganises from block 29
-    awaitStored(blockchain, chain.header(32));
-    chain.reorg(29, 16);
-    while (!result.isDone() && chain.headNumber() < 120) {
-      chain.extend(1);
-      Thread.sleep(30);
-    }
-    final BlockHeader pivot = result.get(120, TimeUnit.SECONDS).getPivotBlockHeader().orElseThrow();
-
-    // the synced chain and state are the canonical ones
-    assertThat(pivot.getHash()).isEqualTo(chain.header(pivot.getNumber()).getHash());
-    assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
-    assertHeadersAndWindowStored(blockchain, chain, pivot);
-    final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
-    chain
-        .world(pivot.getNumber())
-        .accountLeaves()
-        .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
-    // recovered without starting over
-    assertThat(controller.metrics().reorgs()).isPositive();
-    assertThat(controller.metrics().restarts()).isZero();
-  }
-
-  @ParameterizedTest
-  @EnumSource(Format.class)
-  void startsOverWhenTheOrphanedBlockAccessListsAreGone(final Format format) throws Exception {
+  void startsOverOnAReorgBelowThePivot(final Format format) throws Exception {
     final Random random = new Random(31);
     network.maxResponseBytes(4096);
     network.latency(25);
@@ -170,8 +131,8 @@ class Snap2SyncControllerTest {
 
     final CompletableFuture<SnapSyncProcessState> result = controller.start();
     awaitStored(blockchain, chain.header(32));
-    // the spec asks to discard the state when the orphaned lists cannot be fetched
-    chain.reorg(29, 16, false);
+    // once the pivot 32 is chosen, the chain reorganises from block 29
+    chain.reorg(29, 16);
     while (!result.isDone() && chain.headNumber() < 140) {
       chain.extend(1);
       Thread.sleep(30);

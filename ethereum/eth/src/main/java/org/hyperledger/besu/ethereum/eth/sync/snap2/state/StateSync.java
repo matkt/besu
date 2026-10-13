@@ -39,7 +39,6 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -67,7 +66,7 @@ public final class StateSync {
 
   private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
   // response size of a request for one account or one slot
-  static final int SINGLE_ITEM_BYTES = 4096;
+  private static final int SINGLE_ITEM_BYTES = 4096;
   private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
@@ -168,10 +167,6 @@ public final class StateSync {
     return pivot;
   }
 
-  StateCoverage coverage() {
-    return coverage;
-  }
-
   /** Returns the share of the account key space downloaded, from 0 to 1. */
   public double accountCoverage() {
     return coverage.accounts().coverage();
@@ -214,21 +209,6 @@ public final class StateSync {
           }
         },
         scheduler.workers());
-  }
-
-  /**
-   * Runs a write on the flat state at a known pivot, exclusive with pivot moves.
-   *
-   * @return false if the pivot moved and nothing was run
-   */
-  boolean withPivot(final int epoch, final Runnable write) {
-    return atPivot(
-            epoch,
-            () -> {
-              write.run();
-              return Boolean.TRUE;
-            })
-        != null;
   }
 
   // the result of a write at a known pivot, or null if the pivot moved
@@ -276,8 +256,8 @@ public final class StateSync {
     return tries.left();
   }
 
-  /** Runs a write on the flat state exclusive with every download write. */
-  <T> T exclusively(final Supplier<T> write) {
+  // runs a write on the flat state exclusive with every download write
+  private <T> T exclusively(final Supplier<T> write) {
     pivotLock.writeLock().lock();
     try {
       if (stopped) {
@@ -300,8 +280,8 @@ public final class StateSync {
     execute(this::dispatch);
   }
 
-  /** Switches to a new pivot; callers hold the exclusive lock. */
-  void switchPivot(final BlockHeader newPivot) {
+  // callers hold the exclusive lock
+  private void switchPivot(final BlockHeader newPivot) {
     pivot = new Pivot(pivot.epoch() + 1, newPivot);
     pivotStale = false;
     execute(
@@ -768,25 +748,21 @@ public final class StateSync {
       final AccountRangeRequest request,
       final StorageTask task,
       final AccountRangeRequest.Result result) {
-    return withPivot(
-        request.pivot.epoch(),
-        () -> {
-          if (!isPending(task)) {
-            return;
-          }
-          final SyncStateStorage.Batch batch = storage.batch();
-          writeRefetchedAccount(batch, task.accountHash(), result);
-          batch.commit();
-        });
+    return atPivot(
+            request.pivot.epoch(),
+            () -> {
+              if (isPending(task)) {
+                final SyncStateStorage.Batch batch = storage.batch();
+                writeRefetchedAccount(batch, task.accountHash(), result);
+                batch.commit();
+              }
+              return Boolean.TRUE;
+            })
+        != null;
   }
 
-  /**
-   * Writes an account fetched again at the pivot, or removes it if it is gone; its storage task
-   * follows. Callers hold the pivot lock.
-   *
-   * @return the storage root of the account, empty if it has no storage
-   */
-  Optional<Bytes32> writeRefetchedAccount(
+  // writes an account fetched again at the pivot, or removes it if gone; callers hold the lock
+  private void writeRefetchedAccount(
       final SyncStateStorage.Batch batch,
       final Bytes32 hash,
       final AccountRangeRequest.Result result) {
@@ -795,7 +771,7 @@ public final class StateSync {
       batch.removeAccount(hash);
       storage.deleteStorage(hash);
       coverage.removeStorageTask(hash);
-      return Optional.empty();
+      return;
     }
     final Bytes account = result.accounts().getFirst();
     batch.putAccount(hash, account);
@@ -803,14 +779,12 @@ public final class StateSync {
     if (storageRoot.equals(Hash.EMPTY_TRIE_HASH)) {
       storage.deleteStorage(hash);
       coverage.removeStorageTask(hash);
-      return Optional.empty();
+      return;
     }
-    final Bytes32 root = Bytes32.wrap(storageRoot.getBytes());
     final StorageTask task = coverage.storageTask(hash);
     if (task != null) {
-      task.refreshRoot(root);
+      task.refreshRoot(Bytes32.wrap(storageRoot.getBytes()));
     }
-    return Optional.of(root);
   }
 
   private boolean sendCodes() {

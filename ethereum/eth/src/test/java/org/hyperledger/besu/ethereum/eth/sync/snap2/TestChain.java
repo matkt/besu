@@ -119,17 +119,9 @@ public final class TestChain implements ChainHeadSource {
    * orphaned headers and block access lists stay served by hash.
    */
   public synchronized void reorg(final long ancestor, final int blocks) {
-    reorg(ancestor, blocks, true);
-  }
-
-  /** Reorganises the chain; without retention, peers forget the orphaned block access lists. */
-  public synchronized void reorg(final long ancestor, final int blocks, final boolean retain) {
     while (headers.size() > ancestor + 1) {
-      final BlockHeader orphaned = headers.removeLast();
+      headers.removeLast();
       worlds.removeLast();
-      if (!retain) {
-        network.forgetBlockAccessList(orphaned.getHash());
-      }
     }
     extend(blocks);
   }
