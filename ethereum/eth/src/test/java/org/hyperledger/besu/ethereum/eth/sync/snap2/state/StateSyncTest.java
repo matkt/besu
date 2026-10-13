@@ -141,7 +141,7 @@ class StateSyncTest {
     final TestWorld world = TestWorld.random(new Random(13), 800, 3, 400);
     network.serve(world);
     network.serveNoState(1);
-    // many small responses, so that the requests it got before being left out are few
+    // small responses make many requests, among which the few it got before being left out
     network.maxResponseBytes(1024);
     final Storages storages = SyncStorageFixture.create(format);
     stateSync = new StateSync(storages.sync(), network, config());
@@ -164,34 +164,32 @@ class StateSyncTest {
     network.latency(4);
     final Storages storages = SyncStorageFixture.create(format);
     stateSync = new StateSync(storages.sync(), network, config());
-    stateSync.start(header(7, world.root()));
+    final var completion = stateSync.start(header(7, world.root()));
     waitForProgress(1);
     // the peers that served this root stop serving it, as when it gets too old
     network.forget(world.root());
 
-    final long deadline = System.currentTimeMillis() + 20_000;
-    while (!stateSync.isPivotStale() && System.currentTimeMillis() < deadline) {
-      Thread.sleep(20);
-    }
-    assertThat(stateSync.isPivotStale()).isTrue();
+    await().atMost(Duration.ofSeconds(20)).until(stateSync::isPivotStale);
+    assertThat(completion).isNotDone();
 
-    // a move to a served pivot resumes the download
+    // a move to a served pivot resumes the download, which completes
     network.serve(world);
     stateSync.moveTo(header(8, world.root()), new StateDiff()).get(10, TimeUnit.SECONDS);
-    assertThat(stateSync.isPivotStale()).isFalse();
+    completion.get(60, TimeUnit.SECONDS);
+    assertThat(buildRoot(storages)).isEqualTo(world.root());
   }
 
   private long progress() {
     return stateSync.downloadedAccounts() + stateSync.downloadedSlots();
   }
 
-  private void waitForProgress(final long target) throws InterruptedException {
-    final long deadline = System.currentTimeMillis() + 20_000;
-    while (progress() < target
-        && !stateSync.isComplete()
-        && System.currentTimeMillis() < deadline) {
-      Thread.sleep(5);
-    }
+  // polls often, so that the pivot moves before the download completes
+  private void waitForProgress(final long target) {
+    await()
+        .pollDelay(Duration.ZERO)
+        .pollInterval(Duration.ofMillis(5))
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> progress() >= target || stateSync.isComplete());
   }
 
   private Bytes32 buildRoot(final Storages storages) {
