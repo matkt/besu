@@ -44,6 +44,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -152,6 +153,11 @@ final class Snap2SyncController implements SnapSyncController {
   @Override
   public void deletePivotSyncState() {
     marker.delete();
+  }
+
+  @VisibleForTesting
+  Snap2Metrics metrics() {
+    return metrics;
   }
 
   @Override

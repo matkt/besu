@@ -65,6 +65,10 @@ final class Snap2Metrics {
     return moves.get();
   }
 
+  long reorgs() {
+    return reorgs.get();
+  }
+
   /** Registers the gauges and counters. */
   void register(final MetricsSystem metricsSystem) {
     final BesuMetricCategory category = BesuMetricCategory.SYNCHRONIZER;

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -96,6 +97,9 @@ class Snap2SyncControllerTest {
     world
         .accountLeaves()
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
+    assertThat(controller.metrics().pivotMoves()).isPositive();
+    assertThat(controller.metrics().reorgs()).isZero();
+    assertThat(controller.metrics().restarts()).isZero();
     controller.deletePivotSyncState();
     assertThat(marker.exists()).isFalse();
   }
@@ -116,12 +120,7 @@ class Snap2SyncControllerTest {
 
     final CompletableFuture<SnapSyncProcessState> result = controller.start();
     // once the pivot 32 is chosen, the chain reorganises from block 29
-    final BlockHeader orphanedPivot = chain.header(32);
-    final long deadline = System.currentTimeMillis() + 30_000;
-    while (blockchain.getBlockHeader(orphanedPivot.getHash()).isEmpty()
-        && System.currentTimeMillis() < deadline) {
-      Thread.sleep(10);
-    }
+    awaitStored(blockchain, chain.header(32));
     chain.reorg(29, 16);
     while (!result.isDone() && chain.headNumber() < 120) {
       chain.extend(1);
@@ -141,6 +140,9 @@ class Snap2SyncControllerTest {
         .world(pivot.getNumber())
         .accountLeaves()
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
+    // recovered without starting over
+    assertThat(controller.metrics().reorgs()).isPositive();
+    assertThat(controller.metrics().restarts()).isZero();
   }
 
   @ParameterizedTest
@@ -158,12 +160,7 @@ class Snap2SyncControllerTest {
     controller = controller(chain, blockchain, storages, new Snap2Marker(dataDirectory));
 
     final CompletableFuture<SnapSyncProcessState> result = controller.start();
-    final BlockHeader orphanedPivot = chain.header(32);
-    final long deadline = System.currentTimeMillis() + 30_000;
-    while (blockchain.getBlockHeader(orphanedPivot.getHash()).isEmpty()
-        && System.currentTimeMillis() < deadline) {
-      Thread.sleep(10);
-    }
+    awaitStored(blockchain, chain.header(32));
     // the spec asks to discard the state when the orphaned lists cannot be fetched
     chain.reorg(29, 16, false);
     while (!result.isDone() && chain.headNumber() < 140) {
@@ -183,6 +180,13 @@ class Snap2SyncControllerTest {
         .world(pivot.getNumber())
         .accountLeaves()
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
+    assertThat(controller.metrics().restarts()).isPositive();
+  }
+
+  private static void awaitStored(final MutableBlockchain blockchain, final BlockHeader header) {
+    await()
+        .atMost(Duration.ofSeconds(30))
+        .until(() -> blockchain.getBlockHeader(header.getHash()).isPresent());
   }
 
   private Snap2SyncController controller(
