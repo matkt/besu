@@ -24,6 +24,7 @@ import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
+import org.hyperledger.besu.plugin.services.storage.SortedWriter;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetrics;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBWriteBatchTransaction;
@@ -422,6 +423,7 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
                     }));
     try {
       RocksDBSegmentRewrite.completeInterrupted(this);
+      RocksDBSortedWriter.deleteLeftovers(configuration.getDatabaseDir());
     } catch (final RuntimeException e) {
       // the constructor fails with this, which leaves nobody to release the database
       close();
@@ -740,6 +742,13 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
         new RocksDBWriteBatchTransaction(
             this::safeColumnHandle, getDB(), writeOptions, getMetrics()),
         this.closed::get);
+  }
+
+  @Override
+  public SortedWriter startSortedWriter(final SegmentIdentifier segment) throws StorageException {
+    throwIfClosed();
+    return new RocksDBSortedWriter(
+        this, segment, RocksDBSortedWriter.directory(configuration.getDatabaseDir()));
   }
 
   // writes every memtable to disk, so that writes that skipped the log survive a crash
