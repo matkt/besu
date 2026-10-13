@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -173,6 +174,38 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
           Bytes32.wrap(Arrays.copyOfRange(key, 0, 32)),
           Bytes32.wrap(Arrays.copyOfRange(key, 32, 64)),
           Bytes.wrap(slot.getValue()));
+    }
+  }
+
+  /** Returns a slot value as the format stores it. */
+  protected abstract Bytes storedSlot(Bytes32 value);
+
+  /** The accounts and slots of a batch, written to the flat segments. */
+  protected abstract class FlatBatch implements Batch {
+    private final SegmentedKeyValueStorageTransaction tx;
+
+    protected FlatBatch(final SegmentedKeyValueStorageTransaction tx) {
+      this.tx = tx;
+    }
+
+    @Override
+    public void putAccount(final Bytes32 accountHash, final Bytes account) {
+      tx.put(accountSegment, accountHash.toArrayUnsafe(), account.toArrayUnsafe());
+    }
+
+    @Override
+    public void removeAccount(final Bytes32 accountHash) {
+      tx.remove(accountSegment, accountHash.toArrayUnsafe());
+    }
+
+    @Override
+    public void putStorage(final Bytes32 accountHash, final Bytes32 slotHash, final Bytes32 value) {
+      tx.put(storageSegment, slotKey(accountHash, slotHash), storedSlot(value).toArrayUnsafe());
+    }
+
+    @Override
+    public void removeStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
+      tx.remove(storageSegment, slotKey(accountHash, slotHash));
     }
   }
 

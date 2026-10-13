@@ -27,7 +27,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.BonsaiTrieNodeStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
-import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SortedWriter;
 
 import java.util.ArrayList;
@@ -65,31 +64,14 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
   }
 
   @Override
+  protected Bytes storedSlot(final Bytes32 value) {
+    return value;
+  }
+
+  @Override
   public Batch batch() {
     final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
-    final SegmentedKeyValueStorageTransaction tx = updater.getWorldStateTransaction();
-    return new Batch() {
-      @Override
-      public void putAccount(final Bytes32 accountHash, final Bytes account) {
-        tx.put(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe(), account.toArrayUnsafe());
-      }
-
-      @Override
-      public void removeAccount(final Bytes32 accountHash) {
-        tx.remove(ACCOUNT_INFO_STATE, accountHash.toArrayUnsafe());
-      }
-
-      @Override
-      public void putStorage(
-          final Bytes32 accountHash, final Bytes32 slotHash, final Bytes32 value) {
-        tx.put(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash), value.toArrayUnsafe());
-      }
-
-      @Override
-      public void removeStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
-        tx.remove(ACCOUNT_STORAGE_STORAGE, slotKey(accountHash, slotHash));
-      }
-
+    return new FlatBatch(updater.getWorldStateTransaction()) {
       // stored by code hash, which prepareForSync requires
       @Override
       public void putCode(final Bytes32 codeHash, final Bytes code) {

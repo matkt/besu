@@ -56,35 +56,17 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
     return forest.getCode(Hash.wrap(codeHash)).isPresent();
   }
 
+  // as the Forest world state stores slots, without leading zeros
+  @Override
+  protected Bytes storedSlot(final Bytes32 value) {
+    return value.trimLeadingZeros();
+  }
+
   @Override
   public Batch batch() {
     final SegmentedKeyValueStorageTransaction tx = flat.startUnloggedBatchTransaction();
-    return new Batch() {
+    return new FlatBatch(tx) {
       private ForestWorldStateKeyValueStorage.Updater codeUpdater;
-
-      @Override
-      public void putAccount(final Bytes32 accountHash, final Bytes account) {
-        tx.put(accountSegment, accountHash.toArrayUnsafe(), account.toArrayUnsafe());
-      }
-
-      @Override
-      public void removeAccount(final Bytes32 accountHash) {
-        tx.remove(accountSegment, accountHash.toArrayUnsafe());
-      }
-
-      @Override
-      public void putStorage(
-          final Bytes32 accountHash, final Bytes32 slotHash, final Bytes32 value) {
-        tx.put(
-            storageSegment,
-            slotKey(accountHash, slotHash),
-            value.trimLeadingZeros().toArrayUnsafe());
-      }
-
-      @Override
-      public void removeStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
-        tx.remove(storageSegment, slotKey(accountHash, slotHash));
-      }
 
       @Override
       public void putCode(final Bytes32 codeHash, final Bytes code) {
