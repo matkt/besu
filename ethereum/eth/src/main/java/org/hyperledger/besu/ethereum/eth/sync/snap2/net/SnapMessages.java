@@ -14,12 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
 
-import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.eth.messages.snap.AccountRangeMessage;
 import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV2;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
-import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 
 import java.util.ArrayList;
@@ -30,9 +28,6 @@ import org.apache.tuweni.bytes.Bytes32;
 
 /** Decodes snap range responses in wire order, without intermediate maps. */
 public final class SnapMessages {
-
-  private static final Bytes EMPTY_TRIE_ROOT = Hash.EMPTY_TRIE_HASH.getBytes();
-  private static final Bytes EMPTY_CODE_HASH = Hash.EMPTY.getBytes();
 
   private SnapMessages() {}
 
@@ -65,7 +60,7 @@ public final class SnapMessages {
     while (!in.isEndOfCurrentList()) {
       in.enterList();
       hashes.add(in.readBytes32());
-      accounts.add(toFullAccount(in));
+      accounts.add(AccountRangeMessage.toFullAccount(in));
       in.leaveList();
     }
     in.leaveList();
@@ -97,41 +92,6 @@ public final class SnapMessages {
     in.leaveList();
     final List<Bytes> proof = readByteList(in);
     return new StorageRanges(slotHashes, slotValues, proof);
-  }
-
-  // converts a slim account body, positioned on the input, to the full trie encoding
-  private static Bytes toFullAccount(final RLPInput in) {
-    in.enterList();
-    if (in.nextIsList()) {
-      throw new RLPException("invalid account nonce");
-    }
-    final Bytes nonce = in.readAsRlp().raw();
-    if (in.nextIsList()) {
-      throw new RLPException("invalid account balance");
-    }
-    final Bytes balance = in.readAsRlp().raw();
-    final Bytes storageRoot = readHashOrDefault(in, EMPTY_TRIE_ROOT);
-    final Bytes codeHash = readHashOrDefault(in, EMPTY_CODE_HASH);
-    in.leaveList();
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    out.writeRaw(nonce);
-    out.writeRaw(balance);
-    out.writeBytes(storageRoot);
-    out.writeBytes(codeHash);
-    out.endList();
-    return out.encoded();
-  }
-
-  private static Bytes readHashOrDefault(final RLPInput in, final Bytes defaultValue) {
-    final Bytes value = in.readBytes();
-    if (value.isEmpty()) {
-      return defaultValue;
-    }
-    if (value.size() != 32) {
-      throw new RLPException("invalid hash size " + value.size());
-    }
-    return value;
   }
 
   private static List<Bytes> readByteList(final RLPInput in) {

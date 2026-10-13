@@ -20,6 +20,7 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
@@ -28,7 +29,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import kotlin.collections.ArrayDeque;
 import org.apache.tuweni.bytes.Bytes;
@@ -104,19 +104,43 @@ public final class AccountRangeMessage extends AbstractSnapMessageData {
     return ImmutableAccountRangeData.builder().accounts(accounts).proofs(proofs).build();
   }
 
-  @VisibleForTesting
-  public static Bytes toFullAccount(final RLPInput rlpInput) {
-    final PmtStateTrieAccountValue accountValue = PmtStateTrieAccountValue.readFrom(rlpInput);
+  /**
+   * Converts a slim account, positioned on the input, to its encoding in the trie; the nonce and
+   * balance are copied as they are, a range proof catching any that is not canonical.
+   */
+  public static Bytes toFullAccount(final RLPInput in) {
+    in.enterList();
+    if (in.nextIsList()) {
+      throw new RLPException("invalid account nonce");
+    }
+    final Bytes nonce = in.readAsRlp().raw();
+    if (in.nextIsList()) {
+      throw new RLPException("invalid account balance");
+    }
+    final Bytes balance = in.readAsRlp().raw();
+    final Bytes storageRoot = readHashOrDefault(in, Hash.EMPTY_TRIE_HASH.getBytes());
+    final Bytes codeHash = readHashOrDefault(in, Hash.EMPTY.getBytes());
+    in.leaveList();
+    final BytesValueRLPOutput out = new BytesValueRLPOutput();
+    out.startList();
+    out.writeRaw(nonce);
+    out.writeRaw(balance);
+    out.writeBytes(storageRoot);
+    out.writeBytes(codeHash);
+    out.endList();
+    return out.encoded();
+  }
 
-    final BytesValueRLPOutput rlpOutput = new BytesValueRLPOutput();
-    rlpOutput.startList();
-    rlpOutput.writeLongScalar(accountValue.getNonce()); // nonce
-    rlpOutput.writeUInt256Scalar(accountValue.getBalance()); // balance
-    rlpOutput.writeBytes(accountValue.getStorageRoot().getBytes());
-    rlpOutput.writeBytes(accountValue.getCodeHash().getBytes());
-    rlpOutput.endList();
-
-    return rlpOutput.encoded();
+  // a slim account leaves out the empty storage root and code hash
+  private static Bytes readHashOrDefault(final RLPInput in, final Bytes defaultValue) {
+    final Bytes value = in.readBytes();
+    if (value.isEmpty()) {
+      return defaultValue;
+    }
+    if (value.size() != 32) {
+      throw new RLPException("invalid hash size " + value.size());
+    }
+    return value;
   }
 
   public static Bytes toSlimAccount(final RLPInput rlpInput) {
