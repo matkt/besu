@@ -88,6 +88,11 @@ public final class WorldStateTrieBuilder {
     return slots.get();
   }
 
+  /** Returns the number of storage tries built while downloading and kept so far. */
+  public long keptStorageTries() {
+    return keptStorageTries.get();
+  }
+
   /** Stops a running build, which then throws a {@link CancellationException}. */
   public void cancel() {
     cancelled.set(true);

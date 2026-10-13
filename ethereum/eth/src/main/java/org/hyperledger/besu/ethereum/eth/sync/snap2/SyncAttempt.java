@@ -658,14 +658,19 @@ final class SyncAttempt {
     return accounts ? builder.accountsProcessed() : builder.slotsProcessed();
   }
 
+  long trieKeptStorageTries() {
+    final WorldStateTrieBuilder builder = trieBuilder;
+    return builder == null ? 0 : builder.keptStorageTries();
+  }
+
   String progress() {
     final WorldStateTrieBuilder builder = trieBuilder;
     final HeaderBackfill headers = backfill;
     final String phase =
         builder != null
             ? String.format(
-                "building tries: %d accounts, %d slots",
-                builder.accountsProcessed(), builder.slotsProcessed())
+                "building tries: %d accounts, %d slots, %d storage tries kept from the download",
+                builder.accountsProcessed(), builder.slotsProcessed(), builder.keptStorageTries())
             : "state " + stateSync.progress();
     return String.format(
         "pivot %d, %s, headers stored down to %s, bodies and receipts of %d blocks stored, %d needed below the pivot",

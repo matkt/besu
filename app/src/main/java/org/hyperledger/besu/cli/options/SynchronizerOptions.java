@@ -432,7 +432,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       arity = "0..1",
       fallbackValue = "true",
       description =
-          "Build the storage tries of the SNAP2 sync while the state downloads instead of at the end (default: ${DEFAULT-VALUE})")
+          "Build the storage tries of the SNAP2 sync while the state downloads, leaving only the storages changed since to the final build (default: ${DEFAULT-VALUE})")
   private Boolean snap2StorageTriesWhileDownloading =
       SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
 

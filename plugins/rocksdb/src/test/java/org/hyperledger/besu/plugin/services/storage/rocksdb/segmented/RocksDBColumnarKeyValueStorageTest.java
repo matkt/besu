@@ -540,6 +540,21 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
   }
 
   @Test
+  public void lowPriorityUnloggedBatchSkipsTheWriteAheadLog() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final long empty = walBytes(store);
+
+    final SegmentedKeyValueStorageTransaction tx = store.startLowPriorityUnloggedBatchTransaction();
+    tx.put(TestSegment.FOO, bytesFromHexString("0001"), new byte[64 * 1024]);
+    tx.commit();
+
+    assertThat(walBytes(store)).isEqualTo(empty);
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0001"))).isPresent();
+    store.close();
+  }
+
+  @Test
   public void flushWritesTheMemtablesToDisk() throws Exception {
     final RocksDBColumnarKeyValueStorage store =
         (RocksDBColumnarKeyValueStorage) createSegmentedStore();

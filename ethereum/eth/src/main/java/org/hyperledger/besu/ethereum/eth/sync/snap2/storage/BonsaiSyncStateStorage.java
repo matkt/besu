@@ -94,6 +94,15 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
   @Override
   public TrieWriter trieWriter() {
+    return trieWriter(false);
+  }
+
+  @Override
+  public TrieWriter backgroundTrieWriter() {
+    return trieWriter(true);
+  }
+
+  private TrieWriter trieWriter(final boolean lowPriority) {
     return new TrieWriter() {
       private BonsaiWorldStateKeyValueStorage.Updater updater;
       private long pendingBytes;
@@ -120,7 +129,7 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
       private void put(final Bytes key, final Bytes32 hash, final Bytes rlp) {
         if (updater == null) {
-          updater = newUpdater();
+          updater = newUpdater(lowPriority);
         }
         updater.putTrieNode(key, hash, rlp);
         pendingBytes += key.size() + rlp.size();
@@ -264,8 +273,15 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
   // the sync is the only writer, its writes skip the conflict checks and the write-ahead log
   private BonsaiWorldStateKeyValueStorage.Updater newUpdater() {
+    return newUpdater(false);
+  }
+
+  // low priority writes are slowed down first when the compactions fall behind
+  private BonsaiWorldStateKeyValueStorage.Updater newUpdater(final boolean lowPriority) {
     return new BonsaiWorldStateKeyValueStorage.Updater(
-        flat.startUnloggedBatchTransaction(),
+        lowPriority
+            ? flat.startLowPriorityUnloggedBatchTransaction()
+            : flat.startUnloggedBatchTransaction(),
         bonsai.getTrieLogStorage().startUnloggedBatchTransaction(),
         bonsai.getFlatDbStrategy(),
         flat,

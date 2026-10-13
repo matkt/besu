@@ -50,6 +50,7 @@ public final class StorageTries {
   private final ExecutorService workers;
   private final LinkedBlockingQueue<Bytes32> queue = new LinkedBlockingQueue<>(MAX_QUEUED);
   private final AtomicLong built = new AtomicLong();
+  private final AtomicLong left = new AtomicLong();
   private volatile boolean stopped;
 
   /**
@@ -71,8 +72,8 @@ public final class StorageTries {
 
   /** Queues an account whose storage is downloaded; when too many wait, the final build does it. */
   public void completed(final Bytes32 accountHash) {
-    if (!stopped) {
-      queue.offer(accountHash.copy());
+    if (!stopped && !queue.offer(accountHash.copy())) {
+      left.incrementAndGet();
     }
   }
 
@@ -84,6 +85,11 @@ public final class StorageTries {
   /** Returns the number of accounts waiting for their storage trie. */
   public int queued() {
     return queue.size();
+  }
+
+  /** Returns the number of storages left to the final build: too many queued, or changed. */
+  public long left() {
+    return left.get();
   }
 
   /** Stops building and waits for the builds in progress to give up. */
@@ -101,7 +107,8 @@ public final class StorageTries {
   }
 
   private void run() {
-    final SyncStateStorage.TrieWriter writer = storage.trieWriter();
+    // its writes give way to the download's when the storage falls behind
+    final SyncStateStorage.TrieWriter writer = storage.backgroundTrieWriter();
     while (!stopped) {
       final Bytes32 account;
       try {
@@ -114,6 +121,7 @@ public final class StorageTries {
       } catch (final CancellationException e) {
         return;
       } catch (final RuntimeException e) {
+        left.incrementAndGet();
         LOG.debug("Storage trie of {} left to the final build: {}", account, e.getMessage());
       }
     }
@@ -146,6 +154,7 @@ public final class StorageTries {
     final Bytes32 root = trie.rootHash();
     writer.commit();
     if (!root.equals(expected.get().getBytes())) {
+      left.incrementAndGet();
       LOG.debug(
           "Storage of {} gives root {} instead of {}, left to the final build",
           accountHash,
@@ -163,6 +172,8 @@ public final class StorageTries {
                 writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
                 writer.commit();
                 built.incrementAndGet();
+              } else {
+                left.incrementAndGet();
               }
             });
     if (!running) {

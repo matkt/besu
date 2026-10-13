@@ -85,6 +85,7 @@
 - Schedule the Amsterdam fork on Hoodi at timestamp `1793036568` (Mon, 26 Oct 2026, 17:42:48 UTC). [#11531](https://github.com/besu-eth/besu/pull/11531)
 - Add the `SNAP2` sync mode (`--sync-mode=SNAP2`), which downloads the chain and the world state in parallel over snap/2 ([EIP-8189](https://eips.ethereum.org/EIPS/eip-8189)) and keeps the state at the chain head with block access lists instead of healing it with trie node requests, on Bonsai and Forest.
 - RocksDB no longer recycles its write-ahead log files, which the writes that skip the log, as the SNAP2 sync makes, do not allow.
+- The SNAP2 sync builds the storage tries while the state downloads by default, on one or two threads whose writes give way to the download's, so that the final build only redoes the storages changed since; `--Xsnap2-storage-tries-while-downloading=false` builds them all at the end.
 - The SNAP2 sync completes once the headers, the state and the tries are done, with the bodies and receipts of the latest blocks only; the older ones are then downloaded in the background while the node follows the chain head, highest first, a couple of requests at a time, paused around block imports and rate limited by the hidden `--Xsnap2-backfill-bytes-per-second` option (4 MiB/s by default). The progress is recorded in the blockchain, so a restarted node resumes where it stopped.
 
 ## 26.9.0

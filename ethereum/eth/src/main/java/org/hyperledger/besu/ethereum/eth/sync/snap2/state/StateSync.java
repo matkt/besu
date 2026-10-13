@@ -134,10 +134,13 @@ public final class StateSync {
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
     this.tries =
         config.storageTriesWhileDownloading()
-            ? Optional.of(
-                new StorageTries(
-                    storage, this::withoutMoves, Math.max(1, config.trieBuildThreads() / 4)))
+            ? Optional.of(new StorageTries(storage, this::withoutMoves, storageTrieThreads(config)))
             : Optional.empty();
+  }
+
+  // one thread, two on large machines: the download keeps the cores and the disk
+  private static int storageTrieThreads(final Snap2Configuration config) {
+    return Math.max(1, Math.min(2, config.trieBuildThreads() / 8));
   }
 
   /** Starts downloading the state of the given pivot. */
@@ -266,6 +269,11 @@ public final class StateSync {
     return tries.map(StorageTries::queued).orElse(0);
   }
 
+  /** Returns the number of storages whose trie the download left to the final build. */
+  public long storageTriesLeft() {
+    return tries.map(StorageTries::left).orElse(0L);
+  }
+
   /** Runs a write on the flat state exclusive with every download write. */
   <T> T exclusively(final Supplier<T> write) {
     pivotLock.writeLock().lock();
@@ -318,14 +326,23 @@ public final class StateSync {
 
   /** Returns a one-line progress summary. */
   public String progress() {
+    final String storageTries =
+        tries
+            .map(
+                builder ->
+                    String.format(
+                        ", storage tries built %d, queued %d, %d left to the final build",
+                        builder.built(), builder.queued(), builder.left()))
+            .orElse("");
     return String.format(
-        "accounts %d (%.2f%% of key space), slots %d, bytecodes %d, pending storages %d, %d peers left out",
+        "accounts %d (%.2f%% of key space), slots %d, bytecodes %d, pending storages %d, %d peers left out%s",
         accounts.get(),
         coverage.accounts().coverage() * 100,
         slots.get(),
         codes.get(),
         coverage.pendingStorageCount(),
-        excludedCount);
+        excludedCount,
+        storageTries);
   }
 
   public long downloadedAccounts() {

@@ -79,18 +79,15 @@ class StateSyncTest {
     final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
     network.serve(world);
     final Storages storages = SyncStorageFixture.create(format);
-    stateSync =
-        new StateSync(
-            storages.sync(),
-            network,
-            config().toBuilder().storageTriesWhileDownloading(true).build());
+    stateSync = new StateSync(storages.sync(), network, config());
 
     stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
-    // every storage completed while downloading gets its trie from the written slots
+    // by default, every storage completed while downloading gets its trie from the written slots
     final int withStorage = world.storageLeaves().size();
     await()
         .atMost(Duration.ofSeconds(20))
         .until(() -> stateSync.storageTriesBuilt() == withStorage);
+    assertThat(stateSync.storageTriesLeft()).isZero();
 
     final WorldStateTrieBuilder.Result built = build(storages);
     assertThat(built.root()).isEqualTo(world.root());
@@ -99,11 +96,15 @@ class StateSyncTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
-  void leavesTheStorageTriesToTheFinalBuildByDefault(final Format format) throws Exception {
+  void leavesTheStorageTriesToTheFinalBuildWhenDisabled(final Format format) throws Exception {
     final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
     network.serve(world);
     final Storages storages = SyncStorageFixture.create(format);
-    stateSync = new StateSync(storages.sync(), network, config());
+    stateSync =
+        new StateSync(
+            storages.sync(),
+            network,
+            config().toBuilder().storageTriesWhileDownloading(false).build());
 
     stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
 
@@ -151,17 +152,19 @@ class StateSyncTest {
                 LongStream.of(11, 23, 37, 41, 59).mapToObj(seed -> Arguments.of(format, seed)));
   }
 
+  // the moves rewrite slots of storages whose trie is already built
   @ParameterizedTest
   @MethodSource("formatsAndSeeds")
-  void followsAMovingPivot(final Format format, final long seed) throws Exception {
+  void followsAMovingPivotWhileBuildingStorageTries(final Format format, final long seed)
+      throws Exception {
     followMovingPivot(format, seed, config());
   }
 
-  // the moves rewrite slots of storages whose trie is already built
   @ParameterizedTest
   @EnumSource(Format.class)
-  void followsAMovingPivotWhileBuildingStorageTries(final Format format) throws Exception {
-    followMovingPivot(format, 11, config().toBuilder().storageTriesWhileDownloading(true).build());
+  void followsAMovingPivotWithTheStorageTriesLeftToTheFinalBuild(final Format format)
+      throws Exception {
+    followMovingPivot(format, 11, config().toBuilder().storageTriesWhileDownloading(false).build());
   }
 
   private void followMovingPivot(

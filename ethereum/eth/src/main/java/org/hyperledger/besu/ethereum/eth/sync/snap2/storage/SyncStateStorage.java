@@ -61,6 +61,14 @@ public interface SyncStateStorage {
   TrieWriter trieWriter();
 
   /**
+   * Creates a writer of the trie nodes built while the state downloads, whose writes give way to
+   * the download's when the storage falls behind; not shared between threads.
+   */
+  default TrieWriter backgroundTrieWriter() {
+    return trieWriter();
+  }
+
+  /**
    * Creates the trie node writer of one partition of the final build, whose accounts come in key
    * order, so that it can write sorted files; not shared between threads.
    */

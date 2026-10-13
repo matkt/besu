@@ -133,6 +133,16 @@ final class Snap2Metrics {
         "snap2_trie_slots_processed",
         "Storage slots added to the tries SNAP2 is building",
         () -> attemptValue(attempt -> attempt.trieProgress(false)));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_trie_storage_tries_kept",
+        "Storage tries built while downloading that the final SNAP2 build kept",
+        () -> attemptValue(SyncAttempt::trieKeptStorageTries));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_storage_tries_left",
+        "Downloaded storages whose trie SNAP2 left to the final build",
+        () -> attemptValue(attempt -> attempt.stateSync().storageTriesLeft()));
     metricsSystem.createCounter(
         category,
         "snap2_accounts_downloaded_total",

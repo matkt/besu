@@ -168,7 +168,14 @@ class Snap2SyncControllerTest {
     final MutableBlockchain blockchain =
         InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
     final Storages storages = SyncStorageFixture.create(format);
-    controller = controller(chain, blockchain, storages, new Snap2Marker(dataDirectory));
+    // with every storage trie left to the final build, as the other tests build them meanwhile
+    controller =
+        controller(
+            chain,
+            blockchain,
+            storages,
+            new Snap2Marker(dataDirectory),
+            config().storageTriesWhileDownloading(false).build());
 
     final CompletableFuture<SnapSyncProcessState> result = controller.start();
     awaitStored(blockchain, chain.header(32));
