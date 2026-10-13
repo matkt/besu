@@ -93,7 +93,10 @@ public final class SyncStorageFixture {
     return new Storages(new ForestSyncStateStorage(forest, provider), null, forest);
   }
 
-  /** A world state held in memory: accounts with their storage and code. */
+  /**
+   * A flat world state keyed by hash, as the download writes it, for the trie build; {@link
+   * org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld} is the one that changes block by block.
+   */
   public static final class World {
     public final TreeMap<Bytes32, PmtStateTrieAccountValue> accounts = new TreeMap<>();
     public final TreeMap<Bytes32, TreeMap<Bytes32, UInt256>> storage = new TreeMap<>();
