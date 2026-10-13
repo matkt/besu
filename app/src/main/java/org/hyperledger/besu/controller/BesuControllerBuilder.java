@@ -1187,9 +1187,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
 
       final MergeContext mergeContext = protocolContext.getConsensusContext(MergeContext.class);
 
-      final SingleBlockHeaderDownloader headerDownloader =
-          new SingleBlockHeaderDownloader(ethContext, protocolSchedule);
-
       final List<Runnable> cleanups = new ArrayList<>();
       final Runnable cleanupAction =
           () -> {
@@ -1210,7 +1207,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             new PivotSelectorFromSafeBlock(
                 protocolContext,
                 genesisConfigOptions,
-                headerDownloader,
+                new SingleBlockHeaderDownloader(ethContext, protocolSchedule),
                 protocolSchedule,
                 Clock.systemUTC(),
                 syncConfig.getSnapSyncConfiguration().getPivotBlockWindowValidity(),
