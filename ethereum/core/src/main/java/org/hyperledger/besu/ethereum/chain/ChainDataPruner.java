@@ -82,6 +82,17 @@ public class ChainDataPruner implements BlockAddedObserver {
     }
   }
 
+  /** Returns the lowest block whose body and receipts stay in place at this chain head. */
+  public long lowestRetained(final long chainHead) {
+    return switch (pruningMode) {
+      case CHAIN_PRUNING ->
+          config.isBlockPruningEnabled()
+              ? Math.max(1, chainHead - config.chainPruningBlocksRetained() + 1)
+              : 0;
+      case PRE_MERGE_PRUNING -> mergeBlock;
+    };
+  }
+
   private void chainPrunerAction(final BlockAddedEvent event) {
     final BlockHeader header = event.getHeader();
     // Validate on every event, including non-canonical forks: a fork below the mark means

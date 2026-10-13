@@ -20,15 +20,18 @@ import org.hyperledger.besu.consensus.merge.ForkchoiceEvent;
 import org.hyperledger.besu.consensus.merge.UnverifiedForkchoiceListener;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.ChainDataPruner;
+import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Synchronizer;
 import org.hyperledger.besu.ethereum.eth.manager.ChainHeadEstimate;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.common.NoSyncRequiredState;
+import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.FullSyncDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.SyncTerminationCondition;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2SyncFactory;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapDownloaderFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
@@ -69,6 +72,12 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
   private final ProtocolContext protocolContext;
   private final PivotBlockSelector pivotBlockSelector;
   private final SyncTerminationCondition terminationCondition;
+  private final ProtocolSchedule protocolSchedule;
+  private final EthContext ethContext;
+  private final MetricsSystem metricsSystem;
+  private final Optional<ChainDataPruner> chainDataPruner;
+  private final BodyBackfill.Settings bodyBackfillSettings;
+  private volatile Optional<BodyBackfill> bodyBackfill = Optional.empty();
 
   public DefaultSynchronizer(
       final SynchronizerConfiguration syncConfig,
@@ -90,6 +99,14 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
     this.pivotBlockSelector = pivotBlockSelector;
     this.protocolContext = protocolContext;
     this.terminationCondition = terminationCondition;
+    this.protocolSchedule = protocolSchedule;
+    this.ethContext = ethContext;
+    this.metricsSystem = metricsSystem;
+    this.chainDataPruner = chainDataPruner;
+    this.bodyBackfillSettings =
+        BodyBackfill.Settings.of(
+            syncConfig.getSnapSyncConfiguration().getSnap2BackfillBytesPerSecond(),
+            syncConfig.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled());
 
     ChainHeadTracker.trackChainHeadForPeers(
         ethContext,
@@ -210,6 +227,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
         future = fastSyncDownloader.get().start().thenCompose(this::handleSyncResult);
       } else {
         syncState.markInitialSyncPhaseAsDone();
+        startBodyBackfill();
         future = startFullSync();
       }
       return future.thenApply(this::finalizeSync);
@@ -220,6 +238,9 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
 
   @Override
   public void stop() {
+    // the back-fill outlives the initial sync, after which the synchronizer no longer runs
+    bodyBackfill.ifPresent(BodyBackfill::stop);
+    bodyBackfill = Optional.empty();
     if (running.compareAndSet(true, false)) {
       LOG.info("Stopping synchronizer");
       fastSyncDownloader.ifPresent(SnapSyncController::stop);
@@ -272,6 +293,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       pivotBlockSelector.close();
       syncState.markInitialSyncPhaseAsDone();
     }
+    startBodyBackfill();
 
     if (terminationCondition.shouldContinueDownload()) {
       return startFullSync();
@@ -279,6 +301,30 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       syncState.setReachedTerminalDifficulty(true);
       return CompletableFuture.completedFuture(null);
     }
+  }
+
+  // the SNAP2 sync sets the chain head with the latest bodies only, the older ones being stored
+  // in the background while the node follows the head, above the floor and the pruned blocks
+  private void startBodyBackfill() {
+    final MutableBlockchain blockchain = protocolContext.getBlockchain();
+    if (blockchain.getBodiesFrom().isEmpty()) {
+      return;
+    }
+    final long floor = syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L);
+    final BodyBackfill backfill =
+        new BodyBackfill(
+            blockchain,
+            protocolSchedule,
+            ethContext.getPeerTaskExecutor(),
+            syncState::isInSync,
+            head ->
+                Math.max(
+                    floor + 1,
+                    chainDataPruner.map(pruner -> pruner.lowestRetained(head)).orElse(0L)),
+            bodyBackfillSettings,
+            metricsSystem);
+    bodyBackfill = Optional.of(backfill);
+    backfill.start();
   }
 
   private CompletableFuture<Void> startFullSync() {

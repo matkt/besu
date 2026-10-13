@@ -75,6 +75,8 @@ public class SnapSyncConfiguration {
   // SNAP2 downloads small account ranges lowest first, so that the state is written in key order
   public static final int DEFAULT_SNAP2_ACCOUNT_RANGES = 65_536;
   public static final Boolean DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING = Boolean.FALSE;
+  // the bodies and receipts SNAP2 leaves out are stored in the background at about this rate
+  public static final int DEFAULT_SNAP2_BACKFILL_BYTES_PER_SECOND = 4 * 1024 * 1024;
 
   public static SnapSyncConfiguration getDefault() {
     return ImmutableSnapSyncConfiguration.builder().build();
@@ -143,5 +145,10 @@ public class SnapSyncConfiguration {
   @Value.Default
   public Boolean isSnap2StorageTriesWhileDownloading() {
     return DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
+  }
+
+  @Value.Default
+  public int getSnap2BackfillBytesPerSecond() {
+    return DEFAULT_SNAP2_BACKFILL_BYTES_PER_SECOND;
   }
 }

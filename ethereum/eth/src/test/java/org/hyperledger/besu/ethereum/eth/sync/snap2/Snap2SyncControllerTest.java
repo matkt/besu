@@ -26,7 +26,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
@@ -57,11 +59,15 @@ class Snap2SyncControllerTest {
 
   private final FakeSnapNetwork network = new FakeSnapNetwork();
   private Snap2SyncController controller;
+  private BodyBackfill backfill;
 
   @AfterEach
   void tearDown() {
     if (controller != null) {
       controller.stop();
+    }
+    if (backfill != null) {
+      backfill.stop();
     }
     network.stop();
     assertThat(network.unagreedRequests()).isEmpty();
@@ -225,6 +231,23 @@ class Snap2SyncControllerTest {
         assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
       }
     }
+
+    // the older bodies are stored afterwards by the back-fill, from the recorded block down
+    backfill =
+        new BodyBackfill(
+            blockchain,
+            ProtocolScheduleFixture.MAINNET,
+            new FakePeerTaskExecutor(message -> network.answer(Protocol.ETH, message)),
+            () -> true,
+            head -> 1,
+            new BodyBackfill.Settings(1L << 40, 0, Duration.ZERO, Duration.ofMillis(20), 8, false),
+            new NoOpMetricsSystem());
+    backfill.start();
+    await().atMost(Duration.ofSeconds(30)).until(() -> backfill.state() == BodyBackfill.State.DONE);
+    for (long number = 1; number <= pivot.getNumber(); number++) {
+      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
+    }
+    assertThat(blockchain.getBodiesFrom()).contains(1L);
   }
 
   @Test

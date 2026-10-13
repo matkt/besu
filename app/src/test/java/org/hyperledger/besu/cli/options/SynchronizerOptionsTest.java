@@ -79,6 +79,8 @@ public class SynchronizerOptionsTest
                 .isSnapSyncTransactionIndexingEnabled(Boolean.TRUE)
                 .snap2AccountRanges(SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES + 2)
                 .isSnap2StorageTriesWhileDownloading(Boolean.TRUE)
+                .snap2BackfillBytesPerSecond(
+                    SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_BYTES_PER_SECOND + 2)
                 .build())
         .snapSyncSavePreCheckpointHeadersOnlyEnabled(
             SnapSyncConfiguration.DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED)

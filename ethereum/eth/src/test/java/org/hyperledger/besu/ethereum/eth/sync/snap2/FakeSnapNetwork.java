@@ -237,6 +237,11 @@ public final class FakeSnapNetwork implements RequestSender {
     return submit(request);
   }
 
+  /** Answers a request message as a peer would, through the handlers. */
+  public MessageData answer(final Protocol protocol, final MessageData message) {
+    return respond(protocol, message);
+  }
+
   @Override
   public int peerCount(final Protocol protocol) {
     return peers.size();

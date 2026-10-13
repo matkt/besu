@@ -53,10 +53,6 @@ import org.slf4j.LoggerFactory;
 public final class BodyDownloader {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyDownloader.class);
-  // peers cap a body or receipt response around 2 MiB
-  private static final double RESPONSE_BYTES = 2 * 1024 * 1024;
-  private static final int MIN_RANGE_BLOCKS = 8;
-  private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
   private static final long MAX_MEMORY = 1L << 30;
 
   private final RequestSender sender;
@@ -71,6 +67,7 @@ public final class BodyDownloader {
   private final Executor writer;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
+  private final BlockSizes sizes = new BlockSizes();
 
   // guarded by this
   private final BlockRanges stored = new BlockRanges();
@@ -83,9 +80,6 @@ public final class BodyDownloader {
   private int downloading;
   private int held;
   private boolean closed;
-  // averages of the stored blocks, without and with their receipts
-  private double bodyBytes = INITIAL_BLOCK_BYTES;
-  private double blockBytes = INITIAL_BLOCK_BYTES;
 
   /**
    * Creates a downloader.
@@ -174,11 +168,12 @@ public final class BodyDownloader {
   }
 
   private void dispatch() {
-    final int rangeBlocks = rangeBlocks();
+    final int rangeBlocks = sizes.bodyBlocks(maxRangeBlocks);
     final int slots = sender.capacity(Protocol.ETH);
     // enough ranges to keep every eth slot of the peers busy, within the memory budget
     final int network = Math.max(1, Math.min(maxRanges, slots + slots / 4));
-    final int inMemory = (int) Math.max(1, memory / (rangeBlocks * Math.max(1, blockBytes)));
+    final int inMemory =
+        (int) Math.max(1, memory / (rangeBlocks * Math.max(1, sizes.blockBytes())));
     while (!closed && downloading < network && held < inMemory) {
       final long[] range = BlockRanges.highestGap(stored, fetching, lowest, highest, rangeBlocks);
       if (range == null) {
@@ -189,32 +184,6 @@ public final class BodyDownloader {
       held++;
       fetch(range[0], range[1]);
     }
-  }
-
-  // about one full body response, so many blocks when they are small
-  private int rangeBlocks() {
-    final double blocks = RESPONSE_BYTES / Math.max(1, bodyBytes);
-    return (int)
-        Math.max(Math.min(MIN_RANGE_BLOCKS, maxRangeBlocks), Math.min(maxRangeBlocks, blocks));
-  }
-
-  // blocks whose receipts fill about one response, from the measured receipt sizes
-  private synchronized int receiptBlocks() {
-    final double receiptBytes = blockBytes - bodyBytes;
-    return (int) Math.max(1, receiptBytes > 0 ? RESPONSE_BYTES / receiptBytes : maxRangeBlocks);
-  }
-
-  private void measure(final List<SyncBlockWithReceipts> blocks) {
-    long bodies = 0;
-    long receipts = 0;
-    for (final SyncBlockWithReceipts block : blocks) {
-      bodies += block.getBlock().getBody().getRlp().size();
-      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
-        receipts += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
-      }
-    }
-    bodyBytes = 0.8 * bodyBytes + 0.2 * bodies / blocks.size();
-    blockBytes = 0.8 * blockBytes + 0.2 * (bodies + receipts) / blocks.size();
   }
 
   private void fetch(final long from, final long to) {
@@ -258,7 +227,7 @@ public final class BodyDownloader {
     fetching.remove(from, to);
     held--;
     if (blocks != null) {
-      measure(blocks);
+      sizes.measure(blocks);
     }
     if (blocks != null && canonical(blocks)) {
       stored.add(from, to);
@@ -336,7 +305,7 @@ public final class BodyDownloader {
     }
     // about one response per group, the groups asked in parallel
     final CompletableFuture<?>[] groups =
-        Lists.partition(needed, receiptBlocks()).stream()
+        Lists.partition(needed, sizes.receiptBlocks(maxRangeBlocks)).stream()
             .map(group -> receiptsFrom(group, List.of(), receipts))
             .toArray(CompletableFuture[]::new);
     return CompletableFuture.allOf(groups)
