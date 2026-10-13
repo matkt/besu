@@ -15,29 +15,20 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.chain.DefaultBlockchain;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyDownloader;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.ChainHeadSource;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.ReorgRecovery;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiff;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.StorageRetry;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
-import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
-import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
-import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.util.FutureUtils;
 
 import java.time.Duration;
@@ -49,10 +40,8 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -77,24 +66,11 @@ final class SyncAttempt {
     static final Resume NONE = new Resume(-1);
   }
 
-  private final Snap2Configuration config;
-  private final ProtocolSchedule protocolSchedule;
-  private final MutableBlockchain blockchain;
-  private final SyncState syncState;
-  private final SyncStateStorage storage;
-  private final ChainHeadSource heads;
-  private final MetricsSystem metricsSystem;
-  private final SyncDurationMetrics syncDurationMetrics;
-  private final boolean headersToCheckpointOnly;
-  private final boolean indexTransactions;
-  private final RequestSender scheduler;
-  private final HeaderFetcher fetcher;
-  private final BalFetcher balFetcher;
-  private final ExecutorService executor;
-  private final ScheduledExecutorService control;
-  private final BooleanSupplier stopped;
-  private final Snap2Metrics metrics;
+  /** The blocks a reorg orphaned above the common ancestor, and the new ones up to the pivot. */
+  private record Reorg(
+      BlockHeader ancestor, List<BlockHeader> orphaned, List<BlockHeader> newFork) {}
 
+  private final SyncContext context;
   private final BlockHeader firstPivot;
   private final Resume resume;
   private final StateSync stateSync;
@@ -111,24 +87,8 @@ final class SyncAttempt {
   private volatile long finalTarget = -1;
 
   SyncAttempt(final SyncContext context, final BlockHeader firstPivot, final Resume resume) {
-    this.config = context.config();
-    this.protocolSchedule = context.protocolSchedule();
-    this.blockchain = context.blockchain();
-    this.syncState = context.syncState();
-    this.storage = context.storage();
-    this.heads = context.heads();
-    this.metricsSystem = context.metricsSystem();
-    this.syncDurationMetrics = context.syncDurationMetrics();
-    this.headersToCheckpointOnly = context.headersToCheckpointOnly();
-    this.indexTransactions = context.indexTransactions();
-    this.scheduler = context.scheduler();
-    this.fetcher = context.fetcher();
-    this.balFetcher = context.balFetcher();
-    this.executor = context.executor();
-    this.control = context.control();
-    this.stopped = context.stopped();
-    this.metrics = context.metrics();
-    this.stateSync = new StateSync(storage, scheduler, config);
+    this.context = context;
+    this.stateSync = new StateSync(context.storage(), context.scheduler(), context.config());
     this.firstPivot = firstPivot;
     this.resume = resume;
   }
@@ -142,33 +102,37 @@ final class SyncAttempt {
     startBackfill(firstPivot);
     bodies =
         new BodyDownloader(
-            scheduler,
-            protocolSchedule,
-            blockchain,
+            context.scheduler(),
+            context.protocolSchedule(),
+            context.blockchain(),
             floor.getNumber(),
-            config.bodiesPerRequest(),
-            config.maxBodyRanges(),
-            indexTransactions,
-            executor);
+            context.config().bodiesPerRequest(),
+            context.config().maxBodyRanges(),
+            context.indexTransactions(),
+            context.executor());
     final CompletableFuture<Void> blocks = bodyLoop();
 
     final CompletableFuture<BlockHeader> main =
         state
             .thenCompose(unused -> settleMoves())
             .thenCompose(unused -> finalCatchUp())
-            .thenApplyAsync(unused -> buildTries(), executor)
+            .thenApplyAsync(unused -> buildTries(), context.executor())
             .thenCompose(
                 finalPivot -> {
                   finalTarget = finalPivot.getNumber();
-                  syncDurationMetrics.stopTimer(
-                      SyncDurationMetrics.Labels.SNAP_INITIAL_WORLD_STATE_DOWNLOAD_DURATION);
+                  context
+                      .syncDurationMetrics()
+                      .stopTimer(
+                          SyncDurationMetrics.Labels.SNAP_INITIAL_WORLD_STATE_DOWNLOAD_DURATION);
                   LOG.info("Waiting for the chain download to reach block {}", finalTarget);
                   return CompletableFuture.allOf(headersDone, blocks)
                       .thenApply(unused -> finalPivot);
                 })
             .thenApply(
                 finalPivot -> {
-                  syncDurationMetrics.stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
+                  context
+                      .syncDurationMetrics()
+                      .stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
                   LOG.info("SNAP2 sync complete at block {}", finalPivot.getNumber());
                   return finalPivot;
                 });
@@ -203,7 +167,7 @@ final class SyncAttempt {
   }
 
   private boolean inactive() {
-    return stopped.getAsBoolean() || cancelled;
+    return context.stopped().getAsBoolean() || cancelled;
   }
 
   Resume resume() {
@@ -216,20 +180,19 @@ final class SyncAttempt {
 
   // genesis, or the checkpoint stored with its total difficulty, below which no body is needed
   private BlockHeader chainFloor() {
-    final Optional<Checkpoint> checkpoint = syncState.getCheckpoint();
+    final MutableBlockchain blockchain = context.blockchain();
+    final Optional<Checkpoint> checkpoint = context.syncState().getCheckpoint();
     if (checkpoint.isEmpty() || checkpoint.get().blockNumber() <= 0) {
       return blockchain.getGenesisBlockHeader();
     }
+    final Hash checkpointHash = checkpoint.get().blockHash();
     final BlockHeader header =
         blockchain
-            .getBlockHeader(checkpoint.get().blockHash())
-            .orElseGet(() -> fetcher.byHash(checkpoint.get().blockHash(), Priority.HEADERS).join());
+            .getBlockHeader(checkpointHash)
+            .orElseGet(() -> context.fetcher().byHash(checkpointHash, Priority.HEADERS).join());
     if (header.getNumber() != checkpoint.get().blockNumber()) {
       throw new IllegalStateException(
-          "checkpoint "
-              + checkpoint.get().blockHash()
-              + " is not at block "
-              + checkpoint.get().blockNumber());
+          "checkpoint " + checkpointHash + " is not at block " + checkpoint.get().blockNumber());
     }
     StorageRetry.run(
         () -> blockchain.unsafeStoreHeader(header, checkpoint.get().totalDifficulty()));
@@ -239,6 +202,7 @@ final class SyncAttempt {
   // the chain head stays on the floor until every body is stored; headers a failed attempt
   // indexed above this pivot are dropped
   private void prepareChain() {
+    final MutableBlockchain blockchain = context.blockchain();
     if (resume.indexedUpTo() > firstPivot.getNumber()) {
       StorageRetry.run(
           () ->
@@ -253,7 +217,7 @@ final class SyncAttempt {
   }
 
   private void storeHeaders(final List<BlockHeader> headers) {
-    StorageRetry.run(() -> blockchain.storeBlockHeaders(headers));
+    StorageRetry.run(() -> context.blockchain().storeBlockHeaders(headers));
     indexedUpTo = Math.max(indexedUpTo, headers.getLast().getNumber());
   }
 
@@ -265,17 +229,19 @@ final class SyncAttempt {
     }
     final HeaderBackfill next =
         new HeaderBackfill(
-            scheduler,
-            protocolSchedule,
-            blockchain,
-            fetcher,
-            headersToCheckpointOnly ? floor : blockchain.getGenesisBlockHeader(),
+            context.scheduler(),
+            context.protocolSchedule(),
+            context.blockchain(),
+            context.fetcher(),
+            context.headersToCheckpointOnly()
+                ? floor
+                : context.blockchain().getGenesisBlockHeader(),
             top,
-            config.headersPerRequest(),
-            config.chainParallelism(),
-            metricsSystem);
+            context.config().headersPerRequest(),
+            context.config().chainParallelism(),
+            context.metricsSystem());
     backfill = next;
-    next.run(executor)
+    next.run(context.executor())
         .whenComplete(
             (unused, error) -> {
               if (inactive() || next != backfill) {
@@ -283,27 +249,32 @@ final class SyncAttempt {
               }
               if (error == null) {
                 headersDone.complete(null);
-                return;
+              } else {
+                LOG.warn(
+                    "Header download failed, resuming: {}", Futures.unwrap(error).getMessage());
+                resumeBackfill(next);
               }
-              LOG.warn("Header download failed, resuming: {}", Futures.unwrap(error).getMessage());
-              delay(Duration.ofSeconds(5))
-                  .thenRun(
-                      () -> {
-                        if (!inactive() && next == backfill) {
-                          startBackfill(
-                              blockchain
-                                  .getBlockHeader(next.lowestStored())
-                                  .orElseThrow(
-                                      () ->
-                                          new IllegalStateException(
-                                              "lost the lowest stored header")));
-                        }
-                      })
-                  .exceptionally(
-                      resumeError -> {
-                        headersDone.completeExceptionally(resumeError);
-                        return null;
-                      });
+            });
+  }
+
+  // starts again below the lowest header the failed download stored
+  private void resumeBackfill(final HeaderBackfill failed) {
+    delay(Duration.ofSeconds(5))
+        .thenRun(
+            () -> {
+              if (!inactive() && failed == backfill) {
+                startBackfill(
+                    context
+                        .blockchain()
+                        .getBlockHeader(failed.lowestStored())
+                        .orElseThrow(
+                            () -> new IllegalStateException("lost the lowest stored header")));
+              }
+            })
+        .exceptionally(
+            error -> {
+              headersDone.completeExceptionally(error);
+              return null;
             });
   }
 
@@ -316,12 +287,13 @@ final class SyncAttempt {
     final long target = finalTarget >= 0 ? finalTarget : pivotNumber();
     bodies.download(lowestStoredHeader(), target);
     if (finalTarget >= 0 && bodies.storedUpTo(finalTarget)) {
-      return CompletableFuture.runAsync(() -> setChainHead(finalTarget), executor);
+      return CompletableFuture.runAsync(() -> setChainHead(finalTarget), context.executor());
     }
     return poll().thenCompose(unused -> bodyLoop());
   }
 
   private void setChainHead(final long target) {
+    final MutableBlockchain blockchain = context.blockchain();
     final BlockHeader head =
         blockchain
             .getBlockHeader(target)
@@ -338,12 +310,13 @@ final class SyncAttempt {
     if (inactive() || finalizing || moving) {
       return;
     }
-    final Optional<Hash> head = heads.headHash();
+    final Optional<Hash> head = context.heads().headHash();
     if (head.isEmpty()) {
       return;
     }
     moving = true;
-    fetcher
+    context
+        .fetcher()
         .byHash(head.get(), Priority.PIVOT)
         .thenCompose(headHeader -> moveTowards(headHeader, false))
         .whenComplete(
@@ -365,18 +338,20 @@ final class SyncAttempt {
     }
     final BlockHeader pivot = stateSync.pivot().header();
     final long distance = head.getNumber() - pivot.getNumber();
-    final boolean due = distance >= config.pivotDistance() + config.pivotMoveThreshold();
+    final boolean due =
+        distance >= context.config().pivotDistance() + context.config().pivotMoveThreshold();
     if (distance <= 0 || !(force || due || stateSync.isPivotStale())) {
       return CompletableFuture.completedFuture(null);
     }
-    return fetcher
+    return context
+        .fetcher()
         .chainDown(head, pivot.getNumber() + 1, Priority.PIVOT)
         .thenCompose(
             chain -> {
               if (!chain.getFirst().getParentHash().equals(pivot.getHash())) {
                 return recoverFromReorg(head, chain);
               }
-              final long target = head.getNumber() - config.pivotDistance();
+              final long target = head.getNumber() - context.config().pivotDistance();
               if (target <= pivot.getNumber()) {
                 return CompletableFuture.completedFuture(null);
               }
@@ -409,7 +384,8 @@ final class SyncAttempt {
     final List<BlockHeader> step =
         headers.subList(from, Math.min(headers.size(), from + MAX_BLOCKS_PER_MOVE));
     final BlockHeader target = step.getLast();
-    return balFetcher
+    return context
+        .balFetcher()
         .fetch(step)
         .thenCompose(
             lists -> {
@@ -423,7 +399,7 @@ final class SyncAttempt {
             })
         .thenCompose(
             outcome -> {
-              metrics.pivotMoved();
+              context.metrics().pivotMoved();
               LOG.info(
                   "Moved the pivot to block {}: {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots, {} storages to refresh",
                   target.getNumber(),
@@ -442,78 +418,18 @@ final class SyncAttempt {
     final long lowest = Math.max(floor.getNumber() + 1, pivot.getNumber() - MAX_REORG_DEPTH);
     // both branches down to the same height, the orphaned one walked from our pivot by hash
     final CompletableFuture<List<BlockHeader>> canonicalPart =
-        fetcher.chainDown(newChain.getFirst(), lowest, Priority.PIVOT);
+        context.fetcher().chainDown(newChain.getFirst(), lowest, Priority.PIVOT);
     final CompletableFuture<List<BlockHeader>> orphanedPart =
-        fetcher.chainDown(pivot, lowest, Priority.PIVOT);
+        context.fetcher().chainDown(pivot, lowest, Priority.PIVOT);
     return canonicalPart
-        .thenCombine(orphanedPart, (lower, orphanedChain) -> List.of(lower, orphanedChain))
-        .thenCompose(
-            branches -> {
-              final List<BlockHeader> canonical = new ArrayList<>(branches.get(0));
+        .thenCombine(
+            orphanedPart,
+            (lower, orphaned) -> {
+              final List<BlockHeader> canonical = new ArrayList<>(lower);
               canonical.addAll(newChain.subList(1, newChain.size()));
-              final List<BlockHeader> orphanedChain = branches.get(1);
-              final int ancestorIndex = commonAncestor(canonical, orphanedChain);
-              if (ancestorIndex < 0) {
-                return CompletableFuture.failedFuture(
-                    new RestartException(
-                        "the chain reorganised deeper than " + MAX_REORG_DEPTH + " blocks"));
-              }
-              final BlockHeader ancestor = canonical.get(ancestorIndex);
-              final long target =
-                  Math.max(ancestor.getNumber() + 1, head.getNumber() - config.pivotDistance());
-              final List<BlockHeader> newFork =
-                  canonical.subList(
-                      ancestorIndex + 1, (int) (ancestorIndex + 1 + target - ancestor.getNumber()));
-              final List<BlockHeader> orphaned =
-                  orphanedChain.stream()
-                      .filter(header -> header.getNumber() > ancestor.getNumber())
-                      .toList();
-              metrics.reorged();
-              LOG.warn(
-                  "Chain reorganised below the pivot {}: common ancestor {}, {} orphaned blocks, new pivot {}",
-                  pivot.getNumber(),
-                  ancestor.getNumber(),
-                  orphaned.size(),
-                  target);
-              return balFetcher
-                  .fetch(orphaned, ORPHANED_BAL_ROUNDS)
-                  .exceptionallyCompose(
-                      error ->
-                          CompletableFuture.failedFuture(
-                              new RestartException("orphaned block access lists are unavailable")))
-                  .thenCombine(balFetcher.fetch(newFork), (old, fresh) -> List.of(old, fresh))
-                  .thenCompose(
-                      lists -> {
-                        if (inactive()) {
-                          return abandoned();
-                        }
-                        if (backfill.lowestStored() > ancestor.getNumber() + 1) {
-                          // the download in progress follows the orphaned branch
-                          startBackfill(newFork.getFirst());
-                        }
-                        storeHeaders(newFork);
-                        if (pivot.getNumber() > target) {
-                          StorageRetry.run(
-                              () ->
-                                  blockchain.unsafeRemoveCanonicalIndexRange(
-                                      target, pivot.getNumber()));
-                        }
-                        storeBlockAccessLists(newFork, lists.get(1));
-                        // after the new headers, so that no import reads the orphaned ones
-                        bodies.rewind(ancestor.getNumber() + 1);
-                        return new ReorgRecovery(stateSync, storage, scheduler)
-                            .recover(newFork.getLast(), fold(lists.get(0)), fold(lists.get(1)));
-                      })
-                  .exceptionallyCompose(
-                      error ->
-                          Futures.unwrap(error) instanceof RestartException
-                                  || Futures.unwrap(error) instanceof CancellationException
-                              ? CompletableFuture.failedFuture(error)
-                              : CompletableFuture.failedFuture(
-                                  new RestartException(
-                                      "reorg recovery failed: "
-                                          + Futures.unwrap(error).getMessage())));
+              return reorg(head, canonical, orphaned);
             })
+        .thenCompose(reorg -> recover(pivot, reorg))
         .exceptionallyCompose(
             error -> {
               if (Futures.unwrap(error) instanceof RestartException restartError) {
@@ -524,14 +440,95 @@ final class SyncAttempt {
             });
   }
 
+  // splits both branches at their common ancestor, the new one up to the new pivot
+  private Reorg reorg(
+      final BlockHeader head, final List<BlockHeader> canonical, final List<BlockHeader> orphaned) {
+    final int ancestorIndex = commonAncestor(canonical, orphaned);
+    if (ancestorIndex < 0) {
+      throw new RestartException(
+          "the chain reorganised deeper than " + MAX_REORG_DEPTH + " blocks");
+    }
+    final BlockHeader ancestor = canonical.get(ancestorIndex);
+    final long target =
+        Math.max(ancestor.getNumber() + 1, head.getNumber() - context.config().pivotDistance());
+    return new Reorg(
+        ancestor,
+        orphaned.stream().filter(header -> header.getNumber() > ancestor.getNumber()).toList(),
+        canonical.subList(
+            ancestorIndex + 1, (int) (ancestorIndex + 1 + target - ancestor.getNumber())));
+  }
+
+  // fetches the lists of both branches, then moves the chain and the state to the new one
+  private CompletableFuture<Void> recover(final BlockHeader pivot, final Reorg reorg) {
+    context.metrics().reorged();
+    LOG.warn(
+        "Chain reorganised below the pivot {}: common ancestor {}, {} orphaned blocks, new pivot {}",
+        pivot.getNumber(),
+        reorg.ancestor().getNumber(),
+        reorg.orphaned().size(),
+        reorg.newFork().getLast().getNumber());
+    final CompletableFuture<List<Bytes>> orphanedLists =
+        context
+            .balFetcher()
+            .fetch(reorg.orphaned(), ORPHANED_BAL_ROUNDS)
+            .exceptionallyCompose(
+                error ->
+                    CompletableFuture.failedFuture(
+                        new RestartException("orphaned block access lists are unavailable")));
+    final CompletableFuture<List<Bytes>> newLists = context.balFetcher().fetch(reorg.newFork());
+    return orphanedLists
+        .thenCombine(newLists, (orphaned, fresh) -> switchBranch(pivot, reorg, orphaned, fresh))
+        .thenCompose(Function.identity())
+        .exceptionallyCompose(
+            error -> {
+              final Throwable cause = Futures.unwrap(error);
+              if (cause instanceof RestartException || cause instanceof CancellationException) {
+                return CompletableFuture.failedFuture(error);
+              }
+              return CompletableFuture.failedFuture(
+                  new RestartException("reorg recovery failed: " + cause.getMessage()));
+            });
+  }
+
+  private CompletableFuture<Void> switchBranch(
+      final BlockHeader pivot,
+      final Reorg reorg,
+      final List<Bytes> orphanedLists,
+      final List<Bytes> newLists) {
+    if (inactive()) {
+      return abandoned();
+    }
+    final long ancestor = reorg.ancestor().getNumber();
+    final BlockHeader newPivot = reorg.newFork().getLast();
+    if (backfill.lowestStored() > ancestor + 1) {
+      // the download in progress follows the orphaned branch
+      startBackfill(reorg.newFork().getFirst());
+    }
+    storeHeaders(reorg.newFork());
+    if (pivot.getNumber() > newPivot.getNumber()) {
+      StorageRetry.run(
+          () ->
+              context
+                  .blockchain()
+                  .unsafeRemoveCanonicalIndexRange(newPivot.getNumber(), pivot.getNumber()));
+    }
+    storeBlockAccessLists(reorg.newFork(), newLists);
+    // after the new headers, so that no import reads the orphaned ones
+    bodies.rewind(ancestor + 1);
+    return new ReorgRecovery(stateSync, context.storage(), context.scheduler())
+        .recover(newPivot, fold(orphanedLists), fold(newLists));
+  }
+
   // stops moving the pivot and waits for a move in progress
   private CompletableFuture<Void> settleMoves() {
     final CompletableFuture<Void> settled = new CompletableFuture<>();
-    control.execute(
-        () -> {
-          finalizing = true;
-          waitIdle(settled);
-        });
+    context
+        .control()
+        .execute(
+            () -> {
+              finalizing = true;
+              waitIdle(settled);
+            });
     return settled;
   }
 
@@ -539,7 +536,7 @@ final class SyncAttempt {
     if (inactive()) {
       settled.completeExceptionally(new CancellationException("attempt abandoned"));
     } else if (moving) {
-      control.schedule(() -> waitIdle(settled), 200, TimeUnit.MILLISECONDS);
+      context.control().schedule(() -> waitIdle(settled), 200, TimeUnit.MILLISECONDS);
     } else {
       settled.complete(null);
     }
@@ -550,11 +547,12 @@ final class SyncAttempt {
     if (inactive()) {
       return abandoned();
     }
-    final Optional<Hash> head = heads.headHash();
+    final Optional<Hash> head = context.heads().headHash();
     if (head.isEmpty()) {
       return CompletableFuture.completedFuture(null);
     }
-    return fetcher
+    return context
+        .fetcher()
         .byHash(head.get(), Priority.PIVOT)
         .thenCompose(headHeader -> moveTowards(headHeader, true))
         .exceptionallyCompose(
@@ -577,7 +575,7 @@ final class SyncAttempt {
     final BlockHeader pivot = stateSync.pivot().header();
     stateSync.stop();
     LOG.info("Building the state tries of block {}", pivot.getNumber());
-    trieBuilder = new WorldStateTrieBuilder(storage, config.trieBuildThreads());
+    trieBuilder = new WorldStateTrieBuilder(context.storage(), context.config().trieBuildThreads());
     final WorldStateTrieBuilder.Result built = trieBuilder.build();
     if (!built.root().equals(Bytes32.wrap(pivot.getStateRoot().getBytes()))) {
       throw new CompletionException(
@@ -589,10 +587,10 @@ final class SyncAttempt {
                   + " root "
                   + pivot.getStateRoot()));
     }
-    storage.saveWorldState(pivot, built.rootNode());
-    storage.completeSync();
+    context.storage().saveWorldState(pivot, built.rootNode());
+    context.storage().completeSync();
     // the state skipped the write-ahead log
-    storage.flush();
+    context.storage().flush();
     LOG.info(
         "World state of block {} is complete: {} accounts, {} storage tries kept from the download, {} slots read for the others",
         pivot.getNumber(),
@@ -662,11 +660,11 @@ final class SyncAttempt {
   }
 
   private CompletableFuture<Void> delay(final Duration delay) {
-    return Futures.delay(delay, executor);
+    return Futures.delay(delay, context.executor());
   }
 
   private CompletableFuture<Void> poll() {
-    return Futures.delay(config.pollInterval(), executor);
+    return Futures.delay(context.config().pollInterval(), context.executor());
   }
 
   // index of the highest header of the canonical branch that is also on the orphaned one
@@ -691,16 +689,10 @@ final class SyncAttempt {
 
   // keeps the lists of the blocks the node will hold, to serve them once synced
   private void storeBlockAccessLists(final List<BlockHeader> headers, final List<Bytes> lists) {
-    if (blockchain instanceof DefaultBlockchain defaultBlockchain) {
-      StorageRetry.run(
-          () -> {
-            final var updater = defaultBlockchain.getBlockchainStorage().unloggedUpdater();
-            for (int i = 0; i < headers.size(); i++) {
-              updater.putSyncBlockAccessList(
-                  headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));
-            }
-            updater.commit();
-          });
+    final Map<Hash, SyncBlockAccessList> accessLists = new HashMap<>();
+    for (int i = 0; i < headers.size(); i++) {
+      accessLists.put(headers.get(i).getHash(), new SyncBlockAccessList(lists.get(i)));
     }
+    StorageRetry.run(() -> context.blockchain().unsafeStoreSyncBlockAccessLists(accessLists));
   }
 }

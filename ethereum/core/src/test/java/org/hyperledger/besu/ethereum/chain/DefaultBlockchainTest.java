@@ -29,12 +29,14 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.LogWithMetadata;
 import org.hyperledger.besu.ethereum.core.SyncBlock;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockBody;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.DefaultProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
@@ -53,6 +55,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -365,6 +368,29 @@ public class DefaultBlockchainTest {
               transaction ->
                   assertThat(blockchain.getTransactionLocation(transaction.getHash())).isPresent());
     }
+  }
+
+  @Test
+  public void storesSyncBlockAccessListsOfStoredHeaders() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final Block block =
+        gen.block(
+            new BlockDataGenerator.BlockOptions()
+                .setBlockNumber(1)
+                .setParentHash(genesisBlock.getHash()));
+    final Hash blockHash = block.getHash();
+    final BlockAccessList accessList = gen.blockAccessList(3);
+    blockchain.storeBlockHeaders(List.of(block.getHeader()));
+
+    blockchain.unsafeStoreSyncBlockAccessLists(
+        Map.of(blockHash, new SyncBlockAccessList(accessList.encode())));
+
+    assertThat(blockchain.getBlockAccessList(blockHash).map(BlockAccessList::accountChanges))
+        .contains(accessList.accountChanges());
   }
 
   @Test

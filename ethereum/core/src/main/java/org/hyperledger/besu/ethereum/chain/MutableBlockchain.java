@@ -18,11 +18,13 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface MutableBlockchain extends Blockchain {
@@ -123,6 +125,14 @@ public interface MutableBlockchain extends Blockchain {
    * @param to the new chain head
    */
   void unsafeSetSyncChainHead(BlockHeader from, BlockHeader to);
+
+  /**
+   * Stores the access lists of blocks whose headers are stored, without updating the chain state.
+   * They skip the write-ahead log until {@link #unsafeSetSyncChainHead} flushes them.
+   *
+   * @param accessLists the access lists by block hash
+   */
+  void unsafeStoreSyncBlockAccessLists(Map<Hash, SyncBlockAccessList> accessLists);
 
   void unsafeSetChainHead(final BlockHeader blockHeader, final Difficulty totalDifficulty);
 
