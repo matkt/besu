@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
@@ -99,6 +100,25 @@ class BodyDownloaderTest {
     bodies.download(1, 40);
     awaitStoredUpTo(bodies, 40);
     assertCanonicalBodies(40);
+  }
+
+  @Test
+  void checksThatTheStoredBlocksLinkUpToTheHead() {
+    chain.extend(50);
+    final BodyDownloader bodies = downloader(50, 10);
+    bodies.download(1, 50);
+    awaitStoredUpTo(bodies, 50);
+
+    bodies.verifyChain(chain.header(10), chain.header(50));
+    assertThatThrownBy(() -> bodies.verifyChain(chain.header(10), chain.header(49)))
+        .hasMessageContaining("do not lead to block 49");
+    // the blocks a reorg forgot break the chain until downloaded again
+    bodies.rewind(31);
+    assertThatThrownBy(() -> bodies.verifyChain(chain.header(10), chain.header(50)))
+        .isInstanceOf(IllegalStateException.class);
+    bodies.download(1, 50);
+    awaitStoredUpTo(bodies, 50);
+    bodies.verifyChain(chain.header(10), chain.header(50));
   }
 
   @Test

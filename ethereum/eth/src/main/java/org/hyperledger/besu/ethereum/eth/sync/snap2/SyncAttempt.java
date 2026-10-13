@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyDownloader;
@@ -77,6 +78,8 @@ final class SyncAttempt {
   private final CompletableFuture<BlockHeader> restart = new CompletableFuture<>();
   private final CompletableFuture<Void> headersDone = new CompletableFuture<>();
   private BlockHeader floor;
+  // the total difficulty stored with every header above a proof-of-stake floor
+  private Optional<Difficulty> headerTotalDifficulty = Optional.empty();
   private volatile long indexedUpTo = -1;
   private volatile HeaderBackfill backfill;
   private volatile BodyDownloader bodies;
@@ -209,16 +212,27 @@ final class SyncAttempt {
               blockchain.unsafeRemoveCanonicalIndexRange(
                   firstPivot.getNumber(), resume.indexedUpTo()));
     }
-    final var floorDifficulty =
+    final Difficulty floorDifficulty =
         blockchain
             .getTotalDifficultyByHash(floor.getHash())
             .orElseThrow(() -> new IllegalStateException("lost a total difficulty"));
     StorageRetry.run(() -> blockchain.unsafeSetChainHead(floor, floorDifficulty));
+    if (floor.getDifficulty().isZero()) {
+      headerTotalDifficulty = Optional.of(floorDifficulty);
+    }
   }
 
   private void storeHeaders(final List<BlockHeader> headers) {
-    StorageRetry.run(() -> context.blockchain().storeBlockHeaders(headers));
+    StorageRetry.run(() -> writeHeaders(headers));
     indexedUpTo = Math.max(indexedUpTo, headers.getLast().getNumber());
+  }
+
+  // above a proof-of-stake floor, with their total difficulty, which the chain head then reuses
+  private void writeHeaders(final List<BlockHeader> headers) {
+    final MutableBlockchain blockchain = context.blockchain();
+    headerTotalDifficulty.ifPresentOrElse(
+        total -> blockchain.storeBlockHeaders(headers, total),
+        () -> blockchain.storeBlockHeaders(headers));
   }
 
   // downloads the headers below a stored header, replacing any download in progress
@@ -231,7 +245,7 @@ final class SyncAttempt {
         new HeaderBackfill(
             context.scheduler(),
             context.protocolSchedule(),
-            context.blockchain(),
+            this::writeHeaders,
             context.fetcher(),
             context.headersToCheckpointOnly()
                 ? floor
@@ -299,9 +313,10 @@ final class SyncAttempt {
             .getBlockHeader(target)
             .orElseThrow(() -> new IllegalStateException("lost the header of block " + target));
     LOG.info(
-        "Bodies and receipts of blocks {} to {} stored, writing their total difficulties",
+        "Bodies and receipts of blocks {} to {} stored, setting the chain head",
         floor.getNumber() + 1,
         target);
+    bodies.verifyChain(floor, head);
     StorageRetry.run(() -> blockchain.unsafeSetSyncChainHead(floor, head));
   }
 

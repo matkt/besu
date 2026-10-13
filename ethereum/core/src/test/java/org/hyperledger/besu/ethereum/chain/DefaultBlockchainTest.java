@@ -371,6 +371,84 @@ public class DefaultBlockchainTest {
   }
 
   @Test
+  public void setsTheSyncChainHeadAboveAProofOfStakeFloorFromTheStoredTotalDifficulties() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    chain.blockchain.storeBlockHeaders(chain.headers(), chain.floorDifficulty);
+    chain.storeBodies();
+
+    chain.blockchain.unsafeSetSyncChainHead(chain.floor, chain.head());
+
+    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.head());
+    assertThat(chain.blockchain.getChainHead().getTotalDifficulty())
+        .isEqualTo(chain.floorDifficulty);
+    chain
+        .headers()
+        .forEach(
+            header ->
+                assertThat(chain.blockchain.getTotalDifficultyByHash(header.getHash()))
+                    .contains(chain.floorDifficulty));
+  }
+
+  @Test
+  public void computesTheTotalDifficultiesWhenTheHeadersWereStoredWithout() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    chain.blockchain.storeBlockHeaders(chain.headers());
+    chain.storeBodies();
+
+    chain.blockchain.unsafeSetSyncChainHead(chain.floor, chain.head());
+
+    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.head());
+    assertThat(chain.blockchain.getTotalDifficultyByHash(chain.headers().get(1).getHash()))
+        .contains(chain.floorDifficulty);
+  }
+
+  // a checkpoint at the first proof-of-stake block, then blocks of difficulty zero
+  private final class ProofOfStakeChain {
+    private final BlockDataGenerator gen = new BlockDataGenerator();
+    private final Difficulty floorDifficulty = Difficulty.of(17);
+    private final DefaultBlockchain blockchain;
+    private final BlockHeader floor;
+    private final List<Block> blocks = new ArrayList<>();
+
+    private ProofOfStakeChain() {
+      final Block genesis = gen.genesisBlock();
+      blockchain =
+          createMutableBlockchain(
+              new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesis);
+      Block parent =
+          gen.block(
+              new BlockDataGenerator.BlockOptions()
+                  .setBlockNumber(1)
+                  .setParentHash(genesis.getHash())
+                  .setDifficulty(Difficulty.ZERO));
+      floor = parent.getHeader();
+      blockchain.unsafeStoreHeader(floor, floorDifficulty);
+      for (long number = 2; number <= 5; number++) {
+        parent =
+            gen.block(
+                new BlockDataGenerator.BlockOptions()
+                    .setBlockNumber(number)
+                    .setParentHash(parent.getHash())
+                    .setDifficulty(Difficulty.ZERO));
+        blocks.add(parent);
+      }
+    }
+
+    private List<BlockHeader> headers() {
+      return blocks.stream().map(Block::getHeader).toList();
+    }
+
+    private BlockHeader head() {
+      return blocks.getLast().getHeader();
+    }
+
+    private void storeBodies() {
+      blockchain.unsafeStoreSyncBodiesAndReceipts(
+          blocks.stream().map(block -> toSyncBlockWithReceipts(block)).toList(), false);
+    }
+  }
+
+  @Test
   public void storesSyncBlockAccessListsOfStoredHeaders() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();

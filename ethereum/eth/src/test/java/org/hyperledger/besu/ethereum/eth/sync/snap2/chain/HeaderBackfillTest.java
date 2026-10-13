@@ -119,7 +119,7 @@ class HeaderBackfillTest {
     return new HeaderBackfill(
         network,
         ProtocolScheduleFixture.MAINNET,
-        blockchain,
+        blockchain::storeBlockHeaders,
         new HeaderFetcher(network, ProtocolScheduleFixture.MAINNET, chain, 10),
         floor,
         top,

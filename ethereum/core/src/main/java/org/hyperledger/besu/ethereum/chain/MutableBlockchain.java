@@ -119,7 +119,9 @@ public interface MutableBlockchain extends Blockchain {
 
   /**
    * Makes a canonical block the chain head once the bodies and receipts of the blocks above {@code
-   * from} are stored, writing their total difficulties in order.
+   * from} are stored. Above a proof-of-stake {@code from} whose headers were stored with their
+   * total difficulty, it only checks that {@code to} is canonical; otherwise it reads every header
+   * to check its parent link and write its total difficulty.
    *
    * @param from a canonical block with its total difficulty stored
    * @param to the new chain head
@@ -142,6 +144,15 @@ public interface MutableBlockchain extends Blockchain {
    * @param blockHeaders The block headers to store.
    */
   void storeBlockHeaders(List<BlockHeader> blockHeaders);
+
+  /**
+   * Stores the headers of proof-of-stake blocks with their total difficulty, the same for all of
+   * them since their difficulty is zero, without updating the chain state.
+   *
+   * @param blockHeaders The block headers to store.
+   * @param totalDifficulty The total difficulty of every one of them.
+   */
+  void storeBlockHeaders(List<BlockHeader> blockHeaders, Difficulty totalDifficulty);
 
   /**
    * Removes the canonical blockNumber→blockHash index entries for the given block number range,

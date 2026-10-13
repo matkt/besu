@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -71,6 +72,8 @@ public final class BodyDownloader {
 
   // guarded by this
   private final BlockRanges stored = new BlockRanges();
+  // the ends of each stored range by its first block, to check they form one chain
+  private final TreeMap<Long, RangeEnds> ends = new TreeMap<>();
   private final BlockRanges fetching = new BlockRanges();
   private long lowest;
   private long highest = -1;
@@ -126,7 +129,30 @@ public final class BodyDownloader {
 
   /** Forgets the blocks from {@code from} on, which a reorg replaced. */
   public synchronized void rewind(final long from) {
-    stored.remove(from, Long.MAX_VALUE);
+    // a range across the rewind point is forgotten whole, its last hash being gone
+    final Map.Entry<Long, RangeEnds> across = ends.lowerEntry(from);
+    final long start = across != null && across.getValue().last() >= from ? across.getKey() : from;
+    stored.remove(start, Long.MAX_VALUE);
+    ends.tailMap(start, true).clear();
+  }
+
+  /**
+   * Checks that the stored ranges link up by hash from {@code floor} to {@code head}; the blocks
+   * inside each range were checked when it was stored.
+   */
+  public synchronized void verifyChain(final BlockHeader floor, final BlockHeader head) {
+    long next = floor.getNumber() + 1;
+    Hash parent = floor.getHash();
+    for (final Map.Entry<Long, RangeEnds> range : ends.headMap(head.getNumber(), true).entrySet()) {
+      if (range.getKey() != next || !range.getValue().firstParent().equals(parent)) {
+        throw new IllegalStateException("stored blocks do not link up at block " + range.getKey());
+      }
+      next = range.getValue().last() + 1;
+      parent = range.getValue().lastHash();
+    }
+    if (next != head.getNumber() + 1 || !parent.equals(head.getHash())) {
+      throw new IllegalStateException("stored blocks do not lead to block " + head.getNumber());
+    }
   }
 
   /** Stops downloading; a range in flight may still be stored. */
@@ -214,6 +240,10 @@ public final class BodyDownloader {
     }
     if (blocks != null && canonical(blocks)) {
       stored.add(from, to);
+      ends.put(
+          from,
+          new RangeEnds(
+              to, blocks.getFirst().getHeader().getParentHash(), blocks.getLast().getHash()));
     }
     dispatch();
   }
@@ -319,4 +349,6 @@ public final class BodyDownloader {
               return receiptsFrom(left, value.lastBlockPartialReceipts(), receipts);
             });
   }
+
+  private record RangeEnds(long last, Hash firstParent, Hash lastHash) {}
 }

@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask.Direction;
@@ -35,6 +34,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +51,7 @@ public final class HeaderBackfill {
 
   private final RequestSender sender;
   private final ProtocolSchedule protocolSchedule;
-  private final MutableBlockchain blockchain;
+  private final Consumer<List<BlockHeader>> store;
   private final HeaderFetcher fetcher;
   private final BlockHeader floor;
   private final BlockHeader top;
@@ -66,13 +66,14 @@ public final class HeaderBackfill {
   /**
    * Creates a backfill.
    *
+   * @param store writes verified headers to the blockchain
    * @param floor the highest header below which nothing is needed, already stored and trusted
    * @param top the lowest trusted header to download down from, already stored
    */
   public HeaderBackfill(
       final RequestSender sender,
       final ProtocolSchedule protocolSchedule,
-      final MutableBlockchain blockchain,
+      final Consumer<List<BlockHeader>> store,
       final HeaderFetcher fetcher,
       final BlockHeader floor,
       final BlockHeader top,
@@ -81,7 +82,7 @@ public final class HeaderBackfill {
       final MetricsSystem metricsSystem) {
     this.sender = sender;
     this.protocolSchedule = protocolSchedule;
-    this.blockchain = blockchain;
+    this.store = store;
     this.fetcher = fetcher;
     this.floor = floor;
     this.top = top;
@@ -201,7 +202,7 @@ public final class HeaderBackfill {
     final List<BlockHeader> verified = headers;
     synchronized (this) {
       throwIfStopped();
-      StorageRetry.run(() -> blockchain.storeBlockHeaders(verified));
+      StorageRetry.run(() -> store.accept(verified));
     }
     expected = verified.getLast().getParentHash();
     lowestStored = verified.getLast().getNumber();

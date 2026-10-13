@@ -602,13 +602,27 @@ public class DefaultBlockchain implements MutableBlockchain {
   @Override
   public void storeBlockHeaders(final List<BlockHeader> blockHeaders) {
     final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
+    blockHeaders.forEach(header -> putCanonicalHeader(updater, header));
+    updater.commit();
+  }
+
+  @Override
+  public void storeBlockHeaders(
+      final List<BlockHeader> blockHeaders, final Difficulty totalDifficulty) {
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     blockHeaders.forEach(
         header -> {
-          final Hash hash = header.getHash();
-          updater.putBlockHeader(hash, header);
-          updater.putBlockHash(header.getNumber(), hash);
+          putCanonicalHeader(updater, header);
+          updater.putTotalDifficulty(header.getHash(), totalDifficulty);
         });
     updater.commit();
+  }
+
+  private static void putCanonicalHeader(
+      final BlockchainStorage.Updater updater, final BlockHeader header) {
+    final Hash hash = header.getHash();
+    updater.putBlockHeader(hash, header);
+    updater.putBlockHash(header.getNumber(), hash);
   }
 
   @Override
@@ -774,12 +788,33 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @Override
   public synchronized void unsafeSetSyncChainHead(final BlockHeader from, final BlockHeader to) {
-    Difficulty total =
+    final Difficulty fromTotal =
         blockchainStorage
             .getTotalDifficulty(from.getHash())
             .orElseThrow(
                 () ->
                     new IllegalStateException("no total difficulty for block " + from.getNumber()));
+    // above a proof-of-stake block every difficulty is zero, so the headers stored with their
+    // total difficulty need not be read again
+    final Difficulty total;
+    if (from.getDifficulty().isZero()
+        && blockchainStorage.getTotalDifficulty(to.getHash()).isPresent()) {
+      if (!blockchainStorage.getBlockHash(to.getNumber()).map(to.getHash()::equals).orElse(false)) {
+        throw new IllegalStateException("block " + to.getNumber() + " is not canonical");
+      }
+      total = fromTotal;
+    } else {
+      total = storeSyncTotalDifficulties(from, to, fromTotal);
+    }
+    // the synced blocks skipped the write-ahead log: on disk before the head points at them
+    blockchainStorage.flush();
+    unsafeSetChainHead(to, total);
+  }
+
+  // reads every header above from, checking its parent link, and writes its total difficulty
+  private Difficulty storeSyncTotalDifficulties(
+      final BlockHeader from, final BlockHeader to, final Difficulty fromTotal) {
+    Difficulty total = fromTotal;
     BlockchainStorage.Updater updater = blockchainStorage.unloggedUpdater();
     Hash parent = from.getHash();
     try {
@@ -810,9 +845,7 @@ public class DefaultBlockchain implements MutableBlockchain {
       throw e;
     }
     updater.commit();
-    // the synced blocks skipped the write-ahead log: on disk before the head points at them
-    blockchainStorage.flush();
-    unsafeSetChainHead(to, total);
+    return total;
   }
 
   @Override
