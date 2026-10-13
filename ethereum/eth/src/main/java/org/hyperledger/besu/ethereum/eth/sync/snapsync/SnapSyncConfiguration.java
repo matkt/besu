@@ -76,7 +76,6 @@ public class SnapSyncConfiguration {
 
   // SNAP2 downloads small account ranges lowest first, so that the state is written in key order
   public static final int DEFAULT_SNAP2_ACCOUNT_RANGES = 65_536;
-  public static final Boolean DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING = Boolean.TRUE;
   public static final BackfillMode DEFAULT_SNAP2_BACKFILL_MODE = BackfillMode.MEDIUM;
 
   public static SnapSyncConfiguration getDefault() {
@@ -141,11 +140,6 @@ public class SnapSyncConfiguration {
   @Value.Default
   public int getSnap2AccountRanges() {
     return DEFAULT_SNAP2_ACCOUNT_RANGES;
-  }
-
-  @Value.Default
-  public Boolean isSnap2StorageTriesWhileDownloading() {
-    return DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
   }
 
   @Value.Default

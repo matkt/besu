@@ -93,8 +93,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private static final String SNAP_TRANSACTION_INDEXING_ENABLED_FLAG =
       "--snapsync-synchronizer-transaction-indexing-enabled";
   private static final String SNAP2_ACCOUNT_RANGES_FLAG = "--Xsnap2-account-ranges";
-  private static final String SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG =
-      "--Xsnap2-storage-tries-while-downloading";
   private static final String SNAP2_BACKFILL_MODE_FLAG = "--Xsnap2-backfill-mode";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
@@ -426,17 +424,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       PositiveNumber.fromInt(SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES);
 
   @CommandLine.Option(
-      names = {SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG},
-      hidden = true,
-      paramLabel = "<Boolean>",
-      arity = "0..1",
-      fallbackValue = "true",
-      description =
-          "Build the storage tries of the SNAP2 sync while the state downloads, leaving only the storages changed since to the final build (default: ${DEFAULT-VALUE})")
-  private Boolean snap2StorageTriesWhileDownloading =
-      SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
-
-  @CommandLine.Option(
       names = {SNAP2_BACKFILL_MODE_FLAG},
       hidden = true,
       paramLabel = "<MODE>",
@@ -577,8 +564,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
     options.snap2AccountRanges =
         PositiveNumber.fromInt(config.getSnapSyncConfiguration().getSnap2AccountRanges());
-    options.snap2StorageTriesWhileDownloading =
-        config.getSnapSyncConfiguration().isSnap2StorageTriesWhileDownloading();
     options.snap2BackfillMode = config.getSnapSyncConfiguration().getSnap2BackfillMode();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
@@ -626,7 +611,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
             .snap2AccountRanges(snap2AccountRanges.getValue())
-            .isSnap2StorageTriesWhileDownloading(snap2StorageTriesWhileDownloading)
             .snap2BackfillMode(snap2BackfillMode)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
@@ -707,8 +691,6 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapTransactionIndexingEnabled),
             SNAP2_ACCOUNT_RANGES_FLAG,
             OptionParser.format(snap2AccountRanges.getValue()),
-            SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG,
-            OptionParser.format(snap2StorageTriesWhileDownloading),
             SNAP2_BACKFILL_MODE_FLAG,
             snap2BackfillMode.name(),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,

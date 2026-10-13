@@ -82,8 +82,6 @@ public final class Snap2SyncFactory {
     final Snap2Configuration config =
         Snap2Configuration.getDefault().toBuilder()
             .accountChunks(syncConfig.getSnapSyncConfiguration().getSnap2AccountRanges())
-            .storageTriesWhileDownloading(
-                syncConfig.getSnapSyncConfiguration().isSnap2StorageTriesWhileDownloading())
             .build();
     return Optional.of(
         new Snap2SyncController(

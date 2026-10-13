@@ -94,26 +94,6 @@ class StateSyncTest {
     assertThat(built.keptStorageTries()).isEqualTo(withStorage);
   }
 
-  @ParameterizedTest
-  @EnumSource(Format.class)
-  void leavesTheStorageTriesToTheFinalBuildWhenDisabled(final Format format) throws Exception {
-    final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
-    network.serve(world);
-    final Storages storages = SyncStorageFixture.create(format);
-    stateSync =
-        new StateSync(
-            storages.sync(),
-            network,
-            config().toBuilder().storageTriesWhileDownloading(false).build());
-
-    stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
-
-    assertThat(stateSync.storageTriesBuilt()).isZero();
-    final WorldStateTrieBuilder.Result built = build(storages);
-    assertThat(built.root()).isEqualTo(world.root());
-    assertThat(built.keptStorageTries()).isZero();
-  }
-
   @Test
   void requestsTheAccountRangesLowestFirst() throws Exception {
     final TestWorld world = TestWorld.random(new Random(7), 2000, 0, 0);
@@ -158,13 +138,6 @@ class StateSyncTest {
   void followsAMovingPivotWhileBuildingStorageTries(final Format format, final long seed)
       throws Exception {
     followMovingPivot(format, seed, config());
-  }
-
-  @ParameterizedTest
-  @EnumSource(Format.class)
-  void followsAMovingPivotWithTheStorageTriesLeftToTheFinalBuild(final Format format)
-      throws Exception {
-    followMovingPivot(format, 11, config().toBuilder().storageTriesWhileDownloading(false).build());
   }
 
   private void followMovingPivot(

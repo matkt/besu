@@ -711,15 +711,13 @@ final class SyncAttempt {
           .append(compact(stateSync.downloadedCodes()))
           .append(" | storages pending ")
           .append(count(stateSync.pendingStorages()));
-      if (stateSync.buildsStorageTries()) {
-        line.append(" | storage tries ")
-            .append(compact(stateSync.storageTriesBuilt()))
-            .append(" built");
-        if (stateSync.storageTriesLeft() > 0) {
-          line.append(", ")
-              .append(compact(stateSync.storageTriesLeft()))
-              .append(" left to the final build");
-        }
+      line.append(" | storage tries ")
+          .append(compact(stateSync.storageTriesBuilt()))
+          .append(" built");
+      if (stateSync.storageTriesLeft() > 0) {
+        line.append(", ")
+            .append(compact(stateSync.storageTriesLeft()))
+            .append(" left to the final build");
       }
       line.append(" | pivot ").append(block(pivotNumber()));
       headNumber()

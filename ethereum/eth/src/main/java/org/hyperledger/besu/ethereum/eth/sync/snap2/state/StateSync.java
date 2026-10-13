@@ -84,8 +84,8 @@ public final class StateSync {
   private final RequestSender scheduler;
   private final Snap2Configuration config;
   private final StateCoverage coverage = new StateCoverage();
-  // builds the storage tries while downloading, when enabled
-  private final Optional<StorageTries> tries;
+  // builds the storage tries while downloading
+  private final StorageTries tries;
   private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
@@ -136,10 +136,7 @@ public final class StateSync {
         Executors.newFixedThreadPool(
             Math.max(2, config.workerThreads()),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
-    this.tries =
-        config.storageTriesWhileDownloading()
-            ? Optional.of(new StorageTries(storage, this::withoutMoves, storageTrieThreads(config)))
-            : Optional.empty();
+    this.tries = new StorageTries(storage, this::withoutMoves, storageTrieThreads(config));
   }
 
   // one thread, two on large machines: the download keeps the cores and the disk
@@ -266,17 +263,17 @@ public final class StateSync {
 
   /** Returns the number of storage tries built while downloading. */
   public long storageTriesBuilt() {
-    return tries.map(StorageTries::built).orElse(0L);
+    return tries.built();
   }
 
   /** Returns the number of downloaded storages waiting for their trie. */
   public int storageTriesQueued() {
-    return tries.map(StorageTries::queued).orElse(0);
+    return tries.queued();
   }
 
   /** Returns the number of storages whose trie the download left to the final build. */
   public long storageTriesLeft() {
-    return tries.map(StorageTries::left).orElse(0L);
+    return tries.left();
   }
 
   /** Runs a write on the flat state exclusive with every download write. */
@@ -325,18 +322,13 @@ public final class StateSync {
     }
     loop.shutdownNow();
     persister.shutdownNow();
-    tries.ifPresent(StorageTries::stop);
+    tries.stop();
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
   /** Returns the number of accounts whose storage is still to download. */
   public int pendingStorages() {
     return coverage.pendingStorageCount();
-  }
-
-  /** Returns whether the storage tries are built while downloading. */
-  public boolean buildsStorageTries() {
-    return tries.isPresent();
   }
 
   public long downloadedAccounts() {
@@ -705,7 +697,7 @@ public final class StateSync {
   private void cover(final StorageTask task, final Bytes32 origin, final Bytes32 end) {
     if (task.cover(origin, end)) {
       coverage.removeStorageTask(task.accountHash());
-      tries.ifPresent(builder -> builder.completed(task.accountHash()));
+      tries.completed(task.accountHash());
     }
   }
 
@@ -949,14 +941,10 @@ public final class StateSync {
         ProgressFormat.compact(accounts.get()),
         ProgressFormat.compact(slots.get()),
         ProgressFormat.compact(codes.get()),
-        tries
-            .map(
-                builder ->
-                    String.format(
-                        " | storage tries %s built, %s left to the final build",
-                        ProgressFormat.compact(builder.built()),
-                        ProgressFormat.compact(builder.left() + builder.queued())))
-            .orElse(""));
+        String.format(
+            " | storage tries %s built, %s left to the final build",
+            ProgressFormat.compact(tries.built()),
+            ProgressFormat.compact(tries.left() + tries.queued())));
     completion.complete(null);
     return true;
   }

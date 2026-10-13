@@ -40,7 +40,6 @@ import java.time.Duration;
  *     chain head is set, the older ones being back-filled once the node follows the head
  * @param workerThreads threads decoding and verifying responses
  * @param trieBuildThreads threads building the tries at the end
- * @param storageTriesWhileDownloading whether storage tries are built while the state downloads
  * @param minPeers snap/2 peers to wait for before starting
  * @param pollInterval how often the pivot and the chain download check for progress
  */
@@ -63,7 +62,6 @@ public record Snap2Configuration(
     int bodyWindow,
     int workerThreads,
     int trieBuildThreads,
-    boolean storageTriesWhileDownloading,
     int minPeers,
     Duration pollInterval) {
 
@@ -89,7 +87,6 @@ public record Snap2Configuration(
         128,
         Math.max(2, cores),
         Math.max(2, cores),
-        SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING,
         1,
         Duration.ofSeconds(2));
   }
@@ -111,7 +108,6 @@ public record Snap2Configuration(
     private int bodyWindow;
     private int workerThreads;
     private int trieBuildThreads;
-    private boolean storageTriesWhileDownloading;
     private Duration pollInterval;
     private final Snap2Configuration base;
 
@@ -127,7 +123,6 @@ public record Snap2Configuration(
       this.bodyWindow = base.bodyWindow();
       this.workerThreads = base.workerThreads();
       this.trieBuildThreads = base.trieBuildThreads();
-      this.storageTriesWhileDownloading = base.storageTriesWhileDownloading();
       this.pollInterval = base.pollInterval();
     }
 
@@ -181,11 +176,6 @@ public record Snap2Configuration(
       return this;
     }
 
-    public Builder storageTriesWhileDownloading(final boolean value) {
-      storageTriesWhileDownloading = value;
-      return this;
-    }
-
     public Builder pollInterval(final Duration value) {
       pollInterval = value;
       return this;
@@ -211,7 +201,6 @@ public record Snap2Configuration(
           bodyWindow,
           workerThreads,
           trieBuildThreads,
-          storageTriesWhileDownloading,
           base.minPeers(),
           pollInterval);
     }
