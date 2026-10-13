@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.util.FutureUtils;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -296,11 +297,13 @@ final class SyncAttempt {
         new BodyBackfill(
             context.blockchain(),
             context.protocolSchedule(),
+            context.peers(),
             context.peerTaskExecutor(),
             () -> true,
             pivot.getNumber() + 1,
             head -> from,
             BodyBackfill.Settings.unthrottled(context.indexTransactions()),
+            Clock.systemUTC(),
             context.metricsSystem());
     window = bodies;
     bodies.start();

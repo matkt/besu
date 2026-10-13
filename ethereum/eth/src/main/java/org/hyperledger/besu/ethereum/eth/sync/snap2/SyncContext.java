@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerSelector;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.ChainHeadSource;
@@ -47,6 +48,7 @@ record SyncContext(
     boolean headersToCheckpointOnly,
     boolean indexTransactions,
     RequestSender scheduler,
+    PeerSelector peers,
     PeerTaskExecutor peerTaskExecutor,
     HeaderFetcher fetcher,
     BalFetcher balFetcher,

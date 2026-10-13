@@ -44,9 +44,14 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,12 +61,15 @@ import java.util.function.LongUnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 @Timeout(60)
 class BodyBackfillTest {
 
   private static final int HEAD = 60;
   private static final long NO_LIMIT = 0;
+  private static final long SLOT_SECONDS = 12;
 
   private final BlockDataGenerator gen = new BlockDataGenerator(5);
   private final List<Block> chain = new ArrayList<>();
@@ -69,6 +77,7 @@ class BodyBackfillTest {
   private final Map<Hash, List<TransactionReceipt>> receiptsByHash = new HashMap<>();
   private final FakePeerTaskExecutor executor = new FakePeerTaskExecutor(this::answer);
   private final AtomicBoolean inSync = new AtomicBoolean(true);
+  private final SettableClock clock = new SettableClock();
   private MutableBlockchain blockchain;
   private BodyBackfill backfill;
 
@@ -112,6 +121,45 @@ class BodyBackfillTest {
     assertThat(seconds).isGreaterThan(0.8 * backfill.bytesStored() / bytesPerSecond);
   }
 
+  @ParameterizedTest
+  @EnumSource(BackfillMode.class)
+  void eachModeCapsItsRateAndItsRequestsInFlight(final BackfillMode mode) throws Exception {
+    assertThat(mode.bytesPerSecond())
+        .isEqualTo(
+            switch (mode) {
+              case SLOW -> 5L << 20;
+              case MEDIUM -> 14L << 20;
+              case FAST -> 32L << 20;
+            });
+    assertThat(Settings.of(mode, false).bytesPerSecond()).isEqualTo(mode.bytesPerSecond());
+    assertThat(Settings.of(mode, false).requests()).isEqualTo(mode.requests());
+
+    blockchain = chain(51);
+    executor.holdResponses();
+    backfill = backfill(settings(mode), head -> 1);
+    backfill.start();
+    await().atMost(Duration.ofSeconds(10)).until(() -> executor.requestCount() >= mode.requests());
+    Thread.sleep(200);
+
+    // every worker waits for its one answer, so no further request goes out
+    assertThat(executor.requestCount()).isEqualTo(mode.requests());
+    assertThat(executor.maxInFlight()).isEqualTo(mode.requests());
+    executor.releaseResponses();
+  }
+
+  @Test
+  void spreadsTheRequestsOverDifferentPeers() {
+    blockchain = chain(51);
+    executor.holdResponses();
+    backfill = backfill(settings(BackfillMode.MEDIUM), head -> 1);
+
+    backfill.start();
+
+    await().atMost(Duration.ofSeconds(10)).until(() -> executor.requestCount() >= 4);
+    assertThat(new HashSet<>(executor.peersUsed().subList(0, 4))).hasSize(4);
+    executor.releaseResponses();
+  }
+
   @Test
   void pausesWhileTheNodeIsBehindAndResumes() throws Exception {
     blockchain = chain(51);
@@ -129,21 +177,92 @@ class BodyBackfillTest {
   }
 
   @Test
-  void pausesAfterABlockImport() throws Exception {
+  void slowModePausesAroundBlockImports() throws Exception {
     blockchain = chain(51);
-    backfill = backfill(settings(NO_LIMIT, Duration.ofSeconds(1)), head -> 1);
+    backfill = backfill(settings(BackfillMode.SLOW), head -> 1);
     backfill.onBlockAdded(
         BlockAddedEvent.createForHeadAdvancement(chain.get(HEAD), List.of(), List.of()));
     final long imported = System.nanoTime();
 
     backfill.start();
-    Thread.sleep(400);
+    Thread.sleep(500);
     assertThat(backfill.blocksStored()).isZero();
     assertThat(backfill.state()).isEqualTo(State.PAUSED);
 
     await().atMost(Duration.ofSeconds(30)).until(() -> backfill.state() == State.DONE);
-    assertThat(System.nanoTime() - imported).isGreaterThan(Duration.ofMillis(900).toNanos());
+    assertThat(System.nanoTime() - imported).isGreaterThan(Duration.ofMillis(1900).toNanos());
     assertBodiesStored(1, HEAD);
+  }
+
+  @Test
+  void fastModeDoesNotPauseAroundBlockImports() {
+    blockchain = chain(51);
+    backfill = backfill(settings(BackfillMode.FAST), head -> 1);
+    backfill.onBlockAdded(
+        BlockAddedEvent.createForHeadAdvancement(chain.get(HEAD), List.of(), List.of()));
+
+    backfill.start();
+
+    await().atMost(Duration.ofMillis(500)).until(() -> backfill.blocksStored() > 0);
+  }
+
+  @Test
+  void fastModeStillPausesWhileTheNodeIsBehind() throws Exception {
+    blockchain = chain(51);
+    inSync.set(false);
+    backfill = backfill(settings(BackfillMode.FAST), head -> 1);
+
+    backfill.start();
+    Thread.sleep(300);
+
+    assertThat(backfill.blocksStored()).isZero();
+    assertThat(backfill.state()).isEqualTo(State.PAUSED);
+  }
+
+  @Test
+  void halvesItsRateWhileTheChainHeadLagsAndRecoversOnceItCatchesUp() {
+    blockchain = chain(51);
+    final long bytesPerSecond = 1 << 20;
+    // the head is older than a slot plus the allowance
+    clock.advance(Duration.ofSeconds(SLOT_SECONDS + 10));
+    executor.holdResponses();
+    backfill =
+        backfill(
+            new Settings(
+                "test",
+                bytesPerSecond,
+                1,
+                0,
+                Duration.ZERO,
+                Duration.ofMillis(20),
+                Duration.ofSeconds(4),
+                5,
+                false),
+            head -> 1);
+    backfill.start();
+    executor.allow(2);
+    await().atMost(Duration.ofSeconds(10)).until(() -> backfill.blocksStored() > 0);
+    assertThat(backfill.bytesPerSecond()).isEqualTo(bytesPerSecond / 2);
+    assertThat(backfill.backedOff()).isTrue();
+
+    // a fresh head, and a slot later the rate recovers a step
+    final Block next =
+        gen.block(
+            new BlockOptions()
+                .setBlockNumber(HEAD + 1)
+                .setParentHash(chain.get(HEAD).getHash())
+                .setDifficulty(Difficulty.ZERO)
+                .hasOmmers(false)
+                .hasTransactions(false)
+                .setTimestamp(clock.instant().getEpochSecond()));
+    blockchain.storeBlockHeaders(List.of(next.getHeader()), Difficulty.ONE);
+    blockchain.unsafeSetChainHead(next.getHeader(), Difficulty.ONE);
+    clock.advance(Duration.ofSeconds(SLOT_SECONDS + 1));
+    executor.allow(2);
+
+    await().atMost(Duration.ofSeconds(10)).until(() -> backfill.blocksStored() > 5);
+    assertThat(backfill.bytesPerSecond()).isEqualTo(bytesPerSecond * 5 / 8);
+    executor.releaseResponses();
   }
 
   @Test
@@ -214,8 +333,32 @@ class BodyBackfillTest {
     assertThat(executor.requestCount()).isZero();
   }
 
+  // two requests, no flush threshold, and a quick poll
   private static Settings settings(final long bytesPerSecond, final Duration importGrace) {
-    return new Settings(bytesPerSecond, 2, 0, importGrace, Duration.ofMillis(20), 5, false);
+    return new Settings(
+        "test",
+        bytesPerSecond,
+        2,
+        0,
+        importGrace,
+        Duration.ofMillis(20),
+        Duration.ofSeconds(4),
+        5,
+        false);
+  }
+
+  // the settings of a mode, with small ranges and a quick poll
+  private static Settings settings(final BackfillMode mode) {
+    return new Settings(
+        mode.name(),
+        mode.bytesPerSecond(),
+        mode.requests(),
+        0,
+        mode.importGrace(),
+        Duration.ofMillis(20),
+        mode.headLagAllowance(),
+        5,
+        false);
   }
 
   private BodyBackfill backfill(final Settings settings, final LongUnaryOperator lowestNeeded) {
@@ -230,20 +373,23 @@ class BodyBackfillTest {
         blockchain,
         ProtocolScheduleFixture.MAINNET,
         executor,
+        executor,
         inSync::get,
         blockchain.getBodiesFrom().orElseThrow(),
         lowestNeeded,
         settings,
+        clock,
         new NoOpMetricsSystem());
   }
 
-  // a chain of blocks with transactions and receipts, every header stored, the head set, and the
-  // bodies and receipts of the blocks from bodiesFrom only
+  // a chain of blocks with transactions and receipts, one a slot, the head two seconds old, every
+  // header stored, the head set, and the bodies and receipts of the blocks from bodiesFrom only
   private MutableBlockchain chain(final long bodiesFrom) {
     final Block genesis = gen.genesisBlock();
     chain.add(genesis);
     final MutableBlockchain blockchain =
         InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesis);
+    final long headTimestamp = clock.instant().getEpochSecond() - 2;
     Block parent = genesis;
     for (long number = 1; number <= HEAD; number++) {
       final List<Transaction> transactions =
@@ -256,6 +402,7 @@ class BodyBackfillTest {
                   .setBlockNumber(number)
                   .setParentHash(parent.getHash())
                   .setDifficulty(Difficulty.ZERO)
+                  .setTimestamp(headTimestamp - (HEAD - number) * SLOT_SECONDS)
                   .hasOmmers(false)
                   .addTransaction(transactions)
                   .setReceiptsRoot(BodyValidation.receiptsRoot(receipts)));
@@ -315,6 +462,30 @@ class BodyBackfillTest {
       assertThat(blockchain.getBlockBody(block.getHash())).contains(block.getBody());
       assertThat(blockchain.getTxReceipts(block.getHash()))
           .contains(receiptsByHash.get(block.getHash()));
+    }
+  }
+
+  // a wall clock the tests move
+  private static final class SettableClock extends Clock {
+    private volatile Instant now = Instant.now();
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(final ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
+    }
+
+    void advance(final Duration duration) {
+      now = now.plus(duration);
     }
   }
 }

@@ -107,6 +107,7 @@ public final class Snap2SyncFactory {
                     config.maxSnapRequestsPerPeer(),
                     config.maxEthRequestsPerPeer(),
                     config.workerThreads()),
+            ethContext.getEthPeers(),
             ethContext.getPeerTaskExecutor()));
   }
 

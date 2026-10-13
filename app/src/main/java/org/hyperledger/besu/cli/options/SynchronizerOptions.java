@@ -17,6 +17,7 @@ package org.hyperledger.besu.cli.options;
 import static org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration.DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED;
 
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackfillMode;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 import org.hyperledger.besu.util.number.PositiveNumber;
@@ -94,8 +95,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private static final String SNAP2_ACCOUNT_RANGES_FLAG = "--Xsnap2-account-ranges";
   private static final String SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG =
       "--Xsnap2-storage-tries-while-downloading";
-  private static final String SNAP2_BACKFILL_BYTES_PER_SECOND_FLAG =
-      "--Xsnap2-backfill-bytes-per-second";
+  private static final String SNAP2_BACKFILL_MODE_FLAG = "--Xsnap2-backfill-mode";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
       "--Xsnapsync-synchronizer-flat-account-healed-count-per-request";
@@ -437,13 +437,12 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
 
   @CommandLine.Option(
-      names = {SNAP2_BACKFILL_BYTES_PER_SECOND_FLAG},
+      names = {SNAP2_BACKFILL_MODE_FLAG},
       hidden = true,
-      paramLabel = "<INTEGER>",
+      paramLabel = "<MODE>",
       description =
-          "Bytes of bodies and receipts per second the SNAP2 sync stores in the background once the node follows the chain head (default: ${DEFAULT-VALUE})")
-  private PositiveNumber snap2BackfillBytesPerSecond =
-      PositiveNumber.fromInt(SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_BYTES_PER_SECOND);
+          "How hard the SNAP2 sync downloads the older bodies and receipts in the background once the node follows the chain head. SLOW: 5 MiB/s on 2 peers, paused 2 s after each block import, backed off at the first sign of head lag, mainnet history in 2 to 3 days. MEDIUM: 14 MiB/s on 4 peers, paused 1 s after each import, backed off when the head lags more than a slot, about a day. FAST: 32 MiB/s on 8 peers, no pause around imports, backed off when the head lags, about 10 hours. Every mode stops while the node is behind the chain head. Valid values: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE})")
+  private BackfillMode snap2BackfillMode = SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_MODE;
 
   /**
    * @deprecated No longer used. Accepted for backwards compatibility. The flag will be removed in a
@@ -580,8 +579,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         PositiveNumber.fromInt(config.getSnapSyncConfiguration().getSnap2AccountRanges());
     options.snap2StorageTriesWhileDownloading =
         config.getSnapSyncConfiguration().isSnap2StorageTriesWhileDownloading();
-    options.snap2BackfillBytesPerSecond =
-        PositiveNumber.fromInt(config.getSnapSyncConfiguration().getSnap2BackfillBytesPerSecond());
+    options.snap2BackfillMode = config.getSnapSyncConfiguration().getSnap2BackfillMode();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
     options.era1ImportPrepipelineConcurrency = config.era1ImportPrepipelineConcurrency();
@@ -629,7 +627,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
             .snap2AccountRanges(snap2AccountRanges.getValue())
             .isSnap2StorageTriesWhileDownloading(snap2StorageTriesWhileDownloading)
-            .snap2BackfillBytesPerSecond(snap2BackfillBytesPerSecond.getValue())
+            .snap2BackfillMode(snap2BackfillMode)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
     builder.backwardHeadersDownloadStepTimeoutMillis(backwardHeadersDownloadStepTimeoutMillis);
@@ -711,8 +709,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snap2AccountRanges.getValue()),
             SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG,
             OptionParser.format(snap2StorageTriesWhileDownloading),
-            SNAP2_BACKFILL_BYTES_PER_SECOND_FLAG,
-            OptionParser.format(snap2BackfillBytesPerSecond.getValue()),
+            SNAP2_BACKFILL_MODE_FLAG,
+            snap2BackfillMode.name(),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,
             OptionParser.format(era1ImportPrepipelineEnabled),
             ERA1_DATA_URI_FLAG,

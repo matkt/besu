@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerSelector;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.TrailingPeerRequirements;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.SyncAttempt.Resume;
@@ -76,6 +77,7 @@ final class Snap2SyncController implements SnapSyncController {
   private final boolean indexTransactions;
   private final SyncDurationMetrics syncDurationMetrics;
   private final Supplier<RequestSender> senders;
+  private final PeerSelector peers;
   private final PeerTaskExecutor peerTaskExecutor;
 
   private final ExecutorService executor =
@@ -104,6 +106,7 @@ final class Snap2SyncController implements SnapSyncController {
       final boolean indexTransactions,
       final SyncDurationMetrics syncDurationMetrics,
       final Supplier<RequestSender> senders,
+      final PeerSelector peers,
       final PeerTaskExecutor peerTaskExecutor) {
     this.config = config;
     this.protocolSchedule = protocolSchedule;
@@ -118,6 +121,7 @@ final class Snap2SyncController implements SnapSyncController {
     this.indexTransactions = indexTransactions;
     this.syncDurationMetrics = syncDurationMetrics;
     this.senders = senders;
+    this.peers = peers;
     this.peerTaskExecutor = peerTaskExecutor;
   }
 
@@ -187,6 +191,7 @@ final class Snap2SyncController implements SnapSyncController {
             headersToCheckpointOnly,
             indexTransactions,
             scheduler,
+            peers,
             peerTaskExecutor,
             new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest()),
             new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), BAL_ROUNDS),

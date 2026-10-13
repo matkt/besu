@@ -77,6 +77,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
   private final MetricsSystem metricsSystem;
   private final Optional<ChainDataPruner> chainDataPruner;
   private final BodyBackfill.Settings bodyBackfillSettings;
+  private final Clock clock;
   private volatile Optional<BodyBackfill> bodyBackfill = Optional.empty();
 
   public DefaultSynchronizer(
@@ -103,9 +104,10 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
     this.ethContext = ethContext;
     this.metricsSystem = metricsSystem;
     this.chainDataPruner = chainDataPruner;
+    this.clock = clock;
     this.bodyBackfillSettings =
         BodyBackfill.Settings.of(
-            syncConfig.getSnapSyncConfiguration().getSnap2BackfillBytesPerSecond(),
+            syncConfig.getSnapSyncConfiguration().getSnap2BackfillMode(),
             syncConfig.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled());
 
     ChainHeadTracker.trackChainHeadForPeers(
@@ -316,6 +318,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
         new BodyBackfill(
             blockchain,
             protocolSchedule,
+            ethContext.getEthPeers(),
             ethContext.getPeerTaskExecutor(),
             syncState::isInSync,
             bodiesFrom.get(),
@@ -324,6 +327,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
                     floor + 1,
                     chainDataPruner.map(pruner -> pruner.lowestRetained(head)).orElse(0L)),
             bodyBackfillSettings,
+            clock,
             metricsSystem);
     bodyBackfill = Optional.of(backfill);
     backfill.start();

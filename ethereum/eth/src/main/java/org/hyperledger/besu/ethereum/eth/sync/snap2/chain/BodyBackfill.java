@@ -23,6 +23,9 @@ import org.hyperledger.besu.ethereum.core.SyncBlock;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.SyncTransactionReceipt;
 import org.hyperledger.besu.ethereum.core.encoding.receipt.SyncTransactionReceiptEncoder;
+import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerSelector;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResponseCode;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
@@ -34,13 +37,16 @@ import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -56,16 +62,15 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Downloads the bodies and receipts of the blocks below a block whose headers are stored, highest
- * first, a few requests at a time, and records the lowest block stored with every one above it once
- * its writes are on disk. The SNAP2 sync runs it unthrottled on the window of blocks below its
- * final pivot; afterwards, and after a restart, it back-fills the older blocks in the background,
- * rate limited and paused while a block is imported or the node is behind.
+ * first, a few requests at a time each to a different peer, and records the lowest block stored
+ * with every one above it once its writes are on disk. The SNAP2 sync runs it unthrottled on the
+ * window of blocks below its final pivot; afterwards, and after a restart, it back-fills the older
+ * blocks in the background at the rate of its {@link BackfillMode}, paused while a block is
+ * imported or the node is behind, and halved while the chain head lags the wall clock.
  */
 public final class BodyBackfill implements BlockAddedObserver {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyBackfill.class);
-  // peers asked again for one request, beyond the first
-  private static final int RETRIES = 2;
   private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
   private static final Duration LOG_INTERVAL = Duration.ofMinutes(1);
   // peers cap a body or receipt response around 2 MiB
@@ -73,6 +78,11 @@ public final class BodyBackfill implements BlockAddedObserver {
   private static final int MIN_RANGE_BLOCKS = 8;
   private static final int MAX_RANGE_BLOCKS = 128;
   private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
+  // a head older than the slot plus the allowance of the mode is lagging; the rate halves at most
+  // once a slot and recovers an eighth a slot
+  private static final Duration SLOT = Duration.ofSeconds(12);
+  private static final double MIN_SHARE = 1.0 / 8;
+  private static final double SHARE_STEP = 1.0 / 8;
 
   /** What the back-fill is doing. */
   public enum State {
@@ -84,43 +94,51 @@ public final class BodyBackfill implements BlockAddedObserver {
   /**
    * Tuning of the back-fill.
    *
+   * @param label what the settings are for, in the logs
    * @param bytesPerSecond most bytes of bodies and receipts stored per second, 0 for no limit
-   * @param requests requests in flight at most
+   * @param requests requests in flight at most, each to a different peer
    * @param flushBytes bytes stored between two flushes, each moving the record of the lowest block
    * @param importGrace how long to wait after a block is imported
    * @param pollInterval how often a paused back-fill checks whether it can go on
+   * @param headLagAllowance how far past a slot the chain head may lag before the rate halves
    * @param maxRangeBlocks most blocks per request
    * @param indexTransactions whether the transactions of the stored blocks are indexed
    */
   public record Settings(
+      String label,
       long bytesPerSecond,
       int requests,
       long flushBytes,
       Duration importGrace,
       Duration pollInterval,
+      Duration headLagAllowance,
       int maxRangeBlocks,
       boolean indexTransactions) {
 
-    /** Returns the settings of the background back-fill for a rate. */
-    public static Settings of(final long bytesPerSecond, final boolean indexTransactions) {
+    /** Returns the settings of the background back-fill in a mode. */
+    public static Settings of(final BackfillMode mode, final boolean indexTransactions) {
       return new Settings(
-          bytesPerSecond,
-          2,
+          mode.name(),
+          mode.bytesPerSecond(),
+          mode.requests(),
           64L * 1024 * 1024,
+          mode.importGrace(),
           Duration.ofSeconds(1),
-          Duration.ofSeconds(1),
+          mode.headLagAllowance(),
           MAX_RANGE_BLOCKS,
           indexTransactions);
     }
 
-    /** Returns settings without limit or pause, for the sync. */
+    /** Returns settings without limit or pause, for the window the sync downloads. */
     public static Settings unthrottled(final boolean indexTransactions) {
       return new Settings(
+          "window",
           0,
           4,
           64L * 1024 * 1024,
           Duration.ZERO,
           Duration.ofSeconds(1),
+          Duration.ZERO,
           MAX_RANGE_BLOCKS,
           indexTransactions);
     }
@@ -128,18 +146,23 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   private final MutableBlockchain blockchain;
   private final ProtocolSchedule protocolSchedule;
+  private final PeerSelector peers;
   private final PeerTaskExecutor peerTaskExecutor;
   private final BooleanSupplier inSync;
   // the lowest block whose body is needed, given the chain head
   private final LongUnaryOperator lowestNeeded;
   private final Settings settings;
+  private final Clock clock;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
   private final ExecutorService workers;
   private final CompletableFuture<Void> done = new CompletableFuture<>();
   private final AtomicLong blocksStored = new AtomicLong();
   private final AtomicLong bytesStored = new AtomicLong();
+  private final AtomicLong backoffs = new AtomicLong();
   private final AtomicLong lastLogNanos = new AtomicLong();
+  // guarded by itself: the peers with a request in flight
+  private final Set<EthPeer> busyPeers = new HashSet<>();
   private final Object throttle = new Object();
 
   // guarded by this
@@ -149,11 +172,14 @@ public final class BodyBackfill implements BlockAddedObserver {
   private long persisted;
   private long bytesSinceFlush;
   private long observerId = -1;
-  // guarded by throttle: the next store, and the averages of the stored blocks, without and with
-  // their receipts
+  // guarded by throttle: the next store, the averages of the stored blocks, without and with
+  // their receipts, and the share of the rate left by the back-off
   private long nextStoreNanos;
   private double bodyBytes = INITIAL_BLOCK_BYTES;
   private double blockBytes = INITIAL_BLOCK_BYTES;
+  private double share = 1;
+  private long lastDecreaseMillis = Long.MIN_VALUE / 2;
+  private long lastIncreaseMillis = Long.MIN_VALUE / 2;
 
   private volatile long lowest;
   private volatile boolean stopped;
@@ -174,20 +200,24 @@ public final class BodyBackfill implements BlockAddedObserver {
   public BodyBackfill(
       final MutableBlockchain blockchain,
       final ProtocolSchedule protocolSchedule,
+      final PeerSelector peers,
       final PeerTaskExecutor peerTaskExecutor,
       final BooleanSupplier inSync,
       final long lowest,
       final LongUnaryOperator lowestNeeded,
       final Settings settings,
+      final Clock clock,
       final MetricsSystem metricsSystem) {
     this.blockchain = blockchain;
     this.protocolSchedule = protocolSchedule;
+    this.peers = peers;
     this.peerTaskExecutor = peerTaskExecutor;
     this.inSync = inSync;
     this.lowest = lowest;
     this.persisted = lowest;
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
+    this.clock = clock;
     this.workers =
         Executors.newFixedThreadPool(
             settings.requests(), Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
@@ -258,6 +288,20 @@ public final class BodyBackfill implements BlockAddedObserver {
     return bytesStored.get();
   }
 
+  /** Returns the rate in force, once the back-off took its share, 0 without limit. */
+  public long bytesPerSecond() {
+    synchronized (throttle) {
+      return (long) (settings.bytesPerSecond() * share);
+    }
+  }
+
+  /** Returns whether the rate is halved because the chain head lags the wall clock. */
+  public boolean backedOff() {
+    synchronized (throttle) {
+      return share < 1;
+    }
+  }
+
   // a block import keeps the back-fill away for a while
   @Override
   public void onBlockAdded(final BlockAddedEvent event) {
@@ -288,6 +332,7 @@ public final class BodyBackfill implements BlockAddedObserver {
       Thread.sleep(settings.pollInterval().toMillis());
       return;
     }
+    adapt();
     final long[] range = nextRange();
     if (range == null) {
       if (idle()) {
@@ -316,6 +361,31 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   private boolean busy() {
     return System.nanoTime() - busyUntilNanos < 0;
+  }
+
+  // halves the rate while the chain head lags the wall clock, an import or a late block being
+  // under way, and recovers it step by step once the head is fresh again
+  private void adapt() {
+    if (settings.bytesPerSecond() <= 0) {
+      return;
+    }
+    final long now = clock.millis();
+    final long lag = now - blockchain.getChainHeadHeader().getTimestamp() * 1000;
+    final long slot = SLOT.toMillis();
+    synchronized (throttle) {
+      if (lag > slot + settings.headLagAllowance().toMillis()) {
+        if (now - lastDecreaseMillis >= slot) {
+          share = Math.max(MIN_SHARE, share / 2);
+          lastDecreaseMillis = now;
+          backoffs.incrementAndGet();
+        }
+      } else if (share < 1
+          && now - lastDecreaseMillis >= slot
+          && now - lastIncreaseMillis >= slot) {
+        share = Math.min(1, share + SHARE_STEP);
+        lastIncreaseMillis = now;
+      }
+    }
   }
 
   // the highest run of blocks below the lowest stored one that is neither stored nor in flight
@@ -375,16 +445,17 @@ public final class BodyBackfill implements BlockAddedObserver {
     }
   }
 
-  // sleeps so that the stored bytes stay under the rate, with a burst of one range
+  // sleeps so that the stored bytes stay under the rate in force, with a burst of one range
   private void throttle(final long bytes) throws InterruptedException {
-    if (settings.bytesPerSecond() <= 0) {
+    final long rate = bytesPerSecond();
+    if (rate <= 0) {
       return;
     }
     final long wait;
     synchronized (throttle) {
       final long now = System.nanoTime();
       final long start = Math.max(now, nextStoreNanos);
-      nextStoreNanos = start + bytes * TimeUnit.SECONDS.toNanos(1) / settings.bytesPerSecond();
+      nextStoreNanos = start + bytes * TimeUnit.SECONDS.toNanos(1) / rate;
       wait = start - now;
     }
     if (wait > 0) {
@@ -489,8 +560,13 @@ public final class BodyBackfill implements BlockAddedObserver {
       final List<BlockHeader> remaining =
           List.copyOf(headers.subList(blocks.size(), headers.size()));
       final PeerTaskExecutorResult<List<SyncBlock>> result =
-          peerTaskExecutor.execute(
-              new GetSyncBlockBodiesFromPeerTask(remaining, protocolSchedule, RETRIES));
+          request(
+              new GetSyncBlockBodiesFromPeerTask(remaining, protocolSchedule, 0) {
+                @Override
+                public int getRetriesWithSamePeer() {
+                  return 0;
+                }
+              });
       if (result.responseCode() != PeerTaskExecutorResponseCode.SUCCESS) {
         return null;
       }
@@ -518,11 +594,16 @@ public final class BodyBackfill implements BlockAddedObserver {
           return null;
         }
         final PeerTaskExecutorResult<GetSyncReceiptsFromPeerTask.Response> result =
-            peerTaskExecutor.execute(
+            request(
                 new GetSyncReceiptsFromPeerTask(
                     new GetSyncReceiptsFromPeerTask.Request(List.copyOf(remaining), partial),
                     protocolSchedule,
-                    receiptEncoder));
+                    receiptEncoder) {
+                  @Override
+                  public int getRetriesWithSamePeer() {
+                    return 0;
+                  }
+                });
         if (result.responseCode() != PeerTaskExecutorResponseCode.SUCCESS) {
           return null;
         }
@@ -538,6 +619,29 @@ public final class BodyBackfill implements BlockAddedObserver {
     return blocks.stream()
         .map(block -> new SyncBlockWithReceipts(block, receipts.get(block.getHash())))
         .toList();
+  }
+
+  // one request at a time per peer, so that the back-fill takes a small share of each
+  private <T> PeerTaskExecutorResult<T> request(final PeerTask<T> task) {
+    final Optional<EthPeer> peer;
+    synchronized (busyPeers) {
+      peer =
+          peers.getPeer(
+              task.getPeerRequirementFilter()
+                  .and(candidate -> !busyPeers.contains(candidate.ethPeer())));
+      peer.ifPresent(busyPeers::add);
+    }
+    if (peer.isEmpty()) {
+      return new PeerTaskExecutorResult<>(
+          Optional.empty(), PeerTaskExecutorResponseCode.NO_PEER_AVAILABLE, List.of());
+    }
+    try {
+      return peerTaskExecutor.executeAgainstPeer(task, peer.get());
+    } finally {
+      synchronized (busyPeers) {
+        busyPeers.remove(peer.get());
+      }
+    }
   }
 
   // linked end to end and still on the canonical chain
@@ -557,6 +661,12 @@ public final class BodyBackfill implements BlockAddedObserver {
         .orElse(false);
   }
 
+  private int requestsInFlight() {
+    synchronized (busyPeers) {
+      return busyPeers.size();
+    }
+  }
+
   private void maybeLog() {
     final long now = System.nanoTime();
     final long last = lastLogNanos.get();
@@ -567,12 +677,15 @@ public final class BodyBackfill implements BlockAddedObserver {
     final long blocks = blocksStored.get();
     final long bytes = bytesStored.get();
     LOG.info(
-        "Body back-fill {}: blocks {} to the head stored, {} remaining, {} blocks/s, {} MiB/s",
+        "Body back-fill {} ({}): blocks {} to the head stored, {} remaining, {} blocks/s, {} MiB/s of {} MiB/s{}",
         state.name().toLowerCase(Locale.ROOT),
+        settings.label(),
         lowest,
         blocksRemaining(),
         String.format("%.1f", (blocks - loggedBlocks) / seconds),
-        String.format("%.2f", (bytes - loggedBytes) / seconds / (1024 * 1024)));
+        String.format("%.2f", (bytes - loggedBytes) / seconds / (1024 * 1024)),
+        String.format("%.1f", bytesPerSecond() / (1024.0 * 1024)),
+        backedOff() ? ", backed off while the chain head lags" : "");
     loggedBlocks = blocks;
     loggedBytes = bytes;
   }
@@ -589,6 +702,16 @@ public final class BodyBackfill implements BlockAddedObserver {
         "snap2_backfill_blocks_remaining",
         "Blocks whose body and receipts the SNAP2 back-fill still has to store",
         this::blocksRemaining);
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_backfill_rate_bytes_per_second",
+        "Rate of the SNAP2 back-fill in force, once backed off, 0 without limit",
+        this::bytesPerSecond);
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_backfill_requests_in_flight",
+        "Requests of the SNAP2 back-fill waiting for a peer to answer",
+        this::requestsInFlight);
     metricsSystem.createCounter(
         category,
         "snap2_backfill_blocks_total",
@@ -599,6 +722,11 @@ public final class BodyBackfill implements BlockAddedObserver {
         "snap2_backfill_bytes_total",
         "Bytes of bodies and receipts the SNAP2 back-fill stored",
         bytesStored::get);
+    metricsSystem.createCounter(
+        category,
+        "snap2_backfill_backoffs_total",
+        "Times the SNAP2 back-fill halved its rate because the chain head lagged",
+        backoffs::get);
     final LabelledSuppliedMetric states =
         metricsSystem.createLabelledSuppliedGauge(
             category,

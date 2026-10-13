@@ -38,6 +38,7 @@ import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Random;
@@ -239,10 +240,13 @@ class Snap2SyncControllerTest {
             blockchain,
             ProtocolScheduleFixture.MAINNET,
             peerTaskExecutor,
+            peerTaskExecutor,
             () -> true,
             from,
             head -> 1,
-            new BodyBackfill.Settings(0, 2, 0, Duration.ZERO, Duration.ofMillis(20), 8, false),
+            new BodyBackfill.Settings(
+                "test", 0, 2, 0, Duration.ZERO, Duration.ofMillis(20), Duration.ZERO, 8, false),
+            Clock.systemUTC(),
             new NoOpMetricsSystem());
     backfill.start();
     await().atMost(Duration.ofSeconds(30)).until(() -> backfill.state() == BodyBackfill.State.DONE);
@@ -338,6 +342,7 @@ class Snap2SyncControllerTest {
         false,
         new SyncDurationMetrics(new NoOpMetricsSystem()),
         () -> network,
+        peerTaskExecutor,
         peerTaskExecutor);
   }
 }

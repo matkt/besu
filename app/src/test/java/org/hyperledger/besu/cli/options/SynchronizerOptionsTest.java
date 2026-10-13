@@ -15,6 +15,7 @@
 package org.hyperledger.besu.cli.options;
 
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackfillMode;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 
@@ -79,8 +80,7 @@ public class SynchronizerOptionsTest
                 .isSnapSyncTransactionIndexingEnabled(Boolean.TRUE)
                 .snap2AccountRanges(SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES + 2)
                 .isSnap2StorageTriesWhileDownloading(Boolean.FALSE)
-                .snap2BackfillBytesPerSecond(
-                    SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_BYTES_PER_SECOND + 2)
+                .snap2BackfillMode(BackfillMode.FAST)
                 .build())
         .snapSyncSavePreCheckpointHeadersOnlyEnabled(
             SnapSyncConfiguration.DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED)
