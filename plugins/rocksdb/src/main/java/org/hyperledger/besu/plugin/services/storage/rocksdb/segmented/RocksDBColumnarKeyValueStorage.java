@@ -70,6 +70,7 @@ import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
 import org.rocksdb.FlushOptions;
+import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.LRUCache;
 import org.rocksdb.LiveFileMetaData;
 import org.rocksdb.Options;
@@ -431,15 +432,27 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     }
   }
 
-  ColumnFamilyOptions columnFamilyOptions(final SegmentIdentifier segment) {
-    return columnDescriptors.stream()
-        .filter(descriptor -> Arrays.equals(descriptor.getName(), segment.getId()))
-        .findFirst()
-        .orElseThrow(
-            () ->
-                new RuntimeException(
-                    "Column descriptor not found for segment " + segment.getName()))
-        .getOptions();
+  // the ingestion only accepts files written with the comparator and compression of the segment
+  Options sstFileOptions(final SegmentIdentifier segment) {
+    final ColumnFamilyOptions columnFamilyOptions =
+        columnDescriptors.stream()
+            .filter(descriptor -> Arrays.equals(descriptor.getName(), segment.getId()))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new RuntimeException(
+                        "Column descriptor not found for segment " + segment.getName()))
+            .getOptions();
+    return new Options(options, columnFamilyOptions);
+  }
+
+  // adds SST files to the segment, moving them in when they may be
+  void ingest(final SegmentIdentifier segment, final List<String> files, final boolean move)
+      throws RocksDBException {
+    try (final IngestExternalFileOptions ingest =
+        new IngestExternalFileOptions().setMoveFiles(move)) {
+      getDB().ingestExternalFile(safeColumnHandle(segment), files, ingest);
+    }
   }
 
   /** Runs the configured startup warm-ups when enabled. */
