@@ -100,12 +100,36 @@ class BodyDownloaderTest {
     assertCanonicalBodies(40);
   }
 
+  @Test
+  void asksLargerRangesWhenTheBlocksAreSmall() {
+    chain.extend(1000);
+    final BodyDownloader bodies = downloader(1000, 0, 128, 2);
+
+    bodies.download(1, 1000);
+
+    awaitStoredUpTo(bodies, 1000);
+    // the empty bodies let the ranges grow past the 32 blocks of the first ones
+    assertThat(network.requestCount()).isLessThan(1000 / 32);
+  }
+
   // stores the headers up to the head and downloads with ranges of 5 blocks, 2 at a time
   private BodyDownloader downloader(final long head, final long floor) {
+    return downloader(head, floor, 5, 2);
+  }
+
+  private BodyDownloader downloader(
+      final long head, final long floor, final int maxRangeBlocks, final int maxRanges) {
     blockchain = InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
     blockchain.storeBlockHeaders(headers(1, head));
     return new BodyDownloader(
-        network, ProtocolScheduleFixture.MAINNET, blockchain, floor, 5, 2, false, writer);
+        network,
+        ProtocolScheduleFixture.MAINNET,
+        blockchain,
+        floor,
+        maxRangeBlocks,
+        maxRanges,
+        false,
+        writer);
   }
 
   private List<BlockHeader> headers(final long from, final long to) {

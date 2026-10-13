@@ -146,7 +146,7 @@ final class SyncAttempt {
             blockchain,
             floor.getNumber(),
             config.bodiesPerRequest(),
-            config.chainParallelism(),
+            config.maxBodyRanges(),
             indexTransactions,
             executor);
     final CompletableFuture<Void> blocks = bodyLoop();

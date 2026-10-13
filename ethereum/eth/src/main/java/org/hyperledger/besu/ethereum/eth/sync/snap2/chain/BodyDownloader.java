@@ -26,6 +26,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncReceiptsFr
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.StorageRetry;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
@@ -43,21 +44,27 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Downloads the bodies and receipts of stored headers, many ranges at a time and highest first, and
- * stores each range as soon as it arrives. Nothing waits for the lowest pending range, neither the
- * downloads nor the writes; the chain head is set once every block is stored, see {@link
- * MutableBlockchain#unsafeSetSyncChainHead}.
+ * stores each range as soon as it arrives; the chain head is set once every block is stored, see
+ * {@link MutableBlockchain#unsafeSetSyncChainHead}. A range asks about one full body response, and
+ * enough ranges run to keep every eth slot of the peers busy, within a memory budget.
  */
 public final class BodyDownloader {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyDownloader.class);
   private static final int ATTEMPTS = 10;
+  // peers cap a body response around 2 MiB
+  private static final double RANGE_BODY_BYTES = 2 * 1024 * 1024;
+  private static final int MIN_RANGE_BLOCKS = 8;
+  private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
+  private static final long MAX_MEMORY = 1L << 30;
 
   private final RequestSender sender;
   private final ProtocolSchedule protocolSchedule;
   private final MutableBlockchain blockchain;
   private final long floor;
-  private final int blocksPerRequest;
-  private final int parallelism;
+  private final int maxRangeBlocks;
+  private final int maxRanges;
+  private final long memory = Math.min(MAX_MEMORY, Runtime.getRuntime().maxMemory() / 16);
   private final boolean indexTransactions;
   private final Executor writer;
   private final SyncTransactionReceiptEncoder receiptEncoder =
@@ -70,11 +77,16 @@ public final class BodyDownloader {
   private long highest = -1;
   private int running;
   private boolean closed;
+  // averages of the stored blocks, without and with their receipts
+  private double bodyBytes = INITIAL_BLOCK_BYTES;
+  private double blockBytes = INITIAL_BLOCK_BYTES;
 
   /**
    * Creates a downloader.
    *
    * @param floor the highest block whose body is not needed, its total difficulty stored
+   * @param maxRangeBlocks most blocks per range
+   * @param maxRanges most ranges downloaded at once
    * @param writer runs the reads of headers and the writes of bodies
    */
   public BodyDownloader(
@@ -82,16 +94,16 @@ public final class BodyDownloader {
       final ProtocolSchedule protocolSchedule,
       final MutableBlockchain blockchain,
       final long floor,
-      final int blocksPerRequest,
-      final int parallelism,
+      final int maxRangeBlocks,
+      final int maxRanges,
       final boolean indexTransactions,
       final Executor writer) {
     this.sender = sender;
     this.protocolSchedule = protocolSchedule;
     this.blockchain = blockchain;
     this.floor = floor;
-    this.blocksPerRequest = blocksPerRequest;
-    this.parallelism = parallelism;
+    this.maxRangeBlocks = maxRangeBlocks;
+    this.maxRanges = maxRanges;
     this.indexTransactions = indexTransactions;
     this.writer = writer;
   }
@@ -124,9 +136,10 @@ public final class BodyDownloader {
   }
 
   private void dispatch() {
-    while (!closed && running < parallelism) {
-      final long[] range =
-          BlockRanges.highestGap(stored, fetching, lowest, highest, blocksPerRequest);
+    final int rangeBlocks = rangeBlocks();
+    final int ranges = ranges(rangeBlocks);
+    while (!closed && running < ranges) {
+      final long[] range = BlockRanges.highestGap(stored, fetching, lowest, highest, rangeBlocks);
       if (range == null) {
         return;
       }
@@ -134,6 +147,33 @@ public final class BodyDownloader {
       running++;
       fetch(range[0], range[1]);
     }
+  }
+
+  // about one full body response, so many blocks when they are small
+  private int rangeBlocks() {
+    final double blocks = RANGE_BODY_BYTES / Math.max(1, bodyBytes);
+    return (int)
+        Math.max(Math.min(MIN_RANGE_BLOCKS, maxRangeBlocks), Math.min(maxRangeBlocks, blocks));
+  }
+
+  // enough ranges to keep every eth slot of the peers busy, within the memory budget
+  private int ranges(final int rangeBlocks) {
+    final int slots = sender.capacity(Protocol.ETH);
+    final double byMemory = memory / (rangeBlocks * Math.max(1, blockBytes));
+    return (int) Math.max(1, Math.min(maxRanges, Math.min(slots + slots / 4, byMemory)));
+  }
+
+  private void measure(final List<SyncBlockWithReceipts> blocks) {
+    long bodies = 0;
+    long receipts = 0;
+    for (final SyncBlockWithReceipts block : blocks) {
+      bodies += block.getBlock().getBody().getRlp().size();
+      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
+        receipts += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
+      }
+    }
+    bodyBytes = 0.8 * bodyBytes + 0.2 * bodies / blocks.size();
+    blockBytes = 0.8 * blockBytes + 0.2 * (bodies + receipts) / blocks.size();
   }
 
   private void fetch(final long from, final long to) {
@@ -170,6 +210,9 @@ public final class BodyDownloader {
       final long from, final long to, final List<SyncBlockWithReceipts> blocks) {
     fetching.remove(from, to);
     running--;
+    if (blocks != null) {
+      measure(blocks);
+    }
     if (blocks != null
         && canonical(blocks.getFirst().getHeader())
         && canonical(blocks.getLast().getHeader())) {

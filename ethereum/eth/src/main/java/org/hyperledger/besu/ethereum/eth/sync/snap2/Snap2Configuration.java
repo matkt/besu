@@ -33,8 +33,9 @@ import java.time.Duration;
  * @param maxEthRequestsPerPeer most concurrent eth requests a peer can be given
  * @param requestTimeout time a peer has to answer a request
  * @param headersPerRequest block headers per request
- * @param bodiesPerRequest block bodies or receipts per request
- * @param chainParallelism concurrent header, body and receipt requests
+ * @param bodiesPerRequest most blocks per body or receipt request
+ * @param chainParallelism concurrent header requests
+ * @param maxBodyRanges most block ranges whose bodies and receipts are downloaded at once
  * @param workerThreads threads decoding and verifying responses
  * @param trieBuildThreads threads building the tries at the end
  * @param minPeers snap/2 peers to wait for before starting
@@ -57,6 +58,7 @@ public record Snap2Configuration(
     int headersPerRequest,
     int bodiesPerRequest,
     int chainParallelism,
+    int maxBodyRanges,
     int workerThreads,
     int trieBuildThreads,
     int minPeers,
@@ -80,9 +82,10 @@ public record Snap2Configuration(
         6,
         Duration.ofSeconds(15),
         192,
-        32,
+        128,
         64,
-        Math.max(2, cores / 2),
+        512,
+        Math.max(2, cores),
         Math.max(2, cores),
         1,
         Duration.ofSeconds(2));
@@ -196,6 +199,7 @@ public record Snap2Configuration(
           base.headersPerRequest(),
           base.bodiesPerRequest(),
           base.chainParallelism(),
+          base.maxBodyRanges(),
           workerThreads,
           trieBuildThreads,
           base.minPeers(),
