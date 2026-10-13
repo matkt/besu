@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -53,20 +55,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Downloads, while the node follows the chain head, the bodies and receipts of the blocks the SNAP2
- * sync left out below its final pivot: highest first, a couple of requests at a time, the writes
- * rate limited and paused while a block is imported or the node is behind. The lowest block stored
- * with every one above it is recorded in the blockchain once its writes are on disk, so that a
- * restarted node resumes from it.
+ * Downloads the bodies and receipts of the blocks below a block whose headers are stored, highest
+ * first, a few requests at a time, and records the lowest block stored with every one above it once
+ * its writes are on disk. The SNAP2 sync runs it unthrottled on the window of blocks below its
+ * final pivot; afterwards, and after a restart, it back-fills the older blocks in the background,
+ * rate limited and paused while a block is imported or the node is behind.
  */
 public final class BodyBackfill implements BlockAddedObserver {
 
   private static final Logger LOG = LoggerFactory.getLogger(BodyBackfill.class);
-  private static final int WORKERS = 2;
   // peers asked again for one request, beyond the first
   private static final int RETRIES = 2;
   private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
   private static final Duration LOG_INTERVAL = Duration.ofMinutes(1);
+  // peers cap a body or receipt response around 2 MiB
+  private static final double RESPONSE_BYTES = 2 * 1024 * 1024;
+  private static final int MIN_RANGE_BLOCKS = 8;
+  private static final int MAX_RANGE_BLOCKS = 128;
+  private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
 
   /** What the back-fill is doing. */
   public enum State {
@@ -78,7 +84,8 @@ public final class BodyBackfill implements BlockAddedObserver {
   /**
    * Tuning of the back-fill.
    *
-   * @param bytesPerSecond most bytes of bodies and receipts stored per second
+   * @param bytesPerSecond most bytes of bodies and receipts stored per second, 0 for no limit
+   * @param requests requests in flight at most
    * @param flushBytes bytes stored between two flushes, each moving the record of the lowest block
    * @param importGrace how long to wait after a block is imported
    * @param pollInterval how often a paused back-fill checks whether it can go on
@@ -87,20 +94,34 @@ public final class BodyBackfill implements BlockAddedObserver {
    */
   public record Settings(
       long bytesPerSecond,
+      int requests,
       long flushBytes,
       Duration importGrace,
       Duration pollInterval,
       int maxRangeBlocks,
       boolean indexTransactions) {
 
-    /** Returns the settings used in production for a rate. */
+    /** Returns the settings of the background back-fill for a rate. */
     public static Settings of(final long bytesPerSecond, final boolean indexTransactions) {
       return new Settings(
           bytesPerSecond,
+          2,
           64L * 1024 * 1024,
           Duration.ofSeconds(1),
           Duration.ofSeconds(1),
-          128,
+          MAX_RANGE_BLOCKS,
+          indexTransactions);
+    }
+
+    /** Returns settings without limit or pause, for the sync. */
+    public static Settings unthrottled(final boolean indexTransactions) {
+      return new Settings(
+          0,
+          4,
+          64L * 1024 * 1024,
+          Duration.ZERO,
+          Duration.ofSeconds(1),
+          MAX_RANGE_BLOCKS,
           indexTransactions);
     }
   }
@@ -114,10 +135,8 @@ public final class BodyBackfill implements BlockAddedObserver {
   private final Settings settings;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
-  private final BlockSizes sizes = new BlockSizes();
-  private final ExecutorService workers =
-      Executors.newFixedThreadPool(
-          WORKERS, Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
+  private final ExecutorService workers;
+  private final CompletableFuture<Void> done = new CompletableFuture<>();
   private final AtomicLong blocksStored = new AtomicLong();
   private final AtomicLong bytesStored = new AtomicLong();
   private final AtomicLong lastLogNanos = new AtomicLong();
@@ -130,8 +149,11 @@ public final class BodyBackfill implements BlockAddedObserver {
   private long persisted;
   private long bytesSinceFlush;
   private long observerId = -1;
-  // guarded by throttle
+  // guarded by throttle: the next store, and the averages of the stored blocks, without and with
+  // their receipts
   private long nextStoreNanos;
+  private double bodyBytes = INITIAL_BLOCK_BYTES;
+  private double blockBytes = INITIAL_BLOCK_BYTES;
 
   private volatile long lowest;
   private volatile boolean stopped;
@@ -144,6 +166,8 @@ public final class BodyBackfill implements BlockAddedObserver {
    * Creates the back-fill.
    *
    * @param inSync whether the node follows the chain head, the back-fill pausing otherwise
+   * @param lowest the lowest block whose body and receipts are stored already, the download
+   *     starting below it
    * @param lowestNeeded the lowest block whose body is needed for a chain head, above the floor of
    *     the sync and the blocks a pruner would remove
    */
@@ -152,6 +176,7 @@ public final class BodyBackfill implements BlockAddedObserver {
       final ProtocolSchedule protocolSchedule,
       final PeerTaskExecutor peerTaskExecutor,
       final BooleanSupplier inSync,
+      final long lowest,
       final LongUnaryOperator lowestNeeded,
       final Settings settings,
       final MetricsSystem metricsSystem) {
@@ -159,30 +184,27 @@ public final class BodyBackfill implements BlockAddedObserver {
     this.protocolSchedule = protocolSchedule;
     this.peerTaskExecutor = peerTaskExecutor;
     this.inSync = inSync;
+    this.lowest = lowest;
+    this.persisted = lowest;
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
-    this.lowest = blockchain.getBodiesFrom().orElse(0L);
-    this.persisted = lowest;
+    this.workers =
+        Executors.newFixedThreadPool(
+            settings.requests(), Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
     registerMetrics(metricsSystem);
   }
 
-  /** Starts back-filling below the recorded block, unless every needed body is stored already. */
+  /** Starts downloading below the lowest stored block, unless every needed body is stored. */
   public void start() {
-    final long head = blockchain.getChainHeadBlockNumber();
-    if (lowest <= lowestNeeded.applyAsLong(head)) {
-      LOG.info("Bodies and receipts of every block from {} are stored", lowest);
+    if (lowest <= lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber())) {
       finish();
       return;
     }
-    LOG.info(
-        "Back-filling the bodies and receipts of blocks {} to {} in the background",
-        lowestNeeded.applyAsLong(head),
-        lowest - 1);
     lastLogNanos.set(System.nanoTime());
     synchronized (this) {
       observerId = blockchain.observeBlockAdded(this);
     }
-    for (int i = 0; i < WORKERS; i++) {
+    for (int i = 0; i < settings.requests(); i++) {
       workers.execute(this::run);
     }
   }
@@ -204,6 +226,12 @@ public final class BodyBackfill implements BlockAddedObserver {
         LOG.debug("Could not record the back-filled blocks on stop: {}", e.getMessage());
       }
     }
+    done.completeExceptionally(new CancellationException("body download stopped"));
+  }
+
+  /** Completes once every needed body is stored and recorded, or fails once stopped. */
+  public CompletableFuture<Void> done() {
+    return done;
   }
 
   public State state() {
@@ -282,7 +310,7 @@ public final class BodyBackfill implements BlockAddedObserver {
       Thread.sleep(RETRY_DELAY.toMillis());
       return;
     }
-    throttle(sizes.measure(blocks));
+    throttle(measure(blocks));
     store(range, blocks);
   }
 
@@ -296,9 +324,7 @@ public final class BodyBackfill implements BlockAddedObserver {
       return null;
     }
     final long floor = lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
-    final long[] range =
-        BlockRanges.highestGap(
-            stored, fetching, floor, lowest - 1, sizes.bodyBlocks(settings.maxRangeBlocks()));
+    final long[] range = BlockRanges.highestGap(stored, fetching, floor, lowest - 1, rangeBlocks());
     if (range != null) {
       fetching.add(range[0], range[1]);
     }
@@ -313,8 +339,47 @@ public final class BodyBackfill implements BlockAddedObserver {
     fetching.remove(range[0], range[1]);
   }
 
+  // records the sizes of downloaded blocks and returns their total bytes
+  private long measure(final List<SyncBlockWithReceipts> blocks) {
+    long bodies = 0;
+    long receipts = 0;
+    for (final SyncBlockWithReceipts block : blocks) {
+      bodies += block.getBlock().getBody().getRlp().size();
+      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
+        receipts += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
+      }
+    }
+    synchronized (throttle) {
+      bodyBytes = 0.8 * bodyBytes + 0.2 * bodies / blocks.size();
+      blockBytes = 0.8 * blockBytes + 0.2 * (bodies + receipts) / blocks.size();
+    }
+    return bodies + receipts;
+  }
+
+  // blocks whose bodies fill about one response, so many when they are small
+  private int rangeBlocks() {
+    final int max = settings.maxRangeBlocks();
+    synchronized (throttle) {
+      return (int)
+          Math.max(Math.min(MIN_RANGE_BLOCKS, max), Math.min(max, RESPONSE_BYTES / bodyBytes));
+    }
+  }
+
+  // blocks whose receipts fill about one response
+  private int receiptBlocks() {
+    final int max = settings.maxRangeBlocks();
+    synchronized (throttle) {
+      final double receiptBytes = blockBytes - bodyBytes;
+      return (int)
+          Math.max(1, receiptBytes > 0 ? Math.min(max, RESPONSE_BYTES / receiptBytes) : max);
+    }
+  }
+
   // sleeps so that the stored bytes stay under the rate, with a burst of one range
   private void throttle(final long bytes) throws InterruptedException {
+    if (settings.bytesPerSecond() <= 0) {
+      return;
+    }
     final long wait;
     synchronized (throttle) {
       final long now = System.nanoTime();
@@ -341,7 +406,7 @@ public final class BodyBackfill implements BlockAddedObserver {
     }
     blockchain.unsafeStoreSyncBodiesAndReceipts(kept, settings.indexTransactions());
     stored.add(kept.getFirst().getNumber(), range[1]);
-    final long bytes = sizes.measure(kept);
+    final long bytes = measure(kept);
     blocksStored.addAndGet(kept.size());
     bytesStored.addAndGet(bytes);
     bytesSinceFlush += bytes;
@@ -375,8 +440,9 @@ public final class BodyBackfill implements BlockAddedObserver {
     }
     state = State.DONE;
     unobserve();
-    LOG.info("Bodies and receipts of every block from {} are stored, back-fill complete", lowest);
+    LOG.info("Bodies and receipts of every block from {} are stored", lowest);
     workers.shutdown();
+    done.complete(null);
   }
 
   private void unobserve() {
@@ -444,8 +510,7 @@ public final class BodyBackfill implements BlockAddedObserver {
       }
     }
     // about one response per group, a block cut by the peer completed with the next request
-    for (final List<SyncBlock> group :
-        Lists.partition(needed, sizes.receiptBlocks(settings.maxRangeBlocks()))) {
+    for (final List<SyncBlock> group : Lists.partition(needed, receiptBlocks())) {
       List<SyncBlock> remaining = group;
       List<SyncTransactionReceipt> partial = List.of();
       while (!remaining.isEmpty()) {

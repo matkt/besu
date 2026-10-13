@@ -58,6 +58,9 @@ class Snap2SyncControllerTest {
   @TempDir Path dataDirectory;
 
   private final FakeSnapNetwork network = new FakeSnapNetwork();
+  // the bodies and receipts go through the peer tasks of the node, answered by the same chain
+  private final FakePeerTaskExecutor peerTaskExecutor =
+      new FakePeerTaskExecutor(message -> network.answer(Protocol.ETH, message));
   private Snap2SyncController controller;
   private BodyBackfill backfill;
 
@@ -98,10 +101,7 @@ class Snap2SyncControllerTest {
 
     assertThat(pivot.getNumber()).isGreaterThan(40 - 8);
     assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
-    for (long number = 1; number <= pivot.getNumber(); number++) {
-      assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
-      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
-    }
+    assertHeadersAndWindowStored(blockchain, chain, pivot);
     // the stored tries hold the state of the pivot, whatever the storage format
     final TestWorld world = chain.world(pivot.getNumber());
     final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
@@ -142,10 +142,7 @@ class Snap2SyncControllerTest {
     // the synced chain and state are the canonical ones
     assertThat(pivot.getHash()).isEqualTo(chain.header(pivot.getNumber()).getHash());
     assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
-    for (long number = 1; number <= pivot.getNumber(); number++) {
-      assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
-      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
-    }
+    assertHeadersAndWindowStored(blockchain, chain, pivot);
     final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
     chain
         .world(pivot.getNumber())
@@ -189,10 +186,7 @@ class Snap2SyncControllerTest {
 
     assertThat(pivot.getHash()).isEqualTo(chain.header(pivot.getNumber()).getHash());
     assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
-    for (long number = 1; number <= pivot.getNumber(); number++) {
-      assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
-      assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
-    }
+    assertHeadersAndWindowStored(blockchain, chain, pivot);
     final var accountTrie = storages.accountTrie(Bytes32.wrap(pivot.getStateRoot().getBytes()));
     chain
         .world(pivot.getNumber())
@@ -244,10 +238,11 @@ class Snap2SyncControllerTest {
         new BodyBackfill(
             blockchain,
             ProtocolScheduleFixture.MAINNET,
-            new FakePeerTaskExecutor(message -> network.answer(Protocol.ETH, message)),
+            peerTaskExecutor,
             () -> true,
+            from,
             head -> 1,
-            new BodyBackfill.Settings(1L << 40, 0, Duration.ZERO, Duration.ofMillis(20), 8, false),
+            new BodyBackfill.Settings(0, 2, 0, Duration.ZERO, Duration.ofMillis(20), 8, false),
             new NoOpMetricsSystem());
     backfill.start();
     await().atMost(Duration.ofSeconds(30)).until(() -> backfill.state() == BodyBackfill.State.DONE);
@@ -285,6 +280,18 @@ class Snap2SyncControllerTest {
     await()
         .atMost(Duration.ofSeconds(30))
         .until(() -> blockchain.getBlockHeader(header.getHash()).isPresent());
+  }
+
+  // every header, and the bodies and receipts of the window below the pivot, which is recorded
+  private static void assertHeadersAndWindowStored(
+      final MutableBlockchain blockchain, final TestChain chain, final BlockHeader pivot) {
+    final long from = Math.max(1, pivot.getNumber() - 127);
+    assertThat(blockchain.getBodiesFrom()).contains(from);
+    for (long number = 1; number <= pivot.getNumber(); number++) {
+      assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
+      assertThat(blockchain.getBlockBody(chain.header(number).getHash()).isPresent())
+          .isEqualTo(number >= from);
+    }
   }
 
   private static Snap2Configuration.Builder config() {
@@ -330,6 +337,7 @@ class Snap2SyncControllerTest {
         false,
         false,
         new SyncDurationMetrics(new NoOpMetricsSystem()),
-        () -> network);
+        () -> network,
+        peerTaskExecutor);
   }
 }

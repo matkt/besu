@@ -85,16 +85,6 @@ final class Snap2Metrics {
         "snap2_headers_lowest_stored",
         "Lowest block header stored by the SNAP2 header download",
         () -> attemptValue(SyncAttempt::lowestStoredHeader));
-    metricsSystem.createLongGauge(
-        category,
-        "snap2_bodies_stored",
-        "Blocks whose body and receipts SNAP2 stored",
-        () -> attemptValue(SyncAttempt::bodiesStored));
-    metricsSystem.createLongGauge(
-        category,
-        "snap2_bodies_needed",
-        "Blocks whose body and receipts SNAP2 needs below the pivot before setting the chain head",
-        () -> attemptValue(SyncAttempt::bodiesNeeded));
     metricsSystem.createGauge(
         category,
         "snap2_account_coverage",

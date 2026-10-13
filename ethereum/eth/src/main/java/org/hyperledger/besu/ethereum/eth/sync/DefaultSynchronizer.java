@@ -307,7 +307,8 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
   // in the background while the node follows the head, above the floor and the pruned blocks
   private void startBodyBackfill() {
     final MutableBlockchain blockchain = protocolContext.getBlockchain();
-    if (blockchain.getBodiesFrom().isEmpty()) {
+    final Optional<Long> bodiesFrom = blockchain.getBodiesFrom();
+    if (bodiesFrom.isEmpty()) {
       return;
     }
     final long floor = syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L);
@@ -317,6 +318,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
             protocolSchedule,
             ethContext.getPeerTaskExecutor(),
             syncState::isInSync,
+            bodiesFrom.get(),
             head ->
                 Math.max(
                     floor + 1,

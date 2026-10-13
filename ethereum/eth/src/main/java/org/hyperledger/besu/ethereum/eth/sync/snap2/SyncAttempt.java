@@ -20,7 +20,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyDownloader;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.ReorgRecovery;
@@ -50,8 +50,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * One run of the SNAP2 sync from a pivot, owning its download components: the state download, the
- * header back-fill and the body download, the pivot moves and reorg recoveries, and the final trie
- * build. An abandoned attempt stops all its components and never touches the next one.
+ * header back-fill, the pivot moves and reorg recoveries, the final trie build and the download of
+ * the bodies of a window below the final pivot. An abandoned attempt stops all its components and
+ * never touches the next one.
  */
 final class SyncAttempt {
 
@@ -82,12 +83,11 @@ final class SyncAttempt {
   private Optional<Difficulty> headerTotalDifficulty = Optional.empty();
   private volatile long indexedUpTo = -1;
   private volatile HeaderBackfill backfill;
-  private volatile BodyDownloader bodies;
+  private volatile BodyBackfill window;
   private volatile WorldStateTrieBuilder trieBuilder;
   private volatile boolean cancelled;
   private volatile boolean moving;
   private volatile boolean finalizing;
-  private volatile long finalTarget = -1;
 
   SyncAttempt(final SyncContext context, final BlockHeader firstPivot, final Resume resume) {
     this.context = context;
@@ -103,37 +103,24 @@ final class SyncAttempt {
     storeHeaders(List.of(firstPivot));
     final CompletableFuture<Void> state = stateSync.start(firstPivot);
     startBackfill(firstPivot);
-    bodies =
-        new BodyDownloader(
-            context.scheduler(),
-            context.protocolSchedule(),
-            context.blockchain(),
-            floor.getNumber(),
-            context.config().bodiesPerRequest(),
-            context.config().maxBodyRanges(),
-            context.indexTransactions(),
-            context.executor(),
-            context.writer());
-    final CompletableFuture<Void> blocks = bodyLoop();
 
     final CompletableFuture<BlockHeader> main =
         state
             .thenCompose(unused -> settleMoves())
             .thenCompose(unused -> finalCatchUp())
-            .thenApplyAsync(unused -> buildTries(), context.executor())
+            .thenComposeAsync(unused -> fetchWindowAndBuildTries(), context.executor())
             .thenCompose(
                 finalPivot -> {
-                  finalTarget = finalPivot.getNumber();
                   context
                       .syncDurationMetrics()
                       .stopTimer(
                           SyncDurationMetrics.Labels.SNAP_INITIAL_WORLD_STATE_DOWNLOAD_DURATION);
-                  LOG.info("Waiting for the chain download to reach block {}", finalTarget);
-                  return CompletableFuture.allOf(headersDone, blocks)
-                      .thenApply(unused -> finalPivot);
+                  LOG.info("Waiting for the headers to reach block {}", floor.getNumber() + 1);
+                  return headersDone.thenApply(unused -> finalPivot);
                 })
             .thenApply(
                 finalPivot -> {
+                  setChainHead(finalPivot);
                   context
                       .syncDurationMetrics()
                       .stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
@@ -160,9 +147,9 @@ final class SyncAttempt {
     if (headers != null) {
       headers.stop();
     }
-    final BodyDownloader downloader = bodies;
-    if (downloader != null) {
-      downloader.close();
+    final BodyBackfill bodies = window;
+    if (bodies != null) {
+      bodies.stop();
     }
     final WorldStateTrieBuilder builder = trieBuilder;
     if (builder != null) {
@@ -296,18 +283,29 @@ final class SyncAttempt {
             });
   }
 
-  // bodies and receipts of a window of stored headers below the pivot, then the chain head once
-  // the final pivot is reached; the older blocks are back-filled once the node follows the head
-  private CompletableFuture<Void> bodyLoop() {
+  // the bodies and receipts of the window below the final pivot download while the tries build;
+  // the older blocks are back-filled once the node follows the head
+  private CompletableFuture<BlockHeader> fetchWindowAndBuildTries() {
     if (inactive()) {
       return abandoned();
     }
-    final long target = finalTarget >= 0 ? finalTarget : pivotNumber();
-    bodies.download(Math.max(lowestStoredHeader(), windowStart(target)), target);
-    if (finalTarget >= 0 && bodies.stored(windowStart(finalTarget), finalTarget)) {
-      return CompletableFuture.runAsync(() -> setChainHead(finalTarget), context.executor());
-    }
-    return poll().thenCompose(unused -> bodyLoop());
+    final BlockHeader pivot = stateSync.pivot().header();
+    final long from = windowStart(pivot.getNumber());
+    LOG.info("Downloading the bodies and receipts of blocks {} to {}", from, pivot.getNumber());
+    final BodyBackfill bodies =
+        new BodyBackfill(
+            context.blockchain(),
+            context.protocolSchedule(),
+            context.peerTaskExecutor(),
+            () -> true,
+            pivot.getNumber() + 1,
+            head -> from,
+            BodyBackfill.Settings.unthrottled(context.indexTransactions()),
+            context.metricsSystem());
+    window = bodies;
+    bodies.start();
+    final BlockHeader built = buildTries();
+    return bodies.done().thenApply(unused -> built);
   }
 
   // the lowest block whose body and receipts are needed before the head is set at this pivot
@@ -315,22 +313,13 @@ final class SyncAttempt {
     return Math.max(floor.getNumber() + 1, pivot - context.config().bodyWindow() + 1);
   }
 
-  private void setChainHead(final long target) {
-    final MutableBlockchain blockchain = context.blockchain();
-    final BlockHeader head = header(target);
-    final long from = bodies.storedFrom(target);
-    LOG.info("Bodies and receipts of blocks {} to {} stored, setting the chain head", from, target);
-    bodies.verifyChain(header(from - 1), head);
-    // recorded before the head, so that a node restarted in between back-fills the rest
-    StorageRetry.run(() -> blockchain.unsafeSetBodiesFrom(from));
-    StorageRetry.run(() -> blockchain.unsafeSetSyncChainHead(floor, head));
-  }
-
-  private BlockHeader header(final long number) {
-    return context
-        .blockchain()
-        .getBlockHeader(number)
-        .orElseThrow(() -> new IllegalStateException("lost the header of block " + number));
+  // the window recorded the block the bodies are stored from before the head points above it
+  private void setChainHead(final BlockHeader head) {
+    LOG.info(
+        "Bodies and receipts of blocks {} to {} stored, setting the chain head",
+        windowStart(head.getNumber()),
+        head.getNumber());
+    StorageRetry.run(() -> context.blockchain().unsafeSetSyncChainHead(floor, head));
   }
 
   /** Moves the pivot if the head went far enough or peers stopped serving it. */
@@ -542,8 +531,6 @@ final class SyncAttempt {
                   .unsafeRemoveCanonicalIndexRange(newPivot.getNumber(), pivot.getNumber()));
     }
     storeBlockAccessLists(reorg.newFork(), newLists);
-    // after the new headers, so that no import reads the orphaned ones
-    bodies.rewind(ancestor + 1);
     return new ReorgRecovery(stateSync, context.storage(), context.scheduler())
         .recover(newPivot, fold(orphanedLists), fold(newLists));
   }
@@ -640,16 +627,6 @@ final class SyncAttempt {
     return headers == null ? 0 : headers.lowestStored();
   }
 
-  long bodiesStored() {
-    final BodyDownloader downloader = bodies;
-    return downloader == null ? 0 : downloader.storedBlocks();
-  }
-
-  long bodiesNeeded() {
-    final long pivot = pivotNumber();
-    return floor == null ? 0 : Math.max(0, pivot - windowStart(pivot) + 1);
-  }
-
   long trieProgress(final boolean accounts) {
     final WorldStateTrieBuilder builder = trieBuilder;
     if (builder == null) {
@@ -672,13 +649,15 @@ final class SyncAttempt {
                 "building tries: %d accounts, %d slots, %d storage tries kept from the download",
                 builder.accountsProcessed(), builder.slotsProcessed(), builder.keptStorageTries())
             : "state " + stateSync.progress();
+    final BodyBackfill bodies = window;
     return String.format(
-        "pivot %d, %s, headers stored down to %s, bodies and receipts of %d blocks stored, %d needed below the pivot",
+        "pivot %d, %s, headers stored down to %s%s",
         pivotNumber(),
         phase,
         headers == null ? "-" : headers.lowestStored(),
-        bodiesStored(),
-        bodiesNeeded());
+        bodies == null
+            ? ""
+            : String.format(", bodies and receipts of %d blocks stored", bodies.blocksStored()));
   }
 
   StateSync stateSync() {
@@ -687,18 +666,14 @@ final class SyncAttempt {
 
   /** Returns what the attempt is busy with: the state, the tries or the chain. */
   String stage() {
-    if (finalTarget >= 0) {
-      return "chain";
+    if (trieBuilder != null) {
+      return "tries";
     }
-    return trieBuilder != null ? "tries" : "state";
+    return window != null ? "chain" : "state";
   }
 
   private CompletableFuture<Void> delay(final Duration delay) {
     return Futures.delay(delay, context.executor());
-  }
-
-  private CompletableFuture<Void> poll() {
-    return Futures.delay(context.config().pollInterval(), context.executor());
   }
 
   // index of the highest header of the canonical branch that is also on the orphaned one

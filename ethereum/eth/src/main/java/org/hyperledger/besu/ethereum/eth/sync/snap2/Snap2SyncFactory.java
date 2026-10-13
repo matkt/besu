@@ -106,7 +106,8 @@ public final class Snap2SyncFactory {
                     config.requestTimeout(),
                     config.maxSnapRequestsPerPeer(),
                     config.maxEthRequestsPerPeer(),
-                    config.workerThreads())));
+                    config.workerThreads()),
+            ethContext.getPeerTaskExecutor()));
   }
 
   private static SyncStateStorage syncStorage(

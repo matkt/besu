@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.TrailingPeerRequirements;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.SyncAttempt.Resume;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
@@ -61,7 +62,6 @@ final class Snap2SyncController implements SnapSyncController {
   private static final long PROGRESS_LOG_SECONDS = 30;
   // rounds of requests before a block access list counts as unavailable
   private static final int BAL_ROUNDS = 60;
-  private static final int STORE_THREADS = 4;
 
   private final Snap2Configuration config;
   private final ProtocolSchedule protocolSchedule;
@@ -76,13 +76,10 @@ final class Snap2SyncController implements SnapSyncController {
   private final boolean indexTransactions;
   private final SyncDurationMetrics syncDurationMetrics;
   private final Supplier<RequestSender> senders;
+  private final PeerTaskExecutor peerTaskExecutor;
 
   private final ExecutorService executor =
       Executors.newCachedThreadPool(Thread.ofPlatform().name("snap2-sync-", 0).daemon().factory());
-  // the downloaded blocks queue for a few threads, rather than each holding one on a slow disk
-  private final ExecutorService writer =
-      Executors.newFixedThreadPool(
-          STORE_THREADS, Thread.ofPlatform().name("snap2-store-", 0).daemon().factory());
   private final ScheduledExecutorService control =
       Executors.newSingleThreadScheduledExecutor(
           Thread.ofPlatform().name("snap2-control").daemon().factory());
@@ -106,7 +103,8 @@ final class Snap2SyncController implements SnapSyncController {
       final boolean headersToCheckpointOnly,
       final boolean indexTransactions,
       final SyncDurationMetrics syncDurationMetrics,
-      final Supplier<RequestSender> senders) {
+      final Supplier<RequestSender> senders,
+      final PeerTaskExecutor peerTaskExecutor) {
     this.config = config;
     this.protocolSchedule = protocolSchedule;
     this.blockchain = blockchain;
@@ -120,6 +118,7 @@ final class Snap2SyncController implements SnapSyncController {
     this.indexTransactions = indexTransactions;
     this.syncDurationMetrics = syncDurationMetrics;
     this.senders = senders;
+    this.peerTaskExecutor = peerTaskExecutor;
   }
 
   @Override
@@ -188,10 +187,10 @@ final class Snap2SyncController implements SnapSyncController {
             headersToCheckpointOnly,
             indexTransactions,
             scheduler,
+            peerTaskExecutor,
             new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest()),
             new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), BAL_ROUNDS),
             executor,
-            writer,
             control,
             () -> stopped,
             metrics);
@@ -325,6 +324,5 @@ final class Snap2SyncController implements SnapSyncController {
     }
     control.shutdownNow();
     executor.shutdownNow();
-    writer.shutdownNow();
   }
 }

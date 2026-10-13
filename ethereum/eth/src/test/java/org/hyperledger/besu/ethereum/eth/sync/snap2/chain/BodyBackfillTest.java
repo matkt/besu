@@ -61,7 +61,7 @@ import org.junit.jupiter.api.Timeout;
 class BodyBackfillTest {
 
   private static final int HEAD = 60;
-  private static final long NO_LIMIT = 1L << 40;
+  private static final long NO_LIMIT = 0;
 
   private final BlockDataGenerator gen = new BlockDataGenerator(5);
   private final List<Block> chain = new ArrayList<>();
@@ -92,6 +92,7 @@ class BodyBackfillTest {
     assertThat(backfill.lowestStored()).isEqualTo(1);
     assertThat(backfill.blocksRemaining()).isZero();
     assertThat(backfill.blocksStored()).isEqualTo(50);
+    assertThat(backfill.done()).isCompleted();
     // the first request asks one of the two highest missing ranges
     assertThat(number(executor.requestedBodies().getFirst())).isGreaterThanOrEqualTo(41);
   }
@@ -182,6 +183,7 @@ class BodyBackfillTest {
     assertThat(backfill.blocksStored()).isZero();
     assertThat(blockchain.getBlockBody(chain.get(50).getHash())).isEmpty();
     assertThat(blockchain.getBodiesFrom()).contains(51L);
+    assertThat(backfill.done()).isCompletedExceptionally();
   }
 
   @Test
@@ -213,7 +215,7 @@ class BodyBackfillTest {
   }
 
   private static Settings settings(final long bytesPerSecond, final Duration importGrace) {
-    return new Settings(bytesPerSecond, 0, importGrace, Duration.ofMillis(20), 5, false);
+    return new Settings(bytesPerSecond, 2, 0, importGrace, Duration.ofMillis(20), 5, false);
   }
 
   private BodyBackfill backfill(final Settings settings, final LongUnaryOperator lowestNeeded) {
@@ -229,6 +231,7 @@ class BodyBackfillTest {
         ProtocolScheduleFixture.MAINNET,
         executor,
         inSync::get,
+        blockchain.getBodiesFrom().orElseThrow(),
         lowestNeeded,
         settings,
         new NoOpMetricsSystem());
