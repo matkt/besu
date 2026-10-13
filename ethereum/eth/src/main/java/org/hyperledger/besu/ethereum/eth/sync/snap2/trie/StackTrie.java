@@ -30,10 +30,13 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 final class StackTrie {
 
-  private static final int NONE = -1;
-  private static final int LEAF = 0;
-  private static final int BRANCH = 1;
-  private static final int SEALED = 2;
+  /** What the pending item is: nothing yet, a leaf, a branch, or a subtree known by reference. */
+  enum Kind {
+    NONE,
+    LEAF,
+    BRANCH,
+    SEALED
+  }
 
   private final TrieNodeSink sink;
   private final int[] frameDepth = new int[64];
@@ -42,7 +45,7 @@ final class StackTrie {
 
   // pending item: the right-most element, not yet attached to its parent
   private byte[] lastKey;
-  private int kind = NONE;
+  private Kind kind = Kind.NONE;
   private Bytes leafValue;
   private int itemDepth;
   private Bytes itemRlp;
@@ -61,7 +64,7 @@ final class StackTrie {
   }
 
   /** Item left after building a partition, to be added to an enclosing stack trie. */
-  public record Item(int kind, Bytes32 key, int depth, Bytes value, Bytes rlp, Bytes ref) {}
+  public record Item(Kind kind, Bytes32 key, int depth, Bytes value, Bytes rlp, Bytes ref) {}
 
   /**
    * Adds a leaf.
@@ -70,7 +73,7 @@ final class StackTrie {
    * @param value the leaf value, already RLP encoded
    */
   public void addLeaf(final Bytes32 key, final Bytes value) {
-    insert(key.toArrayUnsafe(), LEAF, 64, value, null, null);
+    insert(key.toArrayUnsafe(), Kind.LEAF, 64, value, null, null);
   }
 
   /**
@@ -80,15 +83,15 @@ final class StackTrie {
    * @param ref the reference held by the parent branch, a hash reference or an inlined node
    */
   public void addSealed(final Bytes location, final Bytes ref) {
-    insert(NodeEncoding.padLocation(location), SEALED, location.size(), null, null, ref);
+    insert(NodeEncoding.padLocation(location), Kind.SEALED, location.size(), null, null, ref);
   }
 
   /** Adds an item produced by {@link #finishAsItem()} on a partition of the key space. */
   public void addItem(final Item item) {
-    if (item.kind() == LEAF) {
+    if (item.kind() == Kind.LEAF) {
       addLeaf(item.key(), item.value());
     } else {
-      insert(item.key().toArrayUnsafe(), BRANCH, item.depth(), null, item.rlp(), item.ref());
+      insert(item.key().toArrayUnsafe(), Kind.BRANCH, item.depth(), null, item.rlp(), item.ref());
     }
   }
 
@@ -98,7 +101,7 @@ final class StackTrie {
    * @return the root hash
    */
   public Bytes32 rootHash() {
-    if (kind == NONE) {
+    if (kind == Kind.NONE) {
       return MerkleTrie.EMPTY_TRIE_NODE_HASH;
     }
     popFramesDeeperThan(-1);
@@ -125,30 +128,35 @@ final class StackTrie {
    * if nothing was added. Nodes below the returned item have been emitted.
    */
   public Item finishAsItem() {
-    if (kind == NONE) {
+    if (kind == Kind.NONE) {
       return null;
     }
     popFramesDeeperThan(-1);
-    if (kind == SEALED) {
+    if (kind == Kind.SEALED) {
       throw new IllegalStateException("a partition cannot end with a sealed subtree");
     }
     return new Item(
-        kind, Bytes32.wrap(lastKey), kind == LEAF ? 64 : itemDepth, leafValue, itemRlp, itemRef);
+        kind,
+        Bytes32.wrap(lastKey),
+        kind == Kind.LEAF ? 64 : itemDepth,
+        leafValue,
+        itemRlp,
+        itemRef);
   }
 
   private void insert(
       final byte[] key,
-      final int newKind,
+      final Kind newKind,
       final int newDepth,
       final Bytes value,
       final Bytes rlp,
       final Bytes ref) {
-    if (kind != NONE) {
+    if (kind != Kind.NONE) {
       if (Arrays.compareUnsigned(lastKey, key) >= 0) {
         throw new IllegalArgumentException("keys must be added in strictly increasing order");
       }
       final int split = commonPrefix(lastKey, key);
-      if (split >= newDepth || (kind != LEAF && split >= itemDepth)) {
+      if (split >= newDepth || (kind != Kind.LEAF && split >= itemDepth)) {
         throw new IllegalArgumentException("overlapping subtrees");
       }
       popFramesDeeperThan(split);
@@ -181,7 +189,7 @@ final class StackTrie {
       itemRlp = rlp;
       itemDepth = d;
       leafValue = null;
-      kind = BRANCH;
+      kind = Kind.BRANCH;
     }
   }
 
