@@ -693,8 +693,7 @@ public final class StateSync {
 
   // a complete storage can get its trie built from the written slots
   private void cover(final StorageTask task, final Bytes32 origin, final Bytes32 end) {
-    task.cover(origin, end);
-    if (task.isComplete()) {
+    if (task.cover(origin, end)) {
       coverage.removeStorageTask(task.accountHash());
       tries.ifPresent(builder -> builder.completed(task.accountHash()));
     }

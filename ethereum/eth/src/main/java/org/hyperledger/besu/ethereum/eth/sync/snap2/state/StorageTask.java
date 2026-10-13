@@ -71,11 +71,12 @@ final class StorageTask {
     return covered.contains(slotHash);
   }
 
-  public void cover(final Bytes32 from, final Bytes32 to) {
+  /** Covers a slot range; returns true for the one call that completes the storage. */
+  public synchronized boolean cover(final Bytes32 from, final Bytes32 to) {
+    if (covered.isFull()) {
+      return false;
+    }
     covered.add(from, to);
-  }
-
-  public boolean isComplete() {
     return covered.isFull();
   }
 }
