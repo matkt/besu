@@ -68,14 +68,6 @@ public interface SyncStateStorage {
     return trieWriter();
   }
 
-  /**
-   * Creates the trie node writer of one partition of the final build, whose accounts come in key
-   * order, so that it can write sorted files; not shared between threads.
-   */
-  default TrieWriter partitionTrieWriter() {
-    return trieWriter();
-  }
-
   /** Records the world state root and the block it belongs to, once every node is written. */
   void saveWorldState(BlockHeader header, Bytes rootNode);
 
@@ -119,8 +111,5 @@ public interface SyncStateStorage {
     void storageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
 
     void commit();
-
-    /** Drops what is not committed yet, after a failure. */
-    default void abort() {}
   }
 }

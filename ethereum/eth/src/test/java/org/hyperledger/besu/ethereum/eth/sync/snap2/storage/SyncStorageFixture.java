@@ -93,15 +93,6 @@ public final class SyncStorageFixture {
     return new Storages(new ForestSyncStateStorage(forest, provider), null, forest);
   }
 
-  /** A Bonsai storage that sorts at most the given bytes of nodes of one storage in memory. */
-  public static Storages createBonsai(final long maxSortedStorageBytes) {
-    final BonsaiWorldStateKeyValueStorage bonsai =
-        (BonsaiWorldStateKeyValueStorage)
-            new InMemoryKeyValueStorageProvider()
-                .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
-    return new Storages(new BonsaiSyncStateStorage(bonsai, maxSortedStorageBytes), bonsai, null);
-  }
-
   /**
    * A flat world state keyed by hash, as the download writes it, for the trie build; {@link
    * org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld} is the one that changes block by block.

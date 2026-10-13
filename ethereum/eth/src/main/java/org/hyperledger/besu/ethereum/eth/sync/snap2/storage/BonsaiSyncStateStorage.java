@@ -22,40 +22,21 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.Bonsai
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.BonsaiTrieNodeStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
-import org.hyperledger.besu.plugin.services.storage.SortedWriter;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /** Sync storage writing straight into the Bonsai flat database and trie node store. */
 public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
-  // the storage nodes of one account sorted in memory before going to a file
-  private static final long MAX_SORTED_STORAGE_BYTES = 32L * 1024 * 1024;
-
   private final BonsaiWorldStateKeyValueStorage bonsai;
-  private final long maxSortedStorageBytes;
 
   public BonsaiSyncStateStorage(final BonsaiWorldStateKeyValueStorage bonsai) {
-    this(bonsai, MAX_SORTED_STORAGE_BYTES);
-  }
-
-  @VisibleForTesting
-  BonsaiSyncStateStorage(
-      final BonsaiWorldStateKeyValueStorage bonsai, final long maxSortedStorageBytes) {
     super(bonsai.getComposedWorldStateStorage(), ACCOUNT_INFO_STATE, ACCOUNT_STORAGE_STORAGE);
     this.bonsai = bonsai;
-    this.maxSortedStorageBytes = maxSortedStorageBytes;
   }
 
   @Override
@@ -138,101 +119,6 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
         }
       }
     };
-  }
-
-  @Override
-  public TrieWriter partitionTrieWriter() {
-    // the files hold the nodes under the keys of the default strategy only
-    return bonsai.getTrieNodeStrategy().getClass() == BonsaiTrieNodeStrategy.class
-        ? new SortedStorageTrieWriter(trieWriter())
-        : trieWriter();
-  }
-
-  /**
-   * Sorts the storage nodes of each account and adds them to a file of the partition, which skips
-   * the compactions of the trie segment. The account nodes, and a storage too large to sort in
-   * memory, take the usual writes, the file being closed before such a storage so that it holds
-   * none of its keys.
-   */
-  private final class SortedStorageTrieWriter implements TrieWriter {
-    private final TrieWriter usual;
-    private final List<StorageNode> nodes = new ArrayList<>();
-    private Bytes32 accountHash;
-    private long sortedBytes;
-    private boolean tooLarge;
-    private SortedWriter file;
-
-    private record StorageNode(byte[] key, Bytes location, Bytes32 hash, Bytes rlp) {}
-
-    private SortedStorageTrieWriter(final TrieWriter usual) {
-      this.usual = usual;
-    }
-
-    @Override
-    public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-      usual.accountNode(location, hash, rlp);
-    }
-
-    @Override
-    public void storageNode(
-        final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-      if (hash.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)) {
-        return;
-      }
-      if (!accountHash.equals(this.accountHash)) {
-        finishAccount();
-        this.accountHash = accountHash.copy();
-      }
-      if (tooLarge) {
-        usual.storageNode(accountHash, location, hash, rlp);
-        return;
-      }
-      final byte[] key = TrieNodeKey.of(Hash.wrap(accountHash), location).toArrayUnsafe();
-      nodes.add(new StorageNode(key, location, hash, rlp));
-      sortedBytes += key.length + rlp.size();
-      if (sortedBytes > maxSortedStorageBytes) {
-        closeFile();
-        nodes.forEach(
-            node -> usual.storageNode(accountHash, node.location(), node.hash(), node.rlp()));
-        nodes.clear();
-        tooLarge = true;
-      }
-    }
-
-    @Override
-    public void commit() {
-      finishAccount();
-      closeFile();
-      usual.commit();
-    }
-
-    @Override
-    public void abort() {
-      if (file != null) {
-        file.rollback();
-        file = null;
-      }
-    }
-
-    private void finishAccount() {
-      if (!nodes.isEmpty()) {
-        nodes.sort((a, b) -> Arrays.compareUnsigned(a.key(), b.key()));
-        if (file == null) {
-          file = flat.startSortedWriter(TRIE_BRANCH_STORAGE);
-        }
-        nodes.forEach(node -> file.put(node.key(), node.rlp().toArrayUnsafe()));
-      }
-      nodes.clear();
-      sortedBytes = 0;
-      tooLarge = false;
-    }
-
-    private void closeFile() {
-      if (file != null) {
-        file.commit();
-        file = null;
-      }
-    }
   }
 
   @Override
