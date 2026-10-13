@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -77,6 +78,8 @@ public final class StateSync {
   private final StateCoverage coverage = new StateCoverage();
   private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
+  // writes the verified responses, off the threads that verify them
+  private final ExecutorService persister;
   private final CompletableFuture<Void> completion = new CompletableFuture<>();
   private volatile Pivot pivot;
   private volatile boolean pivotStale;
@@ -117,6 +120,10 @@ public final class StateSync {
     this.loop =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("snap2-state").daemon().factory());
+    this.persister =
+        Executors.newFixedThreadPool(
+            Math.max(2, config.workerThreads()),
+            Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
     this.tries =
         new StorageTries(storage, this::withoutMoves, Math.max(1, config.trieBuildThreads() / 4));
   }
@@ -282,6 +289,7 @@ public final class StateSync {
       pivotLock.writeLock().unlock();
     }
     loop.shutdownNow();
+    persister.shutdownNow();
     tries.stop();
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
@@ -447,7 +455,7 @@ public final class StateSync {
             current, task.next, task.limit, config.responseBytes(), "account_range");
     scheduler
         .submit(request, excluded)
-        .whenComplete(
+        .whenCompleteAsync(
             (response, error) -> {
               final AccountsPersisted persisted =
                   error == null
@@ -473,7 +481,8 @@ public final class StateSync {
                     }
                     dispatch();
                   });
-            });
+            },
+            persister);
   }
 
   private record AccountsPersisted(
@@ -561,7 +570,7 @@ public final class StateSync {
   private void submitStorage(final StorageRangesRequest request) {
     scheduler
         .submit(request, excluded)
-        .whenComplete(
+        .whenCompleteAsync(
             (response, error) -> {
               final StoragePersisted persisted =
                   error == null
@@ -582,7 +591,8 @@ public final class StateSync {
                     afterStorage(request, persisted);
                     dispatch();
                   });
-            });
+            },
+            persister);
   }
 
   private record StoragePersisted(
@@ -687,7 +697,7 @@ public final class StateSync {
             current, task.accountHash(), task.accountHash(), REFRESH_BYTES, "account_refresh");
     scheduler
         .submit(request, excluded)
-        .whenComplete(
+        .whenCompleteAsync(
             (response, error) -> {
               if (error == null) {
                 persistSafely(() -> persistRefresh(request, task, response.value()), request);
@@ -706,7 +716,8 @@ public final class StateSync {
                     }
                     dispatch();
                   });
-            });
+            },
+            persister);
   }
 
   private boolean persistRefresh(
@@ -759,7 +770,7 @@ public final class StateSync {
     final ByteCodesRequest request = new ByteCodesRequest(batch, config.responseBytes());
     scheduler
         .submit(request)
-        .whenComplete(
+        .whenCompleteAsync(
             (response, error) -> {
               final Set<Bytes32> stored =
                   error == null
@@ -778,7 +789,8 @@ public final class StateSync {
                     }
                     dispatch();
                   });
-            });
+            },
+            persister);
     return true;
   }
 
