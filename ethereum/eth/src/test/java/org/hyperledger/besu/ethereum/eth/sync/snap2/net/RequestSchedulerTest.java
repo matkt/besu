@@ -167,6 +167,39 @@ class RequestSchedulerTest {
     assertThat(peer.hasOutstandingRequests()).isFalse();
   }
 
+  @Test
+  void retriesARequestUntilAPeerAnswersIt() throws Exception {
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> response =
+        scheduler.submitWithRetries(headers(1, 2), 5);
+
+    // the first attempt times out, then the peer is tried again once no other peer is left
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> peer.streamPendingOutgoingRequests().count() == 2);
+    peer.respondWhileOtherThreadsWork(
+        RespondingEthPeer.blockchainResponder(blockchain), () -> !response.isDone());
+
+    assertThat(response.get(5, TimeUnit.SECONDS).value())
+        .extracting(BlockHeader::getNumber)
+        .containsExactly(1L, 2L);
+  }
+
+  @Test
+  void failsARequestOnceItsAttemptsRunOut() {
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> response =
+        scheduler.submitWithRetries(headers(1, 2), 2);
+
+    // the peer never answers: a timeout, then no peer left to try
+    assertThatThrownBy(() -> response.get(10, TimeUnit.SECONDS))
+        .isInstanceOf(ExecutionException.class)
+        .cause()
+        .isInstanceOfSatisfying(
+            RequestFailedException.class,
+            failure ->
+                assertThat(failure.reason()).isEqualTo(RequestFailedException.Reason.NO_PEER));
+    assertThat(peer.streamPendingOutgoingRequests()).hasSize(1);
+  }
+
   private PeerTaskRequest<List<BlockHeader>> headers(final long first, final int count) {
     return headers(first, count, Priority.CHAIN);
   }
