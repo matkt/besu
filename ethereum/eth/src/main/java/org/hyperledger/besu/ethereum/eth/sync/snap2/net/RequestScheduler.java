@@ -729,10 +729,8 @@ public final class RequestScheduler implements RequestSender {
           throughput = 0.8 * throughput + 0.2 * ((double) size / elapsedMillis);
           grow();
         }
-        case EMPTY -> {
-          throughput *= 0.9;
-          backoff(now);
-        }
+        // a peer missing some data serves the rest: the request alone moves to another peer
+        case EMPTY -> throughput *= 0.9;
         default -> {
           throughput *= 0.7;
           backoff(now);

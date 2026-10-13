@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorRespon
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskValidationResponse;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+import org.hyperledger.besu.ethereum.rlp.RLP;
 
 import java.util.List;
 import java.util.Optional;
@@ -93,6 +94,10 @@ public final class PeerTaskRequest<T> implements SyncRequest<T> {
 
   @Override
   public T decode(final MessageData response, final EthPeer peer) {
+    // an empty list is how a peer says it has none of it, as for bodies it pruned
+    if (RLP.EMPTY_LIST.equals(response.getData())) {
+      throw new EmptyResponseException(name + " returned nothing");
+    }
     final PeerTask<T> task = current;
     final T result;
     try {

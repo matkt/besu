@@ -26,6 +26,7 @@ import org.hyperledger.besu.ethereum.eth.manager.EthProtocolManagerTestBuilder;
 import org.hyperledger.besu.ethereum.eth.manager.RespondingEthPeer;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask.Direction;
+import org.hyperledger.besu.ethereum.eth.messages.BlockHeadersMessage;
 import org.hyperledger.besu.ethereum.eth.messages.GetBlockHeadersMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
@@ -35,6 +36,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -153,6 +155,34 @@ class RequestSchedulerTest {
   }
 
   @Test
+  void keepsAskingAPeerThatHadNothingForAnEarlierRequest() throws Exception {
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> pruned =
+        scheduler.submit(headers(1, 2));
+    await().until(peer::hasOutstandingRequests);
+    peer.respond(
+        (capability, ethPeer, message) -> Optional.of(BlockHeadersMessage.create(List.of())));
+    assertThatThrownBy(() -> pruned.get(5, TimeUnit.SECONDS))
+        .isInstanceOf(ExecutionException.class)
+        .cause()
+        .isInstanceOfSatisfying(
+            RequestFailedException.class,
+            failure -> assertThat(failure.reason()).isEqualTo(RequestFailedException.Reason.EMPTY));
+
+    // once the empty answer is recorded, the peer is asked again right away, not after a back-off
+    Thread.sleep(200);
+    final CompletableFuture<PeerResponse<List<BlockHeader>>> next = scheduler.submit(headers(3, 2));
+    // a back-off would hold it for a second
+    await()
+        .atMost(Duration.ofMillis(500))
+        .until(() -> nextRequestedHeader().equals(OptionalLong.of(3)));
+    peer.respondWhileOtherThreadsWork(
+        RespondingEthPeer.blockchainResponder(blockchain), () -> !next.isDone());
+    assertThat(next.get(5, TimeUnit.SECONDS).value())
+        .extracting(BlockHeader::getNumber)
+        .containsExactly(3L, 4L);
+  }
+
+  @Test
   void neverSendsARequestToAnExcludedPeer() {
     final CompletableFuture<PeerResponse<List<BlockHeader>>> response =
         scheduler.submit(headers(1, 2), Set.of(peer.getEthPeer()));
@@ -198,6 +228,15 @@ class RequestSchedulerTest {
             failure ->
                 assertThat(failure.reason()).isEqualTo(RequestFailedException.Reason.NO_PEER));
     assertThat(peer.streamPendingOutgoingRequests()).hasSize(1);
+  }
+
+  private OptionalLong nextRequestedHeader() {
+    return peer.peekNextOutgoingRequest()
+        .map(
+            request ->
+                GetBlockHeadersMessage.readFrom(request.unwrapMessageData().getValue())
+                    .blockNumber())
+        .orElse(OptionalLong.empty());
   }
 
   private PeerTaskRequest<List<BlockHeader>> headers(final long first, final int count) {
