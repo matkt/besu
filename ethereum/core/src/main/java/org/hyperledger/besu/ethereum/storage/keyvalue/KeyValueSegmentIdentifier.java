@@ -57,7 +57,7 @@ public enum KeyValueSegmentIdentifier implements SegmentIdentifier {
   SNAPSYNC_MISSING_ACCOUNT_RANGE(new byte[] {16}),
   SNAPSYNC_ACCOUNT_TO_FIX(new byte[] {17}),
   CHAIN_PRUNER_STATE(new byte[] {18}),
-  // flat state staged by the SNAP2 sync on Forest, dropped once the tries are built
+  // flat state staged by the SNAP2 sync on Forest, cleared once the tries are built
   SNAPSYNC_FLAT_ACCOUNTS(new byte[] {19}, EnumSet.of(FOREST)),
   SNAPSYNC_FLAT_STORAGE(new byte[] {20}, EnumSet.of(FOREST));
 

@@ -87,14 +87,14 @@ class SnapProtocolManagerTest {
   }
 
   @Test
-  void advertisesOnlySnap1WhenSnap2IsDisabled() {
+  void advertisesOnlySnap1OutsideTheSnap2Sync() {
     snapProtocolManager = createSnapProtocolManager(false);
 
     assertThat(snapProtocolManager.getSupportedCapabilities()).containsExactly(SnapProtocol.SNAP1);
   }
 
   @Test
-  void advertisesSnap2WhenSnap2IsEnabled() {
+  void advertisesSnap2ForTheSnap2Sync() {
     snapProtocolManager = createSnapProtocolManager(true);
 
     assertThat(snapProtocolManager.getSupportedCapabilities())

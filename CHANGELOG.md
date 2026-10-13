@@ -11,6 +11,7 @@
 - `trace_block` and `trace_replayBlockTransactions` now return a `Block not found` error (`-32000`) for a block number that is not on the chain instead of a `null` result, as `trace_call` and `trace_callMany` already do. [#11381](https://github.com/besu-eth/besu/pull/11381)
 - `trace_filter` now honours `blockHash` and traces exactly that block, as `eth_getLogs` does. Previously the member was parsed and ignored, so `{"blockHash": ...}` traced the latest block, and with `fromBlock` or `toBlock` the hash was dropped. A non-null `blockHash` combined with a non-null `fromBlock` or `toBlock` is now rejected with `Invalid filter params` (`-32602`). An unknown or noncanonical hash returns `Block not found` (`-32000`), a canonical block without a stored body, as after history pruning, returns `Pruned history unavailable` (`4444`), and a block that cannot be traced on its parent state returns `World state unavailable` (`-32000`), including with `count: 0`. A null `blockHash` is still ignored. [#11407](https://github.com/besu-eth/besu/pull/11407)
 - Bonsai databases storing code by its hash are upgraded on first start to store the jump destination analysis next to the code (Bonsai database version 4, archive version 3); the upgrade takes a few minutes on mainnet, after which the database cannot be opened by an older version of Besu. [#11327](https://github.com/besu-eth/besu/pull/11327)
+- The hidden `--Xsnap2-enabled` and `--Xsnap2-request-parallelism` options are removed: `--sync-mode=SNAP2` runs the snap/2 sync and advertises snap/2.
 
 ### Upcoming Breaking Changes
 - Plugin API
@@ -82,6 +83,7 @@
 - The jump destination analysis of contract code is computed once, when the code is stored, instead of on every code cache miss. [#11327](https://github.com/besu-eth/besu/pull/11327)
 - EVM v2: add AND, OR, XOR and NOT. [#11477](https://github.com/besu-eth/besu/pull/11477)
 - Schedule the Amsterdam fork on Hoodi at timestamp `1793036568` (Mon, 26 Oct 2026, 17:42:48 UTC). [#11531](https://github.com/besu-eth/besu/pull/11531)
+- Add the `SNAP2` sync mode (`--sync-mode=SNAP2`), which downloads the chain and the world state in parallel over snap/2 ([EIP-8189](https://eips.ethereum.org/EIPS/eip-8189)) and keeps the state at the chain head with block access lists instead of healing it with trie node requests, on Bonsai and Forest.
 
 ## 26.9.0
 

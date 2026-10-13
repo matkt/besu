@@ -30,7 +30,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * Sync storage for Forest: the flat state is staged in dedicated segments and dropped once the
+ * Sync storage for Forest: the flat state is staged in dedicated segments and cleared once the
  * tries, keyed by hash, are built.
  */
 public final class ForestSyncStateStorage extends AbstractSyncStateStorage {

@@ -476,7 +476,10 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
             "Invalid value for option '--sync-mode': '"
                 + value
                 + "' is not a valid sync mode. "
-                + "Valid values are: FULL, SNAP, SNAP2");
+                + "Valid values are: "
+                + Arrays.stream(SyncMode.values())
+                    .map(Enum::name)
+                    .collect(Collectors.joining(", ")));
       }
     }
   }
