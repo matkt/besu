@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -78,12 +79,15 @@ class StateSyncTest {
     stateSync = new StateSync(storages.sync(), network, config());
 
     stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
-    waitForStorageTries();
+    // every storage completed while downloading gets its trie from the written slots
+    final int withStorage = world.storageLeaves().size();
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> stateSync.storageTriesBuilt() == withStorage);
 
     final WorldStateTrieBuilder.Result built = build(storages);
     assertThat(built.root()).isEqualTo(world.root());
-    // storages complete while downloading get their trie right away
-    assertThat(built.keptStorageTries()).isPositive();
+    assertThat(built.keptStorageTries()).isEqualTo(withStorage);
   }
 
   static Stream<Arguments> formatsAndSeeds() {
@@ -199,13 +203,6 @@ class StateSyncTest {
   private WorldStateTrieBuilder.Result build(final Storages storages) {
     stateSync.stop();
     return new WorldStateTrieBuilder(storages.sync(), 2).build();
-  }
-
-  private void waitForStorageTries() throws InterruptedException {
-    final long deadline = System.currentTimeMillis() + 20_000;
-    while (stateSync.storageTriesQueued() > 0 && System.currentTimeMillis() < deadline) {
-      Thread.sleep(10);
-    }
   }
 
   private static BlockHeader header(final long number, final Bytes32 root) {

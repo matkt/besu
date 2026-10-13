@@ -76,6 +76,7 @@ public final class StateSync {
   private final RequestSender scheduler;
   private final Snap2Configuration config;
   private final StateCoverage coverage = new StateCoverage();
+  private final StorageTries tries;
   private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
@@ -96,7 +97,6 @@ public final class StateSync {
   private final Set<Bytes32> seenCodes = new HashSet<>();
   private final Set<EthPeer> emptyPeers = new HashSet<>();
   private final StateServers servers = new StateServers();
-  private final StorageTries tries;
   // peers left out of state requests, refreshed on each dispatch
   private Set<EthPeer> excluded = Set.of();
   private volatile int excludedCount;
@@ -321,7 +321,7 @@ public final class StateSync {
   private void execute(final Runnable task) {
     if (!loop.isShutdown()) {
       try {
-        loop.execute(task);
+        loop.execute(() -> runLogged(task));
       } catch (final RuntimeException e) {
         LOG.trace("State loop rejected a task", e);
       }
@@ -329,10 +329,15 @@ public final class StateSync {
   }
 
   private void dispatchSafely() {
+    runLogged(this::dispatch);
+  }
+
+  // a scheduled executor keeps the exceptions of its tasks to itself
+  private static void runLogged(final Runnable task) {
     try {
-      dispatch();
+      task.run();
     } catch (final RuntimeException e) {
-      LOG.warn("SNAP2 state dispatch failed", e);
+      LOG.warn("SNAP2 state task failed", e);
     }
   }
 
@@ -506,10 +511,8 @@ public final class StateSync {
             batch.putAccount(hash, account);
             final PmtStateTrieAccountValue value = Accounts.decode(account);
             if (!value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
-              final StorageTask task =
-                  new StorageTask(hash, Bytes32.wrap(value.getStorageRoot().getBytes()));
-              coverage.addStorageTask(task);
-              storageTasks.add(task);
+              storageTasks.add(
+                  new StorageTask(hash, Bytes32.wrap(value.getStorageRoot().getBytes())));
             }
             if (!value.getCodeHash().equals(Hash.EMPTY)) {
               codeHashes.add(Bytes32.wrap(value.getCodeHash().getBytes()));
@@ -522,6 +525,7 @@ public final class StateSync {
               last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
           final Bytes32 end = done ? request.limit : last;
           batch.commit();
+          storageTasks.forEach(coverage::addStorageTask);
           coverage.accounts().add(request.origin, end);
           accounts.addAndGet(count);
           return new AccountsPersisted(end, done, storageTasks, codeHashes);
@@ -604,6 +608,7 @@ public final class StateSync {
         request.pivot.epoch(),
         () -> {
           final SyncStateStorage.Batch batch = storage.batch();
+          final List<Covered> covered = new ArrayList<>();
           Bytes32 lastSlot = null;
           boolean lastComplete = true;
           int lastReturned = 0;
@@ -628,21 +633,29 @@ public final class StateSync {
             final boolean complete =
                 accountSlots.complete() || last == null || last.compareTo(request.limit) >= 0;
             if (isPending(task)) {
-              task.cover(request.origin, complete ? request.limit : last);
-              if (task.isComplete()) {
-                coverage.removeStorageTask(task.accountHash());
-                tries.completed(task.accountHash());
-              }
+              covered.add(new Covered(task, complete ? request.limit : last));
             }
             lastSlot = last;
             lastComplete = complete;
             lastReturned = returned.size();
           }
           batch.commit();
+          covered.forEach(range -> cover(range.task(), request.origin, range.end()));
           slots.addAndGet(count);
           return new StoragePersisted(
               result.accounts().size(), lastSlot, lastComplete, lastReturned, count);
         });
+  }
+
+  private record Covered(StorageTask task, Bytes32 end) {}
+
+  // a complete storage gets its trie built from the written slots
+  private void cover(final StorageTask task, final Bytes32 origin, final Bytes32 end) {
+    task.cover(origin, end);
+    if (task.isComplete()) {
+      coverage.removeStorageTask(task.accountHash());
+      tries.completed(task.accountHash());
+    }
   }
 
   private void afterStorage(final StorageRangesRequest request, final StoragePersisted persisted) {
@@ -758,7 +771,7 @@ public final class StateSync {
     while (iterator.hasNext() && batch.size() < config.codeBatchSize()) {
       final Bytes32 codeHash = iterator.next();
       iterator.remove();
-      if (!storage.hasCode(codeHash)) {
+      if (!isStored(codeHash)) {
         batch.add(codeHash);
       }
     }
@@ -794,10 +807,27 @@ public final class StateSync {
     return true;
   }
 
+  // a failed lookup only costs a download
+  private boolean isStored(final Bytes32 codeHash) {
+    try {
+      return storage.hasCode(codeHash);
+    } catch (final RuntimeException e) {
+      LOG.debug("Failed to look up bytecode {}", codeHash, e);
+      return false;
+    }
+  }
+
   private Set<Bytes32> persistCodes(final Map<Bytes32, Bytes> received) {
-    final SyncStateStorage.Batch batch = storage.batch();
-    received.forEach((hash, code) -> batch.putCode(Bytes32.ZERO, hash, code));
-    batch.commit();
+    final boolean written =
+        withoutMoves(
+            () -> {
+              final SyncStateStorage.Batch batch = storage.batch();
+              received.forEach((hash, code) -> batch.putCode(Bytes32.ZERO, hash, code));
+              batch.commit();
+            });
+    if (!written) {
+      return Set.of();
+    }
     codes.addAndGet(received.size());
     return received.keySet();
   }
