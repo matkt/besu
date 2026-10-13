@@ -14,6 +14,13 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.block;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.compact;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.duration;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.eta;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.mibPerSecond;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.percent;
+
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.BlockAddedEvent;
 import org.hyperledger.besu.ethereum.chain.BlockAddedObserver;
@@ -31,6 +38,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorRespon
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncBlockBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncReceiptsFromPeerTask;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.RateTracker;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
@@ -39,6 +47,7 @@ import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -118,7 +127,7 @@ public final class BodyBackfill implements BlockAddedObserver {
     /** Returns the settings of the background back-fill in a mode. */
     public static Settings of(final BackfillMode mode, final boolean indexTransactions) {
       return new Settings(
-          mode.name(),
+          "back-fill " + mode.name(),
           mode.bytesPerSecond(),
           mode.requests(),
           64L * 1024 * 1024,
@@ -161,6 +170,9 @@ public final class BodyBackfill implements BlockAddedObserver {
   private final AtomicLong bytesStored = new AtomicLong();
   private final AtomicLong backoffs = new AtomicLong();
   private final AtomicLong lastLogNanos = new AtomicLong();
+  // the lowest block at the start, which the share done counts from
+  private final long initialLowest;
+  private final RateTracker blocksRate;
   // guarded by itself: the peers with a request in flight
   private final Set<EthPeer> busyPeers = new HashSet<>();
   private final Object throttle = new Object();
@@ -184,8 +196,9 @@ public final class BodyBackfill implements BlockAddedObserver {
   private volatile long lowest;
   private volatile boolean stopped;
   private volatile State state = State.PAUSED;
+  private volatile String pauseReason = "";
   private volatile long busyUntilNanos = System.nanoTime();
-  private volatile long loggedBlocks;
+  private volatile Instant started = Instant.now();
   private volatile long loggedBytes;
 
   /**
@@ -214,10 +227,12 @@ public final class BodyBackfill implements BlockAddedObserver {
     this.peerTaskExecutor = peerTaskExecutor;
     this.inSync = inSync;
     this.lowest = lowest;
+    this.initialLowest = lowest;
     this.persisted = lowest;
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
     this.clock = clock;
+    this.blocksRate = new RateTracker(clock, 5);
     this.workers =
         Executors.newFixedThreadPool(
             settings.requests(), Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
@@ -226,10 +241,22 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   /** Starts downloading below the lowest stored block, unless every needed body is stored. */
   public void start() {
-    if (lowest <= lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber())) {
+    final long floor = lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
+    if (lowest <= floor) {
+      LOG.info(
+          "SNAP2 {}: every block from {} has its body and receipts",
+          settings.label(),
+          block(lowest));
       finish();
       return;
     }
+    started = clock.instant();
+    LOG.info(
+        "SNAP2 {} started | {} blocks, {} down to {}",
+        settings.label(),
+        compact(lowest - floor),
+        block(lowest - 1),
+        block(floor));
     lastLogNanos.set(System.nanoTime());
     synchronized (this) {
       observerId = blockchain.observeBlockAdded(this);
@@ -327,9 +354,12 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   private void step() throws InterruptedException {
     maybeLog();
-    if (!inSync.getAsBoolean() || busy()) {
-      state = State.PAUSED;
-      Thread.sleep(settings.pollInterval().toMillis());
+    if (!inSync.getAsBoolean()) {
+      pause("node behind the head");
+      return;
+    }
+    if (busy()) {
+      pause("importing a block");
       return;
     }
     adapt();
@@ -361,6 +391,12 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   private boolean busy() {
     return System.nanoTime() - busyUntilNanos < 0;
+  }
+
+  private void pause(final String reason) throws InterruptedException {
+    pauseReason = reason;
+    state = State.PAUSED;
+    Thread.sleep(settings.pollInterval().toMillis());
   }
 
   // halves the rate while the chain head lags the wall clock, an import or a late block being
@@ -511,7 +547,14 @@ public final class BodyBackfill implements BlockAddedObserver {
     }
     state = State.DONE;
     unobserve();
-    LOG.info("Bodies and receipts of every block from {} are stored", lowest);
+    if (blocksStored.get() > 0) {
+      LOG.info(
+          "SNAP2 {} complete in {} | {} blocks, down to {}",
+          settings.label(),
+          duration(Duration.between(started, clock.instant())),
+          compact(blocksStored.get()),
+          block(lowest));
+    }
     workers.shutdown();
     done.complete(null);
   }
@@ -674,19 +717,37 @@ public final class BodyBackfill implements BlockAddedObserver {
       return;
     }
     final double seconds = (now - last) / 1e9;
-    final long blocks = blocksStored.get();
     final long bytes = bytesStored.get();
-    LOG.info(
-        "Body back-fill {} ({}): blocks {} to the head stored, {} remaining, {} blocks/s, {} MiB/s of {} MiB/s{}",
-        state.name().toLowerCase(Locale.ROOT),
-        settings.label(),
-        lowest,
-        blocksRemaining(),
-        String.format("%.1f", (blocks - loggedBlocks) / seconds),
-        String.format("%.2f", (bytes - loggedBytes) / seconds / (1024 * 1024)),
-        String.format("%.1f", bytesPerSecond() / (1024.0 * 1024)),
-        backedOff() ? ", backed off while the chain head lags" : "");
-    loggedBlocks = blocks;
+    final long floor = lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
+    final long done = initialLowest - lowest;
+    blocksRate.sample((double) done);
+    final StringBuilder line =
+        new StringBuilder("SNAP2 ")
+            .append(settings.label())
+            .append(' ')
+            .append(percent(done, initialLowest - floor))
+            .append(" | ")
+            .append(compact(blocksRemaining()))
+            .append(" blocks left, down to ")
+            .append(block(floor))
+            .append(" | ")
+            .append(mibPerSecond((bytes - loggedBytes) / seconds));
+    if (settings.bytesPerSecond() > 0) {
+      line.append(" (limit ").append(mibPerSecond((double) settings.bytesPerSecond())).append(")");
+    }
+    eta((double) blocksRemaining(), blocksRate.perSecond().orElse(0))
+        .ifPresent(left -> line.append(" | ETA ").append(left));
+    line.append(" | ");
+    if (state == State.PAUSED) {
+      line.append("paused: ").append(pauseReason);
+    } else if (backedOff()) {
+      line.append("slowed down: head lag (")
+          .append(mibPerSecond((double) bytesPerSecond()))
+          .append(")");
+    } else {
+      line.append(state.name().toLowerCase(Locale.ROOT));
+    }
+    LOG.info("{}", line);
     loggedBytes = bytes;
   }
 

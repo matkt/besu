@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask.Direction;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
@@ -27,6 +28,8 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.services.pipeline.Pipeline;
 import org.hyperledger.besu.services.pipeline.PipelineBuilder;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -60,6 +63,7 @@ public final class HeaderBackfill {
   private volatile Hash expected;
   private volatile long lowestStored;
   private volatile boolean stopped;
+  private volatile Instant started = Instant.now();
   private Pipeline<Segment> pipeline;
 
   /**
@@ -97,10 +101,25 @@ public final class HeaderBackfill {
     return lowestStored;
   }
 
+  /** Returns the number of headers stored so far. */
+  public long done() {
+    return top.getNumber() - lowestStored;
+  }
+
+  /** Returns the number of headers to store, from below the top down to above the floor. */
+  public long total() {
+    return Math.max(0, top.getNumber() - floor.getNumber() - 1);
+  }
+
   /** Downloads every header in between and checks the chain reaches the floor. */
   public CompletableFuture<Void> run(final ExecutorService executor) {
+    started = Instant.now();
     if (top.getNumber() > floor.getNumber() + 1) {
-      LOG.info("Downloading block headers {} to {}", floor.getNumber() + 1, top.getNumber() - 1);
+      LOG.info(
+          "SNAP2 headers started | {} headers, {} down to {}",
+          ProgressFormat.compact(total()),
+          ProgressFormat.block(top.getNumber() - 1),
+          ProgressFormat.block(floor.getNumber() + 1));
       pipeline =
           PipelineBuilder.createPipelineFrom(
                   "headerSegments",
@@ -129,7 +148,10 @@ public final class HeaderBackfill {
                     + floor.getHash()
                     + ", the consensus client follows another chain");
           }
-          LOG.info("Block headers down to block {} stored", floor.getNumber() + 1);
+          LOG.info(
+              "SNAP2 headers complete in {} | down to {}",
+              ProgressFormat.duration(Duration.between(started, Instant.now())),
+              ProgressFormat.block(floor.getNumber() + 1));
         });
   }
 

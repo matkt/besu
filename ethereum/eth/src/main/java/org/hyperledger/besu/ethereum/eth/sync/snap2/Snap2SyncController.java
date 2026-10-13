@@ -37,6 +37,7 @@ import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -127,7 +128,8 @@ final class Snap2SyncController implements SnapSyncController {
 
   @Override
   public CompletableFuture<SnapSyncProcessState> start() {
-    LOG.info("Starting SNAP2 sync");
+    LOG.info("SNAP2 sync started");
+    final Instant started = Instant.now();
     syncDurationMetrics.startTimer(
         SyncDurationMetrics.Labels.SNAP_INITIAL_WORLD_STATE_DOWNLOAD_DURATION);
     syncDurationMetrics.startTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
@@ -141,6 +143,12 @@ final class Snap2SyncController implements SnapSyncController {
                 }
                 result.completeExceptionally(error);
               } else {
+                LOG.info(
+                    "SNAP2 sync complete at {} in {} | {} pivot moves, {} restarts",
+                    ProgressFormat.block(pivot.getNumber()),
+                    ProgressFormat.duration(Duration.between(started, Instant.now())),
+                    metrics.pivotMoves(),
+                    metrics.restarts());
                 result.complete(new SnapSyncProcessState(pivot));
               }
               shutdown();
@@ -232,7 +240,11 @@ final class Snap2SyncController implements SnapSyncController {
                 return CompletableFuture.failedFuture(error);
               }
               metrics.restarted();
-              LOG.warn("Restarting the SNAP2 sync from scratch: {}", restart.getMessage());
+              LOG.warn(
+                  "SNAP2 restart {} of {}: {}",
+                  metrics.restarts(),
+                  MAX_RESTARTS,
+                  restart.getMessage());
               return run(failed == null ? resume : failed.resume());
             },
             executor);
@@ -245,7 +257,7 @@ final class Snap2SyncController implements SnapSyncController {
     if (context.scheduler().peerCount(Protocol.SNAP) >= config.minPeers()) {
       return CompletableFuture.completedFuture(null);
     }
-    LOG.info("Waiting for {} snap peers, {}", config.minPeers(), metrics.peerSummary());
+    LOG.info("SNAP2 waiting for {} snap peers | {}", config.minPeers(), metrics.peerCounts());
     return Futures.delay(RETRY_DELAY, executor).thenCompose(unused -> waitForPeers());
   }
 
@@ -256,7 +268,7 @@ final class Snap2SyncController implements SnapSyncController {
     }
     final Optional<Hash> head = heads.headHash();
     if (head.isEmpty()) {
-      LOG.info("Waiting for the consensus client to send a head");
+      LOG.info("SNAP2 waiting for the consensus client to send a head");
       return Futures.delay(RETRY_DELAY, executor).thenCompose(unused -> selectPivot());
     }
     final HeaderFetcher fetcher = context.fetcher();
@@ -273,12 +285,16 @@ final class Snap2SyncController implements SnapSyncController {
               final BlockHeader next = chain.size() > 1 ? chain.get(1) : pivot;
               if (next.getBalHash().isEmpty()) {
                 LOG.info(
-                    "Block {} has no block access list yet, SNAP2 waits for the fork that adds them",
-                    next.getNumber());
+                    "SNAP2 waiting for the fork that adds block access lists, {} has none",
+                    ProgressFormat.block(next.getNumber()));
                 return Futures.delay(Duration.ofSeconds(30), executor)
                     .thenCompose(unused -> selectPivot());
               }
-              LOG.info("Selected pivot block {} ({})", pivot.getNumber(), pivot.getHash());
+              LOG.info(
+                  "SNAP2 pivot selected: {} ({}), {} blocks behind the head",
+                  ProgressFormat.block(pivot.getNumber()),
+                  pivot.getHash(),
+                  chain.size() - 1);
               return CompletableFuture.completedFuture(pivot);
             })
         .exceptionallyCompose(
@@ -286,7 +302,8 @@ final class Snap2SyncController implements SnapSyncController {
               if (stopped) {
                 return CompletableFuture.failedFuture(error);
               }
-              LOG.info("Pivot selection failed, retrying: {}", Futures.unwrap(error).getMessage());
+              LOG.info(
+                  "SNAP2 pivot selection failed, retrying: {}", Futures.unwrap(error).getMessage());
               return Futures.delay(RETRY_DELAY, executor).thenCompose(unused -> selectPivot());
             });
   }
@@ -302,17 +319,15 @@ final class Snap2SyncController implements SnapSyncController {
     }
   }
 
+  // one line a tick, led by the phase and its share done; the peers only when they are few
   private void logProgress() {
     try {
       final SyncAttempt attempt = current;
       if (attempt == null) {
         return;
       }
-      LOG.info(
-          "SNAP2 sync progress: {}, {} pivot moves, {}",
-          attempt.progress(),
-          metrics.pivotMoves(),
-          metrics.peerSummary());
+      final Snap2Metrics.PeerCounts peers = metrics.peerCounts();
+      LOG.info("{}{}", attempt.progress(), peers.few() ? " | " + peers : "");
     } catch (final RuntimeException e) {
       LOG.debug("Failed to log the SNAP2 progress", e);
     }

@@ -14,6 +14,13 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.block;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.compact;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.count;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.duration;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.eta;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.percent;
+
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -33,6 +40,7 @@ import org.hyperledger.besu.util.FutureUtils;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -85,10 +93,16 @@ final class SyncAttempt {
   private volatile long indexedUpTo = -1;
   private volatile HeaderBackfill backfill;
   private volatile BodyBackfill window;
+  private volatile long windowSize;
   private volatile WorldStateTrieBuilder trieBuilder;
+  private volatile Instant trieStarted = Instant.now();
   private volatile boolean cancelled;
   private volatile boolean moving;
   private volatile boolean finalizing;
+  // the rates of the last five ticks, for the ETAs of the progress line
+  private final RateTracker stateRate = new RateTracker(Clock.systemUTC(), 5);
+  private final RateTracker headerRate = new RateTracker(Clock.systemUTC(), 5);
+  private final RateTracker trieRate = new RateTracker(Clock.systemUTC(), 5);
 
   SyncAttempt(final SyncContext context, final BlockHeader firstPivot, final Resume resume) {
     this.context = context;
@@ -116,7 +130,11 @@ final class SyncAttempt {
                       .syncDurationMetrics()
                       .stopTimer(
                           SyncDurationMetrics.Labels.SNAP_INITIAL_WORLD_STATE_DOWNLOAD_DURATION);
-                  LOG.info("Waiting for the headers to reach block {}", floor.getNumber() + 1);
+                  if (!headersDone.isDone()) {
+                    LOG.info(
+                        "SNAP2 state and tries done, waiting for the headers down to {}",
+                        block(floor.getNumber() + 1));
+                  }
                   return headersDone.thenApply(unused -> finalPivot);
                 })
             .thenApply(
@@ -125,7 +143,6 @@ final class SyncAttempt {
                   context
                       .syncDurationMetrics()
                       .stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
-                  LOG.info("SNAP2 sync complete at block {}", finalPivot.getNumber());
                   return finalPivot;
                 });
     // either the sync completes, or the attempt ends early
@@ -292,7 +309,7 @@ final class SyncAttempt {
     }
     final BlockHeader pivot = stateSync.pivot().header();
     final long from = windowStart(pivot.getNumber());
-    LOG.info("Downloading the bodies and receipts of blocks {} to {}", from, pivot.getNumber());
+    windowSize = pivot.getNumber() - from + 1;
     final BodyBackfill bodies =
         new BodyBackfill(
             context.blockchain(),
@@ -318,11 +335,11 @@ final class SyncAttempt {
 
   // the window recorded the block the bodies are stored from before the head points above it
   private void setChainHead(final BlockHeader head) {
-    LOG.info(
-        "Bodies and receipts of blocks {} to {} stored, setting the chain head",
-        windowStart(head.getNumber()),
-        head.getNumber());
     StorageRetry.run(() -> context.blockchain().unsafeSetSyncChainHead(floor, head));
+    LOG.info(
+        "SNAP2 chain head set to {} | bodies and receipts from {}, the older blocks back-filled in the background",
+        block(head.getNumber()),
+        block(windowStart(head.getNumber())));
   }
 
   /** Moves the pivot if the head went far enough or peers stopped serving it. */
@@ -422,13 +439,13 @@ final class SyncAttempt {
             outcome -> {
               context.metrics().pivotMoved();
               LOG.info(
-                  "Moved the pivot to block {}: {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots, {} storages to refresh",
-                  target.getNumber(),
-                  outcome.applied(),
-                  outcome.skipped(),
-                  outcome.deleted(),
-                  outcome.slots(),
-                  outcome.staleStorage());
+                  "SNAP2 pivot moved to {} | {} accounts updated, {} outside the downloaded ranges, {} removed, {} slots, {} storages to refresh",
+                  block(target.getNumber()),
+                  count(outcome.applied()),
+                  count(outcome.skipped()),
+                  count(outcome.deleted()),
+                  count(outcome.slots()),
+                  count(outcome.staleStorage()));
               return applyStep(headers, from + MAX_BLOCKS_PER_MOVE);
             });
   }
@@ -483,11 +500,11 @@ final class SyncAttempt {
   private CompletableFuture<Void> recover(final BlockHeader pivot, final Reorg reorg) {
     context.metrics().reorged();
     LOG.warn(
-        "Chain reorganised below the pivot {}: common ancestor {}, {} orphaned blocks, new pivot {}",
-        pivot.getNumber(),
-        reorg.ancestor().getNumber(),
+        "SNAP2 reorg below the pivot {} | common ancestor {}, {} orphaned blocks, new pivot {}",
+        block(pivot.getNumber()),
+        block(reorg.ancestor().getNumber()),
         reorg.orphaned().size(),
-        reorg.newFork().getLast().getNumber());
+        block(reorg.newFork().getLast().getNumber()));
     final CompletableFuture<List<Bytes>> orphanedLists =
         context
             .balFetcher()
@@ -593,7 +610,12 @@ final class SyncAttempt {
     }
     final BlockHeader pivot = stateSync.pivot().header();
     stateSync.stop();
-    LOG.info("Building the state tries of block {}", pivot.getNumber());
+    trieStarted = Instant.now();
+    LOG.info(
+        "SNAP2 trie build started at {} | accounts {} | storage tries built while downloading {}",
+        block(pivot.getNumber()),
+        compact(stateSync.downloadedAccounts()),
+        compact(stateSync.storageTriesBuilt()));
     trieBuilder = new WorldStateTrieBuilder(context.storage(), context.config().trieBuildThreads());
     final WorldStateTrieBuilder.Result built = trieBuilder.build();
     if (!built.root().equals(Bytes32.wrap(pivot.getStateRoot().getBytes()))) {
@@ -611,11 +633,11 @@ final class SyncAttempt {
     // the state skipped the write-ahead log
     context.storage().flush();
     LOG.info(
-        "World state of block {} is complete: {} accounts, {} storage tries kept from the download, {} slots read for the others",
-        pivot.getNumber(),
-        built.accounts(),
-        built.keptStorageTries(),
-        built.slots());
+        "SNAP2 trie build complete in {} | root verified | accounts {} | storage tries kept {} | slots read {}",
+        duration(Duration.between(trieStarted, Instant.now())),
+        compact(built.accounts()),
+        compact(built.keptStorageTries()),
+        compact(built.slots()));
     trieBuilder = null;
     return pivot;
   }
@@ -643,24 +665,89 @@ final class SyncAttempt {
     return builder == null ? 0 : builder.keptStorageTries();
   }
 
+  /** Returns the line of a tick: the phase, its share done and the figures that matter in it. */
   String progress() {
     final WorldStateTrieBuilder builder = trieBuilder;
-    final HeaderBackfill headers = backfill;
-    final String phase =
-        builder != null
-            ? String.format(
-                "building tries: %d accounts, %d slots, %d storage tries kept from the download",
-                builder.accountsProcessed(), builder.slotsProcessed(), builder.keptStorageTries())
-            : "state " + stateSync.progress();
     final BodyBackfill bodies = window;
-    return String.format(
-        "pivot %d, %s, headers stored down to %s%s",
-        pivotNumber(),
-        phase,
-        headers == null ? "-" : headers.lowestStored(),
-        bodies == null
-            ? ""
-            : String.format(", bodies and receipts of %d blocks stored", bodies.blocksStored()));
+    final StringBuilder line = new StringBuilder();
+    if (builder != null) {
+      // the share of the downloaded accounts added to the tries
+      final long processed = builder.accountsProcessed();
+      final long total = Math.max(processed, stateSync.downloadedAccounts());
+      trieRate.sample((double) processed);
+      line.append("SNAP2 tries ")
+          .append(percent(processed, total))
+          .append(" | accounts ")
+          .append(compact(processed))
+          .append(" of ")
+          .append(compact(total))
+          .append(" | slots ")
+          .append(compact(builder.slotsProcessed()))
+          .append(" | storage tries kept ")
+          .append(compact(builder.keptStorageTries()))
+          .append(" | elapsed ")
+          .append(duration(Duration.between(trieStarted, Instant.now())));
+      eta((double) (total - processed), trieRate.perSecond().orElse(0))
+          .ifPresent(left -> line.append(" | ETA ").append(left));
+    } else if (bodies != null) {
+      line.append("SNAP2 chain | bodies ")
+          .append(percent(bodies.blocksStored(), windowSize))
+          .append(" (")
+          .append(count(bodies.blocksStored()))
+          .append(" of ")
+          .append(count(windowSize))
+          .append(")");
+    } else {
+      // the share of the account key space covered
+      final double coverage = stateSync.accountCoverage();
+      stateRate.sample(coverage);
+      line.append("SNAP2 state ")
+          .append(percent(coverage))
+          .append(" | accounts ")
+          .append(count(stateSync.downloadedAccounts()))
+          .append(" | slots ")
+          .append(compact(stateSync.downloadedSlots()))
+          .append(" | bytecodes ")
+          .append(compact(stateSync.downloadedCodes()))
+          .append(" | storages pending ")
+          .append(count(stateSync.pendingStorages()));
+      if (stateSync.buildsStorageTries()) {
+        line.append(" | storage tries ")
+            .append(compact(stateSync.storageTriesBuilt()))
+            .append(" built");
+        if (stateSync.storageTriesLeft() > 0) {
+          line.append(", ")
+              .append(compact(stateSync.storageTriesLeft()))
+              .append(" left to the final build");
+        }
+      }
+      line.append(" | pivot ").append(block(pivotNumber()));
+      headNumber()
+          .ifPresent(
+              head -> line.append(", ").append(count(head - pivotNumber())).append(" behind head"));
+      if (stateSync.peersWithoutState() > 0) {
+        line.append(" | ").append(stateSync.peersWithoutState()).append(" peers left out");
+      }
+      eta(1 - coverage, stateRate.perSecond().orElse(0))
+          .ifPresent(left -> line.append(" | ETA ").append(left));
+    }
+    // the headers, until they reach the floor
+    final HeaderBackfill headers = backfill;
+    if (headers != null && !headersDone.isDone()) {
+      headerRate.sample((double) headers.done());
+      line.append(" | headers ").append(percent(headers.done(), headers.total()));
+      eta((double) (headers.total() - headers.done()), headerRate.perSecond().orElse(0))
+          .ifPresent(left -> line.append(" (ETA ").append(left).append(")"));
+    }
+    return line.toString();
+  }
+
+  private Optional<Long> headNumber() {
+    return context
+        .heads()
+        .headHash()
+        .flatMap(context.heads()::knownHeader)
+        .map(BlockHeader::getNumber);
   }
 
   StateSync stateSync() {

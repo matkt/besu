@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2Configuration;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
@@ -29,6 +30,8 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -89,6 +92,7 @@ public final class StateSync {
   private final ExecutorService persister;
   private final CompletableFuture<Void> completion = new CompletableFuture<>();
   private volatile Pivot pivot;
+  private volatile Instant started = Instant.now();
   private volatile boolean pivotStale;
   private volatile boolean stopped;
   private volatile boolean paused;
@@ -146,15 +150,16 @@ public final class StateSync {
   /** Starts downloading the state of the given pivot. */
   public CompletableFuture<Void> start(final BlockHeader pivotHeader) {
     pivot = new Pivot(0, pivotHeader);
+    started = Instant.now();
     execute(
         () -> {
           RangeManager.generateRanges(
                   RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, config.accountChunks())
               .forEach((from, to) -> accountTasks.add(new RangeTask(from, to)));
           LOG.info(
-              "Starting SNAP2 world state download at block {} with {} account ranges",
-              pivotHeader.getNumber(),
-              accountTasks.size());
+              "SNAP2 state download started at {} | {} account ranges",
+              ProgressFormat.block(pivotHeader.getNumber()),
+              ProgressFormat.count(accountTasks.size()));
           dispatch();
         });
     loop.scheduleWithFixedDelay(this::dispatchSafely, 500, 500, TimeUnit.MILLISECONDS);
@@ -324,25 +329,14 @@ public final class StateSync {
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
-  /** Returns a one-line progress summary. */
-  public String progress() {
-    final String storageTries =
-        tries
-            .map(
-                builder ->
-                    String.format(
-                        ", storage tries built %d, queued %d, %d left to the final build",
-                        builder.built(), builder.queued(), builder.left()))
-            .orElse("");
-    return String.format(
-        "accounts %d (%.2f%% of key space), slots %d, bytecodes %d, pending storages %d, %d peers left out%s",
-        accounts.get(),
-        coverage.accounts().coverage() * 100,
-        slots.get(),
-        codes.get(),
-        coverage.pendingStorageCount(),
-        excludedCount,
-        storageTries);
+  /** Returns the number of accounts whose storage is still to download. */
+  public int pendingStorages() {
+    return coverage.pendingStorageCount();
+  }
+
+  /** Returns whether the storage tries are built while downloading. */
+  public boolean buildsStorageTries() {
+    return tries.isPresent();
   }
 
   public long downloadedAccounts() {
@@ -949,9 +943,20 @@ public final class StateSync {
       return false;
     }
     LOG.info(
-        "SNAP2 world state download complete at block {}: {}",
-        pivot.header().getNumber(),
-        progress());
+        "SNAP2 state download complete at {} in {} | accounts {} | slots {} | bytecodes {}{}",
+        ProgressFormat.block(pivot.header().getNumber()),
+        ProgressFormat.duration(Duration.between(started, Instant.now())),
+        ProgressFormat.compact(accounts.get()),
+        ProgressFormat.compact(slots.get()),
+        ProgressFormat.compact(codes.get()),
+        tries
+            .map(
+                builder ->
+                    String.format(
+                        " | storage tries %s built, %s left to the final build",
+                        ProgressFormat.compact(builder.built()),
+                        ProgressFormat.compact(builder.left() + builder.queued())))
+            .orElse(""));
     completion.complete(null);
     return true;
   }

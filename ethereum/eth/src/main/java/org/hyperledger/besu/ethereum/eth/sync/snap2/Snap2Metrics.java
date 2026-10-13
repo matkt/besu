@@ -195,8 +195,21 @@ final class Snap2Metrics {
             .count();
   }
 
-  /** Returns what the connected peers can serve: snap ranges, and block access lists. */
-  String peerSummary() {
+  /** The connected peers by what they can serve: snap ranges, and block access lists. */
+  record PeerCounts(int all, int snap1, int snap2, int eth71) {
+
+    /** Returns whether the peers are worth a mention: few of them, or none serving snap/2. */
+    boolean few() {
+      return all < 5 || snap2 == 0;
+    }
+
+    @Override
+    public String toString() {
+      return String.format("peers %d (snap/2 %d, snap/1 %d, eth/71 %d)", all, snap2, snap1, eth71);
+    }
+  }
+
+  PeerCounts peerCounts() {
     int peers = 0;
     int snap1 = 0;
     int snap2 = 0;
@@ -214,6 +227,6 @@ final class Snap2Metrics {
         eth71++;
       }
     }
-    return String.format("%d peers (snap/1 %d, snap/2 %d, eth/71 %d)", peers, snap1, snap2, eth71);
+    return new PeerCounts(peers, snap1, snap2, eth71);
   }
 }
