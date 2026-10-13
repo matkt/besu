@@ -16,7 +16,6 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.net;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV2;
-import org.hyperledger.besu.ethereum.p2p.rlpx.wire.AbstractSnapMessageData;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLP;
@@ -29,64 +28,13 @@ import java.util.List;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-/** Encodes snap/2 requests and decodes snap/2 responses without intermediate maps. */
+/** Decodes snap range responses in wire order, without intermediate maps. */
 public final class SnapMessages {
 
   private static final Bytes EMPTY_TRIE_ROOT = Hash.EMPTY_TRIE_HASH.getBytes();
   private static final Bytes EMPTY_CODE_HASH = Hash.EMPTY.getBytes();
 
   private SnapMessages() {}
-
-  /** Request for a range of accounts. */
-  public static MessageData getAccountRange(
-      final Bytes32 root, final Bytes32 origin, final Bytes32 limit, final long bytes) {
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    out.writeBytes(root);
-    out.writeBytes(origin);
-    out.writeBytes(limit);
-    out.writeLongScalar(bytes);
-    out.endList();
-    return new Request(SnapV2.GET_ACCOUNT_RANGE, out.encoded());
-  }
-
-  /** Request for the storage of several accounts, or a slice of the storage of one account. */
-  public static MessageData getStorageRanges(
-      final Bytes32 root,
-      final List<Bytes32> accounts,
-      final Bytes32 origin,
-      final Bytes32 limit,
-      final long bytes) {
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    out.writeBytes(root);
-    out.writeList(accounts, (account, o) -> o.writeBytes(account));
-    out.writeBytes(origin);
-    out.writeBytes(limit);
-    out.writeLongScalar(bytes);
-    out.endList();
-    return new Request(SnapV2.GET_STORAGE_RANGE, out.encoded());
-  }
-
-  /** Request for bytecodes by hash. */
-  public static MessageData getByteCodes(final List<Bytes32> codeHashes, final long bytes) {
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    out.writeList(codeHashes, (hash, o) -> o.writeBytes(hash));
-    out.writeLongScalar(bytes);
-    out.endList();
-    return new Request(SnapV2.GET_BYTECODES, out.encoded());
-  }
-
-  /** Request for block access lists by block hash. */
-  public static MessageData getBlockAccessLists(final List<Hash> blockHashes, final long bytes) {
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    out.writeList(blockHashes, (hash, o) -> o.writeBytes(hash.getBytes()));
-    out.writeLongScalar(bytes);
-    out.endList();
-    return new Request(SnapV2.GET_BLOCK_ACCESS_LISTS, out.encoded());
-  }
 
   /**
    * Decoded account range.
@@ -151,35 +99,8 @@ public final class SnapMessages {
     return new StorageRanges(slotHashes, slotValues, proof);
   }
 
-  /** Decodes a ByteCodes response. */
-  public static List<Bytes> byteCodes(final MessageData message) {
-    checkCode(message, SnapV2.BYTECODES);
-    return readByteList(enterResponse(message));
-  }
-
-  /**
-   * Decodes a BlockAccessLists response; unavailable entries are returned as empty bytes.
-   *
-   * @return the raw RLP of each block access list, in request order
-   */
-  public static List<Bytes> blockAccessLists(final MessageData message) {
-    checkCode(message, SnapV2.BLOCK_ACCESS_LISTS);
-    final RLPInput in = enterResponse(message);
-    final List<Bytes> out = new ArrayList<>();
-    in.enterList();
-    while (!in.isEndOfCurrentList()) {
-      if (in.nextIsList()) {
-        out.add(in.readAsRlp().raw());
-      } else {
-        out.add(in.readBytes());
-      }
-    }
-    in.leaveList();
-    return out;
-  }
-
-  /** Converts a slim account body, positioned on {@code in}, to the full trie encoding. */
-  static Bytes toFullAccount(final RLPInput in) {
+  // converts a slim account body, positioned on the input, to the full trie encoding
+  private static Bytes toFullAccount(final RLPInput in) {
     in.enterList();
     if (in.nextIsList()) {
       throw new RLPException("invalid account nonce");
@@ -238,20 +159,6 @@ public final class SnapMessages {
     if (message.getCode() != expected) {
       throw new IllegalArgumentException(
           "unexpected message code " + message.getCode() + ", expected " + expected);
-    }
-  }
-
-  private static final class Request extends AbstractSnapMessageData {
-    private final int code;
-
-    private Request(final int code, final Bytes data) {
-      super(data);
-      this.code = code;
-    }
-
-    @Override
-    public int getCode() {
-      return code;
     }
   }
 }

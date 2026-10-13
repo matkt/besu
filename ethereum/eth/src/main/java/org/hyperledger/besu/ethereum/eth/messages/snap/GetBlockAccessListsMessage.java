@@ -42,8 +42,13 @@ public final class GetBlockAccessListsMessage extends AbstractSnapMessageData {
   }
 
   public static GetBlockAccessListsMessage create(final Iterable<Hash> blockHashes) {
+    return create(blockHashes, SIZE_REQUEST);
+  }
+
+  public static GetBlockAccessListsMessage create(
+      final Iterable<Hash> blockHashes, final BigInteger sizeRequest) {
     return new GetBlockAccessListsMessage(
-        GetBlockAccessListsMessageData.encodeSnapRequest(blockHashes, SIZE_REQUEST));
+        GetBlockAccessListsMessageData.encodeSnapRequest(blockHashes, sizeRequest));
   }
 
   @Override

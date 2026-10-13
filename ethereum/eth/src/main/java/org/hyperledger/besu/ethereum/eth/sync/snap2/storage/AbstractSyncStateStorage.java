@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 
@@ -35,7 +36,7 @@ import org.apache.tuweni.bytes.Bytes32;
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   private static final byte[] ZEROS = new byte[32];
-  private static final byte[] ONES = Bytes32.fromHexString("ff".repeat(32)).toArray();
+  private static final byte[] ONES = RangeManager.MAX_RANGE.toArray();
 
   protected final SegmentedKeyValueStorage flat;
   protected final SegmentIdentifier accountSegment;
@@ -119,12 +120,12 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
         return;
       }
       stream.close();
-      final byte[] next = increment(accountKey);
-      if (next == null) {
+      final Optional<Bytes32> next = Keys.next(Bytes32.wrap(accountKey));
+      if (next.isEmpty()) {
         stream = Stream.empty();
         iterator = Iterators.peekingIterator(Collections.emptyIterator());
       } else {
-        open(concat(next, ZEROS));
+        open(concat(next.get().toArrayUnsafe(), ZEROS));
       }
     }
 
@@ -132,17 +133,6 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
     public void close() {
       stream.close();
     }
-  }
-
-  // the next 32-byte key, or null after the last one
-  private static byte[] increment(final byte[] key) {
-    final byte[] next = key.clone();
-    for (int i = next.length - 1; i >= 0; i--) {
-      if (++next[i] != 0) {
-        return next;
-      }
-    }
-    return null;
   }
 
   @Override

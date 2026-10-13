@@ -38,6 +38,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.util.FutureUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -173,14 +174,7 @@ final class SyncAttempt {
                 });
     // either the sync completes, or an unrecoverable reorg asks for a restart
     final CompletableFuture<BlockHeader> outcome = new CompletableFuture<>();
-    main.whenComplete(
-        (finalPivot, error) -> {
-          if (error != null) {
-            outcome.completeExceptionally(error);
-          } else {
-            outcome.complete(finalPivot);
-          }
-        });
+    FutureUtils.propagateResult(main, outcome);
     restart.whenComplete(
         (unused, error) -> {
           if (error != null) {

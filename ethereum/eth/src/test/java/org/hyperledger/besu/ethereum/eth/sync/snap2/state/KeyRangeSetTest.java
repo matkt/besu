@@ -17,7 +17,11 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import static java.util.Map.entry;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.hyperledger.besu.ethereum.trie.RangeManager;
+
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
@@ -49,19 +53,16 @@ class KeyRangeSetTest {
   @Test
   void detectsTheFullKeySpace() {
     final KeyRangeSet set = new KeyRangeSet();
-    final List<Bytes32[]> parts = Keys.split(Keys.MIN, Keys.MAX, 16);
+    final List<Map.Entry<Bytes32, Bytes32>> parts =
+        new ArrayList<>(
+            RangeManager.generateRanges(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, 16)
+                .entrySet());
     assertThat(parts).hasSize(16);
-    for (int i = parts.size() - 1; i >= 0; i--) {
+    for (final Map.Entry<Bytes32, Bytes32> part : parts.reversed()) {
       assertThat(set.isFull()).isFalse();
-      set.add(parts.get(i)[0], parts.get(i)[1]);
+      set.add(part.getKey(), part.getValue());
     }
     assertThat(set.isFull()).isTrue();
     assertThat(set.coverage()).isEqualTo(1.0);
-  }
-
-  @Test
-  void stepsKeys() {
-    assertThat(Keys.next(Keys.MAX)).isEmpty();
-    assertThat(Keys.next(key(0xff))).contains(key(0x100));
   }
 }

@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.C
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.List;
@@ -70,9 +71,9 @@ class StateDiffApplierTest {
     final Bytes32 s1 = slotHash(S1);
     final Bytes32 s2 = slotHash(S2);
     if (s1.compareTo(s2) < 0) {
-      task.cover(Keys.MIN, s1);
+      task.cover(RangeManager.MIN_RANGE, s1);
     } else {
-      task.cover(s1, Keys.MAX);
+      task.cover(s1, RangeManager.MAX_RANGE);
     }
     coverage.addStorageTask(task);
 

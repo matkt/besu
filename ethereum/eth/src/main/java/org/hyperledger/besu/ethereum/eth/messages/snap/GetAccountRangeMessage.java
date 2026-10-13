@@ -24,7 +24,6 @@ import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import java.math.BigInteger;
 import java.util.Optional;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.immutables.value.Value;
@@ -52,7 +51,6 @@ public final class GetAccountRangeMessage extends AbstractSnapMessageData {
     return create(worldStateRootHash, startKeyHash, endKeyHash, SIZE_REQUEST);
   }
 
-  @VisibleForTesting
   public static GetAccountRangeMessage create(
       final Hash worldStateRootHash,
       final Bytes32 startKeyHash,

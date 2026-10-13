@@ -14,12 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.messages.snap.GetAccountRangeMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.RangeProof;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -78,7 +81,8 @@ final class AccountRangeRequest implements SyncRequest<AccountRangeRequest.Resul
 
   @Override
   public MessageData message(final EthPeer peer) {
-    return SnapMessages.getAccountRange(pivot.root(), origin, limit, bytes);
+    return GetAccountRangeMessage.create(
+        Hash.wrap(pivot.root()), origin, limit, BigInteger.valueOf(bytes));
   }
 
   @Override

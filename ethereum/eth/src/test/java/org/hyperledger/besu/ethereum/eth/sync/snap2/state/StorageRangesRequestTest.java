@@ -24,6 +24,7 @@ import org.hyperledger.besu.ethereum.eth.messages.snap.StorageRangeMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 
 import java.math.BigInteger;
@@ -83,7 +84,12 @@ class StorageRangesRequestTest {
         new StateSync.Pivot(0, new BlockHeaderTestFixture().number(1).buildHeader());
     final StorageTask task = new StorageTask(ACCOUNT, storage.getRootHash());
     return new StorageRangesRequest(
-        pivot, List.of(task), origin, Keys.MAX, new RangeTask(origin, Keys.MAX), 4096);
+        pivot,
+        List.of(task),
+        origin,
+        RangeManager.MAX_RANGE,
+        new RangeTask(origin, RangeManager.MAX_RANGE),
+        4096);
   }
 
   private MessageData proofOnly(final Bytes32 origin) {

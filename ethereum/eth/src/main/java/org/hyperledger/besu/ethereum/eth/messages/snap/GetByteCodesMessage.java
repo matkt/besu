@@ -47,10 +47,15 @@ public final class GetByteCodesMessage extends AbstractSnapMessageData {
   }
 
   public static GetByteCodesMessage create(final List<Bytes32> codeHashes) {
+    return create(codeHashes, SIZE_REQUEST);
+  }
+
+  public static GetByteCodesMessage create(
+      final List<Bytes32> codeHashes, final BigInteger sizeRequest) {
     final BytesValueRLPOutput tmp = new BytesValueRLPOutput();
     tmp.startList();
     tmp.writeList(codeHashes, (hash, rlpOutput) -> rlpOutput.writeBytes(hash));
-    tmp.writeBigIntegerScalar(SIZE_REQUEST);
+    tmp.writeBigIntegerScalar(sizeRequest);
     tmp.endList();
     return new GetByteCodesMessage(tmp.encoded());
   }

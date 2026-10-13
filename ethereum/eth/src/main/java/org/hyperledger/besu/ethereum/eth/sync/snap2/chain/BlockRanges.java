@@ -14,75 +14,48 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.Iterator;
 
-/**
- * Disjoint ranges of block numbers, bounds included; adjacent ranges are merged. Not thread safe.
- */
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
+import com.google.common.collect.TreeRangeSet;
+
+/** Disjoint ranges of block numbers, bounds included, adjacent ones merged. Not thread safe. */
 final class BlockRanges {
 
-  private final TreeMap<Long, Long> ranges = new TreeMap<>();
+  // closed-open ranges, which merge when adjacent
+  private final RangeSet<Long> ranges = TreeRangeSet.create();
 
   void add(final long from, final long to) {
-    long start = from;
-    long end = to;
-    final Map.Entry<Long, Long> before = ranges.floorEntry(from);
-    if (before != null && before.getValue() >= from - 1) {
-      start = before.getKey();
-      end = Math.max(end, before.getValue());
-    }
-    Map.Entry<Long, Long> next = ranges.ceilingEntry(start);
-    while (next != null && next.getKey() <= end + 1) {
-      end = Math.max(end, next.getValue());
-      ranges.remove(next.getKey());
-      next = ranges.ceilingEntry(start);
-    }
-    ranges.put(start, end);
+    ranges.add(Range.closedOpen(from, to + 1));
   }
 
+  /** Removes {@code [from, to]}, or everything from {@code from} on for {@link Long#MAX_VALUE}. */
   void remove(final long from, final long to) {
-    final Map.Entry<Long, Long> before = ranges.floorEntry(from);
-    if (before != null && before.getValue() >= from) {
-      ranges.put(before.getKey(), from - 1);
-      if (before.getValue() > to) {
-        ranges.put(to + 1, before.getValue());
-      }
-      if (before.getKey() == from) {
-        ranges.remove(from);
-      }
-    }
-    Map.Entry<Long, Long> next = ranges.ceilingEntry(from);
-    while (next != null && next.getKey() <= to) {
-      ranges.remove(next.getKey());
-      if (next.getValue() > to) {
-        ranges.put(to + 1, next.getValue());
-      }
-      next = ranges.ceilingEntry(from);
-    }
+    ranges.remove(to == Long.MAX_VALUE ? Range.atLeast(from) : Range.closedOpen(from, to + 1));
   }
 
   boolean covers(final long from, final long to) {
-    final Map.Entry<Long, Long> range = ranges.floorEntry(from);
-    return range != null && range.getValue() >= to;
+    return ranges.encloses(Range.closedOpen(from, to + 1));
   }
 
   /** Returns the start of the range holding {@code number}, or -1. */
   long startOf(final long number) {
-    final Map.Entry<Long, Long> range = ranges.floorEntry(number);
-    return range != null && range.getValue() >= number ? range.getKey() : -1;
+    final Range<Long> range = ranges.rangeContaining(number);
+    return range == null ? -1 : range.lowerEndpoint();
   }
 
   /** Returns the end of the highest range below {@code number}, or -1. */
   long endBelow(final long number) {
-    final Map.Entry<Long, Long> range = ranges.lowerEntry(number);
-    return range == null ? -1 : Math.min(range.getValue(), number - 1);
+    final Iterator<Range<Long>> below =
+        ranges.subRangeSet(Range.lessThan(number)).asDescendingSetOfRanges().iterator();
+    return below.hasNext() ? below.next().upperEndpoint() - 1 : -1;
   }
 
   long size() {
     long size = 0;
-    for (final Map.Entry<Long, Long> range : ranges.entrySet()) {
-      size += range.getValue() - range.getKey() + 1;
+    for (final Range<Long> range : ranges.asRanges()) {
+      size += range.upperEndpoint() - range.lowerEndpoint();
     }
     return size;
   }

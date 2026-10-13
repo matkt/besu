@@ -14,6 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
+
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -64,8 +67,8 @@ public final class KeyRangeSet {
   /** Returns whether the whole key space is covered. */
   public synchronized boolean isFull() {
     return ranges.size() == 1
-        && ranges.firstKey().equals(Keys.MIN)
-        && ranges.firstEntry().getValue().equals(Keys.MAX);
+        && ranges.firstKey().equals(RangeManager.MIN_RANGE)
+        && ranges.firstEntry().getValue().equals(RangeManager.MAX_RANGE);
   }
 
   /** Returns whether nothing is covered. */

@@ -14,12 +14,15 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.messages.snap.GetStorageRangeMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.RangeProof;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -94,8 +97,12 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
 
   @Override
   public MessageData message(final EthPeer peer) {
-    return SnapMessages.getStorageRanges(
-        pivot.root(), tasks.stream().map(StorageTask::accountHash).toList(), origin, limit, bytes);
+    return GetStorageRangeMessage.create(
+        Hash.wrap(pivot.root()),
+        tasks.stream().map(StorageTask::accountHash).toList(),
+        origin,
+        limit,
+        BigInteger.valueOf(bytes));
   }
 
   @Override

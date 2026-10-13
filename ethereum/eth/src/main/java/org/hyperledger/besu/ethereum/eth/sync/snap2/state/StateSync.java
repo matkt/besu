@@ -23,9 +23,11 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Keys;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTries;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.ArrayDeque;
@@ -63,7 +65,6 @@ public final class StateSync {
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
   private static final int BYTES_PER_SLOT = 64;
-  private static final double KEY_SPACE = Math.pow(2, 256);
 
   /** Current pivot; responses requested at another epoch are discarded. */
   public record Pivot(int epoch, BlockHeader header) {
@@ -133,9 +134,9 @@ public final class StateSync {
     pivot = new Pivot(0, pivotHeader);
     execute(
         () -> {
-          for (final Bytes32[] range : Keys.split(Keys.MIN, Keys.MAX, config.accountChunks())) {
-            accountTasks.add(new RangeTask(range[0], range[1]));
-          }
+          RangeManager.generateRanges(
+                  RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, config.accountChunks())
+              .forEach((from, to) -> accountTasks.add(new RangeTask(from, to)));
           LOG.info(
               "Starting SNAP2 world state download at block {} with {} account ranges",
               pivotHeader.getNumber(),
@@ -556,7 +557,13 @@ public final class StateSync {
     storageInFlight++;
     batch.forEach(task -> task.inFlight++);
     final StorageRangesRequest request =
-        new StorageRangesRequest(current, batch, Keys.MIN, Keys.MAX, null, config.responseBytes());
+        new StorageRangesRequest(
+            current,
+            batch,
+            RangeManager.MIN_RANGE,
+            RangeManager.MAX_RANGE,
+            null,
+            config.responseBytes());
     submitStorage(request);
   }
 
@@ -691,14 +698,13 @@ public final class StateSync {
   // density of the slots returned so far suggests: a small storage cut short stays in one range
   private void splitIntoChunks(final StorageTask task, final Bytes32 lastSlot, final int returned) {
     final Bytes32 start = Keys.next(lastSlot).orElseThrow();
-    final double covered = lastSlot.toUnsignedBigInteger().doubleValue() / KEY_SPACE;
+    final double covered = Keys.fraction(RangeManager.MIN_RANGE, lastSlot);
     final double remainingSlots = returned * (1 - covered) / covered;
     final double requests = remainingSlots * BYTES_PER_SLOT / config.responseBytes();
     final int parts =
         (int) Math.max(1, Math.min(config.maxStorageChunks(), Math.ceil(requests / 4)));
-    for (final Bytes32[] range : Keys.split(start, Keys.MAX, parts)) {
-      task.chunks.add(new RangeTask(range[0], range[1]));
-    }
+    RangeManager.generateRanges(start, RangeManager.MAX_RANGE, parts)
+        .forEach((from, to) -> task.chunks.add(new RangeTask(from, to)));
     chunked.add(task);
   }
 

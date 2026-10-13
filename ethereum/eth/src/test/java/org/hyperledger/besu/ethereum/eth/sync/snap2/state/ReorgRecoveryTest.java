@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.B
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 
 import java.util.List;
 
@@ -48,11 +49,11 @@ class ReorgRecoveryTest {
   @Test
   void refetchesWhatOnlyTheOrphanedForkChanged() {
     final StateCoverage coverage = new StateCoverage();
-    coverage.accounts().add(Keys.MIN, Keys.MAX);
+    coverage.accounts().add(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE);
     // the contract's storage is half downloaded
     final StorageTask task = new StorageTask(hash(CONTRACT), Bytes32.ZERO);
     final Bytes32 inside = slotHash(SLOT_ORPHANED);
-    task.cover(Keys.MIN, inside);
+    task.cover(RangeManager.MIN_RANGE, inside);
     coverage.addStorageTask(task);
     final Bytes32 outside = slotHash(SLOT_OUTSIDE);
     final boolean outsideCovered = task.covers(outside);

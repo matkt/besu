@@ -19,6 +19,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.util.ArrayList;
@@ -132,7 +133,7 @@ public final class WorldStateTrieBuilder {
 
   private StackTrie.Item buildPartition(final int prefix) {
     final byte[] from = new byte[32];
-    final byte[] to = Bytes32.fromHexString("ff".repeat(32)).toArray();
+    final byte[] to = RangeManager.MAX_RANGE.toArray();
     from[0] = (byte) prefix;
     to[0] = (byte) prefix;
     final SyncStateStorage.TrieWriter writer = storage.trieWriter();

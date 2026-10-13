@@ -17,6 +17,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.trie;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
+import org.hyperledger.besu.ethereum.trie.CompactEncoding;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,8 +33,6 @@ import org.apache.tuweni.bytes.Bytes32;
  * the last returned key, which holds when the root recomputed from them and the proof matches.
  */
 public final class RangeProof {
-
-  private static final byte[] MAX_KEY = Bytes32.fromHexString("ff".repeat(32)).toArrayUnsafe();
 
   private RangeProof() {}
 
@@ -82,7 +82,7 @@ public final class RangeProof {
           new Walker(
               nodes,
               origin.toArrayUnsafe(),
-              keys.isEmpty() ? MAX_KEY : keys.get(keys.size() - 1).toArrayUnsafe());
+              (keys.isEmpty() ? RangeManager.MAX_RANGE : keys.getLast()).toArrayUnsafe());
       walker.visit(NodeEncoding.hashRef(rootHash), Bytes.EMPTY);
 
       final StackTrie trie = new StackTrie(null);
@@ -162,8 +162,9 @@ public final class RangeProof {
           throw new IllegalArgumentException("branch value in a 32-byte key trie");
         }
       } else if (items == 2) {
-        final Bytes path = decodePath(in.readBytes());
-        final boolean leaf = path.size() > 0 && path.get(path.size() - 1) == 16;
+        final Bytes path = CompactEncoding.decode(in.readBytes());
+        final boolean leaf =
+            path.size() > 0 && path.get(path.size() - 1) == CompactEncoding.LEAF_TERMINATOR;
         final Bytes full =
             Bytes.concatenate(location, leaf ? path.slice(0, path.size() - 1) : path);
         if (leaf) {
@@ -255,36 +256,6 @@ public final class RangeProof {
         throw new IllegalArgumentException("invalid child reference");
       }
       return NodeEncoding.hashRef(Bytes32.wrap(value));
-    }
-
-    // decodes a hex-prefix path, appending the leaf terminator 16 for leaves
-    private static Bytes decodePath(final Bytes encoded) {
-      if (encoded.isEmpty()) {
-        throw new IllegalArgumentException("empty path");
-      }
-      final int flag = (encoded.get(0) & 0xff) >> 4;
-      if (flag > 3) {
-        throw new IllegalArgumentException("invalid path flag");
-      }
-      final boolean odd = (flag & 1) == 1;
-      final boolean leaf = flag >= 2;
-      final int nibbles = (encoded.size() - 1) * 2 + (odd ? 1 : 0);
-      final byte[] out = new byte[nibbles + (leaf ? 1 : 0)];
-      int pos = 0;
-      if (odd) {
-        out[pos++] = (byte) (encoded.get(0) & 0x0f);
-      } else if ((encoded.get(0) & 0x0f) != 0) {
-        throw new IllegalArgumentException("invalid path padding");
-      }
-      for (int i = 1; i < encoded.size(); i++) {
-        final int b = encoded.get(i) & 0xff;
-        out[pos++] = (byte) (b >> 4);
-        out[pos++] = (byte) (b & 0x0f);
-      }
-      if (leaf) {
-        out[pos] = 16;
-      }
-      return Bytes.wrap(out);
     }
   }
 }

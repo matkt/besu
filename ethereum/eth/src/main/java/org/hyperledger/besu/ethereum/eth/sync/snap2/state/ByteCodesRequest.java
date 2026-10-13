@@ -15,11 +15,14 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
+import org.hyperledger.besu.ethereum.eth.messages.snap.ByteCodesMessage;
+import org.hyperledger.besu.ethereum.eth.messages.snap.GetByteCodesMessage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.NodeEncoding;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 
+import java.math.BigInteger;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,12 +58,12 @@ final class ByteCodesRequest implements SyncRequest<Map<Bytes32, Bytes>> {
 
   @Override
   public MessageData message(final EthPeer peer) {
-    return SnapMessages.getByteCodes(codeHashes, bytes);
+    return GetByteCodesMessage.create(codeHashes, BigInteger.valueOf(bytes));
   }
 
   @Override
   public Map<Bytes32, Bytes> decode(final MessageData response, final EthPeer peer) {
-    final List<Bytes> codes = SnapMessages.byteCodes(response);
+    final Collection<Bytes> codes = ByteCodesMessage.readFrom(response).bytecodes(true).codes();
     if (codes.isEmpty()) {
       throw new EmptyResponseException("no bytecode");
     }

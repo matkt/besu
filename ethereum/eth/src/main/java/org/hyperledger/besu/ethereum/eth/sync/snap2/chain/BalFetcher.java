@@ -19,17 +19,18 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.EthProtocol;
 import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.messages.BlockAccessListsMessageData;
 import org.hyperledger.besu.ethereum.eth.messages.EthProtocolMessages;
 import org.hyperledger.besu.ethereum.eth.messages.GetBlockAccessListsMessage;
+import org.hyperledger.besu.ethereum.eth.messages.snap.SnapV2;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.NodeEncoding;
+import org.hyperledger.besu.ethereum.mainnet.BodyValidation;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.RLP;
-import org.hyperledger.besu.ethereum.rlp.RLPInput;
 
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -239,27 +240,25 @@ public final class BalFetcher {
     public MessageData message(final EthPeer peer) {
       final List<Hash> hashes = headers.stream().map(BlockHeader::getHash).toList();
       return protocolFor(peer) == Protocol.SNAP
-          ? SnapMessages.getBlockAccessLists(hashes, bytes)
+          ? org.hyperledger.besu.ethereum.eth.messages.snap.GetBlockAccessListsMessage.create(
+              hashes, BigInteger.valueOf(bytes))
           : GetBlockAccessListsMessage.create(hashes);
     }
 
     @Override
     public Map<Hash, Bytes> decode(final MessageData response, final EthPeer peer) {
-      final List<Bytes> lists =
-          protocolFor(peer) == Protocol.SNAP
-              ? SnapMessages.blockAccessLists(response)
-              : ethBlockAccessLists(response);
+      final List<Bytes> lists = blockAccessLists(response, protocolFor(peer));
       if (lists.size() > headers.size()) {
         throw new InvalidResponseException("more block access lists than requested", true);
       }
       final Map<Hash, Bytes> out = new HashMap<>();
       for (int i = 0; i < lists.size(); i++) {
         final Bytes list = lists.get(i);
-        if (list.isEmpty()) {
+        if (list.equals(RLP.NULL)) {
           continue;
         }
         final BlockHeader header = headers.get(i);
-        if (!NodeEncoding.keccak(list).equals(header.getBalHash().orElseThrow().getBytes())) {
+        if (!BodyValidation.balHash(list).equals(header.getBalHash().orElseThrow())) {
           throw new InvalidResponseException(
               "block access list does not match the header of block " + header.getNumber(), true);
         }
@@ -272,18 +271,20 @@ public final class BalFetcher {
       return out;
     }
 
-    // [list...] without request id, as the eth request manager strips it; unavailable is empty
-    private static List<Bytes> ethBlockAccessLists(final MessageData message) {
-      if (message.getCode() != EthProtocolMessages.BLOCK_ACCESS_LISTS) {
+    // the raw lists, unavailable ones as RLP.NULL; the eth request manager strips the request id
+    private static List<Bytes> blockAccessLists(
+        final MessageData message, final Protocol protocol) {
+      final boolean snap = protocol == Protocol.SNAP;
+      final int expected =
+          snap ? SnapV2.BLOCK_ACCESS_LISTS : EthProtocolMessages.BLOCK_ACCESS_LISTS;
+      if (message.getCode() != expected) {
         throw new InvalidResponseException("unexpected message code " + message.getCode(), true);
       }
-      final RLPInput in = RLP.input(message.getData());
       final List<Bytes> out = new ArrayList<>();
-      in.enterList();
-      while (!in.isEndOfCurrentList()) {
-        out.add(in.nextIsList() ? in.readAsRlp().raw() : in.readBytes());
-      }
-      in.leaveList();
+      (snap
+              ? BlockAccessListsMessageData.decodeSnapResponseRaw(message.getData(), true)
+              : BlockAccessListsMessageData.decodeEthResponseRaw(message.getData()))
+          .forEach(out::add);
       return out;
     }
   }

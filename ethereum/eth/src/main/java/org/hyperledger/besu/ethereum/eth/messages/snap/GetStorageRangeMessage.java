@@ -53,13 +53,22 @@ public final class GetStorageRangeMessage extends AbstractSnapMessageData {
       final List<Bytes32> accountHashes,
       final Bytes32 startKeyHash,
       final Bytes32 endKeyHash) {
+    return create(worldStateRootHash, accountHashes, startKeyHash, endKeyHash, SIZE_REQUEST);
+  }
+
+  public static GetStorageRangeMessage create(
+      final Hash worldStateRootHash,
+      final List<Bytes32> accountHashes,
+      final Bytes32 startKeyHash,
+      final Bytes32 endKeyHash,
+      final BigInteger sizeRequest) {
     final BytesValueRLPOutput tmp = new BytesValueRLPOutput();
     tmp.startList();
     tmp.writeBytes(worldStateRootHash.getBytes());
     tmp.writeList(accountHashes, (hash, rlpOutput) -> rlpOutput.writeBytes(hash));
     tmp.writeBytes(startKeyHash);
     tmp.writeBytes(endKeyHash);
-    tmp.writeBigIntegerScalar(SIZE_REQUEST);
+    tmp.writeBigIntegerScalar(sizeRequest);
     tmp.endList();
     return new GetStorageRangeMessage(tmp.encoded());
   }
