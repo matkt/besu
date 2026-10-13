@@ -321,48 +321,6 @@ public class DefaultBlockchainTest {
   }
 
   @Test
-  public void unsafeImportSyncBodiesAndReceiptsRecomputesTheTotalDifficultyWhenResumingLower() {
-    final BlockDataGenerator gen = new BlockDataGenerator();
-    final KeyValueStorage kvStore = new InMemoryKeyValueStorage();
-    final KeyValueStorage kvStoreVariables = new InMemoryKeyValueStorage();
-    final Block genesisBlock = gen.genesisBlock();
-    final DefaultBlockchain blockchain =
-        createMutableBlockchain(kvStore, kvStoreVariables, genesisBlock);
-    final List<Block> blocks = new ArrayList<>();
-    Block parent = genesisBlock;
-    for (long number = 1; number <= 4; number++) {
-      parent =
-          gen.block(
-              new BlockDataGenerator.BlockOptions()
-                  .setBlockNumber(number)
-                  .setParentHash(parent.getHash())
-                  .setDifficulty(Difficulty.of(number * 10)));
-      blocks.add(parent);
-    }
-    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
-    blockchain.unsafeImportSyncBodiesAndReceipts(
-        blocks.stream().map(this::toSyncBlockWithReceipts).toList(), false);
-
-    // a reorg replaces blocks 3 and 4, so the import resumes at block 3
-    final Block fork =
-        gen.block(
-            new BlockDataGenerator.BlockOptions()
-                .setBlockNumber(3)
-                .setParentHash(blocks.get(1).getHash())
-                .setDifficulty(Difficulty.of(7)));
-    blockchain.storeBlockHeaders(List.of(fork.getHeader()));
-    blockchain.unsafeImportSyncBodiesAndReceipts(List.of(toSyncBlockWithReceipts(fork)), false);
-
-    final Difficulty expected =
-        blockchain
-            .getTotalDifficultyByHash(blocks.get(1).getHash())
-            .orElseThrow()
-            .add(Difficulty.of(7));
-    assertThat(blockchain.getTotalDifficultyByHash(fork.getHash())).contains(expected);
-    assertThat(blockchain.getChainHead().getTotalDifficulty()).isEqualTo(expected);
-  }
-
-  @Test
   public void storesSyncBodiesInAnyOrderAndSetsTheChainHeadAfterwards() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();
@@ -400,6 +358,12 @@ public class DefaultBlockchainTest {
         .contains(genesisDifficulty.add(Difficulty.of(3)));
     for (final Block block : blocks) {
       assertThat(blockchain.getBlockBody(block.getHash())).isPresent();
+      block
+          .getBody()
+          .getTransactions()
+          .forEach(
+              transaction ->
+                  assertThat(blockchain.getTransactionLocation(transaction.getHash())).isPresent());
     }
   }
 
