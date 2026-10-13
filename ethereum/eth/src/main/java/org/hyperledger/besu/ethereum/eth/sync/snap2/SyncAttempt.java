@@ -296,32 +296,41 @@ final class SyncAttempt {
             });
   }
 
-  // bodies and receipts of every stored header up to the pivot, then the chain head once the
-  // final pivot is reached
+  // bodies and receipts of a window of stored headers below the pivot, then the chain head once
+  // the final pivot is reached; the older blocks are back-filled once the node follows the head
   private CompletableFuture<Void> bodyLoop() {
     if (inactive()) {
       return abandoned();
     }
     final long target = finalTarget >= 0 ? finalTarget : pivotNumber();
-    bodies.download(lowestStoredHeader(), target);
-    if (finalTarget >= 0 && bodies.storedUpTo(finalTarget)) {
+    bodies.download(Math.max(lowestStoredHeader(), windowStart(target)), target);
+    if (finalTarget >= 0 && bodies.stored(windowStart(finalTarget), finalTarget)) {
       return CompletableFuture.runAsync(() -> setChainHead(finalTarget), context.executor());
     }
     return poll().thenCompose(unused -> bodyLoop());
   }
 
+  // the lowest block whose body and receipts are needed before the head is set at this pivot
+  private long windowStart(final long pivot) {
+    return Math.max(floor.getNumber() + 1, pivot - context.config().bodyWindow() + 1);
+  }
+
   private void setChainHead(final long target) {
     final MutableBlockchain blockchain = context.blockchain();
-    final BlockHeader head =
-        blockchain
-            .getBlockHeader(target)
-            .orElseThrow(() -> new IllegalStateException("lost the header of block " + target));
-    LOG.info(
-        "Bodies and receipts of blocks {} to {} stored, setting the chain head",
-        floor.getNumber() + 1,
-        target);
-    bodies.verifyChain(floor, head);
+    final BlockHeader head = header(target);
+    final long from = bodies.storedFrom(target);
+    LOG.info("Bodies and receipts of blocks {} to {} stored, setting the chain head", from, target);
+    bodies.verifyChain(header(from - 1), head);
+    // recorded before the head, so that a node restarted in between back-fills the rest
+    StorageRetry.run(() -> blockchain.unsafeSetBodiesFrom(from));
     StorageRetry.run(() -> blockchain.unsafeSetSyncChainHead(floor, head));
+  }
+
+  private BlockHeader header(final long number) {
+    return context
+        .blockchain()
+        .getBlockHeader(number)
+        .orElseThrow(() -> new IllegalStateException("lost the header of block " + number));
   }
 
   /** Moves the pivot if the head went far enough or peers stopped serving it. */
@@ -637,8 +646,8 @@ final class SyncAttempt {
   }
 
   long bodiesNeeded() {
-    final BlockHeader base = floor;
-    return base == null ? 0 : Math.max(0, pivotNumber() - base.getNumber());
+    final long pivot = pivotNumber();
+    return floor == null ? 0 : Math.max(0, pivot - windowStart(pivot) + 1);
   }
 
   long trieProgress(final boolean accounts) {
@@ -659,7 +668,7 @@ final class SyncAttempt {
                 builder.accountsProcessed(), builder.slotsProcessed())
             : "state " + stateSync.progress();
     return String.format(
-        "pivot %d, %s, headers stored down to %s, bodies and receipts of %d of %d blocks",
+        "pivot %d, %s, headers stored down to %s, bodies and receipts of %d blocks stored, %d needed below the pivot",
         pivotNumber(),
         phase,
         headers == null ? "-" : headers.lowestStored(),

@@ -45,9 +45,10 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Downloads the bodies and receipts of stored headers, many ranges at a time and highest first, and
- * stores each range as soon as it arrives; the chain head is set once every block is stored, see
- * {@link MutableBlockchain#unsafeSetSyncChainHead}. A range asks about one full body response, and
- * enough ranges run to keep every eth slot of the peers busy, within a memory budget.
+ * stores each range as soon as it arrives; the chain head is set once the blocks of a window below
+ * the pivot are stored, see {@link MutableBlockchain#unsafeSetSyncChainHead}. A range asks about
+ * one full body response, and enough ranges run to keep every eth slot of the peers busy, within a
+ * memory budget.
  */
 public final class BodyDownloader {
 
@@ -123,9 +124,14 @@ public final class BodyDownloader {
     dispatch();
   }
 
-  /** Returns whether every block above the floor up to {@code target} is stored. */
-  public synchronized boolean storedUpTo(final long target) {
-    return target <= floor || stored.covers(floor + 1, target);
+  /** Returns whether every block from {@code from} to {@code to} is stored. */
+  public synchronized boolean stored(final long from, final long to) {
+    return to < from || stored.covers(from, to);
+  }
+
+  /** Returns the lowest block from which every block up to {@code to} is stored, or -1. */
+  public synchronized long storedFrom(final long to) {
+    return stored.startOf(to);
   }
 
   /** Returns the number of blocks stored. */
@@ -143,13 +149,14 @@ public final class BodyDownloader {
   }
 
   /**
-   * Checks that the stored ranges link up by hash from {@code floor} to {@code head}; the blocks
-   * inside each range were checked when it was stored.
+   * Checks that the stored ranges link up by hash from the block after {@code base} to {@code
+   * head}; the blocks inside each range were checked when it was stored.
    */
-  public synchronized void verifyChain(final BlockHeader floor, final BlockHeader head) {
-    long next = floor.getNumber() + 1;
-    Hash parent = floor.getHash();
-    for (final Map.Entry<Long, RangeEnds> range : ends.headMap(head.getNumber(), true).entrySet()) {
+  public synchronized void verifyChain(final BlockHeader base, final BlockHeader head) {
+    long next = base.getNumber() + 1;
+    Hash parent = base.getHash();
+    for (final Map.Entry<Long, RangeEnds> range :
+        ends.subMap(next, true, head.getNumber(), true).entrySet()) {
       if (range.getKey() != next || !range.getValue().firstParent().equals(parent)) {
         throw new IllegalStateException("stored blocks do not link up at block " + range.getKey());
       }

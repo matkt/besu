@@ -189,6 +189,45 @@ class Snap2SyncControllerTest {
   }
 
   @Test
+  void setsTheChainHeadWithTheBodiesOfAWindowBelowThePivot() throws Exception {
+    final Random random = new Random(41);
+    network.maxResponseBytes(4096);
+    network.latency(25);
+    final TestChain chain =
+        new TestChain(random, TestWorld.random(random, 1500, 6, 1200), network, 24, 6);
+    chain.extend(40);
+    final MutableBlockchain blockchain =
+        InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
+    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+    controller =
+        controller(
+            chain,
+            blockchain,
+            storages,
+            new Snap2Marker(dataDirectory),
+            config().bodyWindow(8).build());
+
+    final CompletableFuture<SnapSyncProcessState> result = controller.start();
+    while (!result.isDone() && chain.headNumber() < 140) {
+      chain.extend(1);
+      Thread.sleep(30);
+    }
+    final BlockHeader pivot = result.get(120, TimeUnit.SECONDS).getPivotBlockHeader().orElseThrow();
+
+    // the head is set once the window below the pivot is stored, the older bodies still missing
+    assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(pivot.getNumber());
+    final long from = blockchain.getBodiesFrom().orElseThrow();
+    assertThat(from).isBetween(2L, pivot.getNumber() - 7);
+    assertThat(blockchain.getBlockBody(chain.header(1).getHash())).isEmpty();
+    for (long number = 1; number <= pivot.getNumber(); number++) {
+      assertThat(blockchain.getBlockHeader(number)).contains(chain.header(number));
+      if (number >= from) {
+        assertThat(blockchain.getBlockBody(chain.header(number).getHash())).isPresent();
+      }
+    }
+  }
+
+  @Test
   void stopsWhenTheTrustedChainDoesNotLeadToTheLocalGenesis() {
     final Random random = new Random(37);
     final TestChain chain =
@@ -218,26 +257,36 @@ class Snap2SyncControllerTest {
         .until(() -> blockchain.getBlockHeader(header.getHash()).isPresent());
   }
 
+  private static Snap2Configuration.Builder config() {
+    return Snap2Configuration.getDefault().toBuilder()
+        .pivotDistance(8)
+        .pivotMoveThreshold(4)
+        .accountChunks(16)
+        .responseBytes(4096)
+        .storageBatchSize(16)
+        .maxStorageChunks(8)
+        .codeBatchSize(8)
+        .workerThreads(2)
+        .trieBuildThreads(2)
+        .pollInterval(Duration.ofMillis(100));
+  }
+
   private Snap2SyncController controller(
       final TestChain chain,
       final MutableBlockchain blockchain,
       final Storages storages,
       final Snap2Marker marker) {
+    return controller(chain, blockchain, storages, marker, config().build());
+  }
+
+  private Snap2SyncController controller(
+      final TestChain chain,
+      final MutableBlockchain blockchain,
+      final Storages storages,
+      final Snap2Marker marker,
+      final Snap2Configuration config) {
     final SyncState syncState = mock(SyncState.class);
     when(syncState.getCheckpoint()).thenReturn(Optional.empty());
-    final Snap2Configuration config =
-        Snap2Configuration.getDefault().toBuilder()
-            .pivotDistance(8)
-            .pivotMoveThreshold(4)
-            .accountChunks(16)
-            .responseBytes(4096)
-            .storageBatchSize(16)
-            .maxStorageChunks(8)
-            .codeBatchSize(8)
-            .workerThreads(2)
-            .trieBuildThreads(2)
-            .pollInterval(Duration.ofMillis(100))
-            .build();
     return new Snap2SyncController(
         config,
         ProtocolScheduleFixture.MAINNET,

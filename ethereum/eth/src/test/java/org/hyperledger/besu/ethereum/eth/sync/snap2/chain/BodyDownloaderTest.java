@@ -65,8 +65,9 @@ class BodyDownloaderTest {
 
     bodies.download(1, 50);
 
-    awaitStoredUpTo(bodies, 50);
+    awaitStored(bodies, 11, 50);
     assertThat(bodies.storedBlocks()).isEqualTo(40);
+    assertThat(bodies.storedFrom(50)).isEqualTo(11);
     for (long number = 1; number <= 50; number++) {
       assertThat(blockchain.getBlockBody(chain.header(number).getHash()).isPresent())
           .isEqualTo(number > 10);
@@ -86,7 +87,7 @@ class BodyDownloaderTest {
     blockchain.storeBlockHeaders(chain.headers(31, 40));
     network.releaseResponses();
 
-    awaitStoredUpTo(bodies, 40);
+    awaitStored(bodies, 1, 40);
     assertCanonicalBodies(40);
   }
 
@@ -95,15 +96,16 @@ class BodyDownloaderTest {
     chain.extend(40);
     final BodyDownloader bodies = downloader(40, 0);
     bodies.download(1, 40);
-    awaitStoredUpTo(bodies, 40);
+    awaitStored(bodies, 1, 40);
 
     chain.reorg(30, 10);
     blockchain.storeBlockHeaders(chain.headers(31, 40));
     bodies.rewind(31);
 
-    assertThat(bodies.storedUpTo(40)).isFalse();
+    assertThat(bodies.stored(1, 40)).isFalse();
+    assertThat(bodies.storedFrom(40)).isEqualTo(-1);
     bodies.download(1, 40);
-    awaitStoredUpTo(bodies, 40);
+    awaitStored(bodies, 1, 40);
     assertCanonicalBodies(40);
   }
 
@@ -128,7 +130,7 @@ class BodyDownloaderTest {
     // the two ranges allowed on the network move on while the first ones wait for the writer
     await().atMost(Duration.ofSeconds(10)).until(() -> network.requestCount() >= 4);
     storesHeld.countDown();
-    awaitStoredUpTo(bodies, 40);
+    awaitStored(bodies, 1, 40);
     assertCanonicalBodies(40);
   }
 
@@ -137,9 +139,11 @@ class BodyDownloaderTest {
     chain.extend(50);
     final BodyDownloader bodies = downloader(50, 10);
     bodies.download(1, 50);
-    awaitStoredUpTo(bodies, 50);
+    awaitStored(bodies, 11, 50);
 
     bodies.verifyChain(chain.header(10), chain.header(50));
+    // from any stored block, as the blocks below a window are left to the back-fill
+    bodies.verifyChain(chain.header(30), chain.header(50));
     assertThatThrownBy(() -> bodies.verifyChain(chain.header(10), chain.header(49)))
         .hasMessageContaining("do not lead to block 49");
     // the blocks a reorg forgot break the chain until downloaded again
@@ -147,7 +151,7 @@ class BodyDownloaderTest {
     assertThatThrownBy(() -> bodies.verifyChain(chain.header(10), chain.header(50)))
         .isInstanceOf(IllegalStateException.class);
     bodies.download(1, 50);
-    awaitStoredUpTo(bodies, 50);
+    awaitStored(bodies, 11, 50);
     bodies.verifyChain(chain.header(10), chain.header(50));
   }
 
@@ -158,7 +162,7 @@ class BodyDownloaderTest {
 
     bodies.download(1, 1000);
 
-    awaitStoredUpTo(bodies, 1000);
+    awaitStored(bodies, 1, 1000);
     // the empty bodies let the ranges grow from the 32 blocks of the first ones to 128
     assertThat(network.requestCount()).isLessThanOrEqualTo(1000 / 64);
   }
@@ -196,7 +200,7 @@ class BodyDownloaderTest {
     }
   }
 
-  private static void awaitStoredUpTo(final BodyDownloader bodies, final long target) {
-    await().atMost(Duration.ofSeconds(30)).until(() -> bodies.storedUpTo(target));
+  private static void awaitStored(final BodyDownloader bodies, final long from, final long to) {
+    await().atMost(Duration.ofSeconds(30)).until(() -> bodies.stored(from, to));
   }
 }

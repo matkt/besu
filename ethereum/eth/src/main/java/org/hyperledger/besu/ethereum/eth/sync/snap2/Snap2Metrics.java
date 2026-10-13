@@ -93,7 +93,7 @@ final class Snap2Metrics {
     metricsSystem.createLongGauge(
         category,
         "snap2_bodies_needed",
-        "Blocks whose body and receipts SNAP2 needs, from the floor to the pivot",
+        "Blocks whose body and receipts SNAP2 needs below the pivot before setting the chain head",
         () -> attemptValue(SyncAttempt::bodiesNeeded));
     metricsSystem.createGauge(
         category,

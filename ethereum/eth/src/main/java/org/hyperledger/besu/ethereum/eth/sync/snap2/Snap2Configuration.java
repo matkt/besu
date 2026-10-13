@@ -38,6 +38,8 @@ import java.time.Duration;
  * @param bodiesPerRequest most blocks per body or receipt request
  * @param chainParallelism concurrent header requests
  * @param maxBodyRanges most block ranges whose bodies and receipts are downloaded at once
+ * @param bodyWindow blocks below the final pivot whose bodies and receipts are stored before the
+ *     chain head is set, the older ones being back-filled once the node follows the head
  * @param workerThreads threads decoding and verifying responses
  * @param trieBuildThreads threads building the tries at the end
  * @param storageTriesWhileDownloading whether storage tries are built while the state downloads
@@ -62,6 +64,7 @@ public record Snap2Configuration(
     int bodiesPerRequest,
     int chainParallelism,
     int maxBodyRanges,
+    int bodyWindow,
     int workerThreads,
     int trieBuildThreads,
     boolean storageTriesWhileDownloading,
@@ -89,6 +92,7 @@ public record Snap2Configuration(
         128,
         64,
         512,
+        128,
         Math.max(2, cores),
         Math.max(2, cores),
         SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING,
@@ -110,6 +114,7 @@ public record Snap2Configuration(
     private int codeBatchSize;
     private int pivotDistance;
     private int pivotMoveThreshold;
+    private int bodyWindow;
     private int workerThreads;
     private int trieBuildThreads;
     private boolean storageTriesWhileDownloading;
@@ -125,6 +130,7 @@ public record Snap2Configuration(
       this.codeBatchSize = base.codeBatchSize();
       this.pivotDistance = base.pivotDistance();
       this.pivotMoveThreshold = base.pivotMoveThreshold();
+      this.bodyWindow = base.bodyWindow();
       this.workerThreads = base.workerThreads();
       this.trieBuildThreads = base.trieBuildThreads();
       this.storageTriesWhileDownloading = base.storageTriesWhileDownloading();
@@ -163,6 +169,11 @@ public record Snap2Configuration(
 
     public Builder pivotMoveThreshold(final int value) {
       pivotMoveThreshold = value;
+      return this;
+    }
+
+    public Builder bodyWindow(final int value) {
+      bodyWindow = value;
       return this;
     }
 
@@ -205,6 +216,7 @@ public record Snap2Configuration(
           base.bodiesPerRequest(),
           base.chainParallelism(),
           base.maxBodyRanges(),
+          bodyWindow,
           workerThreads,
           trieBuildThreads,
           storageTriesWhileDownloading,
