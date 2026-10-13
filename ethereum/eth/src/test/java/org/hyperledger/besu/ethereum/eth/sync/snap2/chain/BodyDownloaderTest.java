@@ -70,7 +70,7 @@ class BodyDownloaderTest {
   @Test
   void downloadsAgainARangeWhoseHeadersAReorgReplacedWhileInFlight() {
     chain.extend(40);
-    network.latency(300);
+    network.holdResponses();
     final BodyDownloader bodies = downloader(40, 0);
 
     bodies.download(1, 40);
@@ -78,6 +78,7 @@ class BodyDownloaderTest {
     await().atMost(Duration.ofSeconds(10)).until(() -> network.requestCount() >= 2);
     chain.reorg(30, 10);
     blockchain.storeBlockHeaders(headers(31, 40));
+    network.releaseResponses();
 
     awaitStoredUpTo(bodies, 40);
     assertCanonicalBodies(40);
@@ -108,8 +109,8 @@ class BodyDownloaderTest {
     bodies.download(1, 1000);
 
     awaitStoredUpTo(bodies, 1000);
-    // the empty bodies let the ranges grow past the 32 blocks of the first ones
-    assertThat(network.requestCount()).isLessThan(1000 / 32);
+    // the empty bodies let the ranges grow from the 32 blocks of the first ones to 128
+    assertThat(network.requestCount()).isLessThanOrEqualTo(1000 / 64);
   }
 
   // stores the headers up to the head and downloads with ranges of 5 blocks, 2 at a time

@@ -56,6 +56,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -84,6 +85,7 @@ public final class FakeSnapNetwork implements RequestSender {
   private final AtomicInteger nextPeer = new AtomicInteger();
   private final AtomicLong requests = new AtomicLong();
   private final List<String> unagreedRequests = new CopyOnWriteArrayList<>();
+  private volatile CountDownLatch held = new CountDownLatch(0);
   private final Map<String, Function<MessageData, MessageData>> handlers =
       new ConcurrentHashMap<>();
   private final Map<Hash, Bytes> blockAccessLists = new ConcurrentHashMap<>();
@@ -134,6 +136,15 @@ public final class FakeSnapNetwork implements RequestSender {
     return requests.get();
   }
 
+  /** Holds every answer until {@link #releaseResponses()}. */
+  public void holdResponses() {
+    held = new CountDownLatch(1);
+  }
+
+  public void releaseResponses() {
+    held.countDown();
+  }
+
   /** Makes a peer answer every account and storage range request with nothing. */
   public void serveNoState(final int peer) {
     withoutState.add(peers.get(peer));
@@ -174,12 +185,13 @@ public final class FakeSnapNetwork implements RequestSender {
     requests.incrementAndGet();
     return CompletableFuture.supplyAsync(
         () -> {
-          if (latencyMillis > 0) {
-            try {
+          try {
+            held.await();
+            if (latencyMillis > 0) {
               Thread.sleep(latencyMillis);
-            } catch (final InterruptedException e) {
-              Thread.currentThread().interrupt();
             }
+          } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
           }
           final Protocol protocol = request.protocolFor(peer);
           final MessageData message = request.message(peer);
