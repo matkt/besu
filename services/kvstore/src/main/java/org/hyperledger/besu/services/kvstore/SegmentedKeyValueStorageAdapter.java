@@ -132,6 +132,17 @@ public class SegmentedKeyValueStorageAdapter implements KeyValueStorage {
   }
 
   @Override
+  public KeyValueStorageTransaction startUnloggedBatchTransaction() throws StorageException {
+    return new KeyValueStorageTransactionAdapter(
+        segmentIdentifier, storage.startUnloggedBatchTransaction());
+  }
+
+  @Override
+  public void flush() throws StorageException {
+    storage.flush();
+  }
+
+  @Override
   public boolean isClosed() {
     return storage.isClosed();
   }
