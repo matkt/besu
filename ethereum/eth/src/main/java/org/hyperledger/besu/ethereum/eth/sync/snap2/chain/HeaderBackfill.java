@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetHeadersFromPeerTask.Direction;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
@@ -245,11 +246,6 @@ public final class HeaderBackfill {
   }
 
   /** The trusted headers lead to another block than the floor, which no retry changes. */
-  public static final class WrongChainException extends IllegalStateException {
-    WrongChainException(final String message) {
-      super(message);
-    }
-  }
 
   /**
    * Headers fetched for a segment.

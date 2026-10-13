@@ -53,6 +53,7 @@ import java.time.Clock;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
@@ -314,6 +315,14 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       return;
     }
     final long floor = syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L);
+    final LongUnaryOperator lowestNeeded =
+        head ->
+            Math.max(
+                floor + 1, chainDataPruner.map(pruner -> pruner.lowestRetained(head)).orElse(0L));
+    // done at an earlier start
+    if (bodiesFrom.get() <= lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber())) {
+      return;
+    }
     final BodyBackfill backfill =
         new BodyBackfill(
             blockchain,
@@ -322,10 +331,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
             ethContext.getPeerTaskExecutor(),
             syncState::isInSync,
             bodiesFrom.get(),
-            head ->
-                Math.max(
-                    floor + 1,
-                    chainDataPruner.map(pruner -> pruner.lowestRetained(head)).orElse(0L)),
+            lowestNeeded,
             bodyBackfillSettings,
             clock,
             metricsSystem);

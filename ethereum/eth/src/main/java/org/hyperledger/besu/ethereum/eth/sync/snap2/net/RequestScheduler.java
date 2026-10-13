@@ -293,7 +293,8 @@ public final class RequestScheduler implements RequestSender {
   public void stop() {
     stopped = true;
     ethPeers.unsubscribeConnect(connectSubscription);
-    loop.shutdown();
+    // timeouts still scheduled would fire on failed requests
+    loop.shutdownNow();
     workers.shutdownNow();
     final RequestFailedException failure = stoppedFailure();
     outstanding.forEach(future -> future.completeExceptionally(failure));

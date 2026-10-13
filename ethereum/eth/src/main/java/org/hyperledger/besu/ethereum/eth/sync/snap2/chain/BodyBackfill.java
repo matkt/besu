@@ -88,8 +88,9 @@ public final class BodyBackfill implements BlockAddedObserver {
   private static final int MAX_RANGE_BLOCKS = 128;
   private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
   // a head older than the slot plus the allowance of the mode is lagging; the rate halves at most
-  // once a slot and recovers an eighth a slot
-  private static final Duration SLOT = Duration.ofSeconds(12);
+  // once a slot and recovers an eighth a slot, the slot being the block time of the last blocks
+  private static final int SLOT_BLOCKS = 32;
+  private static final long DEFAULT_SLOT_MILLIS = 12_000;
   private static final double MIN_SHARE = 1.0 / 8;
   private static final double SHARE_STEP = 1.0 / 8;
 
@@ -406,8 +407,9 @@ public final class BodyBackfill implements BlockAddedObserver {
       return;
     }
     final long now = clock.millis();
-    final long lag = now - blockchain.getChainHeadHeader().getTimestamp() * 1000;
-    final long slot = SLOT.toMillis();
+    final BlockHeader head = blockchain.getChainHeadHeader();
+    final long lag = now - head.getTimestamp() * 1000;
+    final long slot = slotMillis(head);
     synchronized (throttle) {
       if (lag > slot + settings.headLagAllowance().toMillis()) {
         if (now - lastDecreaseMillis >= slot) {
@@ -422,6 +424,15 @@ public final class BodyBackfill implements BlockAddedObserver {
         lastIncreaseMillis = now;
       }
     }
+  }
+
+  private long slotMillis(final BlockHeader head) {
+    final long blocks = Math.min(SLOT_BLOCKS, head.getNumber());
+    return blockchain
+        .getBlockHeader(head.getNumber() - blocks)
+        .filter(earlier -> blocks > 0 && head.getTimestamp() > earlier.getTimestamp())
+        .map(earlier -> (head.getTimestamp() - earlier.getTimestamp()) * 1000 / blocks)
+        .orElse(DEFAULT_SLOT_MILLIS);
   }
 
   // the highest run of blocks below the lowest stored one that is neither stored nor in flight

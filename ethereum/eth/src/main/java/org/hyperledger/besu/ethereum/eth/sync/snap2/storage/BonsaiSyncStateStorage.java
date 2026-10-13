@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -51,17 +52,17 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
   @Override
   public Batch batch() {
-    final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
-    return new FlatBatch(updater.getWorldStateTransaction()) {
+    final SegmentedKeyValueStorageTransaction tx = flat.startUnloggedBatchTransaction();
+    return new FlatBatch(tx) {
       // stored by code hash, which prepareForSync requires
       @Override
       public void putCode(final Bytes32 codeHash, final Bytes code) {
-        updater.putCode(Hash.ZERO, Hash.wrap(codeHash), code);
+        bonsai.getFlatDbStrategy().putFlatCode(flat, tx, Hash.ZERO, Hash.wrap(codeHash), code);
       }
 
       @Override
       public void commit() {
-        updater.commitComposedOnly();
+        tx.commit();
       }
     };
   }
@@ -149,11 +150,11 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
   @Override
   public void prepareForSync() {
-    bonsai.clear();
     if (!bonsai.getFlatDbStrategy().isCodeByCodeHash()) {
       throw new IllegalStateException(
           "SNAP2 sync needs Bonsai to store bytecode by code hash (--Xbonsai-code-using-code-hash-enabled)");
     }
+    bonsai.clear();
   }
 
   @Override

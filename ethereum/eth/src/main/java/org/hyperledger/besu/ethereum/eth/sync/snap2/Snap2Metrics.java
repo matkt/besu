@@ -143,7 +143,7 @@ final class Snap2Metrics {
     final var stage =
         metricsSystem.createLabelledSuppliedGauge(
             category, "snap2_stage", "Current SNAP2 stage, 1 for the active one", "stage");
-    for (final String name : List.of("waiting", "state", "tries", "chain")) {
+    for (final String name : List.of("waiting", "state", "tries", "chain", "done")) {
       stage.labels(() -> name.equals(stage()) ? 1 : 0, name);
     }
     final var peers =
@@ -167,7 +167,7 @@ final class Snap2Metrics {
     return attempt == null ? 0 : value.applyAsLong(attempt);
   }
 
-  private String stage() {
+  String stage() {
     final SyncAttempt attempt = current.get();
     return attempt == null ? "waiting" : attempt.stage();
   }

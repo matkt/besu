@@ -26,8 +26,8 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
@@ -111,6 +111,7 @@ class Snap2SyncControllerTest {
         .forEach((hash, account) -> assertThat(accountTrie.get(hash)).contains(account));
     assertThat(controller.metrics().pivotMoves()).isPositive();
     assertThat(controller.metrics().restarts()).isZero();
+    assertThat(controller.metrics().stage()).isEqualTo("done");
     controller.deletePivotSyncState();
     assertThat(marker.exists()).isFalse();
   }
@@ -231,7 +232,7 @@ class Snap2SyncControllerTest {
 
     // it fails at once, instead of downloading the state of a chain it cannot link
     assertThatThrownBy(() -> result.get(30, TimeUnit.SECONDS))
-        .hasCauseInstanceOf(HeaderBackfill.WrongChainException.class);
+        .hasCauseInstanceOf(WrongChainException.class);
   }
 
   private static void awaitStored(final MutableBlockchain blockchain, final BlockHeader header) {

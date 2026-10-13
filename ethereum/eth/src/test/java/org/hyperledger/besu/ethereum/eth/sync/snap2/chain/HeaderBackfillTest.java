@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestChain;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
@@ -91,7 +92,7 @@ class HeaderBackfillTest {
     final HeaderBackfill backfill = backfill(otherFloor, chain.header(20));
 
     assertThatThrownBy(() -> backfill.run(executor).join())
-        .hasCauseInstanceOf(HeaderBackfill.WrongChainException.class)
+        .hasCauseInstanceOf(WrongChainException.class)
         .hasMessageContaining("does not lead to block 5");
   }
 

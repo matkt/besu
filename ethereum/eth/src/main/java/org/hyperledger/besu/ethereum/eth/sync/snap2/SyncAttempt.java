@@ -26,6 +26,7 @@ import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
@@ -87,6 +88,7 @@ final class SyncAttempt {
   private volatile WorldStateTrieBuilder trieBuilder;
   private volatile Instant trieStarted = Instant.now();
   private volatile boolean cancelled;
+  private volatile boolean done;
   private volatile boolean moving;
   private volatile boolean finalizing;
   // the rates of the last five ticks, for the ETAs of the progress line
@@ -130,6 +132,7 @@ final class SyncAttempt {
             .thenApply(
                 finalPivot -> {
                   setChainHead(finalPivot);
+                  done = true;
                   context
                       .syncDurationMetrics()
                       .stopTimer(SyncDurationMetrics.Labels.CHAIN_DOWNLOAD_DURATION);
@@ -186,9 +189,7 @@ final class SyncAttempt {
     }
     final Hash checkpointHash = checkpoint.get().blockHash();
     final BlockHeader header =
-        blockchain
-            .getBlockHeader(checkpointHash)
-            .orElseGet(() -> context.fetcher().byHash(checkpointHash, Priority.HEADERS).join());
+        blockchain.getBlockHeader(checkpointHash).orElseGet(() -> fetchCheckpoint(checkpointHash));
     if (header.getNumber() != checkpoint.get().blockNumber()) {
       throw new IllegalStateException(
           "checkpoint " + checkpointHash + " is not at block " + checkpoint.get().blockNumber());
@@ -224,7 +225,24 @@ final class SyncAttempt {
   }
 
   // above a proof-of-stake floor, with their total difficulty, which the chain head then reuses
+  // peers may not serve it yet: start over rather than fail the sync
+  private BlockHeader fetchCheckpoint(final Hash hash) {
+    try {
+      return context.fetcher().byHash(hash, Priority.HEADERS).join();
+    } catch (final CompletionException | CancellationException e) {
+      throw new RestartException(
+          "checkpoint " + hash + " unavailable: " + Futures.unwrap(e).getMessage());
+    }
+  }
+
   private void writeHeaders(final List<BlockHeader> headers) {
+    // headers down to genesis pass the checkpoint, which must be on their chain
+    for (final BlockHeader header : headers) {
+      if (header.getNumber() == floor.getNumber() && !header.getHash().equals(floor.getHash())) {
+        throw new WrongChainException(
+            "checkpoint " + floor.getHash() + " is not on the chain of the pivot");
+      }
+    }
     final MutableBlockchain blockchain = context.blockchain();
     headerTotalDifficulty.ifPresentOrElse(
         total -> blockchain.storeBlockHeaders(headers, total),
@@ -259,8 +277,7 @@ final class SyncAttempt {
               }
               if (error == null) {
                 headersDone.complete(null);
-              } else if (Futures.unwrap(error)
-                  instanceof HeaderBackfill.WrongChainException wrong) {
+              } else if (Futures.unwrap(error) instanceof WrongChainException wrong) {
                 aborted.completeExceptionally(wrong);
               } else {
                 LOG.warn(
@@ -489,7 +506,7 @@ final class SyncAttempt {
                 return CompletableFuture.failedFuture(error);
               }
               LOG.info("Final pivot check failed, retrying: {}", cause.getMessage());
-              return delay(Duration.ofSeconds(1)).thenCompose(unused -> finalCatchUp());
+              return delay(Duration.ofSeconds(5)).thenCompose(unused -> finalCatchUp());
             });
   }
 
@@ -641,8 +658,11 @@ final class SyncAttempt {
     return stateSync;
   }
 
-  /** Returns what the attempt is busy with: the state, the tries or the chain. */
+  /** Returns what the attempt is busy with: the state, the tries or the chain, or done. */
   String stage() {
+    if (done) {
+      return "done";
+    }
     if (trieBuilder != null) {
       return "tries";
     }
