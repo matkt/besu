@@ -82,7 +82,8 @@ public final class StateSync {
   private final RequestSender scheduler;
   private final Snap2Configuration config;
   private final StateCoverage coverage = new StateCoverage();
-  private final StorageTries tries;
+  // builds the storage tries while downloading, when enabled
+  private final Optional<StorageTries> tries;
   private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
@@ -95,6 +96,8 @@ public final class StateSync {
 
   // bookkeeping, loop thread only
   private final List<RangeTask> accountTasks = new ArrayList<>();
+  // the lowest account range not done yet
+  private int firstAccountTask;
   private final ArrayDeque<StorageTask> storageQueue = new ArrayDeque<>();
   private final ArrayDeque<StorageTask> refreshQueue = new ArrayDeque<>();
   private final Set<StorageTask> chunked = new LinkedHashSet<>();
@@ -131,7 +134,11 @@ public final class StateSync {
             Math.max(2, config.workerThreads()),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
     this.tries =
-        new StorageTries(storage, this::withoutMoves, Math.max(1, config.trieBuildThreads() / 4));
+        config.storageTriesWhileDownloading()
+            ? Optional.of(
+                new StorageTries(
+                    storage, this::withoutMoves, Math.max(1, config.trieBuildThreads() / 4)))
+            : Optional.empty();
   }
 
   /** Starts downloading the state of the given pivot. */
@@ -252,12 +259,12 @@ public final class StateSync {
 
   /** Returns the number of storage tries built while downloading. */
   public long storageTriesBuilt() {
-    return tries.built();
+    return tries.map(StorageTries::built).orElse(0L);
   }
 
   /** Returns the number of downloaded storages waiting for their trie. */
   public int storageTriesQueued() {
-    return tries.queued();
+    return tries.map(StorageTries::queued).orElse(0);
   }
 
   /** Runs a write on the flat state exclusive with every download write. */
@@ -306,7 +313,7 @@ public final class StateSync {
     }
     loop.shutdownNow();
     persister.shutdownNow();
-    tries.stop();
+    tries.ifPresent(StorageTries::stop);
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
@@ -390,10 +397,16 @@ public final class StateSync {
         coverage.pendingStorageCount() > config.storageBacklog()
             || codeQueue.size() > config.storageBacklog();
     final int accountShare = backlogged ? 0 : Math.max(1, target / 3);
-    for (final RangeTask task : accountTasks) {
+    // lowest ranges first: written in key order, the state is moved down the database levels
+    // instead of being rewritten at each of them
+    while (firstAccountTask < accountTasks.size() && accountTasks.get(firstAccountTask).done) {
+      firstAccountTask++;
+    }
+    for (int i = firstAccountTask; i < accountTasks.size(); i++) {
       if (inFlight() >= target || accountsInFlight >= accountShare) {
         break;
       }
+      final RangeTask task = accountTasks.get(i);
       if (!task.done && !task.inFlight) {
         sendAccounts(task, current);
       }
@@ -678,12 +691,12 @@ public final class StateSync {
 
   private record Covered(StorageTask task, Bytes32 end) {}
 
-  // a complete storage gets its trie built from the written slots
+  // a complete storage can get its trie built from the written slots
   private void cover(final StorageTask task, final Bytes32 origin, final Bytes32 end) {
     task.cover(origin, end);
     if (task.isComplete()) {
       coverage.removeStorageTask(task.accountHash());
-      tries.completed(task.accountHash());
+      tries.ifPresent(builder -> builder.completed(task.accountHash()));
     }
   }
 

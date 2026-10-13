@@ -85,6 +85,7 @@ public final class FakeSnapNetwork implements RequestSender {
   private final AtomicInteger nextPeer = new AtomicInteger();
   private final AtomicLong requests = new AtomicLong();
   private final List<String> unagreedRequests = new CopyOnWriteArrayList<>();
+  private final List<Bytes32> accountRangeOrigins = new CopyOnWriteArrayList<>();
   private volatile CountDownLatch held = new CountDownLatch(0);
   private final Map<String, Function<MessageData, MessageData>> handlers =
       new ConcurrentHashMap<>();
@@ -169,6 +170,11 @@ public final class FakeSnapNetwork implements RequestSender {
     return peers;
   }
 
+  /** Returns the origins of the account range requests, in the order they were sent. */
+  public List<Bytes32> accountRangeOrigins() {
+    return accountRangeOrigins;
+  }
+
   /** Returns the requests sent over a protocol version their peer did not agree. */
   public List<String> unagreedRequests() {
     return unagreedRequests;
@@ -183,6 +189,21 @@ public final class FakeSnapNetwork implements RequestSender {
           new RequestFailedException(RequestFailedException.Reason.NO_PEER, null, "no peer"));
     }
     requests.incrementAndGet();
+    final Protocol protocol = request.protocolFor(peer);
+    final MessageData message;
+    try {
+      message = request.message(peer);
+    } catch (final RuntimeException e) {
+      return CompletableFuture.failedFuture(e);
+    }
+    if (!agreed(peer, protocol, message)) {
+      unagreedRequests.add(request.name() + " over " + protocol);
+    }
+    if (protocol == Protocol.SNAP && message.getCode() == SnapV2.GET_ACCOUNT_RANGE) {
+      accountRangeOrigins.add(
+          Bytes32.wrap(
+              GetAccountRangeMessage.readFrom(message).range(false).startKeyHash().getBytes()));
+    }
     return CompletableFuture.supplyAsync(
         () -> {
           try {
@@ -192,11 +213,6 @@ public final class FakeSnapNetwork implements RequestSender {
             }
           } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
-          }
-          final Protocol protocol = request.protocolFor(peer);
-          final MessageData message = request.message(peer);
-          if (!agreed(peer, protocol, message)) {
-            unagreedRequests.add(request.name() + " over " + protocol);
           }
           final MessageData raw = response(peer, protocol, message);
           // eth responses reach requests already unwrapped, snap ones keep their request id

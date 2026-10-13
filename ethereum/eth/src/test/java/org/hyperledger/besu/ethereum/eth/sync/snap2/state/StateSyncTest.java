@@ -28,15 +28,19 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.F
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -75,7 +79,11 @@ class StateSyncTest {
     final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
     network.serve(world);
     final Storages storages = SyncStorageFixture.create(format);
-    stateSync = new StateSync(storages.sync(), network, config());
+    stateSync =
+        new StateSync(
+            storages.sync(),
+            network,
+            config().toBuilder().storageTriesWhileDownloading(true).build());
 
     stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
     // every storage completed while downloading gets its trie from the written slots
@@ -87,6 +95,53 @@ class StateSyncTest {
     final WorldStateTrieBuilder.Result built = build(storages);
     assertThat(built.root()).isEqualTo(world.root());
     assertThat(built.keptStorageTries()).isEqualTo(withStorage);
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void leavesTheStorageTriesToTheFinalBuildByDefault(final Format format) throws Exception {
+    final TestWorld world = TestWorld.random(new Random(3), 400, 3, 600);
+    network.serve(world);
+    final Storages storages = SyncStorageFixture.create(format);
+    stateSync = new StateSync(storages.sync(), network, config());
+
+    stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
+
+    assertThat(stateSync.storageTriesBuilt()).isZero();
+    final WorldStateTrieBuilder.Result built = build(storages);
+    assertThat(built.root()).isEqualTo(world.root());
+    assertThat(built.keptStorageTries()).isZero();
+  }
+
+  @Test
+  void requestsTheAccountRangesLowestFirst() throws Exception {
+    final TestWorld world = TestWorld.random(new Random(7), 2000, 0, 0);
+    network.serve(world);
+    network.holdResponses();
+    final int ranges = 1024;
+    stateSync =
+        new StateSync(
+            SyncStorageFixture.create(Format.BONSAI).sync(),
+            network,
+            config().toBuilder().accountChunks(ranges).build());
+    final List<Bytes32> starts =
+        List.copyOf(
+            RangeManager.generateRanges(RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, ranges)
+                .keySet());
+
+    final var completion = stateSync.start(header(1, world.root()));
+
+    // with every answer held, the requests in flight are those of the lowest ranges
+    await().pollDelay(Duration.ofMillis(200)).until(() -> !network.accountRangeOrigins().isEmpty());
+    final List<Bytes32> inFlight = List.copyOf(network.accountRangeOrigins());
+    assertThat(inFlight).hasSizeLessThan(ranges).isEqualTo(starts.subList(0, inFlight.size()));
+
+    network.releaseResponses();
+    completion.get(60, TimeUnit.SECONDS);
+    // each range is started once, in key order
+    assertThat(network.accountRangeOrigins().stream().filter(Set.copyOf(starts)::contains))
+        .isSorted()
+        .hasSize(ranges);
   }
 
   static Stream<Arguments> formatsAndSeeds() {

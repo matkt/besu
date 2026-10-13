@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
+import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
+
 import java.time.Duration;
 
 /**
@@ -21,7 +23,7 @@ import java.time.Duration;
  *
  * @param pivotDistance blocks between the chain head and a newly selected pivot
  * @param pivotMoveThreshold blocks the head may advance past the pivot distance before moving
- * @param accountChunks parallel ranges the account key space is split into
+ * @param accountChunks ranges the account key space is split into, downloaded lowest first
  * @param responseBytes soft response size of account, storage and bytecode requests
  * @param balResponseBytes soft response size of block access list requests
  * @param balBatchSize block access lists per request
@@ -38,6 +40,7 @@ import java.time.Duration;
  * @param maxBodyRanges most block ranges whose bodies and receipts are downloaded at once
  * @param workerThreads threads decoding and verifying responses
  * @param trieBuildThreads threads building the tries at the end
+ * @param storageTriesWhileDownloading whether storage tries are built while the state downloads
  * @param minPeers snap/2 peers to wait for before starting
  * @param pollInterval how often the pivot and the chain download check for progress
  */
@@ -61,6 +64,7 @@ public record Snap2Configuration(
     int maxBodyRanges,
     int workerThreads,
     int trieBuildThreads,
+    boolean storageTriesWhileDownloading,
     int minPeers,
     Duration pollInterval) {
 
@@ -70,7 +74,7 @@ public record Snap2Configuration(
     return new Snap2Configuration(
         64,
         32,
-        128,
+        SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES,
         512 * 1024,
         2 * 1024 * 1024,
         32,
@@ -87,6 +91,7 @@ public record Snap2Configuration(
         512,
         Math.max(2, cores),
         Math.max(2, cores),
+        SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING,
         1,
         Duration.ofSeconds(2));
   }
@@ -108,6 +113,7 @@ public record Snap2Configuration(
     private Duration requestTimeout;
     private int workerThreads;
     private int trieBuildThreads;
+    private boolean storageTriesWhileDownloading;
     private Duration pollInterval;
     private final Snap2Configuration base;
 
@@ -123,6 +129,7 @@ public record Snap2Configuration(
       this.requestTimeout = base.requestTimeout();
       this.workerThreads = base.workerThreads();
       this.trieBuildThreads = base.trieBuildThreads();
+      this.storageTriesWhileDownloading = base.storageTriesWhileDownloading();
       this.pollInterval = base.pollInterval();
     }
 
@@ -176,6 +183,11 @@ public record Snap2Configuration(
       return this;
     }
 
+    public Builder storageTriesWhileDownloading(final boolean value) {
+      storageTriesWhileDownloading = value;
+      return this;
+    }
+
     public Builder pollInterval(final Duration value) {
       pollInterval = value;
       return this;
@@ -202,6 +214,7 @@ public record Snap2Configuration(
           base.maxBodyRanges(),
           workerThreads,
           trieBuildThreads,
+          storageTriesWhileDownloading,
           base.minPeers(),
           pollInterval);
     }

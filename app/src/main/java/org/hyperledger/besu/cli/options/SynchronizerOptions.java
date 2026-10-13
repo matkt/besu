@@ -19,6 +19,7 @@ import static org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfigurat
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
+import org.hyperledger.besu.util.number.PositiveNumber;
 
 import java.net.URI;
 import java.util.Arrays;
@@ -90,6 +91,9 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       "--Xsnapsync-synchronizer-trienode-count-per-request";
   private static final String SNAP_TRANSACTION_INDEXING_ENABLED_FLAG =
       "--snapsync-synchronizer-transaction-indexing-enabled";
+  private static final String SNAP2_ACCOUNT_RANGES_FLAG = "--Xsnap2-account-ranges";
+  private static final String SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG =
+      "--Xsnap2-storage-tries-while-downloading";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
       "--Xsnapsync-synchronizer-flat-account-healed-count-per-request";
@@ -410,6 +414,26 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private Boolean snapTransactionIndexingEnabled =
       SnapSyncConfiguration.DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED;
 
+  @CommandLine.Option(
+      names = {SNAP2_ACCOUNT_RANGES_FLAG},
+      hidden = true,
+      paramLabel = "<INTEGER>",
+      description =
+          "Ranges the SNAP2 sync splits the account key space into, downloaded lowest first (default: ${DEFAULT-VALUE})")
+  private PositiveNumber snap2AccountRanges =
+      PositiveNumber.fromInt(SnapSyncConfiguration.DEFAULT_SNAP2_ACCOUNT_RANGES);
+
+  @CommandLine.Option(
+      names = {SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG},
+      hidden = true,
+      paramLabel = "<Boolean>",
+      arity = "0..1",
+      fallbackValue = "true",
+      description =
+          "Build the storage tries of the SNAP2 sync while the state downloads instead of at the end (default: ${DEFAULT-VALUE})")
+  private Boolean snap2StorageTriesWhileDownloading =
+      SnapSyncConfiguration.DEFAULT_SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING;
+
   /**
    * @deprecated No longer used. Accepted for backwards compatibility. The flag will be removed in a
    *     future release.
@@ -541,6 +565,10 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         config.getSnapSyncConfiguration().getMaxConcurrentSnapRequestsGlobal();
     options.snapTransactionIndexingEnabled =
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
+    options.snap2AccountRanges =
+        PositiveNumber.fromInt(config.getSnapSyncConfiguration().getSnap2AccountRanges());
+    options.snap2StorageTriesWhileDownloading =
+        config.getSnapSyncConfiguration().isSnap2StorageTriesWhileDownloading();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
     options.era1ImportPrepipelineConcurrency = config.era1ImportPrepipelineConcurrency();
@@ -586,6 +614,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .maxConcurrentSnapRequestsPerPeer(snapsyncServerMaxConcurrentRequestsPerPeer)
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
+            .snap2AccountRanges(snap2AccountRanges.getValue())
+            .isSnap2StorageTriesWhileDownloading(snap2StorageTriesWhileDownloading)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
     builder.backwardHeadersDownloadStepTimeoutMillis(backwardHeadersDownloadStepTimeoutMillis);
@@ -663,6 +693,10 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapsyncServerMaxConcurrentRequests),
             SNAP_TRANSACTION_INDEXING_ENABLED_FLAG,
             OptionParser.format(snapTransactionIndexingEnabled),
+            SNAP2_ACCOUNT_RANGES_FLAG,
+            OptionParser.format(snap2AccountRanges.getValue()),
+            SNAP2_STORAGE_TRIES_WHILE_DOWNLOADING_FLAG,
+            OptionParser.format(snap2StorageTriesWhileDownloading),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,
             OptionParser.format(era1ImportPrepipelineEnabled),
             ERA1_DATA_URI_FLAG,

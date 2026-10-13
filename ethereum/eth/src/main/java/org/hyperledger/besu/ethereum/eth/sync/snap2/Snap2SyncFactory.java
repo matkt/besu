@@ -79,7 +79,12 @@ public final class Snap2SyncFactory {
         pivotBlockSelector instanceof ChainHeadSource source
             ? source
             : new PeerHeadSource(ethContext.getEthPeers());
-    final Snap2Configuration config = Snap2Configuration.getDefault();
+    final Snap2Configuration config =
+        Snap2Configuration.getDefault().toBuilder()
+            .accountChunks(syncConfig.getSnapSyncConfiguration().getSnap2AccountRanges())
+            .storageTriesWhileDownloading(
+                syncConfig.getSnapSyncConfiguration().isSnap2StorageTriesWhileDownloading())
+            .build();
     return Optional.of(
         new Snap2SyncController(
             config,
