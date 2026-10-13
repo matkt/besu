@@ -161,7 +161,7 @@ public final class HeaderBackfill {
                 () ->
                     new GetHeadersFromPeerTask(
                         high, count, 0, Direction.REVERSE, 0, protocolSchedule),
-                Priority.CHAIN,
+                Priority.HEADERS,
                 "headers"),
             ATTEMPTS)
         .thenCompose(
@@ -210,8 +210,8 @@ public final class HeaderBackfill {
   // the trusted chain from the header with this hash down to low, highest first
   private List<BlockHeader> byHash(final Hash hash, final long low) {
     return fetcher
-        .byHash(hash, Priority.CHAIN)
-        .thenCompose(header -> fetcher.chainDown(header, low, Priority.CHAIN))
+        .byHash(hash, Priority.HEADERS)
+        .thenCompose(header -> fetcher.chainDown(header, low, Priority.HEADERS))
         .join()
         .reversed();
   }

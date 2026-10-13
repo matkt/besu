@@ -229,7 +229,7 @@ final class SyncAttempt {
     final BlockHeader header =
         blockchain
             .getBlockHeader(checkpoint.get().blockHash())
-            .orElseGet(() -> fetcher.byHash(checkpoint.get().blockHash(), Priority.CHAIN).join());
+            .orElseGet(() -> fetcher.byHash(checkpoint.get().blockHash(), Priority.HEADERS).join());
     if (header.getNumber() != checkpoint.get().blockNumber()) {
       throw new IllegalStateException(
           "checkpoint "

@@ -36,7 +36,9 @@ public interface SyncRequest<T> {
     PIVOT,
     /** World state ranges and bytecodes. */
     STATE,
-    /** Block headers, bodies and receipts below the pivot. */
+    /** Block headers below the pivot, which the bodies wait for. */
+    HEADERS,
+    /** Block bodies and receipts below the pivot. */
     CHAIN
   }
 
