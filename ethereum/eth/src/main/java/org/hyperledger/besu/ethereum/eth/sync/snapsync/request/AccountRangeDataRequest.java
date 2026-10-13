@@ -148,7 +148,7 @@ public class AccountRangeDataRequest extends SnapDataRequest {
                       .putAccountInfoState(Hash.wrap(key), value));
         });
 
-    stackTrie.commit(flatDatabaseUpdater.get(), nodeUpdater, false);
+    stackTrie.commit(flatDatabaseUpdater.get(), nodeUpdater);
 
     downloadState.getMetricsManager().notifyAccountsDownloaded(stackTrie.getElementsCount().get());
 

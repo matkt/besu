@@ -96,13 +96,10 @@ public class StackTrie {
   }
 
   public void commit(final NodeUpdater nodeUpdater) {
-    commit((key, value) -> {}, nodeUpdater, false);
+    commit((key, value) -> {}, nodeUpdater);
   }
 
-  public void commit(
-      final FlatDatabaseUpdater flatDatabaseUpdater,
-      final NodeUpdater nodeUpdater,
-      final boolean includeHealNeededNodes) {
+  public void commit(final FlatDatabaseUpdater flatDatabaseUpdater, final NodeUpdater nodeUpdater) {
 
     if (nbSegments.decrementAndGet() <= 0 && !elements.isEmpty()) {
 
@@ -155,7 +152,7 @@ public class StackTrie {
                 proofs.isEmpty() ? RangeManager.MAX_RANGE : keys.lastKey()) {
               @Override
               public void maybeStoreNode(final Bytes location, final Node<Bytes> node) {
-                if (!node.isHealNeeded() || includeHealNeededNodes) {
+                if (!node.isHealNeeded()) {
                   super.maybeStoreNode(location, node);
                 }
               }

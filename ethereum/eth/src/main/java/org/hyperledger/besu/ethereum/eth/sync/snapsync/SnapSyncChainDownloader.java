@@ -798,7 +798,7 @@ public class SnapSyncChainDownloader
     if (now - lastNoPeerLogMillis >= RETRY_WARN_INTERVAL_MS) {
       lastNoPeerLogMillis = now;
       LOG.info(
-          "No peers available, waiting to start snap/2 chain download (retrying every {} ms)",
+          "No peers available, waiting to start the chain download (retrying every {} ms)",
           NO_PEER_RETRY_DELAY_MILLISECONDS);
     }
   }

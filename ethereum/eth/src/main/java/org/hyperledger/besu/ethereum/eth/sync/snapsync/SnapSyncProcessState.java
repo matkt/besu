@@ -90,7 +90,7 @@ public class SnapSyncProcessState {
     return pivotBlockHash.isPresent();
   }
 
-  public void setCurrentHeader(final BlockHeader header) {
+  void setCurrentHeader(final BlockHeader header) {
     pivotBlockNumber = OptionalLong.of(header.getNumber());
     pivotBlockHash = Optional.of(header.getHash());
     pivotBlockHeader = Optional.of(header);

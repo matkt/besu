@@ -63,36 +63,6 @@ public class SnapDownloaderFactory {
       final Clock clock,
       final SyncDurationMetrics syncDurationMetrics,
       final Optional<ChainDataPruner> chainDataPruner) {
-    return createSnapDownloaderV1(
-        snapContext,
-        pivotBlockSelector,
-        syncConfig,
-        dataDirectory,
-        protocolSchedule,
-        protocolContext,
-        metricsSystem,
-        ethContext,
-        worldStateStorageCoordinator,
-        syncState,
-        clock,
-        syncDurationMetrics,
-        chainDataPruner);
-  }
-
-  public static Optional<SnapSyncController> createSnapDownloaderV1(
-      final SnapSyncStatePersistenceManager snapContext,
-      final PivotBlockSelector pivotBlockSelector,
-      final SynchronizerConfiguration syncConfig,
-      final Path dataDirectory,
-      final ProtocolSchedule protocolSchedule,
-      final ProtocolContext protocolContext,
-      final MetricsSystem metricsSystem,
-      final EthContext ethContext,
-      final WorldStateStorageCoordinator worldStateStorageCoordinator,
-      final SyncState syncState,
-      final Clock clock,
-      final SyncDurationMetrics syncDurationMetrics,
-      final Optional<ChainDataPruner> chainDataPruner) {
     final Path syncDataDirectory = dataDirectory.resolve(SYNC_FOLDER);
 
     ensureDirectoryExists(syncDataDirectory.toFile());

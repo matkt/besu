@@ -261,22 +261,9 @@ public class RangeManager {
     return path;
   }
 
-  public static Bytes32 prevKey(final Bytes32 key) {
-    return UInt256.fromBytes(key).subtract(UInt256.ONE);
-  }
-
-  public static Bytes32 nextKey(final Bytes32 key) {
-    final UInt256 next = UInt256.fromBytes(key).add(UInt256.ONE);
-    if (next.isZero()) {
-      throw new IllegalArgumentException("Hash overflow: " + key);
-    }
-    return next;
-  }
-
   /**
    * Returns the next 32-byte key after {@code key}, or {@link Optional#empty()} if {@code key} was
-   * the maximum value (overflow). Unlike {@link #nextKey(Bytes32)}, this never throws — callers
-   * paginating trie entries use the empty result to terminate the loop.
+   * the maximum value (overflow); callers paginating trie entries use the empty result to stop.
    */
   public static Optional<Bytes32> incrementBytes32(final Bytes32 value) {
     final UInt256 incremented = UInt256.fromBytes(value).add(UInt256.ONE);

@@ -117,7 +117,7 @@ public class StorageRangeDataRequest extends SnapDataRequest {
                           accountHash, Hash.wrap(key), Bytes32.leftPad(RLP.decodeValue(value))));
         });
 
-    stackTrie.commit(flatDatabaseUpdater.get(), nodeUpdater, false);
+    stackTrie.commit(flatDatabaseUpdater.get(), nodeUpdater);
 
     downloadState.getMetricsManager().notifySlotsDownloaded(stackTrie.getElementsCount().get());
 
