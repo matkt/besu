@@ -49,7 +49,6 @@ public final class ForkchoiceHeadTracker
         }
       };
   private volatile Hash head;
-  private volatile long bestHeight;
 
   public ForkchoiceHeadTracker(final Runnable cleanup) {
     this.cleanup = cleanup;
@@ -59,7 +58,6 @@ public final class ForkchoiceHeadTracker
   public void onNewUnverifiedForkchoice(final ForkchoiceEvent event) {
     if (event.getHeadBlockHash() != null && !event.getHeadBlockHash().equals(Hash.ZERO)) {
       head = event.getHeadBlockHash();
-      knownHeader(head).ifPresent(header -> bestHeight = Math.max(bestHeight, header.getNumber()));
     }
   }
 
@@ -95,7 +93,7 @@ public final class ForkchoiceHeadTracker
 
   @Override
   public long getBestChainHeight() {
-    return bestHeight;
+    return headHash().flatMap(this::knownHeader).map(BlockHeader::getNumber).orElse(0L);
   }
 
   @Override

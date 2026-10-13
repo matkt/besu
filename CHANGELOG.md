@@ -84,6 +84,7 @@
 - EVM v2: add AND, OR, XOR and NOT. [#11477](https://github.com/besu-eth/besu/pull/11477)
 - Schedule the Amsterdam fork on Hoodi at timestamp `1793036568` (Mon, 26 Oct 2026, 17:42:48 UTC). [#11531](https://github.com/besu-eth/besu/pull/11531)
 - Add the `SNAP2` sync mode (`--sync-mode=SNAP2`), which downloads the chain and the world state in parallel over snap/2 ([EIP-8189](https://eips.ethereum.org/EIPS/eip-8189)) and keeps the state at the chain head with block access lists instead of healing it with trie node requests, on Bonsai and Forest.
+- RocksDB no longer recycles its write-ahead log files, which the writes that skip the log, as the SNAP2 sync makes, do not allow.
 
 ## 26.9.0
 

@@ -101,7 +101,7 @@ public record Snap2Configuration(
     return new Builder(this);
   }
 
-  /** Builder of configurations, for tests. */
+  /** Builder of a configuration changing some fields of another one. */
   public static final class Builder {
     private int accountChunks;
     private int responseBytes;
@@ -110,7 +110,6 @@ public record Snap2Configuration(
     private int codeBatchSize;
     private int pivotDistance;
     private int pivotMoveThreshold;
-    private Duration requestTimeout;
     private int workerThreads;
     private int trieBuildThreads;
     private boolean storageTriesWhileDownloading;
@@ -126,7 +125,6 @@ public record Snap2Configuration(
       this.codeBatchSize = base.codeBatchSize();
       this.pivotDistance = base.pivotDistance();
       this.pivotMoveThreshold = base.pivotMoveThreshold();
-      this.requestTimeout = base.requestTimeout();
       this.workerThreads = base.workerThreads();
       this.trieBuildThreads = base.trieBuildThreads();
       this.storageTriesWhileDownloading = base.storageTriesWhileDownloading();
@@ -168,11 +166,6 @@ public record Snap2Configuration(
       return this;
     }
 
-    public Builder requestTimeout(final Duration value) {
-      requestTimeout = value;
-      return this;
-    }
-
     public Builder workerThreads(final int value) {
       workerThreads = value;
       return this;
@@ -207,7 +200,7 @@ public record Snap2Configuration(
           base.storageBacklog(),
           base.maxSnapRequestsPerPeer(),
           base.maxEthRequestsPerPeer(),
-          requestTimeout,
+          base.requestTimeout(),
           base.headersPerRequest(),
           base.bodiesPerRequest(),
           base.chainParallelism(),

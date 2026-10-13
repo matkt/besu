@@ -19,10 +19,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
@@ -92,8 +90,6 @@ class StateServersTest {
   }
 
   private static EthPeer peer() {
-    final EthPeer peer = mock(EthPeer.class);
-    when(peer.getAgreedCapabilities()).thenReturn(Set.of(SnapProtocol.SNAP1));
-    return peer;
+    return mock(EthPeer.class);
   }
 }

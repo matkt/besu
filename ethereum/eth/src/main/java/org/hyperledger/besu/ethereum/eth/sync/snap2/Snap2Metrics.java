@@ -31,6 +31,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /** Metrics of a SNAP2 sync, read from its current attempt, and a summary of its peers. */
 final class Snap2Metrics {
 
@@ -65,6 +67,7 @@ final class Snap2Metrics {
     return moves.get();
   }
 
+  @VisibleForTesting
   long reorgs() {
     return reorgs.get();
   }

@@ -28,9 +28,4 @@ final class RangeTask {
     this.limit = limit;
     this.next = origin;
   }
-
-  @Override
-  public String toString() {
-    return "[" + next.toHexString() + ".." + limit.toHexString() + "]";
-  }
 }
