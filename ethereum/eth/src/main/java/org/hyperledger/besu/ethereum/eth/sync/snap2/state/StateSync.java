@@ -47,6 +47,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -472,32 +474,52 @@ public final class StateSync {
     final AccountRangeRequest request =
         new AccountRangeRequest(
             current, task.next, task.limit, config.responseBytes(), "account_range");
+    send(
+        request,
+        current.epoch(),
+        result -> persistAccounts(request, result),
+        persisted -> {
+          task.inFlight = false;
+          accountsInFlight--;
+          if (persisted != null) {
+            if (persisted.done) {
+              task.done = true;
+            } else {
+              task.next = Keys.next(persisted.coveredEnd).orElseThrow();
+            }
+            persisted.storageTasks.forEach(this::queueStorage);
+            persisted.codeHashes.forEach(this::queueCode);
+          }
+        });
+  }
+
+  /**
+   * Sends a request, persists its response off the threads that verify it, then runs the
+   * bookkeeping on the loop with what was persisted, or null if nothing was.
+   *
+   * @param epoch the pivot the request is about, or {@link #NO_EPOCH}
+   */
+  private <T, R> void send(
+      final SyncRequest<T> request,
+      final int epoch,
+      final Function<T, R> persist,
+      final Consumer<R> bookkeeping) {
     scheduler
-        .submit(request, excluded)
+        .submit(request, epoch == NO_EPOCH ? Set.of() : excluded)
         .whenCompleteAsync(
             (response, error) -> {
-              final AccountsPersisted persisted =
+              final R persisted =
                   error == null
-                      ? persistSafely(() -> persistAccounts(request, response.value()), request)
+                      ? persistSafely(() -> persist.apply(response.value()), request)
                       : null;
               execute(
                   () -> {
-                    task.inFlight = false;
-                    accountsInFlight--;
                     if (error != null) {
-                      onFailure(error, request.pivot.epoch());
-                    } else {
-                      onServed(response.peer(), request.pivot.epoch());
+                      onFailure(error, epoch);
+                    } else if (epoch != NO_EPOCH) {
+                      onServed(response.peer(), epoch);
                     }
-                    if (persisted != null) {
-                      if (persisted.done) {
-                        task.done = true;
-                      } else {
-                        task.next = Keys.next(persisted.coveredEnd).orElseThrow();
-                      }
-                      persisted.storageTasks.forEach(this::queueStorage);
-                      persisted.codeHashes.forEach(this::queueCode);
-                    }
+                    bookkeeping.accept(persisted);
                     dispatch();
                   });
             },
@@ -592,31 +614,18 @@ public final class StateSync {
   }
 
   private void submitStorage(final StorageRangesRequest request) {
-    scheduler
-        .submit(request, excluded)
-        .whenCompleteAsync(
-            (response, error) -> {
-              final StoragePersisted persisted =
-                  error == null
-                      ? persistSafely(() -> persistStorage(request, response.value()), request)
-                      : null;
-              execute(
-                  () -> {
-                    storageInFlight--;
-                    request.tasks.forEach(task -> task.inFlight--);
-                    if (request.chunk != null) {
-                      request.chunk.inFlight = false;
-                    }
-                    if (error != null) {
-                      onFailure(error, request.pivot.epoch());
-                    } else {
-                      onServed(response.peer(), request.pivot.epoch());
-                    }
-                    afterStorage(request, persisted);
-                    dispatch();
-                  });
-            },
-            persister);
+    send(
+        request,
+        request.pivot.epoch(),
+        result -> persistStorage(request, result),
+        persisted -> {
+          storageInFlight--;
+          request.tasks.forEach(task -> task.inFlight--);
+          if (request.chunk != null) {
+            request.chunk.inFlight = false;
+          }
+          afterStorage(request, persisted);
+        });
   }
 
   private record StoragePersisted(
@@ -690,19 +699,17 @@ public final class StateSync {
       }
       return;
     }
+    // a response serves the first storages asked, in order, the last one possibly cut short
     final int served = persisted == null ? 0 : persisted.served;
     for (int i = 0; i < request.tasks.size(); i++) {
       final StorageTask task = request.tasks.get(i);
-      if (!isPending(task)) {
+      if (!isPending(task) || i < served - 1) {
         continue;
       }
-      if (i < served - 1 || (i == served - 1 && persisted.lastComplete)) {
-        continue;
-      }
-      if (i == served - 1) {
-        splitIntoChunks(task, persisted.lastSlot, persisted.lastReturned);
-      } else {
+      if (i >= served) {
         queueStorage(task);
+      } else if (!persisted.lastComplete) {
+        splitIntoChunks(task, persisted.lastSlot, persisted.lastReturned);
       }
     }
   }
@@ -727,29 +734,17 @@ public final class StateSync {
     final AccountRangeRequest request =
         new AccountRangeRequest(
             current, task.accountHash(), task.accountHash(), SINGLE_ITEM_BYTES, "account_refresh");
-    scheduler
-        .submit(request, excluded)
-        .whenCompleteAsync(
-            (response, error) -> {
-              if (error == null) {
-                persistSafely(() -> persistRefresh(request, task, response.value()), request);
-              }
-              execute(
-                  () -> {
-                    task.refreshing = false;
-                    refreshesInFlight--;
-                    if (error != null) {
-                      onFailure(error, request.pivot.epoch());
-                    } else {
-                      onServed(response.peer(), request.pivot.epoch());
-                    }
-                    if (isPending(task) && task.chunks.isEmpty()) {
-                      queueStorage(task);
-                    }
-                    dispatch();
-                  });
-            },
-            persister);
+    send(
+        request,
+        current.epoch(),
+        result -> persistRefresh(request, task, result),
+        unused -> {
+          task.refreshing = false;
+          refreshesInFlight--;
+          if (isPending(task) && task.chunks.isEmpty()) {
+            queueStorage(task);
+          }
+        });
   }
 
   private boolean persistRefresh(
@@ -817,29 +812,18 @@ public final class StateSync {
     codesRequestsInFlight++;
     codesInFlight.addAll(batch);
     final ByteCodesRequest request = new ByteCodesRequest(batch, config.responseBytes());
-    scheduler
-        .submit(request)
-        .whenCompleteAsync(
-            (response, error) -> {
-              final Set<Bytes32> stored =
-                  error == null
-                      ? persistSafely(() -> persistCodes(response.value()), request)
-                      : null;
-              execute(
-                  () -> {
-                    codesRequestsInFlight--;
-                    codesInFlight.removeAll(batch);
-                    // missing codes go back to the queue
-                    batch.stream()
-                        .filter(hash -> stored == null || !stored.contains(hash))
-                        .forEach(codeQueue::add);
-                    if (error != null) {
-                      onFailure(error, NO_EPOCH);
-                    }
-                    dispatch();
-                  });
-            },
-            persister);
+    send(
+        request,
+        NO_EPOCH,
+        this::persistCodes,
+        stored -> {
+          codesRequestsInFlight--;
+          codesInFlight.removeAll(batch);
+          // missing codes go back to the queue
+          batch.stream()
+              .filter(hash -> stored == null || !stored.contains(hash))
+              .forEach(codeQueue::add);
+        });
     return true;
   }
 
