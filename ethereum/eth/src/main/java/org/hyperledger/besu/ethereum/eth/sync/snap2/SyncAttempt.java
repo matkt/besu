@@ -674,12 +674,14 @@ final class SyncAttempt {
             .append(" | tries ")
             .append(percent(progress.tries()))
             .append(" | headers ")
-            .append(percent(progress.headers()))
-            .append(" | bodies ")
-            .append(percent(progress.bodies()));
-    if (progress.secondsLeft().isPresent()) {
-      eta(progress.secondsLeft().getAsDouble())
-          .ifPresent(left -> line.append(" | ETA ").append(left));
+            .append(percent(progress.headers()));
+    // the bodies and the time left once the state is downloaded, the bodies starting then
+    if (window != null) {
+      line.append(" | bodies ").append(percent(progress.bodies()));
+      if (progress.secondsLeft().isPresent()) {
+        eta(progress.secondsLeft().getAsDouble())
+            .ifPresent(left -> line.append(" | ETA ").append(left));
+      }
     }
     return line.toString();
   }
