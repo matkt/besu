@@ -91,10 +91,6 @@ final class SyncAttempt {
   private volatile boolean done;
   private volatile boolean moving;
   private volatile boolean finalizing;
-  // the rates of the last five ticks, for the ETAs of the progress line
-  private final RateTracker stateRate = new RateTracker(Clock.systemUTC(), 5);
-  private final RateTracker headerRate = new RateTracker(Clock.systemUTC(), 5);
-  private final RateTracker trieRate = new RateTracker(Clock.systemUTC(), 5);
 
   SyncAttempt(final SyncContext context, final BlockHeader firstPivot, final Resume resume) {
     this.context = context;
@@ -580,7 +576,6 @@ final class SyncAttempt {
       // the share of the downloaded accounts added to the tries
       final long processed = builder.accountsProcessed();
       final long total = Math.max(processed, stateSync.downloadedAccounts());
-      trieRate.sample((double) processed);
       line.append("SNAP2 tries ")
           .append(percent(processed, total))
           .append(" | accounts ")
@@ -593,7 +588,10 @@ final class SyncAttempt {
           .append(compact(builder.keptStorageTries()))
           .append(" | elapsed ")
           .append(duration(Duration.between(trieStarted, Instant.now())));
-      eta((double) (total - processed), trieRate.perSecond().orElse(0))
+      eta(
+              (double) processed,
+              (double) (total - processed),
+              Duration.between(trieStarted, Instant.now()))
           .ifPresent(left -> line.append(" | ETA ").append(left));
     } else if (bodies != null) {
       line.append("SNAP2 chain | bodies ")
@@ -606,7 +604,6 @@ final class SyncAttempt {
     } else {
       // the share of the account key space covered
       final double coverage = stateSync.accountCoverage();
-      stateRate.sample(coverage);
       line.append("SNAP2 state ")
           .append(percent(coverage))
           .append(" | accounts ")
@@ -634,15 +631,14 @@ final class SyncAttempt {
       if (stateSync.peersWithoutState() > 0) {
         line.append(" | ").append(stateSync.peersWithoutState()).append(" peers left out");
       }
-      eta(1 - coverage, stateRate.perSecond().orElse(0))
+      eta(coverage, 1 - coverage, stateSync.elapsed())
           .ifPresent(left -> line.append(" | ETA ").append(left));
     }
     // the headers, until they reach the floor
     final HeaderBackfill headers = backfill;
     if (headers != null && !headersDone.isDone()) {
-      headerRate.sample((double) headers.done());
       line.append(" | headers ").append(percent(headers.done(), headers.total()));
-      eta((double) (headers.total() - headers.done()), headerRate.perSecond().orElse(0))
+      eta((double) headers.done(), (double) (headers.total() - headers.done()), headers.elapsed())
           .ifPresent(left -> line.append(" (ETA ").append(left).append(")"));
     }
     return line.toString();

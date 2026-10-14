@@ -81,5 +81,9 @@ class ProgressFormatTest {
     assertThat(ProgressFormat.eta(100, -1)).isEmpty();
     assertThat(ProgressFormat.eta(100, Double.NaN)).isEmpty();
     assertThat(ProgressFormat.eta(1e12, 1)).isEmpty();
+    // at the average rate since the start
+    assertThat(ProgressFormat.eta(10, 30, Duration.ofSeconds(10))).contains("~30s");
+    assertThat(ProgressFormat.eta(0, 30, Duration.ofSeconds(10))).isEmpty();
+    assertThat(ProgressFormat.eta(10, 30, Duration.ZERO)).isEmpty();
   }
 }

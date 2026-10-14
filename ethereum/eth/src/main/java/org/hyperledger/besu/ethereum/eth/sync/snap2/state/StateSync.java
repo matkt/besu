@@ -162,6 +162,11 @@ public final class StateSync {
     return completion;
   }
 
+  /** Returns the time since the download started. */
+  public Duration elapsed() {
+    return Duration.between(started, Instant.now());
+  }
+
   /** Returns the current pivot. */
   public Pivot pivot() {
     return pivot;

@@ -107,4 +107,11 @@ public final class ProgressFormat {
             : Duration.ofSeconds((long) seconds);
     return Optional.of("~" + duration(rounded));
   }
+
+  /** Returns the time left at the average rate since the start, as {@link #eta(double, double)}. */
+  public static Optional<String> eta(
+      final double done, final double remaining, final Duration elapsed) {
+    final double seconds = elapsed.toMillis() / 1000.0;
+    return seconds > 0 ? eta(remaining, done / seconds) : Optional.empty();
+  }
 }

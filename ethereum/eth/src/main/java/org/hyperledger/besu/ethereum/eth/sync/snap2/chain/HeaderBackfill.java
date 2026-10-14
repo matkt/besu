@@ -107,6 +107,11 @@ public final class HeaderBackfill {
     return top.getNumber() - lowestStored;
   }
 
+  /** Returns the time since the download started. */
+  public Duration elapsed() {
+    return Duration.between(started, Instant.now());
+  }
+
   /** Returns the number of headers to store, from below the top down to above the floor. */
   public long total() {
     return Math.max(0, top.getNumber() - floor.getNumber() - 1);

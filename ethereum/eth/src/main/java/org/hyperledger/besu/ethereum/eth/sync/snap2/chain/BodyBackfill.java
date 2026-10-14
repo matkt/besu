@@ -38,7 +38,6 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorRespon
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutorResult;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncBlockBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncReceiptsFromPeerTask;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.RateTracker;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
@@ -175,7 +174,6 @@ public final class BodyBackfill implements BlockAddedObserver {
   private final AtomicLong lastLogNanos = new AtomicLong();
   // the lowest block at the start, which the share done counts from
   private final long initialLowest;
-  private final RateTracker blocksRate;
   // guarded by itself: the peers with a request in flight
   private final Set<EthPeer> busyPeers = new HashSet<>();
   private final Object throttle = new Object();
@@ -235,7 +233,6 @@ public final class BodyBackfill implements BlockAddedObserver {
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
     this.clock = clock;
-    this.blocksRate = new RateTracker(clock, 5);
     this.workers =
         Executors.newFixedThreadPool(
             settings.requests(), Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
@@ -738,7 +735,6 @@ public final class BodyBackfill implements BlockAddedObserver {
     final long bytes = bytesStored.get();
     final long floor = lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
     final long done = initialLowest - lowest;
-    blocksRate.sample((double) done);
     final StringBuilder line =
         new StringBuilder("SNAP2 ")
             .append(settings.label())
@@ -753,7 +749,7 @@ public final class BodyBackfill implements BlockAddedObserver {
     if (settings.bytesPerSecond() > 0) {
       line.append(" (limit ").append(mibPerSecond((double) settings.bytesPerSecond())).append(")");
     }
-    eta((double) blocksRemaining(), blocksRate.perSecond().orElse(0))
+    eta((double) done, (double) blocksRemaining(), Duration.between(started, clock.instant()))
         .ifPresent(left -> line.append(" | ETA ").append(left));
     line.append(" | ");
     if (state == State.PAUSED) {
