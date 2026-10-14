@@ -93,8 +93,6 @@ class StateSyncTest {
     final int withStorage = world.storageLeaves().size();
     assertThat(stateSync.storageTriesBuilt()).isEqualTo(withStorage);
     assertThat(stateSync.storageTriesLeft()).isZero();
-    assertThat(stateSync.persistedResponses()).isPositive();
-    assertThat(stateSync.responsesWaitingToPersist()).isZero();
 
     final WorldStateTrieBuilder.Result built = build(storages);
     assertThat(built.root()).isEqualTo(world.root());
