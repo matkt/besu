@@ -158,6 +158,36 @@ final class Snap2Metrics {
     metricsSystem.createCounter(
         category, "snap2_pivot_moves_total", "Pivot moves of SNAP2", moves::get);
     metricsSystem.createCounter(
+        category,
+        "snap2_pivot_move_milliseconds_total",
+        "Time SNAP2 pivot moves held the state download",
+        () -> attemptValue(attempt -> attempt.stateSync().moveMillis()));
+    metricsSystem.createCounter(
+        category,
+        "snap2_persisted_responses_total",
+        "State responses SNAP2 persisted",
+        () -> attemptValue(attempt -> attempt.stateSync().persistedResponses()));
+    metricsSystem.createCounter(
+        category,
+        "snap2_persist_milliseconds_total",
+        "Time SNAP2 spent persisting state responses",
+        () -> attemptValue(attempt -> attempt.stateSync().persistMillis()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_persist_queue",
+        "State responses waiting for a thread to persist them",
+        () -> attemptValue(attempt -> attempt.stateSync().responsesWaitingToPersist()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_storage_trie_updates_pending",
+        "Storage tries whose pivot move changes wait to be applied",
+        () -> attemptValue(attempt -> attempt.stateSync().storageTrieUpdatesPending()));
+    metricsSystem.createLongGauge(
+        category,
+        "snap2_storage_trie_update_slots_pending",
+        "Changed slots waiting to be applied to storage tries",
+        () -> attemptValue(attempt -> attempt.stateSync().storageTrieUpdateSlotsPending()));
+    metricsSystem.createCounter(
         category, "snap2_restarts_total", "Times SNAP2 started over", restarts::get);
     final var stage =
         metricsSystem.createLabelledSuppliedGauge(

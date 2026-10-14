@@ -45,9 +45,10 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -106,7 +107,7 @@ public final class StateSync {
   private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
-  private final ExecutorService persister;
+  private final ThreadPoolExecutor persister;
   private final CompletableFuture<Void> completion = new CompletableFuture<>();
   private volatile Pivot pivot;
   private volatile Instant started = Instant.now();
@@ -138,6 +139,9 @@ public final class StateSync {
   private final AtomicLong accounts = new AtomicLong();
   private final AtomicLong slots = new AtomicLong();
   private final AtomicLong codes = new AtomicLong();
+  private final AtomicLong persistedResponses = new AtomicLong();
+  private final AtomicLong persistNanos = new AtomicLong();
+  private final AtomicLong moveNanos = new AtomicLong();
   private final AtomicLong storageTries = new AtomicLong();
   private final AtomicLong storageTrieSlots = new AtomicLong();
   // storages complete without their trie, which the final build makes
@@ -153,9 +157,14 @@ public final class StateSync {
     this.loop =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("snap2-state").daemon().factory());
+    final int persisters = Math.max(2, config.workerThreads());
     this.persister =
-        Executors.newFixedThreadPool(
-            Math.max(2, config.workerThreads()),
+        new ThreadPoolExecutor(
+            persisters,
+            persisters,
+            0,
+            TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
     this.trieUpdater =
         new StorageTrieUpdater(
@@ -225,6 +234,8 @@ public final class StateSync {
       final BlockHeader newPivot, final StateDiff diff) {
     return CompletableFuture.supplyAsync(
         () -> {
+          // the writes in progress first, then the move, both holding the download
+          final long start = System.nanoTime();
           try {
             return exclusively(
                 () -> {
@@ -234,6 +245,7 @@ public final class StateSync {
                   return outcome;
                 });
           } finally {
+            moveNanos.addAndGet(System.nanoTime() - start);
             execute(this::dispatch);
           }
         },
@@ -360,6 +372,36 @@ public final class StateSync {
 
   public long downloadedCodes() {
     return codes.get();
+  }
+
+  /** Returns the number of responses persisted, or discarded for a moved pivot. */
+  public long persistedResponses() {
+    return persistedResponses.get();
+  }
+
+  /** Returns the time spent persisting responses, in milliseconds. */
+  public long persistMillis() {
+    return TimeUnit.NANOSECONDS.toMillis(persistNanos.get());
+  }
+
+  /** Returns the number of responses waiting for a thread to persist them. */
+  public int responsesWaitingToPersist() {
+    return persister.getQueue().size();
+  }
+
+  /** Returns the time pivot moves held the download, in milliseconds. */
+  public long moveMillis() {
+    return TimeUnit.NANOSECONDS.toMillis(moveNanos.get());
+  }
+
+  /** Returns the number of storage tries whose changes from pivot moves wait to be applied. */
+  public int storageTrieUpdatesPending() {
+    return trieUpdater.pendingStorages();
+  }
+
+  /** Returns the number of changed slots waiting to be applied to storage tries. */
+  public long storageTrieUpdateSlotsPending() {
+    return trieUpdater.pendingSlots();
   }
 
   private void execute(final Runnable task) {
@@ -541,10 +583,15 @@ public final class StateSync {
         .submit(request, epoch == NO_EPOCH ? Set.of() : excluded)
         .whenCompleteAsync(
             (response, error) -> {
+              final long start = System.nanoTime();
               final R persisted =
                   error == null
                       ? persistSafely(() -> persist.apply(response.value()), request)
                       : null;
+              if (error == null) {
+                persistNanos.addAndGet(System.nanoTime() - start);
+                persistedResponses.incrementAndGet();
+              }
               execute(
                   () -> {
                     if (error != null) {

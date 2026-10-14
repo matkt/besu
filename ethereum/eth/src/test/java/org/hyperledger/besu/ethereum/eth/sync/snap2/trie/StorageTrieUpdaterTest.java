@@ -29,8 +29,10 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.W
 
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 
@@ -73,9 +75,15 @@ class StorageTrieUpdaterTest {
     final StorageTrieUpdater updater =
         new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, hash -> false, 2);
 
-    updater.changed(account, Hash.wrap(root), move(world, account, 1));
-    updater.changed(account, Accounts.UNKNOWN_STORAGE_ROOT, move(world, account, 2));
+    final Map<Bytes32, UInt256> first = move(world, account, 1);
+    final Map<Bytes32, UInt256> second = move(world, account, 2);
+    updater.changed(account, Hash.wrap(root), first);
+    updater.changed(account, Accounts.UNKNOWN_STORAGE_ROOT, second);
+    final Set<Bytes32> changedSlots = new HashSet<>(first.keySet());
+    changedSlots.addAll(second.keySet());
     assertThat(updater.updated()).isZero();
+    assertThat(updater.pendingStorages()).isOne();
+    assertThat(updater.pendingSlots()).isEqualTo(changedSlots.size());
     updater.finish();
 
     assertThat(updater.updated()).isOne();

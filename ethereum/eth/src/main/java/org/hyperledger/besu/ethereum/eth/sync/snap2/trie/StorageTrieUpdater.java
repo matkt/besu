@@ -154,6 +154,16 @@ public final class StorageTrieUpdater {
     return updated.get();
   }
 
+  /** Returns the number of storages whose changes wait to be applied. */
+  public synchronized int pendingStorages() {
+    return pending.size();
+  }
+
+  /** Returns the number of changed slots waiting to be applied. */
+  public synchronized long pendingSlots() {
+    return pendingSlots;
+  }
+
   /** Applies the changes still waiting, then stops. */
   public void finish() {
     synchronized (this) {
