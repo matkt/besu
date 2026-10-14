@@ -44,9 +44,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.DoubleConsumer;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -88,6 +90,7 @@ final class SyncAttempt {
   private volatile Instant trieStarted = Instant.now();
   private volatile boolean cancelled;
   private volatile boolean done;
+  private volatile boolean triesBuilt;
   // the pivot move in progress, or the last one
   private volatile CompletableFuture<Void> move = CompletableFuture.completedFuture(null);
   private volatile boolean finalizing;
@@ -523,6 +526,7 @@ final class SyncAttempt {
         compact(built.accounts()),
         compact(built.keptStorageTries()),
         compact(built.slots()));
+    triesBuilt = true;
     trieBuilder = null;
     return pivot;
   }
@@ -542,84 +546,131 @@ final class SyncAttempt {
     return Optional.ofNullable(trieBuilder);
   }
 
-  /** Returns the line of a tick: the phase, its share done and the figures that matter in it. */
-  String progress() {
+  /** The share done of each phase, from 0 to 1, and the time left to the end of the slowest. */
+  record Progress(
+      double state, double tries, double headers, double bodies, OptionalDouble secondsLeft) {}
+
+  Progress progressFigures() {
+    final double[] secondsLeft = {-1};
+    final DoubleConsumer phaseLeft = seconds -> secondsLeft[0] = Math.max(secondsLeft[0], seconds);
     final WorldStateTrieBuilder builder = trieBuilder;
-    final BodyBackfill bodies = window;
-    final StringBuilder line = new StringBuilder();
-    if (builder != null) {
-      // the share of the downloaded accounts added to the tries
+    final long downloadedSlots = stateSync.downloadedSlots();
+    final double state;
+    final double tries;
+    if (triesBuilt) {
+      state = 1;
+      tries = 1;
+    } else if (builder != null) {
+      state = 1;
+      // the slots in the tries built while downloading and those the final build added
+      final long slots = stateSync.storageTrieSlots() + builder.slotsProcessed();
+      tries = Math.min(0.999, (double) slots / Math.max(1, downloadedSlots));
       final long processed = builder.accountsProcessed();
-      final long total = Math.max(processed, stateSync.downloadedAccounts());
-      line.append("SNAP2 tries ")
-          .append(percent(processed, total))
-          .append(" | accounts ")
-          .append(compact(processed))
-          .append(" of ")
-          .append(compact(total))
-          .append(" | slots ")
-          .append(compact(builder.slotsProcessed()))
-          .append(" | storage tries kept ")
-          .append(compact(builder.keptStorageTries()))
-          .append(" | elapsed ")
-          .append(duration(Duration.between(trieStarted, Instant.now())));
-      eta(
+      secondsLeft(
               (double) processed,
-              (double) (total - processed),
+              (double) Math.max(0, stateSync.downloadedAccounts() - processed),
               Duration.between(trieStarted, Instant.now()))
-          .ifPresent(left -> line.append(" | ETA ").append(left));
-    } else if (bodies != null) {
-      line.append("SNAP2 chain | bodies ")
-          .append(percent(bodies.blocksStored(), windowSize))
-          .append(" (")
-          .append(count(bodies.blocksStored()))
-          .append(" of ")
-          .append(count(windowSize))
-          .append(")");
+          .ifPresent(phaseLeft);
     } else {
-      // the share of the account key space covered
-      final double coverage = stateSync.accountCoverage();
-      line.append("SNAP2 state ")
-          .append(percent(coverage))
-          .append(" | accounts ")
-          .append(count(stateSync.downloadedAccounts()))
-          .append(" | slots ")
-          .append(compact(stateSync.downloadedSlots()))
-          .append(" | bytecodes ")
-          .append(compact(stateSync.downloadedCodes()))
-          .append(" | storages pending ")
-          .append(count(stateSync.pendingStorageCount()));
-      line.append(" | storage tries ")
-          .append(compact(stateSync.storageTriesBuilt()))
-          .append(" built, ")
-          .append(compact(stateSync.storageTriesUpdated()))
-          .append(" updated | ")
-          .append(compact(stateSync.storageTrieSlots()))
-          .append(" slots, ")
-          .append(percent(stateSync.storageTrieSlots(), stateSync.downloadedSlots()))
-          .append(" of those downloaded");
-      if (stateSync.storageTriesLeft() > 0) {
-        line.append(", ")
-            .append(compact(stateSync.storageTriesLeft()))
-            .append(" left to the final build");
-      }
-      line.append(" | pivot ").append(block(pivotNumber()));
-      headNumber()
-          .ifPresent(
-              head -> line.append(", ").append(count(head - pivotNumber())).append(" behind head"));
-      if (stateSync.peersWithoutState() > 0) {
-        line.append(" | ").append(stateSync.peersWithoutState()).append(" peers left out");
-      }
-      eta(coverage, 1 - coverage, stateSync.elapsed())
+      state = stateSync.accountCoverage();
+      // the slots of the whole state, extrapolated from the share of the key space downloaded
+      final double allSlots = state > 0 ? downloadedSlots / state : 0;
+      tries = allSlots > 0 ? Math.min(0.999, stateSync.storageTrieSlots() / allSlots) : 0;
+      secondsLeft(state, 1 - state, stateSync.elapsed()).ifPresent(phaseLeft);
+    }
+    final HeaderBackfill backfilled = backfill;
+    final double headers;
+    if (headersDone.isDone()) {
+      headers = 1;
+    } else if (backfilled == null || backfilled.total() == 0) {
+      headers = 0;
+    } else {
+      headers = (double) backfilled.done() / backfilled.total();
+      secondsLeft(
+              (double) backfilled.done(),
+              (double) (backfilled.total() - backfilled.done()),
+              backfilled.elapsed())
+          .ifPresent(phaseLeft);
+    }
+    final BodyBackfill bodies = window;
+    final double bodiesDone =
+        done
+            ? 1
+            : bodies == null || windowSize <= 0
+                ? 0
+                : Math.min(1, (double) bodies.blocksStored() / windowSize);
+    return new Progress(
+        state,
+        tries,
+        headers,
+        bodiesDone,
+        secondsLeft[0] < 0 ? OptionalDouble.empty() : OptionalDouble.of(secondsLeft[0]));
+  }
+
+  // the time left at the average rate since the start, if any
+  private static OptionalDouble secondsLeft(
+      final double done, final double remaining, final Duration elapsed) {
+    final double seconds = elapsed.toMillis() / 1000.0;
+    return done <= 0 || seconds <= 0
+        ? OptionalDouble.empty()
+        : OptionalDouble.of(remaining * seconds / done);
+  }
+
+  /** Returns the line of a tick: the share done of each phase, and the time left. */
+  String progress() {
+    final Progress progress = progressFigures();
+    final StringBuilder line =
+        new StringBuilder("SNAP2 sync | state ")
+            .append(percent(progress.state()))
+            .append(" | tries ")
+            .append(percent(progress.tries()))
+            .append(" | headers ")
+            .append(percent(progress.headers()))
+            .append(" | bodies ")
+            .append(percent(progress.bodies()));
+    if (progress.secondsLeft().isPresent()) {
+      eta(progress.secondsLeft().getAsDouble())
           .ifPresent(left -> line.append(" | ETA ").append(left));
     }
-    // the headers, until they reach the floor
-    final HeaderBackfill headers = backfill;
-    if (headers != null && !headersDone.isDone()) {
-      line.append(" | headers ").append(percent(headers.done(), headers.total()));
-      eta((double) headers.done(), (double) (headers.total() - headers.done()), headers.elapsed())
-          .ifPresent(left -> line.append(" (ETA ").append(left).append(")"));
+    return line.toString();
+  }
+
+  /** Returns the figures behind the progress, for debugging. */
+  String details() {
+    final StringBuilder line =
+        new StringBuilder("SNAP2 details | accounts ")
+            .append(count(stateSync.downloadedAccounts()))
+            .append(" | slots ")
+            .append(compact(stateSync.downloadedSlots()))
+            .append(" | bytecodes ")
+            .append(compact(stateSync.downloadedCodes()))
+            .append(" | storages pending ")
+            .append(count(stateSync.pendingStorageCount()))
+            .append(" | storage tries ")
+            .append(compact(stateSync.storageTriesBuilt()))
+            .append(" built, ")
+            .append(compact(stateSync.storageTriesUpdated()))
+            .append(" updated, ")
+            .append(compact(stateSync.storageTriesLeft()))
+            .append(" left, ")
+            .append(compact(stateSync.storageTrieSlots()))
+            .append(" slots | pivot ")
+            .append(block(pivotNumber()));
+    headNumber()
+        .ifPresent(
+            head -> line.append(", ").append(count(head - pivotNumber())).append(" behind head"));
+    if (stateSync.peersWithoutState() > 0) {
+      line.append(" | ").append(stateSync.peersWithoutState()).append(" peers left out");
     }
+    trieBuilder()
+        .ifPresent(
+            builder ->
+                line.append(" | final build: accounts ")
+                    .append(compact(builder.accountsProcessed()))
+                    .append(", slots ")
+                    .append(compact(builder.slotsProcessed()))
+                    .append(", storage tries kept ")
+                    .append(compact(builder.keptStorageTries())));
     return line.toString();
   }
 

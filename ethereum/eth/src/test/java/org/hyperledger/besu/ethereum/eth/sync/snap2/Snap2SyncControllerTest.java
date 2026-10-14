@@ -40,6 +40,7 @@ import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
@@ -112,6 +113,17 @@ class Snap2SyncControllerTest {
     assertThat(controller.metrics().pivotMoves()).isPositive();
     assertThat(controller.metrics().restarts()).isZero();
     assertThat(controller.metrics().stage()).isEqualTo("done");
+    // every phase reads done, the log line and the metrics alike
+    assertThat(controller.metrics().progress())
+        .hasValueSatisfying(
+            progress ->
+                assertThat(
+                        List.of(
+                            progress.state(),
+                            progress.tries(),
+                            progress.headers(),
+                            progress.bodies()))
+                    .containsOnly(1.0));
     controller.deletePivotSyncState();
     assertThat(marker.exists()).isFalse();
   }

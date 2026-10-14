@@ -331,6 +331,9 @@ final class Snap2SyncController implements SnapSyncController {
       }
       final Snap2Metrics.PeerCounts peers = metrics.peerCounts();
       LOG.info("{}{}", attempt.progress(), peers.few() ? " | " + peers : "");
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("{}", attempt.details());
+      }
     } catch (final RuntimeException e) {
       LOG.debug("Failed to log the SNAP2 progress", e);
     }

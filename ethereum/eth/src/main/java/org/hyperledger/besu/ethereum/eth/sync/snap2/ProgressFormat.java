@@ -108,6 +108,11 @@ public final class ProgressFormat {
     return Optional.of("~" + duration(rounded));
   }
 
+  /** Returns a number of seconds left, as {@link #eta(double, double)}. */
+  public static Optional<String> eta(final double seconds) {
+    return eta(seconds, 1);
+  }
+
   /** Returns the time left at the average rate since the start, as {@link #eta(double, double)}. */
   public static Optional<String> eta(
       final double done, final double remaining, final Duration elapsed) {

@@ -25,10 +25,12 @@ import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.function.ToDoubleFunction;
 import java.util.function.ToLongFunction;
 
 /** Metrics of a SNAP2 sync, read from its current attempt, and a summary of its peers. */
@@ -146,6 +148,18 @@ final class Snap2Metrics {
         "snap2_bytecodes_downloaded_total",
         "Bytecodes downloaded by SNAP2",
         () -> attemptValue(attempt -> attempt.stateSync().downloadedCodes()));
+    final var progress =
+        metricsSystem.createLabelledSuppliedGauge(
+            category, "snap2_progress", "Share done of each SNAP2 phase, from 0 to 1", "phase");
+    progress.labels(() -> progressValue(SyncAttempt.Progress::state), "state");
+    progress.labels(() -> progressValue(SyncAttempt.Progress::tries), "tries");
+    progress.labels(() -> progressValue(SyncAttempt.Progress::headers), "headers");
+    progress.labels(() -> progressValue(SyncAttempt.Progress::bodies), "bodies");
+    metricsSystem.createGauge(
+        category,
+        "snap2_eta_seconds",
+        "Time left to the end of the slowest SNAP2 phase running, NaN when unknown",
+        () -> progressValue(figures -> figures.secondsLeft().orElse(Double.NaN)));
     metricsSystem.createCounter(
         category, "snap2_pivot_moves_total", "Pivot moves of SNAP2", moves::get);
     metricsSystem.createCounter(
@@ -163,6 +177,15 @@ final class Snap2Metrics {
     peers.labels(() -> peerCounts().snap1(), "snap1");
     peers.labels(() -> peerCounts().snap2(), "snap2");
     peers.labels(() -> peerCounts().eth71(), "eth71");
+  }
+
+  /** Returns the progress of the current attempt, none before the first one. */
+  Optional<SyncAttempt.Progress> progress() {
+    return Optional.ofNullable(current.get()).map(SyncAttempt::progressFigures);
+  }
+
+  private double progressValue(final ToDoubleFunction<SyncAttempt.Progress> figure) {
+    return progress().map(figure::applyAsDouble).orElse(0.0);
   }
 
   // a value of the final trie build, 0 before it starts

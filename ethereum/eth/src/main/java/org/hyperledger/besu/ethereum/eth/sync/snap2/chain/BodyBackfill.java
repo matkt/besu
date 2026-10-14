@@ -736,21 +736,16 @@ public final class BodyBackfill implements BlockAddedObserver {
     final long floor = lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
     final long done = initialLowest - lowest;
     final StringBuilder line =
-        new StringBuilder("SNAP2 ")
-            .append(settings.label())
-            .append(' ')
-            .append(percent(done, initialLowest - floor))
-            .append(" | ")
-            .append(compact(blocksRemaining()))
-            .append(" blocks left, down to ")
-            .append(block(floor))
-            .append(" | ")
-            .append(mibPerSecond((bytes - loggedBytes) / seconds));
+        new StringBuilder("SNAP2 bodies ").append(percent(done, initialLowest - floor));
+    eta((double) done, (double) blocksRemaining(), Duration.between(started, clock.instant()))
+        .ifPresent(left -> line.append(" | ETA ").append(left));
+    line.append(" | ")
+        .append(settings.label())
+        .append(' ')
+        .append(mibPerSecond((bytes - loggedBytes) / seconds));
     if (settings.bytesPerSecond() > 0) {
       line.append(" (limit ").append(mibPerSecond((double) settings.bytesPerSecond())).append(")");
     }
-    eta((double) done, (double) blocksRemaining(), Duration.between(started, clock.instant()))
-        .ifPresent(left -> line.append(" | ETA ").append(left));
     line.append(" | ");
     if (state == State.PAUSED) {
       line.append("paused: ").append(pauseReason);
