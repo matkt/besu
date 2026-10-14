@@ -98,6 +98,11 @@ final class Snap2Metrics {
         () -> attemptValue(attempt -> attempt.stateSync().storageTriesBuilt()));
     metricsSystem.createLongGauge(
         category,
+        "snap2_storage_trie_slots",
+        "Slots SNAP2 added to storage tries while downloading",
+        () -> attemptValue(attempt -> attempt.stateSync().storageTrieSlots()));
+    metricsSystem.createLongGauge(
+        category,
         "snap2_storage_tries_queued",
         "Downloaded storages waiting for their trie",
         () -> attemptValue(attempt -> attempt.stateSync().storageTriesQueued()));

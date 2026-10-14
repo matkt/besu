@@ -20,21 +20,27 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.World;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
 class StorageTriesTest {
@@ -88,5 +94,45 @@ class StorageTriesTest {
 
     assertThat(tries.built()).isZero();
     assertThat(storages.sync().hasStorageTrie(account, world.storageRoot(account))).isFalse();
+  }
+
+  @Test
+  void abandonsALargeStorageThatAMoveChangedWhileItWasBuilt() {
+    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+    final Random random = new Random(7);
+    final World world = new World();
+    final Bytes32 changed = Bytes32.random(random);
+    final Bytes32 kept = Bytes32.random(random);
+    // large enough to be checked while built
+    for (final Bytes32 account : List.of(changed, kept)) {
+      final TreeMap<Bytes32, UInt256> slots = new TreeMap<>();
+      for (int i = 0; i < 70_000; i++) {
+        slots.put(Bytes32.random(random), UInt256.valueOf(i + 1));
+      }
+      world.storage.put(account, slots);
+      world.accounts.put(account, new PmtStateTrieAccountValue(1, Wei.ONE, Hash.ZERO, Hash.EMPTY));
+    }
+    // the move left the changed account with an unknown root, the other one keeps its own
+    world.writeFlat(storages.sync());
+    final Bytes32 changedRoot = world.storageRoot(changed);
+    final Bytes32 keptRoot = world.storageRoot(kept);
+    final SyncStateStorage.Batch batch = storages.sync().batch();
+    batch.putAccount(
+        kept,
+        Accounts.encode(new PmtStateTrieAccountValue(1, Wei.ONE, Hash.wrap(keptRoot), Hash.EMPTY)));
+    batch.commit();
+    final StorageTries tries = new StorageTries(storages.sync(), 1);
+
+    tries.completed(changed, changedRoot, 70_000);
+    tries.completed(kept, keptRoot, 70_000);
+    await().atMost(Duration.ofSeconds(30)).until(() -> tries.built() + tries.left() == 2);
+    tries.stop();
+
+    assertThat(tries.built()).isOne();
+    assertThat(tries.left()).isOne();
+    // the changed one stopped at its first check
+    assertThat(tries.slots()).isEqualTo(65_536 + 70_000);
+    assertThat(storages.sync().hasStorageTrie(kept, keptRoot)).isTrue();
+    assertThat(storages.sync().hasStorageTrie(changed, changedRoot)).isFalse();
   }
 }

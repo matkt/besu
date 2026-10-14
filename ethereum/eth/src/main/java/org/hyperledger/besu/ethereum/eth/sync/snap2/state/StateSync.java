@@ -246,6 +246,11 @@ public final class StateSync {
     return tries.built();
   }
 
+  /** Returns the number of slots added to storage tries while downloading. */
+  public long storageTrieSlots() {
+    return tries.slots();
+  }
+
   /** Returns the number of downloaded storages waiting for their trie. */
   public int storageTriesQueued() {
     return tries.queued();

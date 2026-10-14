@@ -41,7 +41,8 @@ public final class StorageTries {
   private static final Logger LOG = LoggerFactory.getLogger(StorageTries.class);
   // past it the smallest are left to the final build, which reads them in one pass
   private static final int MAX_QUEUED = 100_000;
-  private static final int SLOTS_PER_STOP_CHECK = 65_536;
+  // a build checks this often whether the sync stopped or a move changed the storage
+  private static final int SLOTS_PER_CHECK = 65_536;
 
   private final SyncStateStorage storage;
   private final ExecutorService workers;
@@ -51,6 +52,7 @@ public final class StorageTries {
           Comparator.comparingLong(Pending::slots).reversed().thenComparing(Pending::accountHash));
   private final AtomicLong built = new AtomicLong();
   private final AtomicLong left = new AtomicLong();
+  private final AtomicLong slots = new AtomicLong();
   private volatile boolean stopped;
 
   private record Pending(Bytes32 accountHash, Bytes32 storageRoot, long slots) {}
@@ -82,6 +84,11 @@ public final class StorageTries {
   /** Returns the number of storage tries built. */
   public long built() {
     return built.get();
+  }
+
+  /** Returns the number of slots added to storage tries, those of abandoned builds included. */
+  public long slots() {
+    return slots.get();
   }
 
   /** Returns the number of storages waiting for their trie. */
@@ -119,7 +126,11 @@ public final class StorageTries {
         try {
           build(next, writer);
         } catch (final CancellationException e) {
-          return;
+          if (stopped) {
+            return;
+          }
+          // a move changed the storage while it was built, the final build redoes it
+          left.incrementAndGet();
         } catch (final RuntimeException e) {
           left.incrementAndGet();
           LOG.debug(
@@ -173,15 +184,19 @@ public final class StorageTries {
                 writer.storageNode(accountHash, location, hash, rlp);
               }
             });
-    final long[] slots = {0};
+    final long[] count = {0};
     storage.forEachSlotValue(
         accountHash,
         (slot, value) -> {
-          if (++slots[0] % SLOTS_PER_STOP_CHECK == 0 && stopped) {
-            throw new CancellationException("storage tries stopped");
+          if (++count[0] % SLOTS_PER_CHECK == 0) {
+            slots.addAndGet(SLOTS_PER_CHECK);
+            if (stopped || changed(pending)) {
+              throw new CancellationException("storage tries stopped or storage changed");
+            }
           }
           trie.addLeaf(slot, RLP.encodeOne(value.trimLeadingZeros()));
         });
+    slots.addAndGet(count[0] % SLOTS_PER_CHECK);
     final Bytes32 root = trie.rootHash();
     if (!root.equals(pending.storageRoot())) {
       left.incrementAndGet();
@@ -195,5 +210,15 @@ public final class StorageTries {
     // last, so that a root node is only found with the nodes below it
     writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
     built.incrementAndGet();
+  }
+
+  // a move changing the storage marks the root of its account unknown
+  private boolean changed(final Pending pending) {
+    return storage
+        .getAccount(pending.accountHash())
+        .map(
+            account ->
+                !Accounts.decode(account).getStorageRoot().getBytes().equals(pending.storageRoot()))
+        .orElse(true);
   }
 }

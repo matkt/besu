@@ -619,7 +619,9 @@ final class SyncAttempt {
           .append(count(stateSync.pendingStorages()));
       line.append(" | storage tries ")
           .append(compact(stateSync.storageTriesBuilt()))
-          .append(" built");
+          .append(" built (")
+          .append(compact(stateSync.storageTrieSlots()))
+          .append(" slots)");
       if (stateSync.storageTriesLeft() > 0) {
         line.append(", ")
             .append(compact(stateSync.storageTriesLeft()))
