@@ -153,7 +153,7 @@ final class Snap2Metrics {
     metricsSystem.createGauge(
         category,
         "snap2_eta_seconds",
-        "Time left to the end of the slowest SNAP2 phase running, NaN when unknown",
+        "Time left to the end of the slowest SNAP2 phase running once the state is downloaded, NaN before",
         () -> progressValue(figures -> figures.secondsLeft().orElse(Double.NaN)));
     metricsSystem.createCounter(
         category, "snap2_pivot_moves_total", "Pivot moves of SNAP2", moves::get);

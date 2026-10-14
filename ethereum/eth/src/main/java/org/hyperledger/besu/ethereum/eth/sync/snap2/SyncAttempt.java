@@ -653,7 +653,10 @@ final class SyncAttempt {
         tries,
         headers,
         bodiesDone,
-        secondsLeft[0] < 0 ? OptionalDouble.empty() : OptionalDouble.of(secondsLeft[0]));
+        // the time left once the state is downloaded, the state download alone telling it badly
+        secondsLeft[0] < 0 || window == null
+            ? OptionalDouble.empty()
+            : OptionalDouble.of(secondsLeft[0]));
   }
 
   // the time left at the average rate since the start, if any
@@ -675,13 +678,13 @@ final class SyncAttempt {
             .append(percent(progress.tries()))
             .append(" | headers ")
             .append(percent(progress.headers()));
-    // the bodies and the time left once the state is downloaded, the bodies starting then
+    // the bodies start once the state is downloaded
     if (window != null) {
       line.append(" | bodies ").append(percent(progress.bodies()));
-      if (progress.secondsLeft().isPresent()) {
-        eta(progress.secondsLeft().getAsDouble())
-            .ifPresent(left -> line.append(" | ETA ").append(left));
-      }
+    }
+    if (progress.secondsLeft().isPresent()) {
+      eta(progress.secondsLeft().getAsDouble())
+          .ifPresent(left -> line.append(" | ETA ").append(left));
     }
     return line.toString();
   }
