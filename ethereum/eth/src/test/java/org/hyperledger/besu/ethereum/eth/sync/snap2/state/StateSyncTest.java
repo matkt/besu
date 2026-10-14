@@ -239,8 +239,9 @@ class StateSyncTest {
     return build(storages).root();
   }
 
-  // the download stops first, as it does before the final build
+  // the download applies its last changes to the tries and stops first, as before the final build
   private WorldStateTrieBuilder.Result build(final Storages storages) {
+    stateSync.finishStorageTries();
     stateSync.stop();
     return new WorldStateTrieBuilder(storages.sync(), 2).build();
   }

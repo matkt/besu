@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld.hash;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld.slotHash;
 
@@ -108,7 +109,8 @@ class StateDiffApplierTest {
                     List.of(),
                     List.of()))));
 
-    final StateDiffApplier.Outcome outcome = StateDiffApplier.apply(diff, storage, coverage);
+    final StateDiffApplier.Outcome outcome =
+        StateDiffApplier.apply(diff, storage, coverage, (account, root, slots) -> {});
 
     assertThat(outcome.skipped()).isEqualTo(1);
     assertThat(outcome.deleted()).isEqualTo(1);
@@ -127,7 +129,7 @@ class StateDiffApplierTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
-  void forgetsTheStorageRootOfACompleteStorageItChanges(final Format format) {
+  void handsTheChangedSlotsOfACompleteStorageToItsTrie(final Format format) {
     final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
     final StateCoverage coverage = new StateCoverage();
     final Hash builtRoot = Hash.hash(Bytes.of(1));
@@ -146,10 +148,21 @@ class StateDiffApplierTest {
             List.of(
                 changes(A, List.of(slot(S1, 7)), List.of(), List.of(), List.of()),
                 changes(B, List.of(slot(S1, 7)), List.of(), List.of(), List.of()))));
-    StateDiffApplier.apply(diff, storage, coverage);
+    final Map<Bytes32, Hash> previousRoots = new HashMap<>();
+    final Map<Bytes32, Map<Bytes32, UInt256>> changedSlots = new HashMap<>();
+    StateDiffApplier.apply(
+        diff,
+        storage,
+        coverage,
+        (account, root, slots) -> {
+          previousRoots.put(account, root);
+          changedSlots.put(account, slots);
+        });
 
-    // a trie built for A's former slots no longer matches: the final build redoes it
+    // A's trie gets the changed slots, its root being unknown until then
     assertThat(read(storage, A).getStorageRoot()).isEqualTo(Accounts.UNKNOWN_STORAGE_ROOT);
+    assertThat(previousRoots).containsOnlyKeys(hash(A)).containsEntry(hash(A), builtRoot);
+    assertThat(changedSlots.get(hash(A))).containsExactly(entry(slotHash(S1), UInt256.valueOf(7)));
     // the download learns B's new root instead
     assertThat(read(storage, B).getStorageRoot()).isEqualTo(builtRoot);
   }

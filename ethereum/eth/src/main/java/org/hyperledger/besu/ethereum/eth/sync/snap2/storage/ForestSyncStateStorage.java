@@ -25,6 +25,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -89,6 +90,12 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
   @Override
   public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
     return forest.getAccountStorageTrieNode(storageRoot).isPresent();
+  }
+
+  @Override
+  public Optional<Bytes> storageTrieNode(
+      final Bytes32 accountHash, final Bytes location, final Bytes32 hash) {
+    return forest.getAccountStorageTrieNode(hash);
   }
 
   @Override

@@ -722,28 +722,20 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   // writes that never conflict skip the conflict checks of a transaction
   @Override
   public SegmentedKeyValueStorageTransaction startBatchTransaction() throws StorageException {
-    return batchTransaction(false, false);
+    return batchTransaction(false);
   }
 
   @Override
   public SegmentedKeyValueStorageTransaction startUnloggedBatchTransaction()
       throws StorageException {
-    return batchTransaction(true, false);
+    return batchTransaction(true);
   }
 
-  @Override
-  public SegmentedKeyValueStorageTransaction startLowPriorityUnloggedBatchTransaction()
-      throws StorageException {
-    return batchTransaction(true, true);
-  }
-
-  private SegmentedKeyValueStorageTransaction batchTransaction(
-      final boolean unlogged, final boolean lowPriority) {
+  private SegmentedKeyValueStorageTransaction batchTransaction(final boolean unlogged) {
     throwIfClosed();
     final WriteOptions writeOptions = new WriteOptions();
     writeOptions.setIgnoreMissingColumnFamilies(true);
     writeOptions.setDisableWAL(unlogged);
-    writeOptions.setLowPri(lowPriority);
     return new SegmentedKeyValueStorageTransactionValidatorDecorator(
         new RocksDBWriteBatchTransaction(
             this::safeColumnHandle, getDB(), writeOptions, getMetrics()),

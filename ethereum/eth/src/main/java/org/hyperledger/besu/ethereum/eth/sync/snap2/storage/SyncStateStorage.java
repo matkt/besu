@@ -49,19 +49,14 @@ public interface SyncStateStorage {
   /** Returns whether the storage trie of an account with this root is completely written. */
   boolean hasStorageTrie(Bytes32 accountHash, Bytes32 storageRoot);
 
+  /** Returns a node of the storage trie of an account, by its location and hash. */
+  Optional<Bytes> storageTrieNode(Bytes32 accountHash, Bytes location, Bytes32 hash);
+
   /** Removes every slot of an account, committing in bounded batches. */
   void deleteStorage(Bytes32 accountHash);
 
   /** Creates a writer of trie nodes, not shared between threads. */
   TrieWriter trieWriter();
-
-  /**
-   * Creates a writer of the trie nodes built while the state downloads, whose writes give way to
-   * the download's when the storage falls behind; not shared between threads.
-   */
-  default TrieWriter backgroundTrieWriter() {
-    return trieWriter();
-  }
 
   /** Records the world state root and the block it belongs to, once every node is written. */
   void saveWorldState(BlockHeader header, Bytes rootNode);

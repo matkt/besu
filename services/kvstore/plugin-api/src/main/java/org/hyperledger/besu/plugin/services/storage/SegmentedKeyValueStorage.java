@@ -157,19 +157,6 @@ public interface SegmentedKeyValueStorage extends Closeable {
   }
 
   /**
-   * Begins an unlogged batch transaction of low write priority, slowed down before the other writes
-   * when the storage falls behind, see {@link #startLowPriorityTransaction()}. Storage without
-   * write priorities falls back to {@link #startUnloggedBatchTransaction()}.
-   *
-   * @return An object representing the transaction.
-   * @throws StorageException the storage exception
-   */
-  default SegmentedKeyValueStorageTransaction startLowPriorityUnloggedBatchTransaction()
-      throws StorageException {
-    return startUnloggedBatchTransaction();
-  }
-
-  /**
    * Persists the writes still held in memory, including those that skipped the write-ahead log.
    *
    * @throws StorageException the storage exception

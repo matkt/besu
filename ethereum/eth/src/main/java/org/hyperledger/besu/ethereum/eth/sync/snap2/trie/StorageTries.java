@@ -18,47 +18,96 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.MerkleTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Builds the storage tries of the downloaded storages, largest first, while the rest of the state
- * downloads. A move changing a storage marks its root unknown, so the final build redoes it.
+ * downloads, and applies to the built ones the slots the pivot moves change, before any new build.
+ * A changed storage keeps an unknown root in its account until its trie gives the new one.
  */
 public final class StorageTries {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageTries.class);
-  // past it the smallest are left to the final build, which reads them in one pass
+  // past it the smallest builds are left to the final build, which reads them in one pass
   private static final int MAX_QUEUED = 100_000;
-  // a build checks this often whether the sync stopped or a move changed the storage
+  // a build checks this often whether it must stop
   private static final int SLOTS_PER_CHECK = 65_536;
 
   private final SyncStateStorage storage;
+  private final Predicate<Runnable> withoutMoves;
   private final ExecutorService workers;
-  // guarded by this
-  private final TreeSet<Pending> queue =
+  // guarded by this: the jobs not started, updates in arrival order, builds largest first, and
+  // the accounts a worker is on, which no other worker takes
+  private final Map<Bytes32, Job> jobs = new HashMap<>();
+  private final ArrayDeque<Bytes32> updates = new ArrayDeque<>();
+  private final TreeSet<Job> builds =
       new TreeSet<>(
-          Comparator.comparingLong(Pending::slots).reversed().thenComparing(Pending::accountHash));
+          Comparator.comparingLong((Job job) -> job.slots).reversed().thenComparing(Job::account));
+  private final Set<Bytes32> inProgress = new HashSet<>();
   private final AtomicLong built = new AtomicLong();
+  private final AtomicLong updated = new AtomicLong();
   private final AtomicLong left = new AtomicLong();
   private final AtomicLong slots = new AtomicLong();
+  private volatile boolean finishing;
   private volatile boolean stopped;
 
-  private record Pending(Bytes32 accountHash, Bytes32 storageRoot, long slots) {}
+  /** A storage to build from its slots, or a built trie to change, with the slots moves changed. */
+  private static final class Job {
+    private final Bytes32 account;
+    private final long slots;
+    // a build: the root its downloaded slots were verified against
+    private final Bytes32 verifiedRoot;
+    // an update: the root of the trie to change, null until the job before it gives it
+    private Bytes32 base;
+    private final Map<Bytes32, UInt256> changes = new HashMap<>();
 
-  public StorageTries(final SyncStateStorage storage, final int threads) {
+    private Job(final Bytes32 account, final long slots, final Bytes32 verifiedRoot) {
+      this.account = account;
+      this.slots = slots;
+      this.verifiedRoot = verifiedRoot;
+    }
+
+    private Bytes32 account() {
+      return account;
+    }
+
+    private boolean isBuild() {
+      return verifiedRoot != null;
+    }
+  }
+
+  /**
+   * Creates the builder.
+   *
+   * @param withoutMoves runs an action exclusive with pivot moves, false once the sync stopped
+   */
+  public StorageTries(
+      final SyncStateStorage storage, final Predicate<Runnable> withoutMoves, final int threads) {
     this.storage = storage;
+    this.withoutMoves = withoutMoves;
     this.workers =
         Executors.newFixedThreadPool(
             threads, Thread.ofPlatform().name("snap2-storage-trie-", 0).daemon().factory());
@@ -70,15 +119,49 @@ public final class StorageTries {
   /** Queues a downloaded storage, with the root its slots were verified against. */
   public synchronized void completed(
       final Bytes32 accountHash, final Bytes32 storageRoot, final long slots) {
+    if (stopped || finishing) {
+      return;
+    }
+    final Job job = new Job(accountHash.copy(), slots, storageRoot.copy());
+    jobs.put(job.account, job);
+    builds.add(job);
+    if (builds.size() > MAX_QUEUED) {
+      jobs.remove(builds.pollLast().account);
+      left.incrementAndGet();
+    }
+    notifyAll();
+  }
+
+  /**
+   * Records slots a pivot move changed in a storage downloaded whole, whose account had the given
+   * root before the move; moves call it exclusive with the other writes of the download.
+   */
+  public synchronized void changed(
+      final Bytes32 accountHash, final Hash previousRoot, final Map<Bytes32, UInt256> changed) {
     if (stopped) {
       return;
     }
-    queue.add(new Pending(accountHash.copy(), storageRoot.copy(), slots));
-    if (queue.size() > MAX_QUEUED) {
-      queue.pollLast();
-      left.incrementAndGet();
+    Job job = jobs.get(accountHash);
+    if (job == null) {
+      final Bytes32 base;
+      if (inProgress.contains(accountHash)) {
+        // the job in progress gives it
+        base = null;
+      } else if (Accounts.UNKNOWN_STORAGE_ROOT.equals(previousRoot)) {
+        // no trie to change: the final build makes it
+        return;
+      } else {
+        base = Bytes32.wrap(previousRoot.getBytes());
+      }
+      job = new Job(accountHash.copy(), 0, null);
+      job.base = base;
+      jobs.put(job.account, job);
+      updates.add(job.account);
+      notifyAll();
     }
-    notify();
+    for (final Map.Entry<Bytes32, UInt256> slot : changed.entrySet()) {
+      job.changes.put(slot.getKey().copy(), slot.getValue());
+    }
   }
 
   /** Returns the number of storage tries built. */
@@ -86,26 +169,53 @@ public final class StorageTries {
     return built.get();
   }
 
+  /** Returns the number of built storage tries changed by pivot moves. */
+  public long updated() {
+    return updated.get();
+  }
+
   /** Returns the number of slots added to storage tries, those of abandoned builds included. */
   public long slots() {
     return slots.get();
   }
 
-  /** Returns the number of storages waiting for their trie. */
+  /** Returns the number of storages waiting for their trie or for a change of it. */
   public synchronized int queued() {
-    return queue.size();
+    return jobs.size();
   }
 
-  /** Returns the number of storages left to the final build: too many queued, or changed. */
+  /** Returns the number of storages left to the final build. */
   public long left() {
     return left.get();
   }
 
-  /** Stops building, once the builds in progress wrote what they built. */
+  /** Applies the changes still waiting, gives up the builds, then stops. */
+  public void finish() {
+    synchronized (this) {
+      finishing = true;
+      left.addAndGet(builds.size());
+      builds.forEach(job -> jobs.remove(job.account));
+      builds.clear();
+      // builds in progress give up at their next check
+      while (!stopped && (!updates.isEmpty() || !inProgress.isEmpty())) {
+        try {
+          wait();
+        } catch (final InterruptedException e) {
+          Thread.currentThread().interrupt();
+          break;
+        }
+      }
+    }
+    stop();
+  }
+
+  /** Stops, once the jobs in progress wrote what they built. */
   public void stop() {
     synchronized (this) {
       stopped = true;
-      queue.clear();
+      jobs.clear();
+      updates.clear();
+      builds.clear();
       notifyAll();
     }
     workers.shutdownNow();
@@ -119,22 +229,22 @@ public final class StorageTries {
   }
 
   private void run() {
-    // its writes give way to the download's when the storage falls behind
-    final SyncStateStorage.TrieWriter writer = storage.backgroundTrieWriter();
+    final SyncStateStorage.TrieWriter writer = storage.trieWriter();
     try {
-      for (Pending next = next(writer); next != null; next = next(writer)) {
+      for (Job job = next(writer); job != null; job = next(writer)) {
         try {
-          build(next, writer);
+          process(job, writer);
         } catch (final CancellationException e) {
           if (stopped) {
             return;
           }
-          // a move changed the storage while it was built, the final build redoes it
+          // a build the end of the download cut short
           left.incrementAndGet();
         } catch (final RuntimeException e) {
           left.incrementAndGet();
-          LOG.debug(
-              "Storage trie of {} left to the final build: {}", next.accountHash(), e.getMessage());
+          LOG.debug("Storage trie of {} left to the final build: {}", job.account, e.getMessage());
+        } finally {
+          release(job.account);
         }
       }
     } catch (final InterruptedException e) {
@@ -144,20 +254,53 @@ public final class StorageTries {
     }
   }
 
-  // the next storage to build, null once stopped; the batched writes are committed when idle
-  private Pending next(final SyncStateStorage.TrieWriter writer) throws InterruptedException {
+  // the next job, null once stopped; the batched writes are committed when idle
+  private Job next(final SyncStateStorage.TrieWriter writer) throws InterruptedException {
     synchronized (this) {
-      if (!queue.isEmpty()) {
-        return queue.pollFirst();
+      final Job job = stopped ? null : take();
+      if (job != null || stopped) {
+        return job;
       }
     }
     commit(writer);
     synchronized (this) {
-      while (!stopped && queue.isEmpty()) {
+      while (!stopped) {
+        final Job job = take();
+        if (job != null) {
+          return job;
+        }
         wait();
       }
-      return stopped ? null : queue.pollFirst();
+      return null;
     }
+  }
+
+  // updates first, never of an account a worker is on; then builds, unless finishing
+  private Job take() {
+    for (final Iterator<Bytes32> accounts = updates.iterator(); accounts.hasNext(); ) {
+      final Bytes32 account = accounts.next();
+      if (!inProgress.contains(account)) {
+        accounts.remove();
+        inProgress.add(account);
+        return jobs.remove(account);
+      }
+    }
+    final Job build = finishing ? null : builds.pollFirst();
+    if (build != null) {
+      jobs.remove(build.account);
+      inProgress.add(build.account);
+    }
+    return build;
+  }
+
+  // a move records its changes before writing them, so slots read changed have a next job
+  private synchronized boolean changedSince(final Bytes32 account) {
+    return jobs.containsKey(account);
+  }
+
+  private synchronized void release(final Bytes32 account) {
+    inProgress.remove(account);
+    notifyAll();
   }
 
   // a failed write leaves the storages batched in it to the final build
@@ -169,10 +312,32 @@ public final class StorageTries {
     }
   }
 
-  private void build(final Pending pending, final SyncStateStorage.TrieWriter writer) {
-    final Bytes32 accountHash = pending.accountHash();
-    if (!Accounts.hasBuildableStorage(Hash.wrap(pending.storageRoot()))) {
-      return;
+  private void process(final Job job, final SyncStateStorage.TrieWriter writer) {
+    final Bytes32 root;
+    if (job.isBuild()) {
+      final Bytes32 builtRoot = build(job, writer);
+      if (builtRoot == null) {
+        return;
+      }
+      // applied again if already read, as a move may have changed the slots during the build
+      root = job.changes.isEmpty() ? builtRoot : change(job.account, builtRoot, job, writer);
+      built.incrementAndGet();
+    } else {
+      if (job.base == null || !hasTrie(job.account, job.base)) {
+        // never built, or its build gave up
+        return;
+      }
+      root = change(job.account, job.base, job, writer);
+      updated.incrementAndGet();
+    }
+    publish(job, root, writer);
+  }
+
+  // the root built from the slots, null when they do not give the root they were verified against
+  private Bytes32 build(final Job job, final SyncStateStorage.TrieWriter writer) {
+    final Bytes32 accountHash = job.account;
+    if (!Accounts.hasBuildableStorage(Hash.wrap(job.verifiedRoot))) {
+      return null;
     }
     final Bytes[] rootNode = new Bytes[1];
     final StackTrie trie =
@@ -190,35 +355,97 @@ public final class StorageTries {
         (slot, value) -> {
           if (++count[0] % SLOTS_PER_CHECK == 0) {
             slots.addAndGet(SLOTS_PER_CHECK);
-            if (stopped || changed(pending)) {
-              throw new CancellationException("storage tries stopped or storage changed");
+            if (stopped || finishing) {
+              throw new CancellationException("storage tries stopped");
             }
           }
           trie.addLeaf(slot, RLP.encodeOne(value.trimLeadingZeros()));
         });
     slots.addAndGet(count[0] % SLOTS_PER_CHECK);
     final Bytes32 root = trie.rootHash();
-    if (!root.equals(pending.storageRoot())) {
+    // slots a move changed during the build give another root, until they are applied again
+    if (job.changes.isEmpty() && !root.equals(job.verifiedRoot) && !changedSince(accountHash)) {
       left.incrementAndGet();
       LOG.debug(
           "Storage of {} gives root {} instead of {}, left to the final build",
           accountHash,
           root,
-          pending.storageRoot());
-      return;
+          job.verifiedRoot);
+      return null;
     }
     // last, so that a root node is only found with the nodes below it
-    writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
-    built.incrementAndGet();
+    if (rootNode[0] != null) {
+      writer.storageNode(accountHash, Bytes.EMPTY, root, rootNode[0]);
+    }
+    return root;
   }
 
-  // a move changing the storage marks the root of its account unknown
-  private boolean changed(final Pending pending) {
-    return storage
-        .getAccount(pending.accountHash())
-        .map(
-            account ->
-                !Accounts.decode(account).getStorageRoot().getBytes().equals(pending.storageRoot()))
-        .orElse(true);
+  // applies the changed slots to a stored trie, as a block import does, and returns its new root
+  private Bytes32 change(
+      final Bytes32 accountHash,
+      final Bytes32 base,
+      final Job job,
+      final SyncStateStorage.TrieWriter writer) {
+    // the nodes of the base are read back
+    writer.commit();
+    final StoredMerklePatriciaTrie<Bytes32, Bytes> trie =
+        new StoredMerklePatriciaTrie<>(
+            (location, hash) -> storage.storageTrieNode(accountHash, location, hash),
+            base,
+            Function.identity(),
+            Function.identity());
+    job.changes.forEach(
+        (slot, value) -> {
+          if (value.isZero()) {
+            trie.remove(slot);
+          } else {
+            trie.put(slot, RLP.encodeOne(value.toMinimalBytes()));
+          }
+        });
+    trie.commit((location, hash, node) -> writer.storageNode(accountHash, location, hash, node));
+    return trie.getRootHash();
+  }
+
+  private boolean hasTrie(final Bytes32 accountHash, final Bytes32 root) {
+    return root.equals(MerkleTrie.EMPTY_TRIE_NODE_HASH)
+        || storage.hasStorageTrie(accountHash, root);
+  }
+
+  // commits the trie, then gives its root to the next job of the account, or to the account
+  private void publish(
+      final Job job, final Bytes32 root, final SyncStateStorage.TrieWriter writer) {
+    writer.commit();
+    final boolean running =
+        withoutMoves.test(
+            () -> {
+              final Job next;
+              synchronized (this) {
+                next = jobs.get(job.account);
+                if (next != null) {
+                  next.base = root;
+                }
+              }
+              // a move left the account with an unknown root
+              if (next == null && (!job.isBuild() || !job.changes.isEmpty())) {
+                writeRoot(job.account, root);
+              }
+            });
+    if (!running) {
+      throw new CancellationException("storage tries stopped");
+    }
+  }
+
+  // an account a move removed gets no root
+  private void writeRoot(final Bytes32 accountHash, final Bytes32 root) {
+    storage
+        .getAccount(accountHash)
+        .map(Accounts::decode)
+        .ifPresent(
+            account -> {
+              final SyncStateStorage.Batch batch = storage.batch();
+              batch.putAccount(
+                  accountHash, Accounts.encode(Accounts.withStorageRoot(account, Hash.wrap(root))));
+              batch.commit();
+            });
   }
 }

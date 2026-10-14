@@ -21,18 +21,18 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.World;
-import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -45,9 +45,10 @@ import org.junit.jupiter.api.Test;
 
 class StorageTriesTest {
 
+  private final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+
   @Test
   void buildsTheLargestStoragesFirst() {
-    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
     final World world = SyncStorageFixture.randomWorld(new Random(5), 400);
     world.writeFlat(storages.sync());
     final SyncStateStorage storage = spy(storages.sync());
@@ -62,7 +63,7 @@ class StorageTriesTest {
             })
         .when(storage)
         .forEachSlotValue(any(), any());
-    final StorageTries tries = new StorageTries(storage, 1);
+    final StorageTries tries = new StorageTries(storage, StorageTriesTest::noMoves, 1);
 
     world.storage.forEach(
         (account, slots) -> tries.completed(account, world.storageRoot(account), slots.size()));
@@ -80,15 +81,14 @@ class StorageTriesTest {
   }
 
   @Test
-  void leavesAStorageThatNoLongerHasItsRootToTheFinalBuild() {
-    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+  void leavesAStorageThatDoesNotGiveItsVerifiedRootToTheFinalBuild() {
     final World world = SyncStorageFixture.randomWorld(new Random(6), 50);
     world.writeFlat(storages.sync());
     final Bytes32 account = world.storage.firstKey();
-    final Bytes32 changedRoot = Bytes32.fromHexString("0x" + "11".repeat(32));
-    final StorageTries tries = new StorageTries(storages.sync(), 1);
+    final Bytes32 otherRoot = Bytes32.fromHexString("0x" + "11".repeat(32));
+    final StorageTries tries = new StorageTries(storages.sync(), StorageTriesTest::noMoves, 1);
 
-    tries.completed(account, changedRoot, world.storage.get(account).size());
+    tries.completed(account, otherRoot, world.storage.get(account).size());
     await().atMost(Duration.ofSeconds(20)).until(() -> tries.left() == 1);
     tries.stop();
 
@@ -97,42 +97,109 @@ class StorageTriesTest {
   }
 
   @Test
-  void abandonsALargeStorageThatAMoveChangedWhileItWasBuilt() {
-    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
-    final Random random = new Random(7);
-    final World world = new World();
-    final Bytes32 changed = Bytes32.random(random);
-    final Bytes32 kept = Bytes32.random(random);
-    // large enough to be checked while built
-    for (final Bytes32 account : List.of(changed, kept)) {
-      final TreeMap<Bytes32, UInt256> slots = new TreeMap<>();
-      for (int i = 0; i < 70_000; i++) {
-        slots.put(Bytes32.random(random), UInt256.valueOf(i + 1));
-      }
-      world.storage.put(account, slots);
-      world.accounts.put(account, new PmtStateTrieAccountValue(1, Wei.ONE, Hash.ZERO, Hash.EMPTY));
-    }
-    // the move left the changed account with an unknown root, the other one keeps its own
-    world.writeFlat(storages.sync());
-    final Bytes32 changedRoot = world.storageRoot(changed);
-    final Bytes32 keptRoot = world.storageRoot(kept);
-    final SyncStateStorage.Batch batch = storages.sync().batch();
-    batch.putAccount(
-        kept,
-        Accounts.encode(new PmtStateTrieAccountValue(1, Wei.ONE, Hash.wrap(keptRoot), Hash.EMPTY)));
-    batch.commit();
-    final StorageTries tries = new StorageTries(storages.sync(), 1);
+  void appliesTheSlotsAMoveChangedToABuiltTrie() {
+    final World world = SyncStorageFixture.randomWorld(new Random(8), 80);
+    final Bytes32 account = largestStorage(world);
+    final Bytes32 downloadedRoot = writeWithRoot(world, account);
+    final StorageTries tries = new StorageTries(storages.sync(), StorageTriesTest::noMoves, 1);
+    tries.completed(account, downloadedRoot, world.storage.get(account).size());
+    await().atMost(Duration.ofSeconds(20)).until(() -> tries.built() == 1);
 
-    tries.completed(changed, changedRoot, 70_000);
-    tries.completed(kept, keptRoot, 70_000);
-    await().atMost(Duration.ofSeconds(30)).until(() -> tries.built() + tries.left() == 2);
-    tries.stop();
+    final Map<Bytes32, UInt256> changes = move(world, account);
+    tries.changed(account, Hash.wrap(downloadedRoot), changes);
+    tries.finish();
+
+    assertThat(tries.updated()).isOne();
+    assertStorageTrie(world, account);
+  }
+
+  @Test
+  void appliesTheSlotsAMoveChangedDuringABuildOnceItIsDone() {
+    final World world = SyncStorageFixture.randomWorld(new Random(9), 80);
+    final Bytes32 account = largestStorage(world);
+    final Bytes32 downloadedRoot = writeWithRoot(world, account);
+    final SyncStateStorage storage = spy(storages.sync());
+    final CountDownLatch moved = new CountDownLatch(1);
+    doAnswer(
+            invocation -> {
+              // the move lands before the build reads the slots
+              Uninterruptibles.awaitUninterruptibly(moved);
+              return invocation.callRealMethod();
+            })
+        .when(storage)
+        .forEachSlotValue(any(), any());
+    final StorageTries tries = new StorageTries(storage, StorageTriesTest::noMoves, 1);
+    tries.completed(account, downloadedRoot, world.storage.get(account).size());
+    await().atMost(Duration.ofSeconds(20)).until(() -> tries.queued() == 0);
+
+    final Map<Bytes32, UInt256> changes = move(world, account);
+    tries.changed(account, Accounts.UNKNOWN_STORAGE_ROOT, changes);
+    moved.countDown();
+    await().atMost(Duration.ofSeconds(20)).until(() -> tries.updated() == 1);
+    tries.finish();
 
     assertThat(tries.built()).isOne();
-    assertThat(tries.left()).isOne();
-    // the changed one stopped at its first check
-    assertThat(tries.slots()).isEqualTo(65_536 + 70_000);
-    assertThat(storages.sync().hasStorageTrie(kept, keptRoot)).isTrue();
-    assertThat(storages.sync().hasStorageTrie(changed, changedRoot)).isFalse();
+    assertThat(tries.left()).isZero();
+    assertStorageTrie(world, account);
+  }
+
+  private static Bytes32 largestStorage(final World world) {
+    return world.storage.entrySet().stream()
+        .max(Comparator.comparingInt(entry -> entry.getValue().size()))
+        .orElseThrow()
+        .getKey();
+  }
+
+  // the flat state as downloaded, the account having its storage root
+  private Bytes32 writeWithRoot(final World world, final Bytes32 account) {
+    world.writeFlat(storages.sync());
+    final SyncStateStorage.Batch batch = storages.sync().batch();
+    batch.putAccount(account, Accounts.encode(world.account(account)));
+    batch.commit();
+    return world.storageRoot(account);
+  }
+
+  // changes, adds and removes slots as a move does, and returns the changes
+  private Map<Bytes32, UInt256> move(final World world, final Bytes32 account) {
+    final TreeMap<Bytes32, UInt256> slots = world.storage.get(account);
+    final Map<Bytes32, UInt256> changes = new HashMap<>();
+    changes.put(slots.firstKey(), UInt256.valueOf(7));
+    changes.put(slots.lastKey(), UInt256.ZERO);
+    changes.put(Bytes32.fromHexString("0x" + "ab".repeat(32)), UInt256.valueOf(9));
+    final SyncStateStorage.Batch batch = storages.sync().batch();
+    changes.forEach(
+        (slot, value) -> {
+          if (value.isZero()) {
+            slots.remove(slot);
+            batch.removeStorage(account, slot);
+          } else {
+            slots.put(slot, value);
+            batch.putStorage(account, slot, value);
+          }
+        });
+    batch.putAccount(
+        account,
+        Accounts.encode(
+            Accounts.withStorageRoot(world.accounts.get(account), Accounts.UNKNOWN_STORAGE_ROOT)));
+    batch.commit();
+    return changes;
+  }
+
+  // the account has the root of its new slots, whose trie is stored whole
+  private void assertStorageTrie(final World world, final Bytes32 account) {
+    final Bytes32 root = world.storageRoot(account);
+    assertThat(
+            Accounts.decode(storages.sync().getAccount(account).orElseThrow())
+                .getStorageRoot()
+                .getBytes())
+        .isEqualTo(root);
+    assertThat(storages.storageTrie(account, root).entriesFrom(Bytes32.ZERO, Integer.MAX_VALUE))
+        .isEqualTo(world.storageLeaves(account));
+  }
+
+  // no pivot move ever runs in these tests
+  private static boolean noMoves(final Runnable action) {
+    action.run();
+    return true;
   }
 }

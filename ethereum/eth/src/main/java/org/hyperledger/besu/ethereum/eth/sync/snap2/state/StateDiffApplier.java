@@ -49,9 +49,18 @@ public final class StateDiffApplier {
    */
   public record Outcome(int applied, int skipped, int deleted, long slots, int staleStorage) {}
 
+  /** Receives the slots a move changed in a storage downloaded whole, with the root before. */
+  @FunctionalInterface
+  public interface StorageChanges {
+    void changed(Bytes32 accountHash, Hash previousRoot, Map<Bytes32, UInt256> slots);
+  }
+
   /** Applies the diff and commits it. */
   public static Outcome apply(
-      final StateDiff diff, final SyncStateStorage storage, final StateCoverage coverage) {
+      final StateDiff diff,
+      final SyncStateStorage storage,
+      final StateCoverage coverage,
+      final StorageChanges storageChanges) {
     SyncStateStorage.Batch batch = storage.batch();
     long writes = 0;
     int applied = 0;
@@ -74,8 +83,10 @@ public final class StateDiffApplier {
           storage.getAccount(accountHash).map(Accounts::decode);
       final StorageTask task = coverage.storageTask(accountHash);
       PmtStateTrieAccountValue updated = updated(existing, change);
-      if (!change.storage().isEmpty() && task == null) {
-        // a storage trie built for these slots no longer matches, the final build redoes it
+      final boolean downloadedStorage = !change.storage().isEmpty() && task == null;
+      if (downloadedStorage) {
+        // unknown until the trie built for these slots gets the change, or the final build redoes
+        // it
         updated = Accounts.withStorageRoot(updated, Accounts.UNKNOWN_STORAGE_ROOT);
       }
 
@@ -96,6 +107,12 @@ public final class StateDiffApplier {
       batch.putAccount(accountHash, Accounts.encode(updated));
       applied++;
       writes++;
+      if (downloadedStorage) {
+        storageChanges.changed(
+            accountHash,
+            existing.map(PmtStateTrieAccountValue::getStorageRoot).orElse(Hash.EMPTY_TRIE_HASH),
+            change.storage());
+      }
 
       if (!change.storage().isEmpty()) {
         if (task != null) {

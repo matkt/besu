@@ -492,6 +492,8 @@ final class SyncAttempt {
       throw new CancellationException("attempt abandoned");
     }
     final BlockHeader pivot = stateSync.pivot().header();
+    // the tries the last moves changed are kept by the final build
+    stateSync.finishStorageTries();
     stateSync.stop();
     trieStarted = Instant.now();
     LOG.info(
@@ -589,7 +591,9 @@ final class SyncAttempt {
           .append(count(stateSync.pendingStorageCount()));
       line.append(" | storage tries ")
           .append(compact(stateSync.storageTriesBuilt()))
-          .append(" built (")
+          .append(" built, ")
+          .append(compact(stateSync.storageTriesUpdated()))
+          .append(" updated (")
           .append(compact(stateSync.storageTrieSlots()))
           .append(" slots)");
       if (stateSync.storageTriesLeft() > 0) {

@@ -137,7 +137,7 @@ public final class StateSync {
         Executors.newFixedThreadPool(
             Math.max(2, config.workerThreads()),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
-    this.tries = new StorageTries(storage, storageTrieThreads(config));
+    this.tries = new StorageTries(storage, this::withoutMoves, storageTrieThreads(config));
   }
 
   // one thread per four cores, at most four: the download keeps the rest
@@ -207,7 +207,7 @@ public final class StateSync {
             return exclusively(
                 () -> {
                   final StateDiffApplier.Outcome outcome =
-                      StateDiffApplier.apply(diff, storage, coverage);
+                      StateDiffApplier.apply(diff, storage, coverage, tries::changed);
                   switchPivot(newPivot);
                   return outcome;
                 });
@@ -251,6 +251,16 @@ public final class StateSync {
   /** Returns the number of storage tries built while downloading. */
   public long storageTriesBuilt() {
     return tries.built();
+  }
+
+  /** Returns the number of built storage tries the pivot moves changed. */
+  public long storageTriesUpdated() {
+    return tries.updated();
+  }
+
+  /** Applies the storage changes of the moves to the tries built, giving up the other builds. */
+  public void finishStorageTries() {
+    tries.finish();
   }
 
   /** Returns the number of slots added to storage tries while downloading. */
