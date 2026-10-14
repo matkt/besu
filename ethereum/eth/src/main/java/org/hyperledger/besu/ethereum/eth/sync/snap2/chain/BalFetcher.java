@@ -31,7 +31,6 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 
 import java.math.BigInteger;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,8 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -60,9 +57,6 @@ public final class BalFetcher {
   private final int batchSize;
   private final long responseBytes;
   private final int maxRounds;
-  private final ScheduledExecutorService timer =
-      Executors.newSingleThreadScheduledExecutor(
-          Thread.ofPlatform().name("snap2-bal-retry").daemon().factory());
 
   public BalFetcher(
       final RequestSender sender,
@@ -93,10 +87,6 @@ public final class BalFetcher {
     final Fetch fetch = new Fetch(headers, maxRounds);
     fetch.round(0);
     return fetch.result;
-  }
-
-  public void stop() {
-    timer.shutdownNow();
   }
 
   /** The lists of some headers, asked in rounds, each round to peers that did not lack them. */
@@ -159,14 +149,9 @@ public final class BalFetcher {
       if (round % 5 == 4) {
         forgetLacking();
       }
-      try {
-        timer.schedule(
-            () -> round(round + 1),
-            Duration.ofSeconds(Math.min(10, 1 + round)).toMillis(),
-            TimeUnit.MILLISECONDS);
-      } catch (final RuntimeException e) {
-        result.completeExceptionally(e);
-      }
+      // once the sync stopped, the next round fails at once
+      CompletableFuture.delayedExecutor(Math.min(10, 1 + round), TimeUnit.SECONDS)
+          .execute(() -> round(round + 1));
     }
 
     // keeps the lists the peer sent, and notes it lacked the others

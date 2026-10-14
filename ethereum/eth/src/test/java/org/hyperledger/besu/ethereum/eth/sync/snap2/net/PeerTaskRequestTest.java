@@ -50,7 +50,7 @@ class PeerTaskRequestTest {
             () ->
                 new GetSyncBlockBodiesFromPeerTask(
                     List.of(header), ProtocolScheduleFixture.MAINNET),
-            Priority.CHAIN,
+            Priority.HEADERS,
             "bodies");
     final EthPeer peer = mock(EthPeer.class);
     when(peer.getAgreedCapabilities()).thenReturn(Set.of(EthProtocol.LATEST));
@@ -90,7 +90,7 @@ class PeerTaskRequestTest {
     when(task.processResponse(any(), any())).thenReturn("result");
     when(task.validateResult("result")).thenReturn(validation);
     final PeerTaskRequest<String> request =
-        new PeerTaskRequest<>(() -> task, Priority.CHAIN, "task");
+        new PeerTaskRequest<>(() -> task, Priority.HEADERS, "task");
     request.message(peer());
     return request;
   }

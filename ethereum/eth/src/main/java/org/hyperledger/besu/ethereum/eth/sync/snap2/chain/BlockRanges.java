@@ -30,13 +30,8 @@ final class BlockRanges {
     ranges.add(Range.closedOpen(from, to + 1));
   }
 
-  /** Removes {@code [from, to]}, or everything from {@code from} on for {@link Long#MAX_VALUE}. */
   void remove(final long from, final long to) {
-    ranges.remove(to == Long.MAX_VALUE ? Range.atLeast(from) : Range.closedOpen(from, to + 1));
-  }
-
-  boolean covers(final long from, final long to) {
-    return ranges.encloses(Range.closedOpen(from, to + 1));
+    ranges.remove(Range.closedOpen(from, to + 1));
   }
 
   /** Returns the start of the range holding {@code number}, or -1. */
@@ -52,12 +47,8 @@ final class BlockRanges {
     return below.hasNext() ? below.next().upperEndpoint() - 1 : -1;
   }
 
-  long size() {
-    long size = 0;
-    for (final Range<Long> range : ranges.asRanges()) {
-      size += range.upperEndpoint() - range.lowerEndpoint();
-    }
-    return size;
+  boolean isEmpty() {
+    return ranges.isEmpty();
   }
 
   /**

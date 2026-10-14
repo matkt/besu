@@ -40,9 +40,7 @@ public interface SyncRequest<T> {
     /** World state ranges and bytecodes. */
     STATE,
     /** Block headers below the pivot, which the bodies wait for. */
-    HEADERS,
-    /** Block bodies and receipts below the pivot. */
-    CHAIN
+    HEADERS
   }
 
   Protocol protocol();

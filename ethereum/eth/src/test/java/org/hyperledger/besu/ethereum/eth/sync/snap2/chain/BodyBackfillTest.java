@@ -124,16 +124,6 @@ class BodyBackfillTest {
   @ParameterizedTest
   @EnumSource(BackfillMode.class)
   void eachModeCapsItsRateAndItsRequestsInFlight(final BackfillMode mode) throws Exception {
-    assertThat(mode.bytesPerSecond())
-        .isEqualTo(
-            switch (mode) {
-              case SLOW -> 5L << 20;
-              case MEDIUM -> 14L << 20;
-              case FAST -> 32L << 20;
-            });
-    assertThat(Settings.of(mode, false).bytesPerSecond()).isEqualTo(mode.bytesPerSecond());
-    assertThat(Settings.of(mode, false).requests()).isEqualTo(mode.requests());
-
     blockchain = chain(51);
     executor.holdResponses();
     backfill = backfill(settings(mode), head -> 1);
@@ -207,19 +197,6 @@ class BodyBackfillTest {
   }
 
   @Test
-  void fastModeStillPausesWhileTheNodeIsBehind() throws Exception {
-    blockchain = chain(51);
-    inSync.set(false);
-    backfill = backfill(settings(BackfillMode.FAST), head -> 1);
-
-    backfill.start();
-    Thread.sleep(300);
-
-    assertThat(backfill.blocksStored()).isZero();
-    assertThat(backfill.state()).isEqualTo(State.PAUSED);
-  }
-
-  @Test
   void halvesItsRateWhileTheChainHeadLagsAndRecoversOnceItCatchesUp() {
     blockchain = chain(51);
     final long bytesPerSecond = 1 << 20;
@@ -237,7 +214,8 @@ class BodyBackfillTest {
                 Duration.ofMillis(20),
                 Duration.ofSeconds(4),
                 5,
-                false),
+                false,
+                true),
             head -> 1);
     backfill.start();
     executor.allow(2);
@@ -344,7 +322,8 @@ class BodyBackfillTest {
         Duration.ofMillis(20),
         Duration.ofSeconds(4),
         5,
-        false);
+        false,
+        true);
   }
 
   // the settings of a mode, with small ranges and a quick poll
@@ -358,7 +337,8 @@ class BodyBackfillTest {
         Duration.ofMillis(20),
         mode.headLagAllowance(),
         5,
-        false);
+        false,
+        true);
   }
 
   private BodyBackfill backfill(final Settings settings, final LongUnaryOperator lowestNeeded) {

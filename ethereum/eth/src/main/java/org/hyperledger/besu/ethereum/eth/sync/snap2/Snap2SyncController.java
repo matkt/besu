@@ -339,7 +339,6 @@ final class Snap2SyncController implements SnapSyncController {
       attempt.cancel();
     }
     if (context != null) {
-      context.balFetcher().stop();
       context.scheduler().stop();
     }
     control.shutdownNow();

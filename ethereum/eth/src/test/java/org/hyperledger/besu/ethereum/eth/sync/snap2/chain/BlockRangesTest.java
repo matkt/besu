@@ -27,12 +27,11 @@ class BlockRangesTest {
     ranges.add(30, 39);
     ranges.add(20, 29);
 
-    assertThat(ranges.covers(10, 39)).isTrue();
-    assertThat(ranges.size()).isEqualTo(30);
+    assertThat(ranges.startOf(39)).isEqualTo(10);
 
     ranges.add(5, 12);
-    assertThat(ranges.covers(5, 39)).isTrue();
-    assertThat(ranges.size()).isEqualTo(35);
+    assertThat(ranges.startOf(39)).isEqualTo(5);
+    assertThat(ranges.startOf(4)).isEqualTo(-1);
   }
 
   @Test
@@ -41,14 +40,14 @@ class BlockRangesTest {
     ranges.add(1, 100);
     ranges.remove(40, 49);
 
-    assertThat(ranges.covers(1, 39)).isTrue();
-    assertThat(ranges.covers(50, 100)).isTrue();
-    assertThat(ranges.covers(39, 50)).isFalse();
-    assertThat(ranges.size()).isEqualTo(90);
+    assertThat(ranges.startOf(100)).isEqualTo(50);
+    assertThat(ranges.endBelow(50)).isEqualTo(39);
+    assertThat(ranges.startOf(45)).isEqualTo(-1);
 
-    ranges.remove(30, Long.MAX_VALUE);
-    assertThat(ranges.size()).isEqualTo(29);
-    assertThat(ranges.covers(1, 29)).isTrue();
+    ranges.remove(30, 100);
+    assertThat(ranges.endBelow(101)).isEqualTo(29);
+    ranges.remove(1, 29);
+    assertThat(ranges.isEmpty()).isTrue();
   }
 
   @Test

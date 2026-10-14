@@ -244,7 +244,7 @@ class RequestSchedulerTest {
   }
 
   private PeerTaskRequest<List<BlockHeader>> headers(final long first, final int count) {
-    return headers(first, count, Priority.CHAIN);
+    return headers(first, count, Priority.HEADERS);
   }
 
   private PeerTaskRequest<List<BlockHeader>> headers(

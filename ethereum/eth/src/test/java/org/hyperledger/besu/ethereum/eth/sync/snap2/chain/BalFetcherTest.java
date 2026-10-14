@@ -56,7 +56,6 @@ class BalFetcherTest {
 
   @AfterEach
   void tearDown() {
-    fetcher.stop();
     network.stop();
     assertThat(network.unagreedRequests()).isEmpty();
   }
@@ -90,14 +89,10 @@ class BalFetcherTest {
     network.serveNoBlockAccessLists(SNAP2_ETH68);
 
     final BalFetcher oneRound = new BalFetcher(network, 4, 1 << 20, 1);
-    try {
-      assertThatThrownBy(() -> oneRound.fetch(chain.headers(1, 4)).join())
-          .rootCause()
-          .isInstanceOf(IllegalStateException.class)
-          .hasMessageStartingWith("no peer served the block access list");
-    } finally {
-      oneRound.stop();
-    }
+    assertThatThrownBy(() -> oneRound.fetch(chain.headers(1, 4)).join())
+        .rootCause()
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageStartingWith("no peer served the block access list");
   }
 
   @Test

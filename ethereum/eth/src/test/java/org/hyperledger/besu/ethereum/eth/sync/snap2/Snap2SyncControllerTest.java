@@ -200,7 +200,16 @@ class Snap2SyncControllerTest {
             from,
             head -> 1,
             new BodyBackfill.Settings(
-                "test", 0, 2, 0, Duration.ZERO, Duration.ofMillis(20), Duration.ZERO, 8, false),
+                "test",
+                0,
+                2,
+                0,
+                Duration.ZERO,
+                Duration.ofMillis(20),
+                Duration.ZERO,
+                8,
+                false,
+                true),
             Clock.systemUTC(),
             new NoOpMetricsSystem());
     backfill.start();

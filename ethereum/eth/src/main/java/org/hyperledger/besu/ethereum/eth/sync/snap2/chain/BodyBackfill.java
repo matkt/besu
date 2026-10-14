@@ -70,12 +70,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Downloads the bodies and receipts of the blocks below a block whose headers are stored, highest
- * first, a few requests at a time each to a different peer, and records the lowest block stored
- * with every one above it once its writes are on disk. The SNAP2 sync runs it unthrottled on the
- * window of blocks below its final pivot; afterwards, and after a restart, it back-fills the older
- * blocks in the background at the rate of its {@link BackfillMode}, paused while a block is
- * imported or the node is behind, and halved while the chain head lags the wall clock.
+ * Downloads the bodies and receipts below a stored block, highest first, each request to a
+ * different peer, and records the lowest block stored with every one above it once on disk. The
+ * sync runs it unthrottled on its window; after the sync it runs in the background at the rate of
+ * its {@link BackfillMode}, paused around imports and while the node is behind.
  */
 public final class BodyBackfill implements BlockAddedObserver {
 
@@ -113,6 +111,7 @@ public final class BodyBackfill implements BlockAddedObserver {
    * @param headLagAllowance how far past a slot the chain head may lag before the rate halves
    * @param maxRangeBlocks most blocks per request
    * @param indexTransactions whether the transactions of the stored blocks are indexed
+   * @param background whether it runs after the sync, logging its progress and with metrics
    */
   public record Settings(
       String label,
@@ -123,7 +122,8 @@ public final class BodyBackfill implements BlockAddedObserver {
       Duration pollInterval,
       Duration headLagAllowance,
       int maxRangeBlocks,
-      boolean indexTransactions) {
+      boolean indexTransactions,
+      boolean background) {
 
     /** Returns the settings of the background back-fill in a mode. */
     public static Settings of(final BackfillMode mode, final boolean indexTransactions) {
@@ -136,7 +136,8 @@ public final class BodyBackfill implements BlockAddedObserver {
           Duration.ofSeconds(1),
           mode.headLagAllowance(),
           MAX_RANGE_BLOCKS,
-          indexTransactions);
+          indexTransactions,
+          true);
     }
 
     /** Returns settings without limit or pause, for the window the sync downloads. */
@@ -150,7 +151,8 @@ public final class BodyBackfill implements BlockAddedObserver {
           Duration.ofSeconds(1),
           Duration.ZERO,
           MAX_RANGE_BLOCKS,
-          indexTransactions);
+          indexTransactions,
+          false);
     }
   }
 
@@ -237,7 +239,10 @@ public final class BodyBackfill implements BlockAddedObserver {
     this.workers =
         Executors.newFixedThreadPool(
             settings.requests(), Thread.ofPlatform().name("snap2-backfill-", 0).daemon().factory());
-    registerMetrics(metricsSystem);
+    // the window shows in the progress of the sync
+    if (settings.background()) {
+      registerMetrics(metricsSystem);
+    }
   }
 
   /** Starts downloading below the lowest stored block, unless every needed body is stored. */
@@ -354,7 +359,9 @@ public final class BodyBackfill implements BlockAddedObserver {
   }
 
   private void step() throws InterruptedException {
-    maybeLog();
+    if (settings.background()) {
+      maybeLog();
+    }
     if (!inSync.getAsBoolean()) {
       pause("node behind the head");
       return;
@@ -449,7 +456,7 @@ public final class BodyBackfill implements BlockAddedObserver {
   }
 
   private synchronized boolean idle() {
-    return fetching.size() == 0;
+    return fetching.isEmpty();
   }
 
   private synchronized void release(final long[] range) {
@@ -458,19 +465,25 @@ public final class BodyBackfill implements BlockAddedObserver {
 
   // records the sizes of downloaded blocks and returns their total bytes
   private long measure(final List<SyncBlockWithReceipts> blocks) {
-    long bodies = 0;
-    long receipts = 0;
-    for (final SyncBlockWithReceipts block : blocks) {
-      bodies += block.getBlock().getBody().getRlp().size();
-      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
-        receipts += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
-      }
-    }
+    final long bodies =
+        blocks.stream().mapToLong(block -> block.getBlock().getBody().getRlp().size()).sum();
+    final long total = bytes(blocks);
     synchronized (throttle) {
       bodyBytes = 0.8 * bodyBytes + 0.2 * bodies / blocks.size();
-      blockBytes = 0.8 * blockBytes + 0.2 * (bodies + receipts) / blocks.size();
+      blockBytes = 0.8 * blockBytes + 0.2 * total / blocks.size();
     }
-    return bodies + receipts;
+    return total;
+  }
+
+  private static long bytes(final List<SyncBlockWithReceipts> blocks) {
+    long bytes = 0;
+    for (final SyncBlockWithReceipts block : blocks) {
+      bytes += block.getBlock().getBody().getRlp().size();
+      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
+        bytes += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
+      }
+    }
+    return bytes;
   }
 
   // blocks whose bodies fill about one response, so many when they are small
@@ -524,7 +537,7 @@ public final class BodyBackfill implements BlockAddedObserver {
     }
     blockchain.unsafeStoreSyncBodiesAndReceipts(kept, settings.indexTransactions());
     stored.add(kept.getFirst().getNumber(), range[1]);
-    final long bytes = measure(kept);
+    final long bytes = bytes(kept);
     blocksStored.addAndGet(kept.size());
     bytesStored.addAndGet(bytes);
     bytesSinceFlush += bytes;
@@ -715,12 +728,6 @@ public final class BodyBackfill implements BlockAddedObserver {
         .orElse(false);
   }
 
-  private int requestsInFlight() {
-    synchronized (busyPeers) {
-      return busyPeers.size();
-    }
-  }
-
   private void maybeLog() {
     final long now = System.nanoTime();
     final long last = lastLogNanos.get();
@@ -776,19 +783,9 @@ public final class BodyBackfill implements BlockAddedObserver {
         this::blocksRemaining);
     metricsSystem.createLongGauge(
         category,
-        "snap2_backfill_rate_bytes_per_second",
-        "Rate of the SNAP2 back-fill in force, once backed off, 0 without limit",
+        "snap2_backfill_limit_bytes_per_second",
+        "Rate limit of the SNAP2 back-fill in force, once backed off, 0 without limit",
         this::bytesPerSecond);
-    metricsSystem.createLongGauge(
-        category,
-        "snap2_backfill_requests_in_flight",
-        "Requests of the SNAP2 back-fill waiting for a peer to answer",
-        this::requestsInFlight);
-    metricsSystem.createCounter(
-        category,
-        "snap2_backfill_blocks_total",
-        "Blocks whose body and receipts the SNAP2 back-fill stored",
-        blocksStored::get);
     metricsSystem.createCounter(
         category,
         "snap2_backfill_bytes_total",

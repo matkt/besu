@@ -72,7 +72,7 @@ public final class RequestScheduler implements RequestSender {
 
   private static final Logger LOG = LoggerFactory.getLogger(RequestScheduler.class);
   private static final double INITIAL_THROUGHPUT = 64; // bytes per millisecond
-  private static final double INITIAL_LANE_LIMIT = 2;
+  private static final int INITIAL_LANE_LIMIT = 2;
   private static final int MAX_BACKOFF_SECONDS = 30;
   private static final int CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT = 12;
   // announced heights lag, so a peer that looks behind is only picked when no other peer can be
@@ -198,7 +198,7 @@ public final class RequestScheduler implements RequestSender {
   @Override
   public <T> CompletableFuture<PeerResponse<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
-    final Pending<T> pending = new Pending<>(request, Set.copyOf(excluded));
+    final Pending<T> pending = new Pending<>(request, new HashSet<>(excluded));
     if (stopped) {
       pending.future.completeExceptionally(stoppedFailure());
       return pending.future;
@@ -246,9 +246,10 @@ public final class RequestScheduler implements RequestSender {
                 // every peer may have been tried, start over after a pause
                 excluded.clear();
                 try {
-                  schedule(
+                  loop.schedule(
                       () -> attempt(request, excluded, attemptsLeft - 1, result),
-                      Duration.ofSeconds(1));
+                      1,
+                      TimeUnit.SECONDS);
                 } catch (final RejectedExecutionException stopping) {
                   result.completeExceptionally(stoppedFailure());
                 }
@@ -281,11 +282,7 @@ public final class RequestScheduler implements RequestSender {
   @Override
   public int capacity(final Protocol protocol) {
     final int adapted = protocol == Protocol.SNAP ? snapCapacity : ethCapacity;
-    return adapted > 0 ? adapted : peerCount(protocol) * (int) INITIAL_LANE_LIMIT;
-  }
-
-  private ScheduledFuture<?> schedule(final Runnable task, final Duration delay) {
-    return loop.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
+    return adapted > 0 ? adapted : peerCount(protocol) * INITIAL_LANE_LIMIT;
   }
 
   /** Stops dispatching and fails every request not yet answered. */
@@ -449,7 +446,9 @@ public final class RequestScheduler implements RequestSender {
     }
     if (stream == null) {
       state.lane(protocol).backoff(System.nanoTime());
-      queue.add(pending.excluding(peer));
+      // the loop thread owns the excluded peers once submitted
+      pending.excluded.add(peer);
+      queue.add(pending);
       return;
     }
     final Lane lane = state.lane(protocol);
@@ -645,30 +644,13 @@ public final class RequestScheduler implements RequestSender {
   private static final class Pending<T> {
     private final SyncRequest<T> request;
     private final Set<EthPeer> excluded;
-    private final CompletableFuture<PeerResponse<T>> future;
+    private final CompletableFuture<PeerResponse<T>> future = new CompletableFuture<>();
     private long sequence;
     private long queuedAt;
 
     private Pending(final SyncRequest<T> request, final Set<EthPeer> excluded) {
-      this(request, excluded, new CompletableFuture<>());
-    }
-
-    private Pending(
-        final SyncRequest<T> request,
-        final Set<EthPeer> excluded,
-        final CompletableFuture<PeerResponse<T>> future) {
       this.request = request;
       this.excluded = excluded;
-      this.future = future;
-    }
-
-    private Pending<T> excluding(final EthPeer peer) {
-      final Set<EthPeer> more = new HashSet<>(excluded);
-      more.add(peer);
-      final Pending<T> copy = new Pending<>(request, more, future);
-      copy.sequence = sequence;
-      copy.queuedAt = queuedAt;
-      return copy;
     }
   }
 
