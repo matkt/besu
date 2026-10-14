@@ -46,6 +46,57 @@ import org.mockito.Mockito;
 public class ChainDataPrunerTest {
 
   @Test
+  public void tellsTheLowestBlockItLeavesInPlace() {
+    assertThat(
+            pruner(
+                    ChainDataPruner.PruningMode.CHAIN_PRUNING,
+                    ChainDataPruner.ChainPruningStrategy.ALL,
+                    0)
+                .lowestRetained(1000))
+        .isEqualTo(489);
+    assertThat(
+            pruner(
+                    ChainDataPruner.PruningMode.CHAIN_PRUNING,
+                    ChainDataPruner.ChainPruningStrategy.ALL,
+                    0)
+                .lowestRetained(100))
+        .isEqualTo(1);
+    // block access list pruning leaves the bodies alone
+    assertThat(
+            pruner(
+                    ChainDataPruner.PruningMode.CHAIN_PRUNING,
+                    ChainDataPruner.ChainPruningStrategy.BAL,
+                    0)
+                .lowestRetained(1000))
+        .isZero();
+    assertThat(
+            pruner(
+                    ChainDataPruner.PruningMode.PRE_MERGE_PRUNING,
+                    ChainDataPruner.ChainPruningStrategy.NONE,
+                    700)
+                .lowestRetained(1000))
+        .isEqualTo(700);
+  }
+
+  private static ChainDataPruner pruner(
+      final ChainDataPruner.PruningMode mode,
+      final ChainDataPruner.ChainPruningStrategy strategy,
+      final long mergeBlock) {
+    return new ChainDataPruner(
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            new InMemoryKeyValueStorage(),
+            new VariablesKeyValueStorage(new InMemoryKeyValueStorage()),
+            new MainnetBlockHeaderFunctions(),
+            false),
+        () -> {},
+        new ChainDataPrunerStorage(new InMemoryKeyValueStorage()),
+        mergeBlock,
+        mode,
+        new ChainPrunerConfiguration(strategy, 512, 512, 512, 0, 0),
+        new BlockingExecutor());
+  }
+
+  @Test
   public void singleChainPruning() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final BlockchainStorage blockchainStorage =

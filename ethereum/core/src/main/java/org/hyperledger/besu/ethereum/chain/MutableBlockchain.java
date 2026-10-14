@@ -18,11 +18,13 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface MutableBlockchain extends Blockchain {
@@ -104,6 +106,44 @@ public interface MutableBlockchain extends Blockchain {
   void unsafeImportSyncBodiesAndReceipts(
       List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
 
+  /**
+   * Stores the bodies and receipts of blocks whose headers are stored, in any order and from any
+   * thread, without updating the chain state. They skip the write-ahead log until {@link
+   * #unsafeSetSyncChainHead} flushes them.
+   *
+   * @param blocksAndReceipts The blocks and receipts to store
+   * @param indexTransactions Boolean whether to index transactions
+   */
+  void unsafeStoreSyncBodiesAndReceipts(
+      List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
+
+  /**
+   * Makes a canonical block the chain head once the bodies and receipts of the blocks above {@code
+   * from} are stored. Above a proof-of-stake {@code from} whose headers were stored with their
+   * total difficulty, it only checks that {@code to} is canonical; otherwise it reads every header
+   * to check its parent link and write its total difficulty.
+   *
+   * @param from a canonical block with its total difficulty stored
+   * @param to the new chain head
+   */
+  void unsafeSetSyncChainHead(BlockHeader from, BlockHeader to);
+
+  /**
+   * Records that every block from {@code blockNumber} up to the chain head has its body and
+   * receipts stored, once the ones that skipped the write-ahead log are persisted.
+   *
+   * @param blockNumber the lowest block whose body and receipts are stored
+   */
+  void unsafeSetBodiesFrom(long blockNumber);
+
+  /**
+   * Stores the access lists of blocks whose headers are stored, without updating the chain state.
+   * They skip the write-ahead log until {@link #unsafeSetSyncChainHead} flushes them.
+   *
+   * @param accessLists the access lists by block hash
+   */
+  void unsafeStoreSyncBlockAccessLists(Map<Hash, SyncBlockAccessList> accessLists);
+
   void unsafeSetChainHead(final BlockHeader blockHeader, final Difficulty totalDifficulty);
 
   /**
@@ -112,6 +152,15 @@ public interface MutableBlockchain extends Blockchain {
    * @param blockHeaders The block headers to store.
    */
   void storeBlockHeaders(List<BlockHeader> blockHeaders);
+
+  /**
+   * Stores the headers of proof-of-stake blocks with their total difficulty, the same for all of
+   * them since their difficulty is zero, without updating the chain state.
+   *
+   * @param blockHeaders The block headers to store.
+   * @param totalDifficulty The total difficulty of every one of them.
+   */
+  void storeBlockHeaders(List<BlockHeader> blockHeaders, Difficulty totalDifficulty);
 
   /**
    * Removes the canonical blockNumber→blockHash index entries for the given block number range,

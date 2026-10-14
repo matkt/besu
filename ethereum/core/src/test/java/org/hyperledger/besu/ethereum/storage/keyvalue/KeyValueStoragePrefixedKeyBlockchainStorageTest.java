@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.storage.keyvalue;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.chain.VariablesStorage.Keys.CHAIN_HEAD_HASH;
 import static org.hyperledger.besu.ethereum.chain.VariablesStorage.Keys.FINALIZED_BLOCK_HASH;
 import static org.hyperledger.besu.ethereum.chain.VariablesStorage.Keys.SAFE_BLOCK_HASH;
@@ -25,6 +26,9 @@ import static org.hyperledger.besu.ethereum.core.VariablesStorageHelper.getSampl
 import static org.hyperledger.besu.ethereum.core.VariablesStorageHelper.populateBlockchainStorage;
 import static org.hyperledger.besu.ethereum.core.VariablesStorageHelper.populateVariablesStorage;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.TransactionType;
@@ -66,6 +70,59 @@ public class KeyValueStoragePrefixedKeyBlockchainStorageTest {
     kvVariables = new InMemoryKeyValueStorage();
     variablesStorage = new VariablesKeyValueStorage(kvVariables);
     variableValues = getSampleVariableValues();
+  }
+
+  @Test
+  public void batchUpdaterWritesTheBlockDataInABatch() {
+    final KeyValueStorage blockchainKv = spy(new InMemoryKeyValueStorage());
+    final var storage =
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            blockchainKv, variablesStorage, blockHeaderFunctions, false);
+    final Hash hash = Hash.hash(Bytes.of(1));
+
+    final Updater updater = storage.batchUpdater();
+    updater.putBlockHash(1, hash);
+    updater.commit();
+
+    verify(blockchainKv).startBatchTransaction();
+    assertThat(storage.getBlockHash(1)).contains(hash);
+  }
+
+  @Test
+  public void unloggedUpdaterSkipsTheLogForTheBlockDataOnly() {
+    final KeyValueStorage blockchainKv = spy(new InMemoryKeyValueStorage());
+    final KeyValueStorage variablesKv = spy(new InMemoryKeyValueStorage());
+    final var storage =
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            blockchainKv, new VariablesKeyValueStorage(variablesKv), blockHeaderFunctions, false);
+    final Hash hash = Hash.hash(Bytes.of(1));
+
+    final Updater updater = storage.unloggedUpdater();
+    updater.putBlockHash(1, hash);
+    updater.setChainHead(hash);
+    updater.commit();
+    storage.flush();
+
+    verify(blockchainKv).startUnloggedBatchTransaction();
+    verify(variablesKv, never()).startUnloggedBatchTransaction();
+    verify(blockchainKv).flush();
+    assertThat(storage.getBlockHash(1)).contains(hash);
+    assertThat(storage.getChainHead()).contains(hash);
+  }
+
+  @Test
+  public void keepsTheBlockTheBodiesAreStoredFromInTheVariables() {
+    final var storage =
+        new KeyValueStoragePrefixedKeyBlockchainStorage(
+            kvBlockchain, variablesStorage, blockHeaderFunctions, false);
+    assertThat(storage.getBodiesFrom()).isEmpty();
+
+    final Updater updater = storage.updater();
+    updater.setBodiesFrom(1_234_567L);
+    updater.commit();
+
+    assertThat(storage.getBodiesFrom()).contains(1_234_567L);
+    assertThat(variablesStorage.getBodiesFrom()).contains(1_234_567L);
   }
 
   @Test

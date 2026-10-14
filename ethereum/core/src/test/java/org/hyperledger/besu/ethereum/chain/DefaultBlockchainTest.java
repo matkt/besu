@@ -18,7 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -29,12 +31,14 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.LogWithMetadata;
 import org.hyperledger.besu.ethereum.core.SyncBlock;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockBody;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.DefaultProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
@@ -53,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -67,6 +72,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 public class DefaultBlockchainTest {
 
@@ -318,6 +324,169 @@ public class DefaultBlockchainTest {
       chainStorage.releaseCommit();
       executor.shutdownNow();
     }
+  }
+
+  @Test
+  public void storesSyncBodiesInAnyOrderAndSetsTheChainHeadAfterwards() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final List<Block> blocks = new ArrayList<>();
+    Block parent = genesisBlock;
+    for (long number = 1; number <= 4; number++) {
+      parent =
+          gen.block(
+              new BlockDataGenerator.BlockOptions()
+                  .setBlockNumber(number)
+                  .setParentHash(parent.getHash())
+                  .setDifficulty(Difficulty.of(number)));
+      blocks.add(parent);
+    }
+    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
+
+    for (final int index : new int[] {3, 1, 2, 0}) {
+      blockchain.unsafeStoreSyncBodiesAndReceipts(
+          List.of(toSyncBlockWithReceipts(blocks.get(index))), true);
+    }
+    // stored bodies do not move the chain head
+    assertThat(blockchain.getChainHeadBlockNumber()).isZero();
+
+    blockchain.unsafeSetSyncChainHead(genesisBlock.getHeader(), blocks.getLast().getHeader());
+
+    assertThat(blockchain.getChainHeadBlockNumber()).isEqualTo(4);
+    final Difficulty genesisDifficulty =
+        blockchain.getTotalDifficultyByHash(genesisBlock.getHash()).orElseThrow();
+    assertThat(blockchain.getChainHead().getTotalDifficulty())
+        .isEqualTo(genesisDifficulty.add(Difficulty.of(10)));
+    assertThat(blockchain.getTotalDifficultyByHash(blocks.get(1).getHash()))
+        .contains(genesisDifficulty.add(Difficulty.of(3)));
+    for (final Block block : blocks) {
+      assertThat(blockchain.getBlockBody(block.getHash())).isPresent();
+      block
+          .getBody()
+          .getTransactions()
+          .forEach(
+              transaction ->
+                  assertThat(blockchain.getTransactionLocation(transaction.getHash())).isPresent());
+    }
+  }
+
+  @Test
+  public void setsTheSyncChainHeadAboveAProofOfStakeFloorFromTheStoredTotalDifficulties() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    chain.blockchain.storeBlockHeaders(chain.headers(), chain.floorDifficulty);
+    chain.storeBodies();
+
+    chain.blockchain.unsafeSetSyncChainHead(chain.floor, chain.head());
+
+    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.head());
+    assertThat(chain.blockchain.getChainHead().getTotalDifficulty())
+        .isEqualTo(chain.floorDifficulty);
+    chain
+        .headers()
+        .forEach(
+            header ->
+                assertThat(chain.blockchain.getTotalDifficultyByHash(header.getHash()))
+                    .contains(chain.floorDifficulty));
+  }
+
+  @Test
+  public void computesTheTotalDifficultiesWhenTheHeadersWereStoredWithout() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    chain.blockchain.storeBlockHeaders(chain.headers());
+    chain.storeBodies();
+
+    chain.blockchain.unsafeSetSyncChainHead(chain.floor, chain.head());
+
+    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.head());
+    assertThat(chain.blockchain.getTotalDifficultyByHash(chain.headers().get(1).getHash()))
+        .contains(chain.floorDifficulty);
+  }
+
+  @Test
+  public void recordsTheBlockTheBodiesAreStoredFromOnceTheyAreOnDisk() {
+    final ProofOfStakeChain chain = new ProofOfStakeChain();
+    final KeyValueStorage chainKv = chain.chainKv;
+    chain.blockchain.storeBlockHeaders(chain.headers(), chain.floorDifficulty);
+    chain.storeBodies();
+    assertThat(chain.blockchain.getBodiesFrom()).isEmpty();
+
+    chain.blockchain.unsafeSetBodiesFrom(2);
+
+    final InOrder order = inOrder(chainKv);
+    order.verify(chainKv).flush();
+    order.verify(chainKv).startTransaction();
+    assertThat(chain.blockchain.getBodiesFrom()).contains(2L);
+  }
+
+  // a checkpoint at the first proof-of-stake block, then blocks of difficulty zero
+  private final class ProofOfStakeChain {
+    private final BlockDataGenerator gen = new BlockDataGenerator();
+    private final Difficulty floorDifficulty = Difficulty.of(17);
+    private final KeyValueStorage chainKv = spy(new InMemoryKeyValueStorage());
+    private final DefaultBlockchain blockchain;
+    private final BlockHeader floor;
+    private final List<Block> blocks = new ArrayList<>();
+
+    private ProofOfStakeChain() {
+      final Block genesis = gen.genesisBlock();
+      blockchain = createMutableBlockchain(chainKv, new InMemoryKeyValueStorage(), genesis);
+      Block parent =
+          gen.block(
+              new BlockDataGenerator.BlockOptions()
+                  .setBlockNumber(1)
+                  .setParentHash(genesis.getHash())
+                  .setDifficulty(Difficulty.ZERO));
+      floor = parent.getHeader();
+      blockchain.unsafeStoreHeader(floor, floorDifficulty);
+      for (long number = 2; number <= 5; number++) {
+        parent =
+            gen.block(
+                new BlockDataGenerator.BlockOptions()
+                    .setBlockNumber(number)
+                    .setParentHash(parent.getHash())
+                    .setDifficulty(Difficulty.ZERO));
+        blocks.add(parent);
+      }
+    }
+
+    private List<BlockHeader> headers() {
+      return blocks.stream().map(Block::getHeader).toList();
+    }
+
+    private BlockHeader head() {
+      return blocks.getLast().getHeader();
+    }
+
+    private void storeBodies() {
+      blockchain.unsafeStoreSyncBodiesAndReceipts(
+          blocks.stream().map(block -> toSyncBlockWithReceipts(block)).toList(), false);
+    }
+  }
+
+  @Test
+  public void storesSyncBlockAccessListsOfStoredHeaders() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final Block block =
+        gen.block(
+            new BlockDataGenerator.BlockOptions()
+                .setBlockNumber(1)
+                .setParentHash(genesisBlock.getHash()));
+    final Hash blockHash = block.getHash();
+    final BlockAccessList accessList = gen.blockAccessList(3);
+    blockchain.storeBlockHeaders(List.of(block.getHeader()));
+
+    blockchain.unsafeStoreSyncBlockAccessLists(
+        Map.of(blockHash, new SyncBlockAccessList(accessList.encode())));
+
+    assertThat(blockchain.getBlockAccessList(blockHash).map(BlockAccessList::accountChanges))
+        .contains(accessList.accountChanges());
   }
 
   @Test

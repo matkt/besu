@@ -61,6 +61,30 @@ public interface Blockchain {
   Optional<Long> getEarliestBlockNumber();
 
   /**
+   * Returns the lowest block whose body and receipts a sync stored, as it did those of every block
+   * above it up to the chain head; the blocks below may still miss theirs.
+   *
+   * @return the block, or empty when no sync recorded one
+   */
+  default Optional<Long> getBodiesFrom() {
+    return Optional.empty();
+  }
+
+  /**
+   * Checks whether both given blocks are on the canonical chain.
+   *
+   * @param firstBlockHeaderHash The hash of the first block to check.
+   * @param secondBlockHeaderHash The hash of the second block to check.
+   * @return true if both blocks are on the canonical chain, false otherwise (including when either
+   *     block is unknown to the local chain).
+   */
+  default boolean areBothBlocksOnCanonicalChain(
+      final Hash firstBlockHeaderHash, final Hash secondBlockHeaderHash) {
+    return blockIsOnCanonicalChain(firstBlockHeaderHash)
+        && blockIsOnCanonicalChain(secondBlockHeaderHash);
+  }
+
+  /**
    * Return the block number of the head of the canonical chain.
    *
    * @return The block number of the head of the chain.
@@ -128,20 +152,6 @@ public interface Blockchain {
         .flatMap(header -> getBlockHashByNumber(header.getNumber()))
         .filter(hash -> hash.equals(blockHeaderHash))
         .isPresent();
-  }
-
-  /**
-   * Checks whether both given blocks are on the canonical chain.
-   *
-   * @param firstBlockHeaderHash The hash of the first block to check.
-   * @param secondBlockHeaderHash The hash of the second block to check.
-   * @return true if both blocks are on the canonical chain, false otherwise (including when either
-   *     block is unknown to the local chain).
-   */
-  default boolean areBothBlocksOnCanonicalChain(
-      final Hash firstBlockHeaderHash, final Hash secondBlockHeaderHash) {
-    return blockIsOnCanonicalChain(firstBlockHeaderHash)
-        && blockIsOnCanonicalChain(secondBlockHeaderHash);
   }
 
   /**
