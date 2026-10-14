@@ -593,9 +593,11 @@ final class SyncAttempt {
           .append(compact(stateSync.storageTriesBuilt()))
           .append(" built, ")
           .append(compact(stateSync.storageTriesUpdated()))
-          .append(" updated (")
+          .append(" updated | ")
           .append(compact(stateSync.storageTrieSlots()))
-          .append(" slots)");
+          .append(" slots, ")
+          .append(percent(stateSync.storageTrieSlots(), stateSync.downloadedSlots()))
+          .append(" of those downloaded");
       if (stateSync.storageTriesLeft() > 0) {
         line.append(", ")
             .append(compact(stateSync.storageTriesLeft()))
