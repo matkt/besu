@@ -30,6 +30,12 @@ import org.apache.tuweni.bytes.Bytes32;
  */
 final class StackTrie {
 
+  /** Receives each node referenced by hash, children before parents, at its nibble path. */
+  @FunctionalInterface
+  interface Sink {
+    void onNode(Bytes location, Bytes32 hash, Bytes rlp);
+  }
+
   /** What the pending item is: nothing yet, a leaf, a branch, or a subtree known by reference. */
   enum Kind {
     NONE,
@@ -38,7 +44,7 @@ final class StackTrie {
     SEALED
   }
 
-  private final TrieNodeSink sink;
+  private final Sink sink;
   private final int[] frameDepth = new int[64];
   private final Bytes[][] frameChildren = new Bytes[64][];
   private int frames;
@@ -56,7 +62,7 @@ final class StackTrie {
    *
    * @param sink receives hashed nodes, or null to only compute the root
    */
-  public StackTrie(final TrieNodeSink sink) {
+  public StackTrie(final Sink sink) {
     this.sink = sink;
     for (int i = 0; i < frameChildren.length; i++) {
       frameChildren[i] = new Bytes[16];

@@ -23,22 +23,15 @@ import java.time.Duration;
  * @param pivotMoveThreshold blocks the head may advance past the pivot distance before moving
  * @param accountChunks ranges the account key space is split into, downloaded lowest first
  * @param responseBytes soft response size of account, storage and bytecode requests
- * @param balResponseBytes soft response size of block access list requests
- * @param balBatchSize block access lists per request
  * @param storageBatchSize accounts per multi-account storage request
  * @param maxStorageChunks parallel ranges a large storage is split into
  * @param codeBatchSize bytecodes per request
- * @param storageBacklog pending storages above which account requests slow down
- * @param maxSnapRequestsPerPeer most concurrent snap requests a peer can be given
- * @param maxEthRequestsPerPeer most concurrent eth requests a peer can be given
- * @param requestTimeout time a peer has to answer a request
  * @param headersPerRequest block headers per request
  * @param chainParallelism concurrent header requests
  * @param bodyWindow blocks below the final pivot whose bodies and receipts are stored before the
  *     chain head is set, the older ones being back-filled once the node follows the head
  * @param workerThreads threads decoding and verifying responses
  * @param trieBuildThreads threads building the tries at the end
- * @param minPeers snap/2 peers to wait for before starting
  * @param pollInterval how often the pivot and the chain download check for progress
  */
 public record Snap2Configuration(
@@ -46,21 +39,14 @@ public record Snap2Configuration(
     int pivotMoveThreshold,
     int accountChunks,
     int responseBytes,
-    int balResponseBytes,
-    int balBatchSize,
     int storageBatchSize,
     int maxStorageChunks,
     int codeBatchSize,
-    int storageBacklog,
-    int maxSnapRequestsPerPeer,
-    int maxEthRequestsPerPeer,
-    Duration requestTimeout,
     int headersPerRequest,
     int chainParallelism,
     int bodyWindow,
     int workerThreads,
     int trieBuildThreads,
-    int minPeers,
     Duration pollInterval) {
 
   /** Returns the default configuration. */
@@ -71,21 +57,14 @@ public record Snap2Configuration(
         32,
         65_536,
         512 * 1024,
-        2 * 1024 * 1024,
-        32,
         256,
         64,
         64,
-        50_000,
-        6,
-        6,
-        Duration.ofSeconds(15),
         192,
         64,
         128,
         Math.max(2, cores),
         Math.max(2, cores),
-        1,
         Duration.ofSeconds(2));
   }
 
@@ -185,21 +164,14 @@ public record Snap2Configuration(
           pivotMoveThreshold,
           accountChunks,
           responseBytes,
-          base.balResponseBytes(),
-          base.balBatchSize(),
           storageBatchSize,
           maxStorageChunks,
           codeBatchSize,
-          base.storageBacklog(),
-          base.maxSnapRequestsPerPeer(),
-          base.maxEthRequestsPerPeer(),
-          base.requestTimeout(),
           base.headersPerRequest(),
           base.chainParallelism(),
           bodyWindow,
           workerThreads,
           trieBuildThreads,
-          base.minPeers(),
           pollInterval);
     }
   }

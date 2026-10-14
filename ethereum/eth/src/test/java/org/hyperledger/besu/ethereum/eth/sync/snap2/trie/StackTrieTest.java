@@ -100,7 +100,7 @@ class StackTrieTest {
 
     // partition on the first byte, as the world state builder does
     final Map<Bytes, Bytes> partitioned = new HashMap<>();
-    final TrieNodeSink sink = (location, hash, rlp) -> partitioned.put(location, rlp);
+    final StackTrie.Sink sink = (location, hash, rlp) -> partitioned.put(location, rlp);
     final List<StackTrie.Item> items = new ArrayList<>();
     for (int prefix = 0; prefix < 256; prefix++) {
       final StackTrie part = new StackTrie(sink);

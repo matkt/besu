@@ -67,6 +67,8 @@ public final class StateSync {
   private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
   // response size of a request for one account or one slot
   private static final int SINGLE_ITEM_BYTES = 4096;
+  // pending storages or bytecodes above which no account range is asked
+  private static final int STORAGE_BACKLOG = 50_000;
   private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
@@ -316,11 +318,6 @@ public final class StateSync {
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
-  /** Returns the number of accounts whose storage is still to download. */
-  public int pendingStorages() {
-    return coverage.pendingStorageCount();
-  }
-
   public long downloadedAccounts() {
     return accounts.get();
   }
@@ -386,8 +383,7 @@ public final class StateSync {
 
     // accounts feed storages and bytecodes: pause them while those lag, to bound memory
     final boolean backlogged =
-        coverage.pendingStorageCount() > config.storageBacklog()
-            || codeQueue.size() > config.storageBacklog();
+        coverage.pendingStorageCount() > STORAGE_BACKLOG || codeQueue.size() > STORAGE_BACKLOG;
     final int accountShare = backlogged ? 0 : Math.max(1, target / 3);
     // lowest ranges first: written in key order, the state is moved down the database levels
     // instead of being rewritten at each of them

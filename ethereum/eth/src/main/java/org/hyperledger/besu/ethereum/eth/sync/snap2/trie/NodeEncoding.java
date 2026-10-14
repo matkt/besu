@@ -23,7 +23,7 @@ import org.apache.tuweni.bytes.Bytes32;
 final class NodeEncoding {
 
   /** Encoding of an empty child or of an empty branch value. */
-  public static final byte EMPTY = (byte) 0x80;
+  private static final byte EMPTY = (byte) 0x80;
 
   private static final byte HASH_PREFIX = (byte) 0xa0;
 

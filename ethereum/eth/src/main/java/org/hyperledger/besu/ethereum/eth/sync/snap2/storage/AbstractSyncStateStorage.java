@@ -60,11 +60,6 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
   }
 
   @Override
-  public Optional<Bytes> getStorage(final Bytes32 accountHash, final Bytes32 slotHash) {
-    return flat.get(storageSegment, slotKey(accountHash, slotHash)).map(Bytes::wrap);
-  }
-
-  @Override
   public void scan(final Bytes32 from, final Bytes32 to, final ScanVisitor visitor) {
     try (Stream<Pair<byte[], byte[]>> accounts =
             flat.streamFromKey(accountSegment, from.toArrayUnsafe(), to.toArrayUnsafe());

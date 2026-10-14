@@ -36,7 +36,6 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.metrics.SyncDurationMetrics;
-import org.hyperledger.besu.util.FutureUtils;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -48,7 +47,7 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -89,7 +88,8 @@ final class SyncAttempt {
   private volatile Instant trieStarted = Instant.now();
   private volatile boolean cancelled;
   private volatile boolean done;
-  private volatile boolean moving;
+  // the pivot move in progress, or the last one
+  private volatile CompletableFuture<Void> move = CompletableFuture.completedFuture(null);
   private volatile boolean finalizing;
 
   SyncAttempt(final SyncContext context, final BlockHeader firstPivot, final Resume resume) {
@@ -135,15 +135,7 @@ final class SyncAttempt {
                   return finalPivot;
                 });
     // either the sync completes, or the attempt ends early
-    final CompletableFuture<BlockHeader> outcome = new CompletableFuture<>();
-    FutureUtils.propagateResult(main, outcome);
-    aborted.whenComplete(
-        (unused, error) -> {
-          if (error != null) {
-            outcome.completeExceptionally(error);
-          }
-        });
-    return outcome;
+    return main.applyToEither(aborted, Function.identity());
   }
 
   /** Stops every component of the attempt, which never writes anything afterwards. */
@@ -348,28 +340,27 @@ final class SyncAttempt {
   /** Moves the pivot if the head went far enough or peers stopped serving it. */
   void maybeMove() {
     // nothing to move before the state download starts at the first pivot
-    if (inactive() || finalizing || moving || stateSync.pivot() == null) {
+    if (inactive() || finalizing || !move.isDone() || stateSync.pivot() == null) {
       return;
     }
     final Optional<Hash> head = context.heads().headHash();
     if (head.isEmpty()) {
       return;
     }
-    moving = true;
-    context
-        .fetcher()
-        .byHash(head.get(), Priority.PIVOT)
-        .thenCompose(headHeader -> moveTowards(headHeader, false))
-        .whenComplete(
-            (unused, error) -> {
-              // a restart is logged when it starts
-              if (error != null
-                  && !inactive()
-                  && !(Futures.unwrap(error) instanceof RestartException)) {
-                LOG.warn("Pivot move failed, retrying: {}", Futures.unwrap(error).getMessage());
-              }
-              moving = false;
-            });
+    move =
+        context
+            .fetcher()
+            .byHash(head.get(), Priority.PIVOT)
+            .thenCompose(headHeader -> moveTowards(headHeader, false))
+            .whenComplete(
+                (unused, error) -> {
+                  // a restart is logged when it starts
+                  if (error != null
+                      && !inactive()
+                      && !(Futures.unwrap(error) instanceof RestartException)) {
+                    LOG.warn("Pivot move failed, retrying: {}", Futures.unwrap(error).getMessage());
+                  }
+                });
   }
 
   // forced, it also checks the pivot is still canonical when the head is above it
@@ -457,7 +448,7 @@ final class SyncAttempt {
             });
   }
 
-  // stops moving the pivot and waits for a move in progress
+  // stops moving the pivot and waits for a move in progress, on the thread that starts them
   private CompletableFuture<Void> settleMoves() {
     final CompletableFuture<Void> settled = new CompletableFuture<>();
     context
@@ -465,19 +456,9 @@ final class SyncAttempt {
         .execute(
             () -> {
               finalizing = true;
-              waitIdle(settled);
+              move.whenComplete((unused, error) -> settled.complete(null));
             });
     return settled;
-  }
-
-  private void waitIdle(final CompletableFuture<Void> settled) {
-    if (inactive()) {
-      settled.completeExceptionally(new CancellationException("attempt abandoned"));
-    } else if (moving) {
-      context.control().schedule(() -> waitIdle(settled), 200, TimeUnit.MILLISECONDS);
-    } else {
-      settled.complete(null);
-    }
   }
 
   // the last pivot must be canonical and recent: move it next to the head before building
@@ -554,17 +535,9 @@ final class SyncAttempt {
     return headers == null ? 0 : headers.lowestStored();
   }
 
-  long trieProgress(final boolean accounts) {
-    final WorldStateTrieBuilder builder = trieBuilder;
-    if (builder == null) {
-      return 0;
-    }
-    return accounts ? builder.accountsProcessed() : builder.slotsProcessed();
-  }
-
-  long trieKeptStorageTries() {
-    final WorldStateTrieBuilder builder = trieBuilder;
-    return builder == null ? 0 : builder.keptStorageTries();
+  /** Returns the final trie build, once started. */
+  Optional<WorldStateTrieBuilder> trieBuilder() {
+    return Optional.ofNullable(trieBuilder);
   }
 
   /** Returns the line of a tick: the phase, its share done and the figures that matter in it. */
@@ -613,7 +586,7 @@ final class SyncAttempt {
           .append(" | bytecodes ")
           .append(compact(stateSync.downloadedCodes()))
           .append(" | storages pending ")
-          .append(count(stateSync.pendingStorages()));
+          .append(count(stateSync.pendingStorageCount()));
       line.append(" | storage tries ")
           .append(compact(stateSync.storageTriesBuilt()))
           .append(" built (")

@@ -36,7 +36,10 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.S
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -112,13 +115,13 @@ class StateDiffApplierTest {
     assertThat(outcome.staleStorage()).isEqualTo(1);
     assertThat(read(storage, A).getBalance()).isEqualTo(Wei.of(42));
     assertThat(read(storage, A).getNonce()).isEqualTo(1);
-    assertThat(storage.getStorage(hash(B), s1)).isPresent();
-    assertThat(storage.getStorage(hash(B), s2)).isEmpty();
+    assertThat(slot(storage, hash(B), s1)).isPresent();
+    assertThat(slot(storage, hash(B), s2)).isEmpty();
     assertThat(task.isRootStale()).isTrue();
     assertThat(storage.getAccount(hash(C))).isEmpty();
     assertThat(storage.getAccount(hash(D))).isEmpty();
     assertThat(read(storage, N).getCodeHash()).isEqualTo(Hash.hash(CODE));
-    assertThat(storage.getStorage(hash(N), s1)).isPresent();
+    assertThat(slot(storage, hash(N), s1)).isPresent();
     assertThat(storage.hasCode(Bytes32.wrap(Hash.hash(CODE).getBytes()))).isTrue();
   }
 
@@ -177,5 +180,12 @@ class StateDiffApplierTest {
   private static SlotChanges slot(final UInt256 key, final long value) {
     return new SlotChanges(
         new StorageSlotKey(key), List.of(new StorageChange(1, UInt256.valueOf(value))));
+  }
+
+  private static Optional<Bytes> slot(
+      final SyncStateStorage storage, final Bytes32 account, final Bytes32 slotHash) {
+    final Map<Bytes32, Bytes> slots = new HashMap<>();
+    storage.forEachSlotValue(account, slots::put);
+    return Optional.ofNullable(slots.get(slotHash));
   }
 }

@@ -64,6 +64,9 @@ final class Snap2SyncController implements SnapSyncController {
   private static final long PROGRESS_LOG_SECONDS = 30;
   // rounds of requests before a block access list counts as unavailable
   private static final int BAL_ROUNDS = 60;
+  private static final int BAL_BATCH_SIZE = 32;
+  private static final int BAL_RESPONSE_BYTES = 2 * 1024 * 1024;
+  private static final int MIN_PEERS = 1;
 
   private final Snap2Configuration config;
   private final ProtocolSchedule protocolSchedule;
@@ -202,7 +205,7 @@ final class Snap2SyncController implements SnapSyncController {
             peers,
             peerTaskExecutor,
             new HeaderFetcher(scheduler, protocolSchedule, heads, config.headersPerRequest()),
-            new BalFetcher(scheduler, config.balBatchSize(), config.balResponseBytes(), BAL_ROUNDS),
+            new BalFetcher(scheduler, BAL_BATCH_SIZE, BAL_RESPONSE_BYTES, BAL_ROUNDS),
             executor,
             control,
             () -> stopped,
@@ -254,10 +257,10 @@ final class Snap2SyncController implements SnapSyncController {
     if (stopped) {
       return CompletableFuture.failedFuture(new CancellationException("stopped"));
     }
-    if (context.scheduler().peerCount(Protocol.SNAP) >= config.minPeers()) {
+    if (context.scheduler().peerCount(Protocol.SNAP) >= MIN_PEERS) {
       return CompletableFuture.completedFuture(null);
     }
-    LOG.info("SNAP2 waiting for {} snap peers | {}", config.minPeers(), metrics.peerCounts());
+    LOG.info("SNAP2 waiting for {} snap peers | {}", MIN_PEERS, metrics.peerCounts());
     return Futures.delay(RETRY_DELAY, executor).thenCompose(unused -> waitForPeers());
   }
 

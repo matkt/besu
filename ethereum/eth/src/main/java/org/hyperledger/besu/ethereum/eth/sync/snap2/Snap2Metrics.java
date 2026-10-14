@@ -19,6 +19,7 @@ import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeerImmutableAttributes;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
@@ -27,7 +28,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
@@ -110,17 +110,17 @@ final class Snap2Metrics {
         category,
         "snap2_trie_accounts_processed",
         "Accounts added to the tries SNAP2 is building",
-        () -> attemptValue(attempt -> attempt.trieProgress(true)));
+        () -> trieValue(WorldStateTrieBuilder::accountsProcessed));
     metricsSystem.createLongGauge(
         category,
         "snap2_trie_slots_processed",
         "Storage slots added to the tries SNAP2 is building",
-        () -> attemptValue(attempt -> attempt.trieProgress(false)));
+        () -> trieValue(WorldStateTrieBuilder::slotsProcessed));
     metricsSystem.createLongGauge(
         category,
         "snap2_trie_storage_tries_kept",
         "Storage tries built while downloading that the final SNAP2 build kept",
-        () -> attemptValue(SyncAttempt::trieKeptStorageTries));
+        () -> trieValue(WorldStateTrieBuilder::keptStorageTries));
     metricsSystem.createLongGauge(
         category,
         "snap2_storage_tries_left",
@@ -154,16 +154,15 @@ final class Snap2Metrics {
     final var peers =
         metricsSystem.createLabelledSuppliedGauge(
             category, "snap2_peers", "Connected peers by what they serve to SNAP2", "capability");
-    peers.labels(() -> countPeers(capabilities -> true), "all");
-    peers.labels(
-        () -> countPeers(capabilities -> capabilities.contains(SnapProtocol.SNAP1)), "snap1");
-    peers.labels(
-        () -> countPeers(capabilities -> capabilities.contains(SnapProtocol.SNAP2)), "snap2");
-    peers.labels(
-        () ->
-            countPeers(
-                capabilities -> capabilities.stream().anyMatch(EthProtocol::isEth71Compatible)),
-        "eth71");
+    peers.labels(() -> peerCounts().all(), "all");
+    peers.labels(() -> peerCounts().snap1(), "snap1");
+    peers.labels(() -> peerCounts().snap2(), "snap2");
+    peers.labels(() -> peerCounts().eth71(), "eth71");
+  }
+
+  // a value of the final trie build, 0 before it starts
+  private long trieValue(final ToLongFunction<WorldStateTrieBuilder> value) {
+    return attemptValue(attempt -> attempt.trieBuilder().map(value::applyAsLong).orElse(0L));
   }
 
   // a value of the current attempt, 0 before the first one
@@ -175,15 +174,6 @@ final class Snap2Metrics {
   String stage() {
     final SyncAttempt attempt = current.get();
     return attempt == null ? "waiting" : attempt.stage();
-  }
-
-  private int countPeers(final Predicate<Set<Capability>> filter) {
-    return (int)
-        ethPeers
-            .streamAvailablePeers()
-            .map(EthPeerImmutableAttributes::ethPeer)
-            .filter(peer -> filter.test(peer.getAgreedCapabilities()))
-            .count();
   }
 
   /** The connected peers by what they can serve: snap ranges, and block access lists. */

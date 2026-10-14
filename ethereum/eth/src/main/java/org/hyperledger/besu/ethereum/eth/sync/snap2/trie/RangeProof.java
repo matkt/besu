@@ -103,8 +103,8 @@ public final class RangeProof {
     }
   }
 
-  /** Computes the root of a trie holding exactly the given sorted leaves. */
-  public static Bytes32 computeRoot(final List<Bytes32> keys, final List<Bytes> values) {
+  // the root of a trie holding exactly the given sorted leaves
+  private static Bytes32 computeRoot(final List<Bytes32> keys, final List<Bytes> values) {
     final StackTrie trie = new StackTrie(null);
     for (int i = 0; i < keys.size(); i++) {
       trie.addLeaf(keys.get(i), values.get(i));

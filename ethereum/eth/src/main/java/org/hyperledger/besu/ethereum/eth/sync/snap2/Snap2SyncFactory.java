@@ -39,6 +39,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -48,6 +49,9 @@ import org.slf4j.LoggerFactory;
 public final class Snap2SyncFactory {
 
   private static final Logger LOG = LoggerFactory.getLogger(Snap2SyncFactory.class);
+  private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
+  // concurrent requests a peer is given, per protocol
+  private static final int MAX_REQUESTS_PER_PEER = 6;
 
   private Snap2SyncFactory() {}
 
@@ -98,9 +102,9 @@ public final class Snap2SyncFactory {
                 new RequestScheduler(
                     ethContext.getEthPeers(),
                     metricsSystem,
-                    config.requestTimeout(),
-                    config.maxSnapRequestsPerPeer(),
-                    config.maxEthRequestsPerPeer(),
+                    REQUEST_TIMEOUT,
+                    MAX_REQUESTS_PER_PEER,
+                    MAX_REQUESTS_PER_PEER,
                     config.workerThreads()),
             ethContext.getEthPeers(),
             ethContext.getPeerTaskExecutor()));
