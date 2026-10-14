@@ -92,6 +92,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private static final String SNAP_TRANSACTION_INDEXING_ENABLED_FLAG =
       "--snapsync-synchronizer-transaction-indexing-enabled";
   private static final String SNAP2_BACKFILL_MODE_FLAG = "--Xsnap2-backfill-mode";
+  private static final String SNAP2_SORTED_INGEST_ENABLED_FLAG = "--Xsnap2-sorted-ingest-enabled";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
       "--Xsnapsync-synchronizer-flat-account-healed-count-per-request";
@@ -420,6 +421,17 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
           "How hard the SNAP2 sync downloads the older bodies and receipts in the background once the node follows the chain head. SLOW: 5 MiB/s on 2 peers, paused 2 s after each block import, backed off at the first sign of head lag, mainnet history in 2 to 3 days. MEDIUM: 14 MiB/s on 4 peers, paused 1 s after each import, backed off when the head lags more than a slot, about a day. FAST: 32 MiB/s on 8 peers, no pause around imports, backed off when the head lags, about 10 hours. Every mode stops while the node is behind the chain head. Valid values: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE})")
   private BackfillMode snap2BackfillMode = SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_MODE;
 
+  @CommandLine.Option(
+      names = {SNAP2_SORTED_INGEST_ENABLED_FLAG},
+      hidden = true,
+      paramLabel = "<Boolean>",
+      arity = "0..1",
+      fallbackValue = "true",
+      description =
+          "Write the state downloaded by the SNAP2 sync as sorted files that the storage keeps as they are, instead of through its regular write path. Needs Bonsai. (default: ${DEFAULT-VALUE})")
+  private Boolean snap2SortedIngestEnabled =
+      SnapSyncConfiguration.DEFAULT_SNAP2_SORTED_INGEST_ENABLED;
+
   /**
    * @deprecated No longer used. Accepted for backwards compatibility. The flag will be removed in a
    *     future release.
@@ -552,6 +564,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
     options.snapTransactionIndexingEnabled =
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
     options.snap2BackfillMode = config.getSnapSyncConfiguration().getSnap2BackfillMode();
+    options.snap2SortedIngestEnabled =
+        config.getSnapSyncConfiguration().isSnap2SortedIngestEnabled();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
     options.era1ImportPrepipelineConcurrency = config.era1ImportPrepipelineConcurrency();
@@ -598,6 +612,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
             .snap2BackfillMode(snap2BackfillMode)
+            .isSnap2SortedIngestEnabled(snap2SortedIngestEnabled)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
     builder.backwardHeadersDownloadStepTimeoutMillis(backwardHeadersDownloadStepTimeoutMillis);
@@ -677,6 +692,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapTransactionIndexingEnabled),
             SNAP2_BACKFILL_MODE_FLAG,
             snap2BackfillMode.name(),
+            SNAP2_SORTED_INGEST_ENABLED_FLAG,
+            OptionParser.format(snap2SortedIngestEnabled),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,
             OptionParser.format(era1ImportPrepipelineEnabled),
             ERA1_DATA_URI_FLAG,

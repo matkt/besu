@@ -165,6 +165,30 @@ class WorldStateTrieBuilderTest {
   }
 
   @Test
+  void writesTheStoragesTooLargeToSortThroughTheUsualWrites() {
+    // most storages with slots exceed one kilobyte of nodes, the smallest do not
+    final Storages storages = SyncStorageFixture.createBonsai(1024);
+    final World world = SyncStorageFixture.randomWorld(new Random(9), 500);
+    world.writeFlat(storages.sync());
+
+    final WorldStateTrieBuilder.Result result =
+        new WorldStateTrieBuilder(storages.sync(), 4, hash -> true).build();
+
+    assertThat(result.root()).isEqualTo(world.root());
+    world
+        .storage
+        .keySet()
+        .forEach(
+            account -> {
+              final MerkleTrie<Bytes32, Bytes> storageTrie =
+                  storages.storageTrie(account, world.storageRoot(account));
+              world
+                  .storageLeaves(account)
+                  .forEach((slot, leaf) -> assertThat(storageTrie.get(slot)).contains(leaf));
+            });
+  }
+
+  @Test
   void stopsEveryPartitionWhenOneFails() throws InterruptedException {
     final Storages storages = SyncStorageFixture.create(Format.BONSAI);
     SyncStorageFixture.randomWorld(new Random(3), 2000).writeFlat(storages.sync());

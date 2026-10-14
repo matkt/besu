@@ -76,6 +76,8 @@ public final class StateSync {
   private static final int NO_EPOCH = -1;
   private static final int SEEN_CODES_LIMIT = 200_000;
   private static final int BYTES_PER_SLOT = 64;
+  // peers stop looking codes up after this many in one request
+  static final int MAX_CODES_PER_REQUEST = 1024;
 
   /** Current pivot; responses requested at another epoch are discarded. */
   public record Pivot(int epoch, BlockHeader header) {
@@ -142,6 +144,8 @@ public final class StateSync {
   private final AtomicLong storageTrieSlots = new AtomicLong();
   // storages complete without their trie, which the final build makes
   private final Set<Bytes32> storageTriesLeft = ConcurrentHashMap.newKeySet();
+  // the size of the codes received so far, which tells how many of them fit a response
+  private final AtomicLong codeBytes = new AtomicLong();
 
   public StateSync(
       final SyncStateStorage storage,
@@ -176,6 +180,13 @@ public final class StateSync {
           RangeManager.generateRanges(
                   RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, config.accountChunks())
               .forEach((from, to) -> accountTasks.add(new RangeTask(from, to)));
+          storage
+              .sortedWrites()
+              .ifPresent(
+                  sorted ->
+                      sorted.start(
+                          accountTasks.stream().map(task -> task.limit).toList(),
+                          hash -> coverage.storageTask(hash) != null));
           LOG.info(
               "SNAP2 state download started at {} | {} account ranges",
               ProgressFormat.block(pivotHeader.getNumber()),
@@ -307,6 +318,8 @@ public final class StateSync {
       if (stopped) {
         throw new IllegalStateException("state download stopped");
       }
+      // a sorted file stored after the write would hide it
+      storage.sortedWrites().ifPresent(SyncStateStorage.SortedWrites::flush);
       return write.get();
     } finally {
       pivotLock.writeLock().unlock();
@@ -347,6 +360,7 @@ public final class StateSync {
     loop.shutdownNow();
     persister.shutdownNow();
     trieUpdater.stop();
+    storage.sortedWrites().ifPresent(SyncStateStorage.SortedWrites::close);
     completion.completeExceptionally(new CancellationException("state download stopped"));
   }
 
@@ -577,6 +591,7 @@ public final class StateSync {
     return atPivot(
         request.pivot.epoch(),
         () -> {
+          final Optional<SyncStateStorage.SortedWrites> sorted = storage.sortedWrites();
           final SyncStateStorage.Batch batch = storage.batch();
           final List<StorageTask> storageTasks = new ArrayList<>();
           final Set<Bytes32> codeHashes = new LinkedHashSet<>();
@@ -587,7 +602,9 @@ public final class StateSync {
               break;
             }
             final Bytes account = result.accounts().get(i);
-            batch.putAccount(hash, account);
+            if (sorted.isEmpty()) {
+              batch.putAccount(hash, account);
+            }
             final PmtStateTrieAccountValue value = Accounts.decode(account);
             if (!value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
               storageTasks.add(
@@ -603,6 +620,16 @@ public final class StateSync {
           final boolean done =
               last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
           final Bytes32 end = done ? request.limit : last;
+          if (sorted.isPresent()) {
+            sorted
+                .get()
+                .accounts(
+                    request.limit,
+                    result.hashes().subList(0, count),
+                    result.accounts().subList(0, count),
+                    storageTasks.stream().map(StorageTask::accountHash).toList(),
+                    done);
+          }
           batch.commit();
           storageTasks.forEach(coverage::addStorageTask);
           coverage.accounts().add(request.origin, end);
@@ -615,6 +642,13 @@ public final class StateSync {
     if (!task.queued) {
       task.queued = true;
       storageQueue.add(task);
+    }
+  }
+
+  private void queueStorageFirst(final StorageTask task) {
+    if (!task.queued) {
+      task.queued = true;
+      storageQueue.addFirst(task);
     }
   }
 
@@ -679,6 +713,7 @@ public final class StateSync {
     return atPivot(
         request.pivot.epoch(),
         () -> {
+          final Optional<SyncStateStorage.SortedWrites> sorted = storage.sortedWrites();
           final SyncStateStorage.Batch batch = storage.batch();
           final SyncStateStorage.TrieWriter writer = storage.trieWriter();
           final List<Covered> covered = new ArrayList<>();
@@ -690,6 +725,8 @@ public final class StateSync {
             final StorageTask task = request.tasks.get(i);
             final StorageRangesRequest.Slots accountSlots = result.accounts().get(i);
             int stored = 0;
+            final List<Bytes32> sortedSlots = new ArrayList<>();
+            final List<Bytes32> sortedValues = new ArrayList<>();
             for (int s = 0; s < accountSlots.hashes().size(); s++) {
               final Bytes32 slotHash = accountSlots.hashes().get(s);
               if (slotHash.compareTo(request.limit) > 0) {
@@ -697,10 +734,25 @@ public final class StateSync {
               }
               final Bytes32 value = Bytes32.leftPad(RLP.decodeOne(accountSlots.values().get(s)));
               if (isPending(task) && !value.isZero()) {
-                batch.putStorage(task.accountHash(), slotHash, value);
+                if (sorted.isPresent()) {
+                  sortedSlots.add(slotHash);
+                  sortedValues.add(value);
+                } else {
+                  batch.putStorage(task.accountHash(), slotHash, value);
+                }
                 stored++;
               }
               count++;
+            }
+            if (sorted.isPresent() && !sortedSlots.isEmpty()) {
+              // the slots of a chunk follow each other, so do those of the first request
+              sorted
+                  .get()
+                  .storage(
+                      task.accountHash(),
+                      request.chunk != null ? request.chunk : task,
+                      sortedSlots,
+                      sortedValues);
             }
             // the proof covers up to the last returned slot, which may lie past the limit
             final List<Bytes32> returned = accountSlots.hashes();
@@ -783,6 +835,8 @@ public final class StateSync {
     if (!task.cover(origin, end, slots)) {
       return;
     }
+    // its slots can go into the sorted files once those of the accounts before it are in
+    storage.sortedWrites().ifPresent(sorted -> sorted.storageComplete(task.accountHash()));
     coverage.removeStorageTask(task.accountHash());
     completed.add(task);
     final Optional<Bytes> rootNode = task.trieRootNode();
@@ -809,16 +863,22 @@ public final class StateSync {
     }
     // a response serves the first storages asked, in order, the last one possibly cut short
     final int served = persisted == null ? 0 : persisted.served;
+    final List<StorageTask> unanswered = new ArrayList<>();
     for (int i = 0; i < request.tasks.size(); i++) {
       final StorageTask task = request.tasks.get(i);
       if (!isPending(task) || i < served - 1) {
         continue;
       }
       if (i >= served) {
-        queueStorage(task);
+        unanswered.add(task);
       } else if (!persisted.lastComplete) {
         splitIntoChunks(task, persisted.lastSlot, persisted.lastReturned);
       }
+    }
+    // asked for again before the storages queued after them, which keeps the order the sorted
+    // files take the slots in
+    for (int i = unanswered.size() - 1; i >= 0; i--) {
+      queueStorageFirst(unanswered.get(i));
     }
   }
 
@@ -901,7 +961,8 @@ public final class StateSync {
   private boolean sendCodes() {
     final List<Bytes32> batch = new ArrayList<>();
     final Iterator<Bytes32> iterator = codeQueue.iterator();
-    while (iterator.hasNext() && batch.size() < config.codeBatchSize()) {
+    final int codesPerRequest = codesPerRequest();
+    while (iterator.hasNext() && batch.size() < codesPerRequest) {
       final Bytes32 codeHash = iterator.next();
       iterator.remove();
       if (!isStored(codeHash)) {
@@ -939,6 +1000,21 @@ public final class StateSync {
     }
   }
 
+  /**
+   * As many codes as fit a response at the average size of the codes received so far, but not fewer
+   * than configured: a network of large codes keeps the configured count.
+   */
+  @VisibleForTesting
+  int codesPerRequest() {
+    final long received = codes.get();
+    if (received == 0) {
+      return config.codeBatchSize();
+    }
+    final long averageSize = Math.max(1, codeBytes.get() / received);
+    final long fitting = config.responseBytes() / averageSize;
+    return (int) Math.max(config.codeBatchSize(), Math.min(MAX_CODES_PER_REQUEST, fitting));
+  }
+
   private Set<Bytes32> persistCodes(final Map<Bytes32, Bytes> received) {
     final boolean written =
         withoutMoves(
@@ -951,6 +1027,7 @@ public final class StateSync {
       return Set.of();
     }
     codes.addAndGet(received.size());
+    codeBytes.addAndGet(received.values().stream().mapToLong(Bytes::size).sum());
     return received.keySet();
   }
 
@@ -1022,6 +1099,8 @@ public final class StateSync {
         || inFlight() > 0) {
       return false;
     }
+    // the final build reads what was written
+    storage.sortedWrites().ifPresent(SyncStateStorage.SortedWrites::flush);
     LOG.info(
         "SNAP2 state download complete at {} in {} | accounts {} | slots {} | bytecodes {}{}",
         ProgressFormat.block(pivot.header().getNumber()),

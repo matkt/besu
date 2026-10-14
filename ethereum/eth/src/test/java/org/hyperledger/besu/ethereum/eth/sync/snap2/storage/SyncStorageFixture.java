@@ -45,6 +45,8 @@ public final class SyncStorageFixture {
   /** Storage format under test. */
   public enum Format {
     BONSAI,
+    // Bonsai with the downloaded state written as sorted files
+    BONSAI_SORTED,
     FOREST
   }
 
@@ -81,16 +83,26 @@ public final class SyncStorageFixture {
 
   public static Storages create(final Format format) {
     final InMemoryKeyValueStorageProvider provider = new InMemoryKeyValueStorageProvider();
-    if (format == Format.BONSAI) {
+    if (format != Format.FOREST) {
       final BonsaiWorldStateKeyValueStorage bonsai =
           (BonsaiWorldStateKeyValueStorage)
               provider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
-      return new Storages(new BonsaiSyncStateStorage(bonsai), bonsai, null);
+      return new Storages(
+          new BonsaiSyncStateStorage(bonsai, format == Format.BONSAI_SORTED), bonsai, null);
     }
     final ForestWorldStateKeyValueStorage forest =
         (ForestWorldStateKeyValueStorage)
             provider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_FOREST_CONFIG);
     return new Storages(new ForestSyncStateStorage(forest, provider), null, forest);
+  }
+
+  /** A Bonsai storage that sorts at most the given bytes of nodes of one storage in memory. */
+  public static Storages createBonsai(final long maxSortedStorageBytes) {
+    final BonsaiWorldStateKeyValueStorage bonsai =
+        (BonsaiWorldStateKeyValueStorage)
+            new InMemoryKeyValueStorageProvider()
+                .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    return new Storages(new BonsaiSyncStateStorage(bonsai, maxSortedStorageBytes), bonsai, null);
   }
 
   /**

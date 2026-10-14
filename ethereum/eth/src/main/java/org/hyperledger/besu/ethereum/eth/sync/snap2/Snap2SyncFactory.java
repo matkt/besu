@@ -88,6 +88,8 @@ public final class Snap2SyncFactory {
                     .getEthPeers()
                     .bestPeerWithHeightEstimate()
                     .map(peer -> peer.chainState().getBestBlock().getHash());
+    final boolean sortedIngest =
+        Boolean.TRUE.equals(syncConfig.getSnapSyncConfiguration().isSnap2SortedIngestEnabled());
     final Snap2Configuration config = Snap2Configuration.getDefault();
     return Optional.of(
         new Snap2SyncController(
@@ -96,7 +98,7 @@ public final class Snap2SyncFactory {
             blockchain,
             ethContext.getEthPeers(),
             syncState,
-            syncStorage(worldStateStorageCoordinator, storageProvider),
+            syncStorage(worldStateStorageCoordinator, storageProvider, sortedIngest),
             heads,
             metricsSystem,
             marker,
@@ -116,8 +118,13 @@ public final class Snap2SyncFactory {
   }
 
   private static SyncStateStorage syncStorage(
-      final WorldStateStorageCoordinator coordinator, final StorageProvider storageProvider) {
+      final WorldStateStorageCoordinator coordinator,
+      final StorageProvider storageProvider,
+      final boolean sortedIngest) {
     if (coordinator.getDataStorageFormat() == DataStorageFormat.FOREST) {
+      if (sortedIngest) {
+        LOG.warn("The SNAP2 state is only written as sorted files with Bonsai");
+      }
       return new ForestSyncStateStorage(
           coordinator.getStrategy(ForestWorldStateKeyValueStorage.class), storageProvider);
     }
@@ -126,6 +133,6 @@ public final class Snap2SyncFactory {
     if (bonsai.getFlatDbMode() == FlatDbMode.ARCHIVE) {
       throw new IllegalStateException("SNAP2 sync does not support the Bonsai archive format");
     }
-    return new BonsaiSyncStateStorage(bonsai);
+    return new BonsaiSyncStateStorage(bonsai, sortedIngest);
   }
 }
