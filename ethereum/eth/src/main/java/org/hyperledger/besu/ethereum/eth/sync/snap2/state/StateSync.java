@@ -44,6 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -139,7 +140,8 @@ public final class StateSync {
   private final AtomicLong codes = new AtomicLong();
   private final AtomicLong storageTries = new AtomicLong();
   private final AtomicLong storageTrieSlots = new AtomicLong();
-  private final AtomicLong storageTriesLeft = new AtomicLong();
+  // storages complete without their trie, which the final build makes
+  private final Set<Bytes32> storageTriesLeft = ConcurrentHashMap.newKeySet();
 
   public StateSync(
       final SyncStateStorage storage,
@@ -156,7 +158,8 @@ public final class StateSync {
             Math.max(2, config.workerThreads()),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
     this.trieUpdater =
-        new StorageTrieUpdater(storage, this::withoutMoves, trieUpdateThreads(config));
+        new StorageTrieUpdater(
+            storage, this::withoutMoves, storageTriesLeft::contains, trieUpdateThreads(config));
   }
 
   // one thread per four cores, at most four: the download keeps the rest
@@ -289,7 +292,12 @@ public final class StateSync {
 
   /** Returns the number of storages whose trie the download left to the final build. */
   public long storageTriesLeft() {
-    return storageTriesLeft.get();
+    return storageTriesLeft.size();
+  }
+
+  /** Returns whether the download completed the storage of an account without writing its trie. */
+  public boolean storageTrieLeft(final Bytes32 accountHash) {
+    return storageTriesLeft.contains(accountHash);
   }
 
   // runs a write on the flat state exclusive with every download write
@@ -700,9 +708,23 @@ public final class StateSync {
           batch.commit();
           // every range is stored before the one completing a storage writes its root node
           writer.commit();
-          covered.forEach(
-              range -> cover(range.task(), request.origin, range.end(), range.slots(), writer));
-          writer.commit();
+          final List<StorageTask> completed = new ArrayList<>();
+          try {
+            covered.forEach(
+                range ->
+                    cover(
+                        range.task(),
+                        request.origin,
+                        range.end(),
+                        range.slots(),
+                        writer,
+                        completed));
+            writer.commit();
+          } catch (final RuntimeException e) {
+            // their root nodes may be lost: the final build makes their tries
+            completed.forEach(task -> storageTriesLeft.add(task.accountHash()));
+            throw e;
+          }
           slots.addAndGet(count);
           return new StoragePersisted(
               result.accounts().size(), lastSlot, lastComplete, lastReturned);
@@ -740,25 +762,27 @@ public final class StateSync {
     task.trieWritten(valid ? Optional.ofNullable(rootNode[0]) : Optional.empty());
   }
 
-  // a complete storage gets the root node of its trie, so the final build keeps it
+  // a complete storage gets the root node of its trie, or is left to the final build
   private void cover(
       final StorageTask task,
       final Bytes32 origin,
       final Bytes32 end,
       final int slots,
-      final SyncStateStorage.TrieWriter writer) {
+      final SyncStateStorage.TrieWriter writer,
+      final List<StorageTask> completed) {
     if (!task.cover(origin, end, slots)) {
       return;
     }
     coverage.removeStorageTask(task.accountHash());
-    task.trieRootNode()
-        .ifPresentOrElse(
-            rootNode -> {
-              writer.storageNode(task.accountHash(), Bytes.EMPTY, task.storageRoot(), rootNode);
-              storageTries.incrementAndGet();
-              storageTrieSlots.addAndGet(task.slots());
-            },
-            storageTriesLeft::incrementAndGet);
+    completed.add(task);
+    final Optional<Bytes> rootNode = task.trieRootNode();
+    if (rootNode.isPresent()) {
+      writer.storageNode(task.accountHash(), Bytes.EMPTY, task.storageRoot(), rootNode.get());
+      storageTries.incrementAndGet();
+      storageTrieSlots.addAndGet(task.slots());
+    } else {
+      storageTriesLeft.add(task.accountHash());
+    }
   }
 
   private void afterStorage(final StorageRangesRequest request, final StoragePersisted persisted) {
@@ -998,7 +1022,7 @@ public final class StateSync {
         String.format(
             " | storage tries %s built, %s left to the final build",
             ProgressFormat.compact(storageTries.get()),
-            ProgressFormat.compact(storageTriesLeft.get())));
+            ProgressFormat.compact(storageTriesLeft.size())));
     completion.complete(null);
     return true;
   }

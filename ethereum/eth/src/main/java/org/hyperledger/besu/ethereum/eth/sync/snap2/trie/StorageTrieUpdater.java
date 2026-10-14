@@ -24,9 +24,9 @@ import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -43,20 +44,29 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Applies the slots pivot moves change to the storage tries written while downloading, as a block
- * import does. A changed storage keeps an unknown root in its account until its trie gives the new
- * one; without a trie, the final build makes it.
+ * import does. The changes of all the moves are applied once per storage at the end of the
+ * download, in key order, or earlier past a memory budget, to read each trie as little as possible.
+ * A changed storage keeps an unknown root in its account until its trie gives the new one; without
+ * a trie, the final build makes it.
  */
 public final class StorageTrieUpdater {
 
   private static final Logger LOG = LoggerFactory.getLogger(StorageTrieUpdater.class);
+  // changed slots kept in memory, some 200 bytes each, past which updates are applied early
+  private static final int MAX_PENDING_SLOTS = 250_000;
 
   private final SyncStateStorage storage;
   private final Predicate<Runnable> withoutMoves;
+  private final Predicate<Bytes32> trieLeft;
+  private final int maxPendingSlots;
   private final ExecutorService workers;
-  // guarded by this: the updates not started, in arrival order, and the accounts a worker is on
-  private final Map<Bytes32, Update> pending = new LinkedHashMap<>();
+  // guarded by this: the updates not started, by account, the slots they change, and the
+  // accounts a worker is on
+  private final TreeMap<Bytes32, Update> pending = new TreeMap<>();
+  private long pendingSlots;
   private final Set<Bytes32> inProgress = new HashSet<>();
   private final AtomicLong updated = new AtomicLong();
+  private boolean finishing;
   private boolean stopped;
 
   /** The slots moves changed in a storage, and the root of the trie to change. */
@@ -76,11 +86,27 @@ public final class StorageTrieUpdater {
    * Creates the updater.
    *
    * @param withoutMoves runs an action exclusive with pivot moves, false once the sync stopped
+   * @param trieLeft whether the download completed the storage of an account without its trie
    */
   public StorageTrieUpdater(
-      final SyncStateStorage storage, final Predicate<Runnable> withoutMoves, final int threads) {
+      final SyncStateStorage storage,
+      final Predicate<Runnable> withoutMoves,
+      final Predicate<Bytes32> trieLeft,
+      final int threads) {
+    this(storage, withoutMoves, trieLeft, threads, MAX_PENDING_SLOTS);
+  }
+
+  @VisibleForTesting
+  StorageTrieUpdater(
+      final SyncStateStorage storage,
+      final Predicate<Runnable> withoutMoves,
+      final Predicate<Bytes32> trieLeft,
+      final int threads,
+      final int maxPendingSlots) {
     this.storage = storage;
     this.withoutMoves = withoutMoves;
+    this.trieLeft = trieLeft;
+    this.maxPendingSlots = maxPendingSlots;
     this.workers =
         Executors.newFixedThreadPool(
             threads, Thread.ofPlatform().name("snap2-storage-trie-", 0).daemon().factory());
@@ -95,7 +121,8 @@ public final class StorageTrieUpdater {
    */
   public synchronized void changed(
       final Bytes32 accountHash, final Hash previousRoot, final Map<Bytes32, UInt256> changed) {
-    if (stopped) {
+    // a storage left to the final build has no trie to change
+    if (stopped || trieLeft.test(accountHash)) {
       return;
     }
     Update update = pending.get(accountHash);
@@ -111,10 +138,14 @@ public final class StorageTrieUpdater {
       }
       update = new Update(accountHash.copy(), base);
       pending.put(update.account, update);
-      notifyAll();
     }
     for (final Map.Entry<Bytes32, UInt256> slot : changed.entrySet()) {
-      update.changes.put(slot.getKey().copy(), slot.getValue());
+      if (update.changes.put(slot.getKey().copy(), slot.getValue()) == null) {
+        pendingSlots++;
+      }
+    }
+    if (pendingSlots > maxPendingSlots) {
+      notifyAll();
     }
   }
 
@@ -126,6 +157,11 @@ public final class StorageTrieUpdater {
   /** Applies the changes still waiting, then stops. */
   public void finish() {
     synchronized (this) {
+      if (!pending.isEmpty()) {
+        LOG.info("SNAP2 applying the pivot moves to {} storage tries", pending.size());
+      }
+      finishing = true;
+      notifyAll();
       while (!stopped && (!pending.isEmpty() || !inProgress.isEmpty())) {
         try {
           wait();
@@ -143,6 +179,7 @@ public final class StorageTrieUpdater {
     synchronized (this) {
       stopped = true;
       pending.clear();
+      pendingSlots = 0;
       notifyAll();
     }
     workers.shutdownNow();
@@ -176,15 +213,18 @@ public final class StorageTrieUpdater {
     }
   }
 
-  // the next update, never of an account a worker is on; null once stopped
+  // the next update to apply, in key order, never of an account a worker is on; null once stopped
   private synchronized Update next() throws InterruptedException {
     while (!stopped) {
-      for (final Iterator<Update> updates = pending.values().iterator(); updates.hasNext(); ) {
-        final Update update = updates.next();
-        if (!inProgress.contains(update.account)) {
-          updates.remove();
-          inProgress.add(update.account);
-          return update;
+      if (finishing || pendingSlots > maxPendingSlots) {
+        for (final Iterator<Update> updates = pending.values().iterator(); updates.hasNext(); ) {
+          final Update update = updates.next();
+          if (!inProgress.contains(update.account)) {
+            updates.remove();
+            pendingSlots -= update.changes.size();
+            inProgress.add(update.account);
+            return update;
+          }
         }
       }
       wait();

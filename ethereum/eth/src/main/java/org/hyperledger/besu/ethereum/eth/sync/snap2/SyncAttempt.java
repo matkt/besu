@@ -551,7 +551,9 @@ final class SyncAttempt {
         block(pivot.getNumber()),
         compact(stateSync.downloadedAccounts()),
         compact(stateSync.storageTriesBuilt()));
-    trieBuilder = new WorldStateTrieBuilder(context.storage(), context.config().trieBuildThreads());
+    trieBuilder =
+        new WorldStateTrieBuilder(
+            context.storage(), context.config().trieBuildThreads(), stateSync::storageTrieLeft);
     final WorldStateTrieBuilder.Result built = trieBuilder.build();
     if (!built.root().equals(Bytes32.wrap(pivot.getStateRoot().getBytes()))) {
       throw new CompletionException(

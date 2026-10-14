@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.tuweni.bytes.Bytes;
@@ -43,8 +44,9 @@ import org.slf4j.LoggerFactory;
 /**
  * Builds the account trie and the storage tries from the flat state, in parallel over the 256
  * first-byte partitions of the account key space, and fixes the storage roots of the flat accounts.
- * A storage trie already written for the storage root of its account, while downloading, is kept
- * and its slots are not read.
+ * The storage tries the download wrote are kept without reading them: a storage with a known root
+ * has its trie unless the download left it, and a storage a move changed has an unknown root until
+ * its trie is updated.
  */
 public final class WorldStateTrieBuilder {
 
@@ -55,15 +57,23 @@ public final class WorldStateTrieBuilder {
 
   private final SyncStateStorage storage;
   private final int threads;
+  private final Predicate<Bytes32> trieLeft;
   private final AtomicLong accounts = new AtomicLong();
   private final AtomicLong slots = new AtomicLong();
   private final AtomicLong keptStorageTries = new AtomicLong();
   private final AtomicBoolean cancelled = new AtomicBoolean();
   private final AtomicReference<RuntimeException> failure = new AtomicReference<>();
 
-  public WorldStateTrieBuilder(final SyncStateStorage storage, final int threads) {
+  /**
+   * Creates a build.
+   *
+   * @param trieLeft whether the download completed the storage of an account without its trie
+   */
+  public WorldStateTrieBuilder(
+      final SyncStateStorage storage, final int threads, final Predicate<Bytes32> trieLeft) {
     this.storage = storage;
     this.threads = Math.max(1, threads);
+    this.trieLeft = trieLeft;
   }
 
   /**
@@ -203,8 +213,7 @@ public final class WorldStateTrieBuilder {
         throw new CancellationException("trie build cancelled");
       }
       final Hash storageRoot = Accounts.decode(rlp).getStorageRoot();
-      if (Accounts.hasBuildableStorage(storageRoot)
-          && storage.hasStorageTrie(hash, Bytes32.wrap(storageRoot.getBytes()))) {
+      if (Accounts.hasBuildableStorage(storageRoot) && !trieLeft.test(hash)) {
         accountTrie.addLeaf(hash, rlp);
         accounts.incrementAndGet();
         keptStorageTries.incrementAndGet();

@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -23,20 +25,26 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2Configuration;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -132,6 +140,38 @@ class StateSyncTest {
     assertThat(stateSync.storageTriesUpdated()).isPositive();
     assertThat(built.root()).isEqualTo(next.root());
     assertThat(built.keptStorageTries()).isEqualTo(next.storageLeaves().size());
+  }
+
+  // the root node of a storage completed in a write that failed is left to the final build
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void leavesAStorageWhoseRootNodeWasLostToTheFinalBuild(final Format format) throws Exception {
+    final TestWorld world = TestWorld.random(new Random(43), 200, 2, 300);
+    network.serve(world);
+    final Storages storages = SyncStorageFixture.create(format);
+    final SyncStateStorage storage = spy(storages.sync());
+    final AtomicBoolean failed = new AtomicBoolean();
+    doAnswer(
+            invocation ->
+                failingOnce((SyncStateStorage.TrieWriter) invocation.callRealMethod(), failed))
+        .when(storage)
+        .trieWriter();
+    stateSync = new StateSync(storage, network, config());
+
+    stateSync.start(header(1, world.root())).get(60, TimeUnit.SECONDS);
+
+    assertThat(failed).isTrue();
+    assertThat(build(storages).root()).isEqualTo(world.root());
+    // every storage trie reads back whole, the lost one rebuilt
+    world
+        .accountLeaves()
+        .forEach(
+            (hash, leaf) -> {
+              final Bytes32 root = Bytes32.wrap(Accounts.decode(leaf).getStorageRoot().getBytes());
+              assertThat(
+                      storages.storageTrie(hash, root).entriesFrom(Bytes32.ZERO, Integer.MAX_VALUE))
+                  .isEqualTo(world.storageLeaves().getOrDefault(hash, new TreeMap<>()));
+            });
   }
 
   @Test
@@ -265,6 +305,41 @@ class StateSyncTest {
     return next;
   }
 
+  // a writer whose first commit after a root node fails, dropping what it holds
+  private static SyncStateStorage.TrieWriter failingOnce(
+      final SyncStateStorage.TrieWriter writer, final AtomicBoolean failed) {
+    return new SyncStateStorage.TrieWriter() {
+      private boolean rootNode;
+
+      @Override
+      public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        writer.accountNode(location, hash, rlp);
+      }
+
+      @Override
+      public void storageNode(
+          final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        rootNode |= location.isEmpty();
+        writer.storageNode(accountHash, location, hash, rlp);
+      }
+
+      @Override
+      public void commit() {
+        if (rootNode && failed.compareAndSet(false, true)) {
+          writer.abort();
+          throw new StorageException("disk failure");
+        }
+        rootNode = false;
+        writer.commit();
+      }
+
+      @Override
+      public void abort() {
+        writer.abort();
+      }
+    };
+  }
+
   private long progress() {
     return stateSync.downloadedAccounts() + stateSync.downloadedSlots();
   }
@@ -286,7 +361,7 @@ class StateSyncTest {
   private WorldStateTrieBuilder.Result build(final Storages storages) {
     stateSync.finishStorageTries();
     stateSync.stop();
-    return new WorldStateTrieBuilder(storages.sync(), 2).build();
+    return new WorldStateTrieBuilder(storages.sync(), 2, stateSync::storageTrieLeft).build();
   }
 
   private static BlockHeader header(final long number, final Bytes32 root) {

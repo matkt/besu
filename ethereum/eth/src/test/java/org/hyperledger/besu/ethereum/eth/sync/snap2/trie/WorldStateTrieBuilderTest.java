@@ -52,7 +52,7 @@ class WorldStateTrieBuilderTest {
     world.writeFlat(storages.sync());
 
     final WorldStateTrieBuilder.Result result =
-        new WorldStateTrieBuilder(storages.sync(), 4).build();
+        new WorldStateTrieBuilder(storages.sync(), 4, hash -> false).build();
 
     assertThat(result.root()).isEqualTo(world.root());
     assertThat(result.accounts()).isEqualTo(world.accounts.size());
@@ -90,7 +90,7 @@ class WorldStateTrieBuilderTest {
     final Storages storages = SyncStorageFixture.create(format);
     final World world = SyncStorageFixture.randomWorld(new Random(7), 500);
     world.writeFlat(storages.sync());
-    new WorldStateTrieBuilder(storages.sync(), 2).build();
+    new WorldStateTrieBuilder(storages.sync(), 2, hash -> false).build();
     final long withStorage =
         world.storage.values().stream().filter(slots -> !slots.isEmpty()).count();
 
@@ -114,11 +114,39 @@ class WorldStateTrieBuilderTest {
     batch.commit();
 
     final WorldStateTrieBuilder.Result result =
-        new WorldStateTrieBuilder(storages.sync(), 2).build();
+        new WorldStateTrieBuilder(storages.sync(), 2, hash -> false).build();
 
     assertThat(result.root()).isEqualTo(world.root());
     assertThat(result.keptStorageTries()).isEqualTo(withStorage - 1);
     assertThat(result.slots()).isEqualTo(world.storage.get(changed).size());
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void rebuildsTheStorageTriesTheDownloadLeft(final Format format) {
+    final Storages storages = SyncStorageFixture.create(format);
+    final World world = SyncStorageFixture.randomWorld(new Random(9), 500);
+    world.writeFlat(storages.sync());
+    new WorldStateTrieBuilder(storages.sync(), 2, hash -> false).build();
+
+    // a slot of a storage the download completed without its trie, its root still known
+    final Bytes32 left =
+        world.storage.entrySet().stream()
+            .filter(entry -> !entry.getValue().isEmpty())
+            .findFirst()
+            .orElseThrow()
+            .getKey();
+    final Bytes32 slot = world.storage.get(left).firstKey();
+    world.storage.get(left).put(slot, UInt256.valueOf(424242));
+    final SyncStateStorage.Batch batch = storages.sync().batch();
+    batch.putStorage(left, slot, UInt256.valueOf(424242));
+    batch.commit();
+
+    final WorldStateTrieBuilder.Result result =
+        new WorldStateTrieBuilder(storages.sync(), 2, left::equals).build();
+
+    assertThat(result.root()).isEqualTo(world.root());
+    assertThat(result.slots()).isEqualTo(world.storage.get(left).size());
   }
 
   @ParameterizedTest
@@ -130,7 +158,7 @@ class WorldStateTrieBuilderTest {
       world.writeFlat(storages.sync());
 
       final WorldStateTrieBuilder.Result result =
-          new WorldStateTrieBuilder(storages.sync(), 2).build();
+          new WorldStateTrieBuilder(storages.sync(), 2, hash -> false).build();
 
       assertThat(result.root()).isEqualTo(world.root());
     }
@@ -142,7 +170,7 @@ class WorldStateTrieBuilderTest {
     SyncStorageFixture.randomWorld(new Random(3), 2000).writeFlat(storages.sync());
     final SyncStateStorage storage = spy(storages.sync());
     final IllegalStateException diskFailure = new IllegalStateException("disk failure");
-    final WorldStateTrieBuilder builder = new WorldStateTrieBuilder(storage, 4);
+    final WorldStateTrieBuilder builder = new WorldStateTrieBuilder(storage, 4, hash -> false);
     final CountDownLatch failed = new CountDownLatch(1);
     final CountDownLatch secondEnded = new CountDownLatch(1);
     final AtomicBoolean secondCompleted = new AtomicBoolean();

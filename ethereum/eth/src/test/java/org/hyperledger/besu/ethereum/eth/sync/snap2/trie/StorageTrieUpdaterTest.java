@@ -55,7 +55,7 @@ class StorageTrieUpdaterTest {
     final Bytes32 account = largestStorage(world);
     final Bytes32 root = downloaded(world, account);
     final StorageTrieUpdater updater =
-        new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, 2);
+        new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, hash -> false, 2);
 
     updater.changed(account, Hash.wrap(root), move(world, account, 1));
     updater.finish();
@@ -64,6 +64,25 @@ class StorageTrieUpdaterTest {
     assertStorageTrie(world, account);
   }
 
+  // the moves are applied at the end, once per storage
+  @Test
+  void mergesTheMovesOfAStorageIntoOneUpdate() {
+    final World world = SyncStorageFixture.randomWorld(new Random(11), 80);
+    final Bytes32 account = largestStorage(world);
+    final Bytes32 root = downloaded(world, account);
+    final StorageTrieUpdater updater =
+        new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, hash -> false, 2);
+
+    updater.changed(account, Hash.wrap(root), move(world, account, 1));
+    updater.changed(account, Accounts.UNKNOWN_STORAGE_ROOT, move(world, account, 2));
+    assertThat(updater.updated()).isZero();
+    updater.finish();
+
+    assertThat(updater.updated()).isOne();
+    assertStorageTrie(world, account);
+  }
+
+  // past the memory budget an update starts at once, and the next move waits for its root
   @Test
   void appliesTheMovesOfAStorageOneAfterTheOther() {
     final World world = SyncStorageFixture.randomWorld(new Random(9), 80);
@@ -82,7 +101,7 @@ class StorageTrieUpdaterTest {
         .when(storage)
         .storageTrieNode(any(), any(), any());
     final StorageTrieUpdater updater =
-        new StorageTrieUpdater(storage, StorageTrieUpdaterTest::noMoves, 2);
+        new StorageTrieUpdater(storage, StorageTrieUpdaterTest::noMoves, hash -> false, 2, 0);
 
     updater.changed(account, Hash.wrap(root), move(world, account, 1));
     Uninterruptibles.awaitUninterruptibly(reading);
@@ -101,7 +120,7 @@ class StorageTrieUpdaterTest {
     final Bytes32 account = largestStorage(world);
     world.writeFlat(storages.sync());
     final StorageTrieUpdater updater =
-        new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, 1);
+        new StorageTrieUpdater(storages.sync(), StorageTrieUpdaterTest::noMoves, hash -> false, 1);
 
     updater.changed(account, Hash.wrap(world.storageRoot(account)), move(world, account, 1));
     // a second move finds the root unknown
