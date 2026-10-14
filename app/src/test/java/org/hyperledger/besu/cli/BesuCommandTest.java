@@ -70,6 +70,7 @@ import org.hyperledger.besu.ethereum.core.MiningConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackfillMode;
 import org.hyperledger.besu.ethereum.p2p.config.DiscoveryMode;
 import org.hyperledger.besu.ethereum.p2p.peers.EnodeURLImpl;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -1330,6 +1331,18 @@ public class BesuCommandTest extends CommandTestAbstract {
   }
 
   @Test
+  public void syncMode_snap2() {
+    parseCommand("--sync-mode", "SNAP2");
+    verify(mockControllerBuilder).synchronizerConfiguration(syncConfigurationCaptor.capture());
+
+    final SynchronizerConfiguration syncConfig = syncConfigurationCaptor.getValue();
+    assertThat(syncConfig.getSyncMode()).isEqualTo(SyncMode.SNAP2);
+
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
   public void syncMode_invalid() {
     parseCommand("--sync-mode", "bogus");
     verifyNoInteractions(mockRunnerBuilder);
@@ -1337,7 +1350,29 @@ public class BesuCommandTest extends CommandTestAbstract {
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains(
-            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP");
+            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP, SNAP2");
+  }
+
+  @Test
+  public void snap2BackfillMode_fast() {
+    parseCommand("--Xsnap2-backfill-mode", "FAST");
+    verify(mockControllerBuilder).synchronizerConfiguration(syncConfigurationCaptor.capture());
+
+    assertThat(syncConfigurationCaptor.getValue().getSnapSyncConfiguration().getSnap2BackfillMode())
+        .isEqualTo(BackfillMode.FAST);
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void snap2BackfillMode_invalid() {
+    parseCommand("--Xsnap2-backfill-mode", "bogus");
+    verifyNoInteractions(mockRunnerBuilder);
+
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("Invalid value for option '--Xsnap2-backfill-mode'")
+        .contains("SLOW, MEDIUM, FAST");
   }
 
   @Test

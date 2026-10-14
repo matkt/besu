@@ -1,0 +1,1005 @@
+/*
+ * Copyright contributors to Hyperledger Besu.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
+
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2Configuration;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.RangeProof;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTrieUpdater;
+import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
+import org.hyperledger.besu.ethereum.trie.common.PmtStateTrieAccountValue;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Downloads the flat state at the pivot: accounts, storages and bytecodes in parallel, each
+ * response checked against its root and persisted only if the pivot did not move meanwhile.
+ */
+public final class StateSync {
+
+  private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
+  // response size of a request for one account or one slot
+  private static final int SINGLE_ITEM_BYTES = 4096;
+  // pending storages or bytecodes above which no account range is asked
+  private static final int STORAGE_BACKLOG = 50_000;
+  private static final int EMPTY_RESPONSES_FOR_STALE_PIVOT = 12;
+  private static final int NO_EPOCH = -1;
+  private static final int SEEN_CODES_LIMIT = 200_000;
+  private static final int BYTES_PER_SLOT = 64;
+
+  /** Current pivot; responses requested at another epoch are discarded. */
+  public record Pivot(int epoch, BlockHeader header) {
+    Bytes32 root() {
+      return Bytes32.wrap(header.getStateRoot().getBytes());
+    }
+  }
+
+  /** A key range downloaded with consecutive requests, each one resuming after the previous. */
+  static final class RangeTask {
+    final Bytes32 limit;
+    Bytes32 next;
+    boolean inFlight;
+    boolean done;
+
+    RangeTask(final Bytes32 origin, final Bytes32 limit) {
+      this.limit = limit;
+      this.next = origin;
+    }
+  }
+
+  private final SyncStateStorage storage;
+  private final RequestSender scheduler;
+  private final Snap2Configuration config;
+  private final StateCoverage coverage = new StateCoverage();
+  // applies the pivot moves to the storage tries written while downloading
+  private final StorageTrieUpdater trieUpdater;
+  private final ReentrantReadWriteLock pivotLock = new ReentrantReadWriteLock();
+  private final ScheduledExecutorService loop;
+  // writes the verified responses, off the threads that verify them
+  private final ExecutorService persister;
+  private final CompletableFuture<Void> completion = new CompletableFuture<>();
+  private volatile Pivot pivot;
+  private volatile Instant started = Instant.now();
+  private volatile boolean pivotStale;
+  private volatile boolean stopped;
+  private volatile boolean paused;
+
+  // bookkeeping, loop thread only
+  private final List<RangeTask> accountTasks = new ArrayList<>();
+  // the lowest account range not done yet
+  private int firstAccountTask;
+  private final ArrayDeque<StorageTask> storageQueue = new ArrayDeque<>();
+  private final ArrayDeque<StorageTask> refreshQueue = new ArrayDeque<>();
+  private final Set<StorageTask> chunked = new LinkedHashSet<>();
+  private final LinkedHashSet<Bytes32> codeQueue = new LinkedHashSet<>();
+  private final Set<Bytes32> codesInFlight = new HashSet<>();
+  private final Set<Bytes32> seenCodes = new HashSet<>();
+  private final Set<EthPeer> emptyPeers = new HashSet<>();
+  private final StateServers servers = new StateServers();
+  // peers left out of state requests, refreshed on each dispatch
+  private Set<EthPeer> excluded = Set.of();
+  private volatile int excludedCount;
+  private int accountsInFlight;
+  private int storageInFlight;
+  private int codesRequestsInFlight;
+  private int refreshesInFlight;
+  private int consecutiveEmpty;
+
+  private final AtomicLong accounts = new AtomicLong();
+  private final AtomicLong slots = new AtomicLong();
+  private final AtomicLong codes = new AtomicLong();
+  private final AtomicLong storageTries = new AtomicLong();
+  private final AtomicLong storageTrieSlots = new AtomicLong();
+  private final AtomicLong storageTriesLeft = new AtomicLong();
+
+  public StateSync(
+      final SyncStateStorage storage,
+      final RequestSender scheduler,
+      final Snap2Configuration config) {
+    this.storage = storage;
+    this.scheduler = scheduler;
+    this.config = config;
+    this.loop =
+        Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("snap2-state").daemon().factory());
+    this.persister =
+        Executors.newFixedThreadPool(
+            Math.max(2, config.workerThreads()),
+            Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory());
+    this.trieUpdater =
+        new StorageTrieUpdater(storage, this::withoutMoves, trieUpdateThreads(config));
+  }
+
+  // one thread per four cores, at most four: the download keeps the rest
+  private static int trieUpdateThreads(final Snap2Configuration config) {
+    return Math.max(1, Math.min(4, config.trieBuildThreads() / 4));
+  }
+
+  /** Starts downloading the state of the given pivot. */
+  public CompletableFuture<Void> start(final BlockHeader pivotHeader) {
+    pivot = new Pivot(0, pivotHeader);
+    started = Instant.now();
+    execute(
+        () -> {
+          RangeManager.generateRanges(
+                  RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, config.accountChunks())
+              .forEach((from, to) -> accountTasks.add(new RangeTask(from, to)));
+          LOG.info(
+              "SNAP2 state download started at {} | {} account ranges",
+              ProgressFormat.block(pivotHeader.getNumber()),
+              ProgressFormat.count(accountTasks.size()));
+          dispatch();
+        });
+    loop.scheduleWithFixedDelay(this::dispatchSafely, 500, 500, TimeUnit.MILLISECONDS);
+    return completion;
+  }
+
+  /** Returns the time since the download started. */
+  public Duration elapsed() {
+    return Duration.between(started, Instant.now());
+  }
+
+  /** Returns the current pivot. */
+  public Pivot pivot() {
+    return pivot;
+  }
+
+  /** Returns the share of the account key space downloaded, from 0 to 1. */
+  public double accountCoverage() {
+    return coverage.accounts().coverage();
+  }
+
+  /** Returns the number of accounts whose storage is still to download. */
+  public int pendingStorageCount() {
+    return coverage.pendingStorageCount();
+  }
+
+  /** Returns whether peers stopped serving the state of the pivot. */
+  public boolean isPivotStale() {
+    return pivotStale;
+  }
+
+  /** Returns whether every account, slot and bytecode of the pivot is persisted. */
+  @VisibleForTesting
+  boolean isComplete() {
+    return completion.isDone() && !completion.isCompletedExceptionally();
+  }
+
+  /**
+   * Moves the download to a newer pivot, applying the state changes of the blocks in between to
+   * what is already persisted.
+   */
+  public CompletableFuture<StateDiffApplier.Outcome> moveTo(
+      final BlockHeader newPivot, final StateDiff diff) {
+    return CompletableFuture.supplyAsync(
+        () -> {
+          try {
+            return exclusively(
+                () -> {
+                  final StateDiffApplier.Outcome outcome =
+                      StateDiffApplier.apply(diff, storage, coverage, trieUpdater::changed);
+                  switchPivot(newPivot);
+                  return outcome;
+                });
+          } finally {
+            execute(this::dispatch);
+          }
+        },
+        scheduler.workers());
+  }
+
+  // the result of a write at a known pivot, or null if the pivot moved
+  private <T> T atPivot(final int epoch, final Supplier<T> write) {
+    pivotLock.readLock().lock();
+    try {
+      // a stopped download must not touch a storage that may already be wiped for a new sync
+      return stopped || pivot.epoch() != epoch ? null : write.get();
+    } finally {
+      pivotLock.readLock().unlock();
+    }
+  }
+
+  // runs an action exclusive with pivot moves, unless the download stopped
+  private boolean withoutMoves(final Runnable action) {
+    pivotLock.readLock().lock();
+    try {
+      if (stopped) {
+        return false;
+      }
+      action.run();
+      return true;
+    } finally {
+      pivotLock.readLock().unlock();
+    }
+  }
+
+  /** Returns the number of peers left out of state requests because they serve no state. */
+  public int peersWithoutState() {
+    return excludedCount;
+  }
+
+  /** Returns the number of storage tries written while downloading. */
+  public long storageTriesBuilt() {
+    return storageTries.get();
+  }
+
+  /** Returns the number of storage tries written while downloading that pivot moves changed. */
+  public long storageTriesUpdated() {
+    return trieUpdater.updated();
+  }
+
+  /** Applies the storage changes of the last moves to the tries written. */
+  public void finishStorageTries() {
+    trieUpdater.finish();
+  }
+
+  /** Returns the number of slots in the storage tries written while downloading. */
+  public long storageTrieSlots() {
+    return storageTrieSlots.get();
+  }
+
+  /** Returns the number of storages whose trie the download left to the final build. */
+  public long storageTriesLeft() {
+    return storageTriesLeft.get();
+  }
+
+  // runs a write on the flat state exclusive with every download write
+  private <T> T exclusively(final Supplier<T> write) {
+    pivotLock.writeLock().lock();
+    try {
+      if (stopped) {
+        throw new IllegalStateException("state download stopped");
+      }
+      return write.get();
+    } finally {
+      pivotLock.writeLock().unlock();
+    }
+  }
+
+  /** Stops sending new requests, while several pivot moves are applied in a row. */
+  public void pause() {
+    paused = true;
+  }
+
+  /** Resumes sending requests. */
+  public void resume() {
+    paused = false;
+    execute(this::dispatch);
+  }
+
+  // callers hold the exclusive lock
+  private void switchPivot(final BlockHeader newPivot) {
+    pivot = new Pivot(pivot.epoch() + 1, newPivot);
+    pivotStale = false;
+    execute(
+        () -> {
+          consecutiveEmpty = 0;
+          emptyPeers.clear();
+        });
+  }
+
+  /** Stops downloading; once it returns, nothing more is written. */
+  public void stop() {
+    // waits for writes in progress
+    pivotLock.writeLock().lock();
+    try {
+      stopped = true;
+    } finally {
+      pivotLock.writeLock().unlock();
+    }
+    loop.shutdownNow();
+    persister.shutdownNow();
+    trieUpdater.stop();
+    completion.completeExceptionally(new CancellationException("state download stopped"));
+  }
+
+  public long downloadedAccounts() {
+    return accounts.get();
+  }
+
+  public long downloadedSlots() {
+    return slots.get();
+  }
+
+  public long downloadedCodes() {
+    return codes.get();
+  }
+
+  private void execute(final Runnable task) {
+    if (!loop.isShutdown()) {
+      try {
+        loop.execute(() -> runLogged(task));
+      } catch (final RuntimeException e) {
+        LOG.trace("State loop rejected a task", e);
+      }
+    }
+  }
+
+  private void dispatchSafely() {
+    runLogged(this::dispatch);
+  }
+
+  // a scheduled executor keeps the exceptions of its tasks to itself
+  private static void runLogged(final Runnable task) {
+    try {
+      task.run();
+    } catch (final RuntimeException e) {
+      LOG.warn("SNAP2 state task failed", e);
+    }
+  }
+
+  private int inFlight() {
+    return accountsInFlight + storageInFlight + codesRequestsInFlight + refreshesInFlight;
+  }
+
+  private void dispatch() {
+    if (stopped || completion.isDone()) {
+      return;
+    }
+    if (checkCompletion()) {
+      return;
+    }
+    if (pivotStale || paused) {
+      return;
+    }
+    excluded = servers.excluded(System.nanoTime());
+    excludedCount = excluded.size();
+    final Pivot current = pivot;
+    final int capacity = Math.max(1, scheduler.capacity(Protocol.SNAP));
+    final int target = capacity + capacity / 4;
+
+    while (inFlight() < target && !refreshQueue.isEmpty()) {
+      final StorageTask task = refreshQueue.poll();
+      task.refreshQueued = false;
+      if (isPending(task) && !task.refreshing) {
+        sendRefresh(task, current);
+      }
+    }
+
+    // accounts feed storages and bytecodes: pause them while those lag, to bound memory
+    final boolean backlogged =
+        coverage.pendingStorageCount() > STORAGE_BACKLOG || codeQueue.size() > STORAGE_BACKLOG;
+    final int accountShare = backlogged ? 0 : Math.max(1, target / 3);
+    // lowest ranges first: written in key order, the state is moved down the database levels
+    // instead of being rewritten at each of them
+    while (firstAccountTask < accountTasks.size() && accountTasks.get(firstAccountTask).done) {
+      firstAccountTask++;
+    }
+    for (int i = firstAccountTask; i < accountTasks.size(); i++) {
+      if (inFlight() >= target || accountsInFlight >= accountShare) {
+        break;
+      }
+      final RangeTask task = accountTasks.get(i);
+      if (!task.done && !task.inFlight) {
+        sendAccounts(task, current);
+      }
+    }
+
+    final int codeShare = Math.max(1, target / 8);
+    while (inFlight() < target && codesRequestsInFlight < codeShare && sendCodes()) {
+      // keep bytecodes flowing alongside the state
+    }
+
+    final Iterator<StorageTask> chunkedIterator = chunked.iterator();
+    while (chunkedIterator.hasNext() && inFlight() < target) {
+      final StorageTask task = chunkedIterator.next();
+      if (!isPending(task)) {
+        chunkedIterator.remove();
+        continue;
+      }
+      if (task.isRootStale()) {
+        if (task.inFlight == 0) {
+          requestRefresh(task);
+        }
+        continue;
+      }
+      for (final RangeTask chunk : task.chunks) {
+        if (inFlight() >= target) {
+          break;
+        }
+        if (!chunk.done && !chunk.inFlight && !task.refreshing) {
+          sendStorageChunk(task, chunk, current);
+        }
+      }
+    }
+
+    while (inFlight() < target && !storageQueue.isEmpty()) {
+      final List<StorageTask> batch = takeStorageBatch();
+      if (batch.isEmpty()) {
+        break;
+      }
+      sendStorageBatch(batch, current);
+    }
+
+    while (inFlight() < target && sendCodes()) {
+      // use idle capacity for bytecodes
+    }
+  }
+
+  private boolean isPending(final StorageTask task) {
+    return coverage.storageTask(task.accountHash()) == task;
+  }
+
+  private void requestRefresh(final StorageTask task) {
+    if (!task.refreshing && !task.refreshQueued) {
+      task.refreshQueued = true;
+      refreshQueue.add(task);
+    }
+  }
+
+  private List<StorageTask> takeStorageBatch() {
+    final List<StorageTask> batch = new ArrayList<>();
+    while (batch.size() < config.storageBatchSize() && !storageQueue.isEmpty()) {
+      final StorageTask task = storageQueue.poll();
+      task.queued = false;
+      if (!isPending(task)) {
+        continue;
+      }
+      if (task.isRootStale()) {
+        requestRefresh(task);
+        continue;
+      }
+      batch.add(task);
+    }
+    return batch;
+  }
+
+  private void sendAccounts(final RangeTask task, final Pivot current) {
+    task.inFlight = true;
+    accountsInFlight++;
+    final AccountRangeRequest request =
+        new AccountRangeRequest(
+            current, task.next, task.limit, config.responseBytes(), "account_range");
+    send(
+        request,
+        current.epoch(),
+        result -> persistAccounts(request, result),
+        persisted -> {
+          task.inFlight = false;
+          accountsInFlight--;
+          if (persisted != null) {
+            if (persisted.done) {
+              task.done = true;
+            } else {
+              task.next = KeyRangeSet.next(persisted.coveredEnd).orElseThrow();
+            }
+            persisted.storageTasks.forEach(this::queueStorage);
+            persisted.codeHashes.forEach(this::queueCode);
+          }
+        });
+  }
+
+  /**
+   * Sends a request, persists its response off the threads that verify it, then runs the
+   * bookkeeping on the loop with what was persisted, or null if nothing was.
+   *
+   * @param epoch the pivot the request is about, or {@link #NO_EPOCH}
+   */
+  private <T, R> void send(
+      final SyncRequest<T> request,
+      final int epoch,
+      final Function<T, R> persist,
+      final Consumer<R> bookkeeping) {
+    scheduler
+        .submit(request, epoch == NO_EPOCH ? Set.of() : excluded)
+        .whenCompleteAsync(
+            (response, error) -> {
+              final R persisted =
+                  error == null
+                      ? persistSafely(() -> persist.apply(response.value()), request)
+                      : null;
+              execute(
+                  () -> {
+                    if (error != null) {
+                      onFailure(error, epoch);
+                    } else if (epoch != NO_EPOCH) {
+                      onServed(response.peer(), epoch);
+                    }
+                    bookkeeping.accept(persisted);
+                    dispatch();
+                  });
+            },
+            persister);
+  }
+
+  private record AccountsPersisted(
+      Bytes32 coveredEnd, boolean done, List<StorageTask> storageTasks, Set<Bytes32> codeHashes) {}
+
+  private AccountsPersisted persistAccounts(
+      final AccountRangeRequest request, final AccountRangeRequest.Result result) {
+    return atPivot(
+        request.pivot.epoch(),
+        () -> {
+          final SyncStateStorage.Batch batch = storage.batch();
+          final List<StorageTask> storageTasks = new ArrayList<>();
+          final Set<Bytes32> codeHashes = new LinkedHashSet<>();
+          int count = 0;
+          for (int i = 0; i < result.hashes().size(); i++) {
+            final Bytes32 hash = result.hashes().get(i);
+            if (hash.compareTo(request.limit) > 0) {
+              break;
+            }
+            final Bytes account = result.accounts().get(i);
+            batch.putAccount(hash, account);
+            final PmtStateTrieAccountValue value = Accounts.decode(account);
+            if (!value.getStorageRoot().equals(Hash.EMPTY_TRIE_HASH)) {
+              storageTasks.add(
+                  new StorageTask(hash, Bytes32.wrap(value.getStorageRoot().getBytes())));
+            }
+            if (!value.getCodeHash().equals(Hash.EMPTY)) {
+              codeHashes.add(Bytes32.wrap(value.getCodeHash().getBytes()));
+            }
+            count++;
+          }
+          final List<Bytes32> hashes = result.hashes();
+          final Bytes32 last = hashes.isEmpty() ? null : hashes.getLast();
+          final boolean done =
+              last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
+          final Bytes32 end = done ? request.limit : last;
+          batch.commit();
+          storageTasks.forEach(coverage::addStorageTask);
+          coverage.accounts().add(request.origin, end);
+          accounts.addAndGet(count);
+          return new AccountsPersisted(end, done, storageTasks, codeHashes);
+        });
+  }
+
+  private void queueStorage(final StorageTask task) {
+    if (!task.queued) {
+      task.queued = true;
+      storageQueue.add(task);
+    }
+  }
+
+  // seenCodes only spares duplicate lookups of common bytecodes, it is bounded and may forget
+  private void queueCode(final Bytes32 codeHash) {
+    if (seenCodes.contains(codeHash) || codesInFlight.contains(codeHash)) {
+      return;
+    }
+    if (seenCodes.size() >= SEEN_CODES_LIMIT) {
+      seenCodes.clear();
+    }
+    final Bytes32 compact = codeHash.copy();
+    seenCodes.add(compact);
+    codeQueue.add(compact);
+  }
+
+  private void sendStorageBatch(final List<StorageTask> batch, final Pivot current) {
+    storageInFlight++;
+    batch.forEach(task -> task.inFlight++);
+    final StorageRangesRequest request =
+        new StorageRangesRequest(
+            current,
+            batch,
+            RangeManager.MIN_RANGE,
+            RangeManager.MAX_RANGE,
+            null,
+            config.responseBytes());
+    submitStorage(request);
+  }
+
+  private void sendStorageChunk(
+      final StorageTask task, final RangeTask chunk, final Pivot current) {
+    storageInFlight++;
+    task.inFlight++;
+    chunk.inFlight = true;
+    final StorageRangesRequest request =
+        new StorageRangesRequest(
+            current, List.of(task), chunk.next, chunk.limit, chunk, config.responseBytes());
+    submitStorage(request);
+  }
+
+  private void submitStorage(final StorageRangesRequest request) {
+    send(
+        request,
+        request.pivot.epoch(),
+        result -> persistStorage(request, result),
+        persisted -> {
+          storageInFlight--;
+          request.tasks.forEach(task -> task.inFlight--);
+          if (request.chunk != null) {
+            request.chunk.inFlight = false;
+          }
+          afterStorage(request, persisted);
+        });
+  }
+
+  private record StoragePersisted(
+      int served, Bytes32 lastSlot, boolean lastComplete, int lastReturned) {}
+
+  private StoragePersisted persistStorage(
+      final StorageRangesRequest request, final StorageRangesRequest.Result result) {
+    return atPivot(
+        request.pivot.epoch(),
+        () -> {
+          final SyncStateStorage.Batch batch = storage.batch();
+          final SyncStateStorage.TrieWriter writer = storage.trieWriter();
+          final List<Covered> covered = new ArrayList<>();
+          Bytes32 lastSlot = null;
+          boolean lastComplete = true;
+          int lastReturned = 0;
+          int count = 0;
+          for (int i = 0; i < result.accounts().size(); i++) {
+            final StorageTask task = request.tasks.get(i);
+            final StorageRangesRequest.Slots accountSlots = result.accounts().get(i);
+            int stored = 0;
+            for (int s = 0; s < accountSlots.hashes().size(); s++) {
+              final Bytes32 slotHash = accountSlots.hashes().get(s);
+              if (slotHash.compareTo(request.limit) > 0) {
+                break;
+              }
+              final Bytes32 value = Bytes32.leftPad(RLP.decodeOne(accountSlots.values().get(s)));
+              if (isPending(task) && !value.isZero()) {
+                batch.putStorage(task.accountHash(), slotHash, value);
+                stored++;
+              }
+              count++;
+            }
+            // the proof covers up to the last returned slot, which may lie past the limit
+            final List<Bytes32> returned = accountSlots.hashes();
+            final Bytes32 last = returned.isEmpty() ? null : returned.getLast();
+            final boolean complete =
+                accountSlots.complete() || last == null || last.compareTo(request.limit) >= 0;
+            if (isPending(task)) {
+              writeTrie(task, request.origin, accountSlots, writer);
+              covered.add(new Covered(task, complete ? request.limit : last, stored));
+            }
+            lastSlot = last;
+            lastComplete = complete;
+            lastReturned = returned.size();
+          }
+          batch.commit();
+          // every range is stored before the one completing a storage writes its root node
+          writer.commit();
+          covered.forEach(
+              range -> cover(range.task(), request.origin, range.end(), range.slots(), writer));
+          writer.commit();
+          slots.addAndGet(count);
+          return new StoragePersisted(
+              result.accounts().size(), lastSlot, lastComplete, lastReturned);
+        });
+  }
+
+  private record Covered(StorageTask task, Bytes32 end, int slots) {}
+
+  // the trie nodes of a range, its root node kept for when every range is in, unless the ranges of
+  // the storage came at several roots
+  private static void writeTrie(
+      final StorageTask task,
+      final Bytes32 origin,
+      final StorageRangesRequest.Slots slots,
+      final SyncStateStorage.TrieWriter writer) {
+    if (!task.writesTrieAt(slots.root())) {
+      return;
+    }
+    final Bytes[] rootNode = new Bytes[1];
+    final boolean valid =
+        RangeProof.verify(
+                slots.root(),
+                origin,
+                slots.hashes(),
+                slots.values(),
+                slots.proof(),
+                (location, hash, node) -> {
+                  if (location.isEmpty()) {
+                    rootNode[0] = node;
+                  } else {
+                    writer.storageNode(task.accountHash(), location, hash, node);
+                  }
+                })
+            .valid();
+    task.trieWritten(valid ? Optional.ofNullable(rootNode[0]) : Optional.empty());
+  }
+
+  // a complete storage gets the root node of its trie, so the final build keeps it
+  private void cover(
+      final StorageTask task,
+      final Bytes32 origin,
+      final Bytes32 end,
+      final int slots,
+      final SyncStateStorage.TrieWriter writer) {
+    if (!task.cover(origin, end, slots)) {
+      return;
+    }
+    coverage.removeStorageTask(task.accountHash());
+    task.trieRootNode()
+        .ifPresentOrElse(
+            rootNode -> {
+              writer.storageNode(task.accountHash(), Bytes.EMPTY, task.storageRoot(), rootNode);
+              storageTries.incrementAndGet();
+              storageTrieSlots.addAndGet(task.slots());
+            },
+            storageTriesLeft::incrementAndGet);
+  }
+
+  private void afterStorage(final StorageRangesRequest request, final StoragePersisted persisted) {
+    if (request.chunk != null) {
+      final RangeTask chunk = request.chunk;
+      if (persisted != null) {
+        if (persisted.lastComplete) {
+          chunk.done = true;
+        } else {
+          chunk.next = KeyRangeSet.next(persisted.lastSlot).orElseThrow();
+        }
+      }
+      return;
+    }
+    // a response serves the first storages asked, in order, the last one possibly cut short
+    final int served = persisted == null ? 0 : persisted.served;
+    for (int i = 0; i < request.tasks.size(); i++) {
+      final StorageTask task = request.tasks.get(i);
+      if (!isPending(task) || i < served - 1) {
+        continue;
+      }
+      if (i >= served) {
+        queueStorage(task);
+      } else if (!persisted.lastComplete) {
+        splitIntoChunks(task, persisted.lastSlot, persisted.lastReturned);
+      }
+    }
+  }
+
+  // a storage too large for one response is downloaded in parallel slot ranges, as many as the
+  // density of the slots returned so far suggests: a small storage cut short stays in one range
+  private void splitIntoChunks(final StorageTask task, final Bytes32 lastSlot, final int returned) {
+    final Bytes32 start = KeyRangeSet.next(lastSlot).orElseThrow();
+    final double covered = KeyRangeSet.fraction(RangeManager.MIN_RANGE, lastSlot);
+    final double remainingSlots = returned * (1 - covered) / covered;
+    final double requests = remainingSlots * BYTES_PER_SLOT / config.responseBytes();
+    final int parts =
+        (int) Math.max(1, Math.min(config.maxStorageChunks(), Math.ceil(requests / 4)));
+    RangeManager.generateRanges(start, RangeManager.MAX_RANGE, parts)
+        .forEach((from, to) -> task.chunks.add(new RangeTask(from, to)));
+    chunked.add(task);
+  }
+
+  private void sendRefresh(final StorageTask task, final Pivot current) {
+    task.refreshing = true;
+    refreshesInFlight++;
+    final AccountRangeRequest request =
+        new AccountRangeRequest(
+            current, task.accountHash(), task.accountHash(), SINGLE_ITEM_BYTES, "account_refresh");
+    send(
+        request,
+        current.epoch(),
+        result -> persistRefresh(request, task, result),
+        unused -> {
+          task.refreshing = false;
+          refreshesInFlight--;
+          if (isPending(task) && task.chunks.isEmpty()) {
+            queueStorage(task);
+          }
+        });
+  }
+
+  private boolean persistRefresh(
+      final AccountRangeRequest request,
+      final StorageTask task,
+      final AccountRangeRequest.Result result) {
+    return atPivot(
+            request.pivot.epoch(),
+            () -> {
+              if (isPending(task)) {
+                final SyncStateStorage.Batch batch = storage.batch();
+                writeRefetchedAccount(batch, task.accountHash(), result);
+                batch.commit();
+              }
+              return Boolean.TRUE;
+            })
+        != null;
+  }
+
+  // writes an account fetched again at the pivot, or removes it if gone; callers hold the lock
+  private void writeRefetchedAccount(
+      final SyncStateStorage.Batch batch,
+      final Bytes32 hash,
+      final AccountRangeRequest.Result result) {
+    if (!result.startsWith(hash)) {
+      LOG.debug("Account {} no longer exists at the pivot, dropping it", hash);
+      batch.removeAccount(hash);
+      storage.deleteStorage(hash);
+      coverage.removeStorageTask(hash);
+      return;
+    }
+    final Bytes account = result.accounts().getFirst();
+    batch.putAccount(hash, account);
+    final Hash storageRoot = Accounts.decode(account).getStorageRoot();
+    if (storageRoot.equals(Hash.EMPTY_TRIE_HASH)) {
+      storage.deleteStorage(hash);
+      coverage.removeStorageTask(hash);
+      return;
+    }
+    final StorageTask task = coverage.storageTask(hash);
+    if (task != null) {
+      task.refreshRoot(Bytes32.wrap(storageRoot.getBytes()));
+    }
+  }
+
+  private boolean sendCodes() {
+    final List<Bytes32> batch = new ArrayList<>();
+    final Iterator<Bytes32> iterator = codeQueue.iterator();
+    while (iterator.hasNext() && batch.size() < config.codeBatchSize()) {
+      final Bytes32 codeHash = iterator.next();
+      iterator.remove();
+      if (!isStored(codeHash)) {
+        batch.add(codeHash);
+      }
+    }
+    if (batch.isEmpty()) {
+      return false;
+    }
+    codesRequestsInFlight++;
+    codesInFlight.addAll(batch);
+    final ByteCodesRequest request = new ByteCodesRequest(batch, config.responseBytes());
+    send(
+        request,
+        NO_EPOCH,
+        this::persistCodes,
+        stored -> {
+          codesRequestsInFlight--;
+          codesInFlight.removeAll(batch);
+          // missing codes go back to the queue
+          batch.stream()
+              .filter(hash -> stored == null || !stored.contains(hash))
+              .forEach(codeQueue::add);
+        });
+    return true;
+  }
+
+  // a failed lookup only costs a download
+  private boolean isStored(final Bytes32 codeHash) {
+    try {
+      return storage.hasCode(codeHash);
+    } catch (final RuntimeException e) {
+      LOG.debug("Failed to look up bytecode {}", codeHash, e);
+      return false;
+    }
+  }
+
+  private Set<Bytes32> persistCodes(final Map<Bytes32, Bytes> received) {
+    final boolean written =
+        withoutMoves(
+            () -> {
+              final SyncStateStorage.Batch batch = storage.batch();
+              received.forEach((hash, code) -> batch.putCode(hash, code));
+              batch.commit();
+            });
+    if (!written) {
+      return Set.of();
+    }
+    codes.addAndGet(received.size());
+    return received.keySet();
+  }
+
+  // a failed write is retried like a discarded response, and never skips the bookkeeping
+  private <R> R persistSafely(final Supplier<R> persist, final SyncRequest<?> request) {
+    try {
+      return persist.get();
+    } catch (final RuntimeException e) {
+      LOG.warn("Failed to persist {}, retrying it", request.name(), e);
+      return null;
+    }
+  }
+
+  private void onServed(final EthPeer peer, final int epoch) {
+    servers.served(peer, epoch);
+    if (epoch == pivot.epoch()) {
+      consecutiveEmpty = 0;
+      emptyPeers.clear();
+    }
+  }
+
+  // empty answers of peers that serve the state tell that the pivot is too old
+  private void onFailure(final Throwable error, final int epoch) {
+    RequestFailedException.from(error)
+        .ifPresentOrElse(
+            failure -> {
+              if (failure.reason() == RequestFailedException.Reason.EMPTY
+                  && epoch == pivot.epoch()
+                  && failure.peer().isPresent()) {
+                onEmpty(failure.peer().get(), epoch);
+              }
+              LOG.trace("State request failed: {}", failure.getMessage());
+            },
+            () -> LOG.debug("State request failed", error));
+  }
+
+  private void onEmpty(final EthPeer peer, final int epoch) {
+    if (servers.empty(peer, epoch, System.nanoTime())) {
+      LOG.debug(
+          "{} does not serve the state of block {}, leaving it out for a while",
+          peer.getLoggableId(),
+          pivot.header().getNumber());
+      emptyPeers.remove(peer);
+      return;
+    }
+    // a peer that never served state says nothing about the age of the pivot
+    if (!servers.hasServed(peer)) {
+      return;
+    }
+    consecutiveEmpty++;
+    emptyPeers.add(peer);
+    final int candidates = Math.max(1, scheduler.peerCount(Protocol.SNAP) - excluded.size());
+    if (consecutiveEmpty >= EMPTY_RESPONSES_FOR_STALE_PIVOT
+        && emptyPeers.size() >= Math.min(3, candidates)
+        && !pivotStale) {
+      LOG.info(
+          "Peers stopped serving the state of block {}, the pivot must move",
+          pivot.header().getNumber());
+      pivotStale = true;
+    }
+  }
+
+  private boolean checkCompletion() {
+    if (accountTasks.isEmpty()
+        || !coverage.accounts().isFull()
+        || coverage.pendingStorageCount() > 0
+        || !codeQueue.isEmpty()
+        || !codesInFlight.isEmpty()
+        || inFlight() > 0) {
+      return false;
+    }
+    LOG.info(
+        "SNAP2 state download complete at {} in {} | accounts {} | slots {} | bytecodes {}{}",
+        ProgressFormat.block(pivot.header().getNumber()),
+        ProgressFormat.duration(Duration.between(started, Instant.now())),
+        ProgressFormat.compact(accounts.get()),
+        ProgressFormat.compact(slots.get()),
+        ProgressFormat.compact(codes.get()),
+        String.format(
+            " | storage tries %s built, %s left to the final build",
+            ProgressFormat.compact(storageTries.get()),
+            ProgressFormat.compact(storageTriesLeft.get())));
+    completion.complete(null);
+    return true;
+  }
+}

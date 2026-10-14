@@ -87,6 +87,19 @@ public class ForestWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     return new Updater(lock, keyValueStorage.startTransaction(), nodeAddedListeners);
   }
 
+  /**
+   * Returns a batch updater for writes that never conflict, which skip the write-ahead log and are
+   * lost on a crash before the next {@link #flush()}.
+   */
+  public Updater unloggedUpdater() {
+    return new Updater(lock, keyValueStorage.startUnloggedBatchTransaction(), nodeAddedListeners);
+  }
+
+  /** Persists the writes still held in memory, including those that skipped the log. */
+  public void flush() {
+    keyValueStorage.flush();
+  }
+
   public long prune(final Predicate<byte[]> inUseCheck) {
     final AtomicInteger prunedKeys = new AtomicInteger(0);
     try (final Stream<byte[]> entry = keyValueStorage.streamKeys()) {

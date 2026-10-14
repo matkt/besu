@@ -87,10 +87,18 @@ class SnapProtocolManagerTest {
   }
 
   @Test
-  void advertisesOnlySnap1() {
-    snapProtocolManager = createSnapProtocolManager();
+  void advertisesOnlySnap1OutsideTheSnap2Sync() {
+    snapProtocolManager = createSnapProtocolManager(false);
 
     assertThat(snapProtocolManager.getSupportedCapabilities()).containsExactly(SnapProtocol.SNAP1);
+  }
+
+  @Test
+  void advertisesSnap2ForTheSnap2Sync() {
+    snapProtocolManager = createSnapProtocolManager(true);
+
+    assertThat(snapProtocolManager.getSupportedCapabilities())
+        .containsExactly(SnapProtocol.SNAP1, SnapProtocol.SNAP2);
   }
 
   @Test
@@ -366,9 +374,14 @@ class SnapProtocolManagerTest {
   }
 
   private SnapProtocolManager createSnapProtocolManager() {
+    return createSnapProtocolManager(false);
+  }
+
+  private SnapProtocolManager createSnapProtocolManager(final boolean advertiseSnap2) {
     return new SnapProtocolManager(
         worldStateStorageCoordinator,
         snapConfig,
+        advertiseSnap2,
         ethPeers,
         snapMessages,
         ethScheduler,

@@ -72,6 +72,7 @@ import org.hyperledger.besu.ethereum.eth.sync.common.PivotSelectorFromSafeBlock;
 import org.hyperledger.besu.ethereum.eth.sync.common.SingleBlockHeaderDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.SyncTerminationCondition;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.ForkchoiceHeadTracker;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.eth.transactions.BlobCache;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
@@ -914,7 +915,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
           dataStorageConfiguration.getExtraStorageConfiguration().getMaxLayersToLoad());
     }
 
-    if (syncConfig.getSyncMode() == SyncMode.SNAP) {
+    if (syncConfig.getSyncMode() == SyncMode.SNAP || syncConfig.getSyncMode() == SyncMode.SNAP2) {
       synchronizer.subscribeInSync((b) -> ethPeers.snapServerPeersNeeded(!b));
       ethPeers.snapServerPeersNeeded(true);
     } else {
@@ -1198,18 +1199,26 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final PivotBlockSelector selector;
       final NewPayloadListener newPayloadListener;
       final UnverifiedForkchoiceListener forkchoiceListener;
-      final PivotSelectorFromSafeBlock safeBlockSelector =
-          new PivotSelectorFromSafeBlock(
-              protocolContext,
-              genesisConfigOptions,
-              headerDownloader,
-              protocolSchedule,
-              Clock.systemUTC(),
-              syncConfig.getSnapSyncConfiguration().getPivotBlockWindowValidity(),
-              cleanupAction);
-      selector = safeBlockSelector;
-      newPayloadListener = safeBlockSelector;
-      forkchoiceListener = safeBlockSelector;
+      if (syncConfig.getSyncMode() == SyncMode.SNAP2) {
+        // the SNAP2 sync follows the forkchoice head and picks its own pivots
+        final ForkchoiceHeadTracker headTracker = new ForkchoiceHeadTracker(cleanupAction);
+        selector = headTracker;
+        newPayloadListener = headTracker;
+        forkchoiceListener = headTracker;
+      } else {
+        final PivotSelectorFromSafeBlock safeBlockSelector =
+            new PivotSelectorFromSafeBlock(
+                protocolContext,
+                genesisConfigOptions,
+                headerDownloader,
+                protocolSchedule,
+                Clock.systemUTC(),
+                syncConfig.getSnapSyncConfiguration().getPivotBlockWindowValidity(),
+                cleanupAction);
+        selector = safeBlockSelector;
+        newPayloadListener = safeBlockSelector;
+        forkchoiceListener = safeBlockSelector;
+      }
 
       final long newPayloadSubscriptionId = mergeContext.addNewPayloadListener(newPayloadListener);
       cleanups.add(
@@ -1410,6 +1419,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         new SnapProtocolManager(
             worldStateStorageCoordinator,
             syncConfig.getSnapSyncConfiguration(),
+            // snap/2 drops trie node requests, so only the SNAP2 sync advertises it
+            syncConfig.getSyncMode() == SyncMode.SNAP2,
             ethPeers,
             snapMessages,
             ethScheduler,

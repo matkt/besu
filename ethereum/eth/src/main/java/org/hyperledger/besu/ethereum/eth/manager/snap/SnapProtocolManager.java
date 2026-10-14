@@ -70,6 +70,7 @@ public class SnapProtocolManager implements ProtocolManager {
   public SnapProtocolManager(
       final WorldStateStorageCoordinator worldStateStorageCoordinator,
       final SnapSyncConfiguration snapConfig,
+      final boolean advertiseSnap2,
       final EthPeers ethPeers,
       final EthMessages snapMessages,
       final EthScheduler ethScheduler,
@@ -79,7 +80,7 @@ public class SnapProtocolManager implements ProtocolManager {
     this.ethPeers = ethPeers;
     this.snapMessages = snapMessages;
     this.ethScheduler = ethScheduler;
-    this.supportedCapabilities = calculateCapabilities();
+    this.supportedCapabilities = calculateCapabilities(advertiseSnap2);
     this.maxConcurrentRequestsPerPeer = snapConfig.getMaxConcurrentSnapRequestsPerPeer();
     this.maxConcurrentRequestsGlobal = snapConfig.getMaxConcurrentSnapRequestsGlobal();
     new SnapServer(
@@ -97,9 +98,12 @@ public class SnapProtocolManager implements ProtocolManager {
             "Total number of snap sync GET_* requests answered with an empty response because a concurrency cap was reached");
   }
 
-  private List<Capability> calculateCapabilities() {
+  private List<Capability> calculateCapabilities(final boolean advertiseSnap2) {
     final ImmutableList.Builder<Capability> capabilities = ImmutableList.builder();
     capabilities.add(SnapProtocol.SNAP1);
+    if (advertiseSnap2) {
+      capabilities.add(SnapProtocol.SNAP2);
+    }
 
     return capabilities.build();
   }

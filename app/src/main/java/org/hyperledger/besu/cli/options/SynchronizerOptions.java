@@ -17,6 +17,7 @@ package org.hyperledger.besu.cli.options;
 import static org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration.DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED;
 
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackfillMode;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.ImmutableSnapSyncConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
 
@@ -90,6 +91,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       "--Xsnapsync-synchronizer-trienode-count-per-request";
   private static final String SNAP_TRANSACTION_INDEXING_ENABLED_FLAG =
       "--snapsync-synchronizer-transaction-indexing-enabled";
+  private static final String SNAP2_BACKFILL_MODE_FLAG = "--Xsnap2-backfill-mode";
 
   private static final String SNAP_FLAT_ACCOUNT_HEALED_COUNT_PER_REQUEST_FLAG =
       "--Xsnapsync-synchronizer-flat-account-healed-count-per-request";
@@ -410,6 +412,14 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private Boolean snapTransactionIndexingEnabled =
       SnapSyncConfiguration.DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED;
 
+  @CommandLine.Option(
+      names = {SNAP2_BACKFILL_MODE_FLAG},
+      hidden = true,
+      paramLabel = "<MODE>",
+      description =
+          "How hard the SNAP2 sync downloads the older bodies and receipts in the background once the node follows the chain head. SLOW: 5 MiB/s on 2 peers, paused 2 s after each block import, backed off at the first sign of head lag, mainnet history in 2 to 3 days. MEDIUM: 14 MiB/s on 4 peers, paused 1 s after each import, backed off when the head lags more than a slot, about a day. FAST: 32 MiB/s on 8 peers, no pause around imports, backed off when the head lags, about 10 hours. Every mode stops while the node is behind the chain head. Valid values: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE})")
+  private BackfillMode snap2BackfillMode = SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_MODE;
+
   /**
    * @deprecated No longer used. Accepted for backwards compatibility. The flag will be removed in a
    *     future release.
@@ -541,6 +551,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         config.getSnapSyncConfiguration().getMaxConcurrentSnapRequestsGlobal();
     options.snapTransactionIndexingEnabled =
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
+    options.snap2BackfillMode = config.getSnapSyncConfiguration().getSnap2BackfillMode();
     options.era1ImportPrepipelineEnabled = config.era1ImportPrepipelineEnabled();
     options.era1DataUri = config.era1DataUri();
     options.era1ImportPrepipelineConcurrency = config.era1ImportPrepipelineConcurrency();
@@ -586,6 +597,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .maxConcurrentSnapRequestsPerPeer(snapsyncServerMaxConcurrentRequestsPerPeer)
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
+            .snap2BackfillMode(snap2BackfillMode)
             .build());
     builder.receiptsDownloadStepTimeoutMillis(receiptsDownloadStepTimeoutMillis);
     builder.backwardHeadersDownloadStepTimeoutMillis(backwardHeadersDownloadStepTimeoutMillis);
@@ -663,6 +675,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapsyncServerMaxConcurrentRequests),
             SNAP_TRANSACTION_INDEXING_ENABLED_FLAG,
             OptionParser.format(snapTransactionIndexingEnabled),
+            SNAP2_BACKFILL_MODE_FLAG,
+            snap2BackfillMode.name(),
             ERA1_IMPORT_PREPIPELINE_ENABLED_FLAG,
             OptionParser.format(era1ImportPrepipelineEnabled),
             ERA1_DATA_URI_FLAG,

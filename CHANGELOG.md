@@ -77,6 +77,7 @@
 - Snap sync no longer stalls when a download completes while the pipeline stage is handing on another result. [#11514](https://github.com/besu-eth/besu/pull/11514)
 
 ### Additions and Improvements
+- Experimental `SNAP2` sync mode (`--sync-mode=SNAP2`): downloads the state of a pivot near the chain head over snap/2 ([EIP-8189](https://eips.ethereum.org/EIPS/eip-8189)) and keeps it current with the block access lists of the blocks the pivot moves over, writing the storage tries as their slots arrive. The chain head is set once the bodies and receipts of the last blocks are stored; the older ones are stored in the background, at a rate set by `--Xsnap2-backfill-mode`. It replaces the snap/2 download behind the hidden `--Xsnap2-enabled` option, removed together with `--Xsnap2-request-parallelism`.
 - Update `Bouncycastle` to 1.85 to address CVEs `CVE-2026-8763` and `CVE-2026-13506`. [#11336](https://github.com/besu-eth/besu/pull/11336)
 - Update Jackson to 2.21.6 to address CVE `CVE-2026-68497` [#11396](https://github.com/besu-eth/besu/pull/11396)
 - Update Jackson to 2.21.7 to address CVE `CVE-2026-91777` [#11503](https://github.com/besu-eth/besu/pull/11503)
