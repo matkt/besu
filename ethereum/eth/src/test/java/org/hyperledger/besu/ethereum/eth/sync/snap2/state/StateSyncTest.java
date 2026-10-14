@@ -295,7 +295,8 @@ class StateSyncTest {
     final Random random = new Random(5);
     final TestWorld world = TestWorld.random(random, 1500, 4, 800);
     network.serve(world);
-    network.latency(4);
+    // slow enough that the root is forgotten before the next requests come back
+    network.latency(20);
     final Storages storages = SyncStorageFixture.create(format);
     stateSync = new StateSync(storages.sync(), network, config());
     final var completion = stateSync.start(header(7, world.root()));
