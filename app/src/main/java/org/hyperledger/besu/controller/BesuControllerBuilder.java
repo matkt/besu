@@ -227,11 +227,14 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   /** Configuration flags related to block access lists. */
   protected BalConfiguration balConfiguration = BalConfiguration.DEFAULT;
 
-  /** EIP-8347 snapshot the PBT migrator starts from, instead of genesis. */
+  /** EIP-8347 snapshot the PBT migrator starts from. */
   protected Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap = Optional.empty();
 
   /** How much of the node the PBT migrator takes. */
   protected PbtMigrator.Tuning pbtMigrationTuning = PbtMigrator.Tuning.DEFAULT;
+
+  /** Whether the PBT migrator may start from genesis when no snapshot is set. */
+  protected boolean pbtMigrationFromGenesis = false;
 
   /** The API configuration */
   protected ApiConfiguration apiConfiguration;
@@ -628,7 +631,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   /**
    * Sets the EIP-8347 snapshot the PBT migrator starts from.
    *
-   * @param pbtSnapshotBootstrap the snapshot, preimages and anchor, or empty to start from genesis
+   * @param pbtSnapshotBootstrap the snapshot, preimages and anchor, or empty
    * @return the besu controller builder
    */
   public BesuControllerBuilder pbtSnapshotBootstrap(
@@ -646,6 +649,17 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
    */
   public BesuControllerBuilder pbtMigrationTuning(final PbtMigrator.Tuning pbtMigrationTuning) {
     this.pbtMigrationTuning = pbtMigrationTuning;
+    return this;
+  }
+
+  /**
+   * Lets the PBT migrator start from genesis when no snapshot is set.
+   *
+   * @param pbtMigrationFromGenesis whether starting from genesis is enabled
+   * @return the besu controller builder
+   */
+  public BesuControllerBuilder pbtMigrationFromGenesis(final boolean pbtMigrationFromGenesis) {
+    this.pbtMigrationFromGenesis = pbtMigrationFromGenesis;
     return this;
   }
 
@@ -1121,6 +1135,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         migrationExecutor,
         genesisConfig::streamAllocations,
         pbtSnapshotBootstrap,
+        pbtMigrationFromGenesis,
         balsFromPeers,
         1000L,
         pbtMigrationTuning);

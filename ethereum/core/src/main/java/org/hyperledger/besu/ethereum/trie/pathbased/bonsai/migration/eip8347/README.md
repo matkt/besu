@@ -8,8 +8,9 @@ tagged records instead of section counts (EIP PR 12404).
 
 At the PBT fork, every node needs the pre-fork state as a PBT (the binary trie of EIP-8297)
 instead of an MPT. A node can build it alone by replaying the chain from genesis into its
-binary-trie column, which is slow. EIP-8347 lets it start instead from a **PBT snapshot** taken at
-a finalized pre-fork **anchor** block.
+binary-trie column (`--Xpbt-migration-from-genesis`), which is slow and needs a trie log or a BAL
+for every block. EIP-8347 lets it start instead from a **PBT snapshot** taken at a finalized
+pre-fork **anchor** block.
 
 The node trusts nothing about that snapshot, only the anchor's `stateRoot`, which consensus
 validated. The **dual check** proves that the snapshot is exactly the state that `stateRoot`
@@ -267,14 +268,20 @@ besu storage pbt convert --preimages-out pre.bin --snapshot snap.bin --anchor 0 
 
 Exit code: **0** accepted, **1** rejected, **2** any other failure. `verify` writes nothing.
 
+To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
+`--Xpbt-snapshot-anchor-block-hash`, set together. Without a snapshot, the migrator stops and
+writes nothing, so a snapshot given at a later restart is still used. `--Xpbt-migration-from-genesis`
+makes it replay the chain from genesis instead: only where every block has a trie log or a BAL,
+e.g. a devnet with BALs from genesis.
+
 How much of the node the migrator takes, so that block import keeps up:
 
 | Option | Default | |
 |---|---|---|
-| `--Xpbt-migration-threads` | half the cores | threads of the snapshot load and of the binary roots |
-| `--Xpbt-migration-blocks-per-roll` | 128 | most blocks applied in one roll |
-| `--Xpbt-migration-roll-pause` | 0 ms | wait after each roll while catching up |
-| `--Xpbt-migration-sort-buffer` | 64 MiB | heap of each external sort of the load |
+| `--Xpbt-migration-threads` | half the cores | threads of the snapshot load and of the binary roots, at most the cores |
+| `--Xpbt-migration-blocks-per-roll` | 128 | most blocks applied in one roll, at most 512 |
+| `--Xpbt-migration-roll-pause` | the last roll's duration, at most 10 s | wait after each roll while catching up |
+| `--Xpbt-migration-sort-buffer` | 64 MiB | heap of each external sort of the load, at most 1 GiB |
 
 Its writes are low priority: RocksDB slows them down first when compactions fall behind.
 

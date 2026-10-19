@@ -92,6 +92,38 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
         .contains("PBT migration roll pause must not be negative");
   }
 
+  @Test
+  public void genesisStartIsOffByDefault() {
+    parseCommand();
+
+    verify(mockControllerBuilder).pbtMigrationFromGenesis(false);
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void genesisStartOptionReachesTheMigrator() {
+    parseCommand("--Xpbt-migration-from-genesis");
+
+    verify(mockControllerBuilder).pbtMigrationFromGenesis(true);
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void genesisStartAndSnapshotCannotBeSetTogether() {
+    parseCommand(
+        "--Xpbt-migration-from-genesis",
+        "--Xpbt-snapshot-file",
+        "snapshot.bin",
+        "--Xpbt-preimages-file",
+        "preimages.bin",
+        "--Xpbt-snapshot-anchor-block-hash",
+        "0x0000000000000000000000000000000000000000000000000000000000000001");
+
+    Mockito.verifyNoInteractions(mockRunnerBuilder);
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("--Xpbt-migration-from-genesis cannot be used with --Xpbt-snapshot-file");
+  }
+
   private PbtMigrator.Tuning tuning() {
     final ArgumentCaptor<PbtMigrator.Tuning> tuning =
         ArgumentCaptor.forClass(PbtMigrator.Tuning.class);

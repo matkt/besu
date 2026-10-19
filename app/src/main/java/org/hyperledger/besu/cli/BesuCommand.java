@@ -2196,6 +2196,7 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
             .dataStorageConfiguration(getDataStorageConfiguration())
             .pbtSnapshotBootstrap(pbtMigrationOptions.toDomainObject(dataDir()))
             .pbtMigrationTuning(pbtMigrationOptions.toTuning())
+            .pbtMigrationFromGenesis(pbtMigrationOptions.migrationFromGenesis())
             .miningParameters(miningParametersSupplier.get())
             .transactionPoolConfiguration(buildTransactionPoolConfiguration())
             .nodeKey(new NodeKey(securityModule()))

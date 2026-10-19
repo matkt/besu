@@ -33,7 +33,7 @@ public class PbtMigrationOptions {
       hidden = true,
       paramLabel = "<PATH>",
       description =
-          "EIP-8347 PBT snapshot to start the PBT migrator from instead of genesis. Requires "
+          "EIP-8347 PBT snapshot the PBT migrator starts from. Requires "
               + "--Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash.")
   Path snapshotFile = null;
 
@@ -83,6 +83,23 @@ public class PbtMigrationOptions {
       description =
           "Heap in MiB of each external sort of the PBT snapshot load (default: ${DEFAULT-VALUE}).")
   int sortBufferMib = (int) (PbtMigrator.Tuning.DEFAULT.sortBufferBytes() >> 20);
+
+  @CommandLine.Option(
+      names = {"--Xpbt-migration-from-genesis"},
+      hidden = true,
+      description =
+          "Let the PBT migrator start from genesis when no snapshot is set. It then replays every "
+              + "block, so each needs a trie log or a BAL (e.g. a devnet with BALs from genesis).")
+  boolean fromGenesis = false;
+
+  /**
+   * Whether the PBT migrator may start from genesis when no snapshot is set.
+   *
+   * @return {@code true} when starting from genesis is enabled
+   */
+  public boolean migrationFromGenesis() {
+    return fromGenesis;
+  }
 
   /**
    * The snapshot bootstrap, if configured.
@@ -140,6 +157,10 @@ public class PbtMigrationOptions {
       throw new IllegalArgumentException(
           "--Xpbt-snapshot-file, --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash "
               + "must be set together");
+    }
+    if (set == 3 && fromGenesis) {
+      throw new IllegalArgumentException(
+          "--Xpbt-migration-from-genesis cannot be used with --Xpbt-snapshot-file");
     }
     return set == 3;
   }

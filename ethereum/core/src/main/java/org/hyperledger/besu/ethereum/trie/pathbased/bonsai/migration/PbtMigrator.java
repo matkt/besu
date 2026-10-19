@@ -75,8 +75,8 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Builds the binary trie column in the background until the PBT fork: from a verified EIP-8347
- * snapshot or genesis, then along the canonical chain through trie logs, or BALs where the node has
- * none. The chain claims the column at the fork ({@link PbtColumnOwnership}).
+ * snapshot, or genesis when enabled, then along the canonical chain through trie logs, or BALs
+ * where the node has none. The chain claims the column at the fork ({@link PbtColumnOwnership}).
  */
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
@@ -98,6 +98,7 @@ public class PbtMigrator {
   private final Optional<Long> binaryTrieMilestone;
   private final ScheduledExecutorService scheduler;
   private final Optional<SnapshotBootstrap> snapshotBootstrap;
+  private final boolean fromGenesis;
   private final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers;
   private final long pollIntervalMs;
   private final Duration snapshotRetryDelay;
@@ -139,6 +140,7 @@ public class PbtMigrator {
       final ScheduledExecutorService scheduler,
       final Supplier<Stream<GenesisAccount>> genesisAllocations,
       final Optional<SnapshotBootstrap> snapshotBootstrap,
+      final boolean fromGenesis,
       final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
       final long pollIntervalMs,
       final Tuning tuning) {
@@ -149,6 +151,7 @@ public class PbtMigrator {
         scheduler,
         genesisAllocations,
         snapshotBootstrap,
+        fromGenesis,
         balsFromPeers,
         pollIntervalMs,
         tuning,
@@ -163,6 +166,7 @@ public class PbtMigrator {
       final ScheduledExecutorService scheduler,
       final Supplier<Stream<GenesisAccount>> genesisAllocations,
       final Optional<SnapshotBootstrap> snapshotBootstrap,
+      final boolean fromGenesis,
       final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
       final long pollIntervalMs,
       final Tuning tuning,
@@ -174,6 +178,7 @@ public class PbtMigrator {
         scheduler,
         genesisAllocations,
         snapshotBootstrap,
+        fromGenesis,
         balsFromPeers,
         pollIntervalMs,
         tuning,
@@ -189,6 +194,7 @@ public class PbtMigrator {
       final ScheduledExecutorService scheduler,
       final Supplier<Stream<GenesisAccount>> genesisAllocations,
       final Optional<SnapshotBootstrap> snapshotBootstrap,
+      final boolean fromGenesis,
       final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
       final long pollIntervalMs,
       final Tuning tuning,
@@ -199,6 +205,7 @@ public class PbtMigrator {
     this.binaryTrieMilestone = binaryTrieMilestone;
     this.scheduler = scheduler;
     this.snapshotBootstrap = snapshotBootstrap;
+    this.fromGenesis = fromGenesis;
     this.balsFromPeers = balsFromPeers;
     this.pollIntervalMs = pollIntervalMs;
     this.snapshotRetryDelay = snapshotRetryDelay;
@@ -324,6 +331,14 @@ public class PbtMigrator {
     // is an attempt interrupted by a restart, and each bootstrap below empties it before writing.
     if (snapshotBootstrap.isPresent()) {
       bootstrapFromSnapshot(snapshotBootstrap.get());
+      return;
+    }
+    // A replay from genesis needs a trie log or a BAL for every block: only when asked for.
+    if (!fromGenesis) {
+      LOG.info(
+          "PBT migrator stopped: no snapshot (--Xpbt-snapshot-file) and no start from genesis"
+              + " (--Xpbt-migration-from-genesis)");
+      stop();
       return;
     }
 
