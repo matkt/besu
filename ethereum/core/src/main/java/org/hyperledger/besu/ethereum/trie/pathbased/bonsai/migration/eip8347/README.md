@@ -19,8 +19,9 @@ tagged records instead of section counts (EIP PR 12404).
 
 At the PBT fork, every node needs the pre-fork state as a PBT (the binary trie of EIP-8297)
 instead of an MPT. A node can build it alone by replaying the chain from genesis into its
-binary-trie column, which is slow. EIP-8347 lets it start instead from a **PBT snapshot** taken at
-a finalized pre-fork **anchor** block.
+binary-trie column (`--Xpbt-migration-from-genesis`), which is slow and needs a trie log or a BAL
+for every block. EIP-8347 lets it start instead from a **PBT snapshot** taken at a finalized
+pre-fork **anchor** block.
 
 The node trusts nothing about that snapshot. The one thing it can trust is the anchor's
 `stateRoot`: it is in the block header, and consensus validated it. The **dual check** proves that
@@ -555,7 +556,10 @@ besu storage pbt convert --preimages-out pre.bin --snapshot snap.bin --anchor 0 
 Exit code: **0** accepted, **1** rejected, **2** any other failure. `verify` writes nothing.
 
 To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
-`--Xpbt-snapshot-anchor-block-hash`, set together.
+`--Xpbt-snapshot-anchor-block-hash`, set together. Without a snapshot, the migrator stops and
+writes nothing, so a snapshot given at a later restart is still used. `--Xpbt-migration-from-genesis`
+makes it replay the chain from genesis instead: only where every block has a trie log or a BAL,
+e.g. a devnet with BALs from genesis.
 
 How much of the node the migrator takes, so that block import keeps up:
 

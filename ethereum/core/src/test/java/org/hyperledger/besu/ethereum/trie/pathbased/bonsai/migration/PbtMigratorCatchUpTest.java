@@ -165,6 +165,7 @@ class PbtMigratorCatchUpTest {
             scheduler,
             Stream::empty,
             Optional.empty(),
+            true,
             headers -> Map.of(),
             1,
             new PbtMigrator.Tuning(1, blocksPerRoll, rollPause, 1 << 20)) {

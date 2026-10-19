@@ -329,6 +329,29 @@ class PbtSnapshotLoadTest {
     assertNoFileLeft();
   }
 
+  // ---- Without a snapshot ----
+
+  @Test
+  void aStartWithoutSnapshotWritesNothingSoALaterSnapshotLoads() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(rocksDb("db"));
+    final ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+
+    startWithoutSnapshot(storage, scheduler).run();
+
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isEmpty();
+    verify(scheduler).shutdown();
+
+    final Migrator restarted = migrator(storage, artifacts, fixture.mptRoot());
+    restarted.tick();
+
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY))
+        .contains(restarted.anchor().getBlockHash());
+    assertThat(column(storage.getComposedWorldStateStorage()))
+        .isEqualTo(transactionalLoad(fixture, artifacts));
+  }
+
   // ---- Helpers ----
 
   /** A state with shared code, a delegation, header slots and a storage of several groups. */
@@ -532,11 +555,37 @@ class PbtSnapshotLoadTest {
         Optional.of(
             new PbtMigrator.SnapshotBootstrap(
                 artifacts.snapshot(), artifacts.preimages(), anchor.getHash(), workDir())),
+        false,
         headers -> Map.of(),
         1,
         // Two threads, and sorts that spill every few records.
         new PbtMigrator.Tuning(2, 128, Duration.ZERO, 1 << 10),
         retryDelay);
+  }
+
+  /** Starts a migrator with no snapshot and no start from genesis; returns its scheduled tick. */
+  private static Runnable startWithoutSnapshot(
+      final BonsaiWorldStateKeyValueStorage storage, final ScheduledExecutorService scheduler) {
+    final BonsaiWorldStateProvider provider = mock(BonsaiWorldStateProvider.class);
+    when(provider.getWorldStateKeyValueStorage()).thenReturn(storage);
+    when(provider.getBinaryColumnOwnership()).thenReturn(new PbtColumnOwnership(storage));
+    new PbtMigrator(
+            provider,
+            mock(Blockchain.class),
+            Optional.of(Long.MAX_VALUE),
+            scheduler,
+            Stream::empty,
+            Optional.empty(),
+            false,
+            headers -> Map.of(),
+            1,
+            new PbtMigrator.Tuning(1, 128, Duration.ZERO, 1 << 20),
+            Duration.ZERO)
+        .start();
+    final ArgumentCaptor<Runnable> tick = ArgumentCaptor.forClass(Runnable.class);
+    verify(scheduler)
+        .scheduleWithFixedDelay(tick.capture(), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS));
+    return tick.getValue();
   }
 
   private static BlockHeader anchorHeader(final Bytes32 stateRoot) {
