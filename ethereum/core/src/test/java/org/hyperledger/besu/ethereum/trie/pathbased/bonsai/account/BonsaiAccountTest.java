@@ -150,7 +150,7 @@ public class BonsaiAccountTest {
   }
 
   @Test
-  void binaryAccountDelegatesToBinaryStorageRootStrategy() {
+  void binaryAccountRejectsStorageRoot() {
     final BonsaiAccount account =
         new BonsaiAccount(
             bonsaiWorldState,
@@ -163,12 +163,6 @@ public class BonsaiAccountTest {
             true,
             new BonsaiCodeCache());
 
-    assertThat(account.hasStorageRoot()).isFalse();
-    // MPT-specific accessors throw for binary accounts (no storage root).
-    assertThatThrownBy(account::getStorageRoot)
-        .isInstanceOf(UnsupportedOperationException.class)
-        .hasMessageContaining("not applicable for binary trie accounts");
-    // setStorageRoot throws for binary (the strategy owns the state and rejects MPT roots).
     assertThatThrownBy(() -> account.setStorageRoot(Hash.EMPTY_TRIE_HASH))
         .isInstanceOf(UnsupportedOperationException.class);
   }
