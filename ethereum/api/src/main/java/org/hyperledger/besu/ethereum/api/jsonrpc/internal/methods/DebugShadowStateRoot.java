@@ -23,12 +23,8 @@ import org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters.JsonRpcPara
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.JsonRpcSuccessResponse;
 import org.hyperledger.besu.ethereum.api.jsonrpc.internal.response.RpcErrorType;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrationIntrospection;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
-
-import java.util.Optional;
 
 /**
  * {@code debug_shadowStateRoot} — returns the migration's recorded shadow root for a block, or
@@ -37,21 +33,9 @@ import java.util.Optional;
 public class DebugShadowStateRoot implements JsonRpcMethod {
 
   private final ProtocolContext protocolContext;
-  private final Optional<PbtMigrator> pbtMigrator;
 
   public DebugShadowStateRoot(final ProtocolContext protocolContext) {
-    this(protocolContext, Optional.empty());
-  }
-
-  public DebugShadowStateRoot(
-      final ProtocolContext protocolContext, final PbtMigrator pbtMigrator) {
-    this(protocolContext, Optional.of(pbtMigrator));
-  }
-
-  private DebugShadowStateRoot(
-      final ProtocolContext protocolContext, final Optional<PbtMigrator> pbtMigrator) {
     this.protocolContext = protocolContext;
-    this.pbtMigrator = pbtMigrator;
   }
 
   @Override
@@ -79,14 +63,9 @@ public class DebugShadowStateRoot implements JsonRpcMethod {
       return new JsonRpcSuccessResponse(requestContext.getRequest().getId(), null);
     }
 
+    // the migration records the root of every block it reaches
     final Hash root =
-        PbtMigrationIntrospection.shadowStateRoot(
-                bonsai.getWorldStateKeyValueStorage(),
-                protocolContext.getBlockchain(),
-                bonsai.getBinaryTrieMilestone(),
-                blockHash,
-                pbtMigrator)
-            .orElse(null);
+        bonsai.getWorldStateKeyValueStorage().getShadowStateRoot(blockHash).orElse(null);
     return new JsonRpcSuccessResponse(requestContext.getRequest().getId(), root);
   }
 }

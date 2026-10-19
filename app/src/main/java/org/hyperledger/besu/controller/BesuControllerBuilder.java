@@ -29,9 +29,6 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ConsensusContext;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.api.ApiConfiguration;
-import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.DebugShadowStateRoot;
-import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.JsonRpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.methods.JsonRpcMethods;
 import org.hyperledger.besu.ethereum.blockcreation.MiningCoordinator;
 import org.hyperledger.besu.ethereum.chain.BadBlockManager;
@@ -125,7 +122,6 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -974,7 +970,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     final SubProtocolConfiguration subProtocolConfiguration =
         createSubProtocolConfiguration(ethProtocolManager, maybeSnapProtocolManager);
 
-    JsonRpcMethods additionalJsonRpcMethodFactory =
+    final JsonRpcMethods additionalJsonRpcMethodFactory =
         createAdditionalJsonRpcMethodFactory(
             protocolContext, protocolSchedule, miningConfiguration);
 
@@ -1048,8 +1044,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
                 blockchain,
                 binaryTrieMilestone,
                 new PeerBlockAccessListFetcher(ethProtocolManager.ethContext())::fetch);
-        additionalJsonRpcMethodFactory =
-            withShadowStateRoot(additionalJsonRpcMethodFactory, protocolContext, pbtMigrator);
         closeables.addFirst(pbtMigrator::close);
         final PmtPruner pmtPruner = bonsaiProvider.getPmtPruner();
         pmtPruner.start(MonitoredExecutors.newFixedThreadPool("pmt-pruner", 1, metricsSystem));
@@ -1088,19 +1082,6 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         storageProvider,
         dataStorageConfiguration,
         transactionSimulator);
-  }
-
-  private JsonRpcMethods withShadowStateRoot(
-      final JsonRpcMethods existing,
-      final ProtocolContext protocolContext,
-      final PbtMigrator pbtMigrator) {
-    return apis -> {
-      final Map<String, JsonRpcMethod> methods = new HashMap<>(existing.create(apis));
-      methods.put(
-          RpcMethod.DEBUG_SHADOW_STATE_ROOT.getMethodName(),
-          new DebugShadowStateRoot(protocolContext, pbtMigrator));
-      return methods;
-    };
   }
 
   private PbtMigrator createPbtMigrator(

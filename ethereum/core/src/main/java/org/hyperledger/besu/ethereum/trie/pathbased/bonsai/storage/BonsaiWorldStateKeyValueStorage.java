@@ -92,6 +92,10 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   /** Set once the PMT has been deleted, after a block past the PBT fork was finalized. */
   public static final byte[] PMT_PRUNED_KEY = "pmtPruned".getBytes(StandardCharsets.UTF_8);
 
+  /** Prefix of the shadow root recorded for each block the binary trie migration reached. */
+  public static final byte[] SHADOW_STATE_ROOT_KEY_PREFIX =
+      "shadowStateRoot".getBytes(StandardCharsets.UTF_8);
+
   private final AtomicBoolean shouldClose = new AtomicBoolean(false);
   protected final AtomicBoolean isClosed = new AtomicBoolean(false);
   protected final Subscribers<StorageSubscriber> subscribers = Subscribers.create();
@@ -276,6 +280,25 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .getWorldStateTransaction()
         .put(BINARY_TRIE_BRANCH_STORAGE, PBT_MIGRATOR_RETIRED_KEY, new byte[] {1});
     updater.commit();
+  }
+
+  /** The key of the shadow root recorded for {@code blockHash}. */
+  public static byte[] shadowStateRootKey(final Hash blockHash) {
+    return Bytes.concatenate(Bytes.wrap(SHADOW_STATE_ROOT_KEY_PREFIX), blockHash.getBytes())
+        .toArrayUnsafe();
+  }
+
+  /**
+   * The binary root the migration computed for a block, the root its header does not commit.
+   *
+   * @param blockHash the block
+   * @return the root, or empty when the migration never reached the block
+   */
+  public Optional<Hash> getShadowStateRoot(final Hash blockHash) {
+    return composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, shadowStateRootKey(blockHash))
+        .map(Bytes32::wrap)
+        .map(Hash::wrap);
   }
 
   /** {@code true} once the PMT has been deleted, after the PBT fork was finalized. */

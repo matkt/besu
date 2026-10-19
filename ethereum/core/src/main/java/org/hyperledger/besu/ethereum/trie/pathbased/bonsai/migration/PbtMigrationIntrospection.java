@@ -94,33 +94,4 @@ public final class PbtMigrationIntrospection {
         new DirectionProgressResult(
             phase, cursor.getNumber(), cursor.getBlockHash().toHexString(), shadow, ""));
   }
-
-  public static Optional<Hash> shadowStateRoot(
-      final BonsaiWorldStateKeyValueStorage storage,
-      final Blockchain blockchain,
-      final Optional<Long> binaryTrieMilestone,
-      final Hash blockHash,
-      final Optional<PbtMigrator> migrator) {
-    final Optional<BlockHeader> header = blockchain.getBlockHeader(blockHash);
-    if (header.isEmpty() || binaryTrieMilestone.isEmpty()) {
-      return Optional.empty();
-    }
-
-    // Blocks the migrator rolled through answer from its cache, which outlives the cursor.
-    final Optional<Hash> recorded = migrator.flatMap(m -> m.shadowRootFor(blockHash));
-    if (recorded.isPresent()) {
-      return recorded;
-    }
-
-    // Otherwise the only shadow on hand is the column whose mode is opposite to the one the block
-    // header commits, and its worldBlockHash/worldRoot metadata describes that column's cursor.
-    final TrieBranchType shadowMode =
-        BinaryTrieForkSupport.isBinaryTrieActive(header.get().getTimestamp(), binaryTrieMilestone)
-            ? TrieBranchType.PATRICIA
-            : TrieBranchType.BINARY;
-    if (storage.getWorldStateBlockHash(shadowMode).filter(blockHash::equals).isEmpty()) {
-      return Optional.empty();
-    }
-    return storage.getWorldStateRootHash(shadowMode).map(bytes -> Hash.wrap(Bytes32.wrap(bytes)));
-  }
 }

@@ -61,8 +61,6 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import com.google.common.base.Suppliers;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
@@ -84,8 +82,6 @@ import org.slf4j.LoggerFactory;
  */
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
-
-  private static final int SHADOW_ROOT_CACHE_SIZE = 1024;
 
   /** Most blocks applied in one roll, so a long catch-up never holds its whole range in heap. */
   static final int MAX_BLOCKS_PER_ROLL = 128;
@@ -118,15 +114,6 @@ public class PbtMigrator {
 
   /** Genesis allocations as a trie log, built once: the allocation stream can be read only once. */
   private final Supplier<TrieLog> genesisTrieLog;
-
-  /**
-   * Binary roots this migrator computed, keyed by block hash. The binary column only records its
-   * cursor, so without this {@code debug_shadowStateRoot} could answer for the tip alone — and the
-   * tip moves every block. Memory-only and bounded: a missed root is a missing sample, not a
-   * correctness problem.
-   */
-  private final Cache<Hash, Hash> shadowRoots =
-      CacheBuilder.newBuilder().maximumSize(SHADOW_ROOT_CACHE_SIZE).build();
 
   public PbtMigrator(
       final BonsaiWorldStateProvider provider,
@@ -217,11 +204,6 @@ public class PbtMigrator {
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
-  }
-
-  /** The binary root this migrator computed for a block, while it is still cached. */
-  public Optional<Hash> shadowRootFor(final Hash blockHash) {
-    return Optional.ofNullable(shadowRoots.getIfPresent(blockHash));
   }
 
   private void tick() {
@@ -570,7 +552,6 @@ public class PbtMigrator {
       putCursor(
           stateUpdater, Bytes32.wrap(computation.root().getBytes()), blockHeader.getBlockHash());
       stateUpdater.commit();
-      shadowRoots.put(blockHeader.getBlockHash(), computation.root());
 
       LOG.atInfo()
           .setMessage("PBT migrator rolled to block {} ({}); root from {} to {}")
@@ -679,7 +660,7 @@ public class PbtMigrator {
 
   /**
    * Writes the binary column's cursor, the block whose state the column holds and its PBT root, in
-   * {@code updater}'s transaction.
+   * {@code updater}'s transaction, and records that root as the block's shadow root.
    */
   static void putCursor(
       final BonsaiWorldStateKeyValueStorage.Updater updater,
@@ -692,5 +673,11 @@ public class PbtMigrator {
         .getWorldStateTransaction()
         .put(
             BINARY_TRIE_BRANCH_STORAGE, WORLD_BLOCK_HASH_KEY, blockHash.getBytes().toArrayUnsafe());
+    updater
+        .getWorldStateTransaction()
+        .put(
+            BINARY_TRIE_BRANCH_STORAGE,
+            BonsaiWorldStateKeyValueStorage.shadowStateRootKey(blockHash),
+            root.toArrayUnsafe());
   }
 }
