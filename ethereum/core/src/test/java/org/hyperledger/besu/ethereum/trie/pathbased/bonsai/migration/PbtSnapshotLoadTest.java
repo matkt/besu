@@ -21,6 +21,7 @@ import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.Bonsai
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -119,6 +120,24 @@ class PbtSnapshotLoadTest {
     final SortedFileLoad load = sortedFileLoad(fixture, artifacts, 1 << 10, 1 << 10);
     assertThat(load.column()).isEqualTo(transactionalLoad(fixture, artifacts));
     assertThat(load.files()).isGreaterThan(1);
+  }
+
+  @Test
+  void filesAreAddedAFewAtATimeInLocationOrder() throws Exception {
+    // Each ingestion stops the database's writes while it runs: it adds at most 4 files here.
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+
+    final SortedFileLoad load = sortedFileLoad(fixture, artifacts, 1 << 10, 1 << 10, 4);
+    assertThat(load.column()).isEqualTo(transactionalLoad(fixture, artifacts));
+    assertThat(load.ingestions())
+        .hasSize((load.files() + 3) / 4)
+        .allSatisfy(files -> assertThat(files).hasSizeBetween(1, 4));
+    // Files are numbered as they are written, in location order.
+    assertThat(load.ingestions().stream().flatMap(List::stream).map(Path::getFileName))
+        .hasSizeGreaterThan(4)
+        .isSorted()
+        .doesNotHaveDuplicates();
   }
 
   @Test
@@ -334,8 +353,12 @@ class PbtSnapshotLoadTest {
         .build();
   }
 
-  /** A column loaded through sorted files, and how many files it took. */
-  private record SortedFileLoad(List<Map.Entry<Bytes, Bytes>> column, int files) {}
+  /** A column loaded through sorted files, and the files each ingestion added. */
+  private record SortedFileLoad(List<Map.Entry<Bytes, Bytes>> column, List<List<Path>> ingestions) {
+    int files() {
+      return ingestions.stream().mapToInt(List::size).sum();
+    }
+  }
 
   /** The column loaded through sorted files; {@code fileBytes} 0 keeps the default. */
   private SortedFileLoad sortedFileLoad(
@@ -344,6 +367,21 @@ class PbtSnapshotLoadTest {
       final long windowBytes,
       final long fileBytes)
       throws Exception {
+    return sortedFileLoad(
+        fixture,
+        artifacts,
+        windowBytes,
+        fileBytes,
+        SnapshotColumnWriter.DEFAULT_FILES_PER_INGESTION);
+  }
+
+  private SortedFileLoad sortedFileLoad(
+      final Eip8347Fixture fixture,
+      final Artifacts artifacts,
+      final long windowBytes,
+      final long fileBytes,
+      final int filesPerIngestion)
+      throws Exception {
     final SegmentedKeyValueStorage database = spy(rocksDb("sorted"));
     final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(database);
     try (final SnapshotColumnWriter writer =
@@ -351,7 +389,8 @@ class PbtSnapshotLoadTest {
             storage,
             workDir(),
             windowBytes,
-            fileBytes == 0 ? SnapshotColumnWriter.DEFAULT_FILE_BYTES : fileBytes)) {
+            fileBytes == 0 ? SnapshotColumnWriter.DEFAULT_FILE_BYTES : fileBytes,
+            filesPerIngestion)) {
       final Eip8347DualCheckVerifier.Loaded loaded =
           Eip8347DualCheckVerifier.verifyAndLoad(
               artifacts.snapshot(), artifacts.preimages(), fixture.mptRoot(), workDir(), writer);
@@ -360,8 +399,10 @@ class PbtSnapshotLoadTest {
     assertNoFileLeft();
     @SuppressWarnings("unchecked")
     final ArgumentCaptor<List<Path>> files = ArgumentCaptor.forClass(List.class);
-    verify(database).ingestSortedFiles(eq(BINARY_TRIE_BRANCH_STORAGE), files.capture());
-    return new SortedFileLoad(column(database), files.getValue().size());
+    verify(database, atLeastOnce())
+        .ingestSortedFiles(eq(BINARY_TRIE_BRANCH_STORAGE), files.capture());
+    return new SortedFileLoad(
+        column(database), files.getAllValues().stream().<List<Path>>map(List::copyOf).toList());
   }
 
   /** The column as the transactional load wrote it: every node, then the cursor, in a commit. */

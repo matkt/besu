@@ -44,6 +44,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -533,6 +534,34 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
     final ColumnFamilyHandle foo = store.safeColumnHandle(TestSegment.FOO);
     assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level0")).isEqualTo("0");
     assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level6")).isEqualTo("2");
+    store.close();
+  }
+
+  @Test
+  public void sortedFilesAddedBatchAfterBatchInKeyOrderAllLandInTheLastLevel() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final List<Path> files = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      final Path file = folder.resolve("batch-" + i + ".sst");
+      try (final SortedFileWriter writer = store.createSortedFileWriter(TestSegment.FOO, file)) {
+        writer.put(bytesFromHexString("000" + i), bytesFromHexString("0AA" + i));
+        writer.finish();
+      }
+      files.add(file);
+    }
+
+    // Disjoint and ascending: the segment holds data after the first batch, yet none overlaps.
+    store.ingestSortedFiles(TestSegment.FOO, files.subList(0, 1));
+    store.ingestSortedFiles(TestSegment.FOO, files.subList(1, 3));
+
+    for (int i = 0; i < 3; i++) {
+      assertThat(store.get(TestSegment.FOO, bytesFromHexString("000" + i)))
+          .contains(bytesFromHexString("0AA" + i));
+    }
+    final ColumnFamilyHandle foo = store.safeColumnHandle(TestSegment.FOO);
+    assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level0")).isEqualTo("0");
+    assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level6")).isEqualTo("3");
     store.close();
   }
 

@@ -36,6 +36,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -61,6 +62,9 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   /** Bytes of nodes per file, RocksDB's default target file size. */
   static final long DEFAULT_FILE_BYTES = 64L << 20;
 
+  /** Files added per ingestion, which stops every write to the database while it runs. */
+  static final int DEFAULT_FILES_PER_INGESTION = 16;
+
   /** Nodes handed to the sorting thread at a time. */
   private static final int NODES_PER_BATCH = 100_000;
 
@@ -77,6 +81,7 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   private final Path dir;
   private final long windowBytes;
   private final long fileBytes;
+  private final int filesPerIngestion;
   private final ExecutorService sorter = singleThread("pbt-column-sort");
   private final ExecutorService fileWriter = singleThread("pbt-column-files");
   private final Semaphore batchesQueued = new Semaphore(QUEUED);
@@ -102,7 +107,12 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
    */
   SnapshotColumnWriter(final BonsaiWorldStateKeyValueStorage worldStateStorage, final Path workDir)
       throws IOException {
-    this(worldStateStorage, workDir, DEFAULT_WINDOW_BYTES, DEFAULT_FILE_BYTES);
+    this(
+        worldStateStorage,
+        workDir,
+        DEFAULT_WINDOW_BYTES,
+        DEFAULT_FILE_BYTES,
+        DEFAULT_FILES_PER_INGESTION);
   }
 
   /** Same, with explicit sizes (tests use tiny ones for many files and many nodes written last). */
@@ -110,12 +120,14 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
       final BonsaiWorldStateKeyValueStorage worldStateStorage,
       final Path workDir,
       final long windowBytes,
-      final long fileBytes)
+      final long fileBytes,
+      final int filesPerIngestion)
       throws IOException {
     this.worldStateStorage = worldStateStorage;
     this.dir = Files.createDirectories(workDir.resolve("pbt-column"));
     this.windowBytes = windowBytes;
     this.fileBytes = fileBytes;
+    this.filesPerIngestion = filesPerIngestion;
   }
 
   @Override
@@ -147,10 +159,11 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
     awaitQueued(batchesQueued);
     awaitQueued(halvesQueued);
     throwIfFailed();
-    if (!files.isEmpty()) {
+    // Disjoint and ascending, so each batch also lands at the column's last level.
+    for (final List<Path> ingestion : Lists.partition(files, filesPerIngestion)) {
       worldStateStorage
           .getComposedWorldStateStorage()
-          .ingestSortedFiles(BINARY_TRIE_BRANCH_STORAGE, files);
+          .ingestSortedFiles(BINARY_TRIE_BRANCH_STORAGE, ingestion);
     }
     final BonsaiWorldStateKeyValueStorage.Updater updater =
         new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();

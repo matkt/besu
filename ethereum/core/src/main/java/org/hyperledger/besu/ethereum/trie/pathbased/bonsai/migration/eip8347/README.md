@@ -438,7 +438,8 @@ reads back like any stored PBT.
 The entries go to sorted files, which RocksDB adds to the column as they are. Their key ranges do
 not overlap, and the column is empty, so they land at its last level: no write-ahead log, no
 memtable, no compaction, and no write stall for the rest of the database, which keeps processing
-blocks.
+blocks. RocksDB stops every write to the database while it adds files, so they are added 16 at a
+time: each batch starts above the last one, so it lands at the last level too.
 
 A location is `0x00 ‖ path bits ‖ 1`, so stems, which arrive in key order, are in location order
 too. A branch arrives after its subtree, but its location sorts before the subtree when its prefix
