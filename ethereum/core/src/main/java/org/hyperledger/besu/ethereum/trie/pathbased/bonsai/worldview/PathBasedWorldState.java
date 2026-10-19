@@ -194,10 +194,6 @@ public abstract class PathBasedWorldState
     return trieBranchType;
   }
 
-  public WorldStateConfig getWorldStateConfig() {
-    return worldStateConfig;
-  }
-
   public void setSkipStateRootVerification(final boolean skipStateRootVerification) {
     this.skipStateRootVerification = skipStateRootVerification;
   }

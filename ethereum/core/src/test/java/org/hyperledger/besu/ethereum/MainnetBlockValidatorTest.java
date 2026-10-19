@@ -15,7 +15,6 @@
 package org.hyperledger.besu.ethereum;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -474,7 +473,13 @@ public class MainnetBlockValidatorTest {
     final BlockHeader parentHeader = blockParent.getHeader();
     doThrow(storageException)
         .when(worldStateArchive)
-        .getWorldState(eq(withBlockHeaderAndUpdateNodeHead(parentHeader)));
+        .getWorldState(
+            eq(
+                WorldStateQueryParams.newBuilder()
+                    .withBlockHeader(parentHeader)
+                    .withShouldWorldStateUpdateHead(true)
+                    .withTimeStamp(block.getHeader().getTimestamp())
+                    .build()));
 
     BlockProcessingResult result =
         mainnetFrontierBlockValidator.validateAndProcessBlock(

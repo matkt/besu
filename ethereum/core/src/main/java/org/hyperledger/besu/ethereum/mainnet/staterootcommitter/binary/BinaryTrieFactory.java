@@ -20,7 +20,6 @@ import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.ParallelStoredPa
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.StoredPartitionedBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.concurrent.ForkJoinPool;
@@ -48,19 +47,19 @@ public final class BinaryTrieFactory {
   public static StoredPartitionedBinaryTrie createStateTrie(
       final BonsaiWorldState worldState, final ForkJoinPool forkJoinPool) {
     return createTrie(
+        worldState,
         (location, hash) ->
             worldState.getWorldStateStorage().getTrieNode(TrieBranchType.BINARY, location, hash),
         Bytes32.wrap(worldState.getWorldStateRootHash().getBytes()),
-        worldState.getWorldStateConfig(),
         forkJoinPool);
   }
 
   private static StoredPartitionedBinaryTrie createTrie(
+      final BonsaiWorldState worldState,
       final NodeLoader nodeLoader,
       final Bytes32 rootHash,
-      final WorldStateConfig worldStateConfig,
       final ForkJoinPool forkJoinPool) {
-    if (worldStateConfig.isParallelStateRootComputationEnabled()) {
+    if (worldState.isParallelStateRootComputationEnabled()) {
       return new ParallelStoredPartitionedBinaryTrie(nodeLoader, rootHash, forkJoinPool);
     }
     return new StoredPartitionedBinaryTrie(nodeLoader, rootHash);

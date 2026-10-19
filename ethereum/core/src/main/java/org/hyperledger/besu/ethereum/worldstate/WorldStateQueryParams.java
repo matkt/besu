@@ -86,7 +86,7 @@ public class WorldStateQueryParams {
     return blockAccessListOverlay;
   }
 
-  /** Timestamp of the next block, to detect the binary trie fork; defaults to the header's. */
+  /** Timestamp of the next block, to detect the binary trie fork; empty means the header's. */
   public Optional<Long> getTimeStamp() {
     return timeStamp;
   }
@@ -190,13 +190,19 @@ public class WorldStateQueryParams {
         && Objects.equals(blockHeader, that.blockHeader)
         && Objects.equals(blockHash, that.blockHash)
         && Objects.equals(stateRoot, that.stateRoot)
-        && Objects.equals(blockAccessListOverlay, that.blockAccessListOverlay);
+        && Objects.equals(blockAccessListOverlay, that.blockAccessListOverlay)
+        && Objects.equals(timeStamp, that.timeStamp);
   }
 
   @Override
   public int hashCode() {
     return Objects.hash(
-        blockHeader, shouldWorldStateUpdateHead, blockHash, stateRoot, blockAccessListOverlay);
+        blockHeader,
+        shouldWorldStateUpdateHead,
+        blockHash,
+        stateRoot,
+        blockAccessListOverlay,
+        timeStamp);
   }
 
   public static class Builder {
@@ -210,14 +216,13 @@ public class WorldStateQueryParams {
     private Builder() {}
 
     /**
-     * Sets the block header, and the timestamp to the header's one.
+     * Sets the block header.
      *
      * @param blockHeader the block header
      * @return the builder
      */
     public Builder withBlockHeader(final BlockHeader blockHeader) {
       this.blockHeader = blockHeader;
-      this.timeStamp = Optional.of(blockHeader.getTimestamp());
       this.blockHash = blockHeader.getBlockHash();
       this.stateRoot = Optional.of(blockHeader.getStateRoot());
       return this;
@@ -269,7 +274,7 @@ public class WorldStateQueryParams {
     }
 
     /**
-     * Sets the next block timestamp, to call after {@link #withBlockHeader}.
+     * Sets the next block timestamp.
      *
      * @param timeStamp the next block timestamp
      * @return the builder
