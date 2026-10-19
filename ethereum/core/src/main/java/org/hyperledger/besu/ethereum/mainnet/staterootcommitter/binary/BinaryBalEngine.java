@@ -95,7 +95,7 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
       }
 
       final Hash root = writer.commit();
-      LOG.atInfo()
+      LOG.atDebug()
           .setMessage("BAL binary state root computed: root={} parentRoot={} accountChanges={}")
           .addArgument(root)
           .addArgument(worldState.getWorldStateRootHash())

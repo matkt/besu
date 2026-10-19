@@ -127,7 +127,7 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
 
       final Hash root = writer.commit();
       writeSink.addAll(writer.writes());
-      LOG.atInfo().setMessage("DIRECT binary state root computed: root={}").addArgument(root).log();
+      LOG.atDebug().setMessage("Binary state root computed: root={}").addArgument(root).log();
       return root;
     }
 
@@ -156,9 +156,7 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
 
       final Bytes priorCode = resolvePriorCode(address, priorAccount);
       final Bytes updatedCode = resolveUpdatedCode(address, updatedAccount);
-      // Flat encoding follows the account's strategy (serializeAccount): Patricia-shaped roll
-      // replacements stay 4-field even on a BINARY branch; native binary accounts stay 3-field.
-      // Hard-coding BinaryTrieAccountValue here used to overwrite flat-roll-restored PMT priors.
+      // the flat value keeps the account's own encoding: 4 fields if MPT-shaped, 3 if binary
       writer.putAccountHeader(
           address,
           priorAccount != null,

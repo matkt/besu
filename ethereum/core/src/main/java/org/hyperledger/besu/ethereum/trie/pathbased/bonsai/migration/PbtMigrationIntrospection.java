@@ -30,8 +30,7 @@ import org.apache.tuweni.bytes.Bytes32;
  *
  * <p>Besu has a single background direction (binary, via {@link PbtMigrator}) and no merkle-shadow
  * follower. {@code Merkle} is therefore always null. {@code Phase} becomes {@code done} only once
- * the migrator has retired <em>and</em> the fork block is finalized — matching the contract
- * pbt-devnet's completion check enforces.
+ * the migrator has retired <em>and</em> the fork block is finalized.
  */
 public final class PbtMigrationIntrospection {
 

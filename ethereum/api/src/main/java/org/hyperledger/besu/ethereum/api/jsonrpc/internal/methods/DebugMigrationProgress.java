@@ -24,10 +24,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigratio
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateArchive;
 
-/**
- * {@code debug_migrationProgress} — reports where the binary-tree migration stands, in the shape
- * pbt-devnet's migration monitor reads.
- */
+/** {@code debug_migrationProgress} — reports where the binary-tree migration stands. */
 public class DebugMigrationProgress implements JsonRpcMethod {
 
   private final ProtocolContext protocolContext;

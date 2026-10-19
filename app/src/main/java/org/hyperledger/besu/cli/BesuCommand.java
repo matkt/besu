@@ -3267,18 +3267,12 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
     this.dataPath = dataPath.getParent();
   }
 
-  @VisibleForTesting
-  Supplier<GenesisConfig> getGenesisConfigSupplier() {
-    return genesisConfigSupplier;
-  }
-
   /**
-   * Effective genesis configuration (custom {@code --genesis-file} or the selected network
-   * default).
+   * The genesis config, from {@code --genesis-file} or the selected network.
    *
-   * @return genesis config including allocations
+   * @return the genesis config supplier
    */
-  public GenesisConfig getGenesisConfig() {
-    return genesisConfigSupplier.get();
+  public Supplier<GenesisConfig> getGenesisConfigSupplier() {
+    return genesisConfigSupplier;
   }
 }

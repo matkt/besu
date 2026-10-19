@@ -34,6 +34,7 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
@@ -86,7 +87,7 @@ public class PbtSubCommand implements Runnable {
           "Verify an EIP-8347 PBT snapshot and preimage pair (dual-check) against the local chain's anchor block stateRoot. Exit 0 on accept, 1 on reject.",
       mixinStandardHelpOptions = true,
       versionProvider = VersionProvider.class)
-  public static class Verify implements Runnable {
+  public static class Verify implements Callable<Integer> {
 
     /** Default constructor for picocli. */
     public Verify() {}
@@ -112,13 +113,10 @@ public class PbtSubCommand implements Runnable {
     private String anchor;
 
     @Override
-    public void run() {
+    public Integer call() {
       checkNotNull(parentCommand);
       checkNotNull(parentCommand.parentCommand);
-      final int code = verifyAndExitCode();
-      if (code != 0) {
-        System.exit(code);
-      }
+      return verifyAndExitCode();
     }
 
     int verifyAndExitCode() {
@@ -178,7 +176,7 @@ public class PbtSubCommand implements Runnable {
               + "Omit --preimages to derive the preimage file from genesis alloc (writes --preimages-out).",
       mixinStandardHelpOptions = true,
       versionProvider = VersionProvider.class)
-  public static class Convert implements Runnable {
+  public static class Convert implements Callable<Integer> {
 
     /** Default constructor for picocli. */
     public Convert() {}
@@ -212,13 +210,10 @@ public class PbtSubCommand implements Runnable {
     private String anchor;
 
     @Override
-    public void run() {
+    public Integer call() {
       checkNotNull(parentCommand);
       checkNotNull(parentCommand.parentCommand);
-      final int code = convertAndExitCode();
-      if (code != 0) {
-        System.exit(code);
-      }
+      return convertAndExitCode();
     }
 
     int convertAndExitCode() {
@@ -226,6 +221,12 @@ public class PbtSubCommand implements Runnable {
           parentCommand.parentCommand.besuCommand.buildController()) {
         final Blockchain blockchain = controller.getProtocolContext().getBlockchain();
         final BlockHeader header = Verify.resolveAnchor(blockchain, anchor);
+        if (preimagesPath == null && header.getNumber() != 0) {
+          throw new IllegalArgumentException(
+              "--preimages is required for anchor #"
+                  + header.getNumber()
+                  + ": the genesis alloc only holds the preimages of block 0");
+        }
         final Hash stateRoot = header.getStateRoot();
         final Hash blockHash = header.getBlockHash();
         final Optional<WorldState> worldState =
@@ -285,7 +286,8 @@ public class PbtSubCommand implements Runnable {
         throw new IllegalArgumentException(
             "convert requires --preimages (input) or --preimages-out (derive from genesis alloc)");
       }
-      final GenesisConfig genesis = parentCommand.parentCommand.besuCommand.getGenesisConfig();
+      final GenesisConfig genesis =
+          parentCommand.parentCommand.besuCommand.getGenesisConfigSupplier().get();
       final int records =
           Eip8347PreimageFile.writeGenesis(preimagesOutPath, genesis.streamAllocations());
       LOG.info(
