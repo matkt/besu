@@ -717,6 +717,25 @@ public class BesuCommandTest extends CommandTestAbstract {
   }
 
   @Test
+  public void archiveFormatIsRefusedOnAChainWithABinaryTrieFork() throws Exception {
+    final Path genesisFile =
+        createFakeGenesisFile(
+            new JsonObject()
+                .put(
+                    "config",
+                    new JsonObject()
+                        .put("chainId", GENESIS_CONFIG_TEST_CHAINID)
+                        .put("binaryTrieTime", 100)));
+
+    parseCommand(
+        "--genesis-file", genesisFile.toString(), "--data-storage-format=X_BONSAI_ARCHIVE");
+
+    verifyNoInteractions(mockRunnerBuilder);
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("binaryTrieTime is not supported with --data-storage-format=X_BONSAI_ARCHIVE");
+  }
+
+  @Test
   public void defaultNetworkIdForInvalidGenesisMustBeMainnetNetworkId() throws Exception {
     final Path genesisFile = createFakeGenesisFile(GENESIS_INVALID_DATA);
 

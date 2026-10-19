@@ -1618,6 +1618,14 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
 
   private void validateDataStorageOptions() {
     dataStorageOptions.validate(commandLine);
+    // the binary trie is built only on the Bonsai format, the archive one would stop at the fork
+    if (genesisConfigOptionsSupplier.get().getBinaryTrieTime().isPresent()
+        && dataStorageOptions.toDomainObject().getDataStorageFormat()
+            == DataStorageFormat.X_BONSAI_ARCHIVE) {
+      throw new ParameterException(
+          commandLine,
+          "binaryTrieTime is not supported with --data-storage-format=X_BONSAI_ARCHIVE");
+    }
   }
 
   private void validateMiningParams() {
