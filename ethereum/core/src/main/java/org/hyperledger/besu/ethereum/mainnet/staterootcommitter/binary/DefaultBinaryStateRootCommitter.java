@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExec
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.MissingCodeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.StorageConsumingMap;
@@ -204,10 +205,11 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
       if (priorAccount == null || Hash.EMPTY.equals(priorAccount.getCodeHash())) {
         return Bytes.EMPTY;
       }
+      // missing code would be written as empty code
       return bonsai
           .getCode(address, priorAccount.getCodeHash())
           .map(Code::getBytes)
-          .orElse(Bytes.EMPTY);
+          .orElseThrow(() -> new MissingCodeException(address, priorAccount.getCodeHash()));
     }
 
     private Bytes resolveUpdatedCode(final Address address, final BonsaiAccount updatedAccount) {
@@ -217,7 +219,11 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
             ? Bytes.EMPTY
             : codeUpdate.getUpdated();
       }
-      return resolveCurrentCode(address, updatedAccount.getCodeHash()).orElse(Bytes.EMPTY);
+      if (Hash.EMPTY.equals(updatedAccount.getCodeHash())) {
+        return Bytes.EMPTY;
+      }
+      return resolveCurrentCode(address, updatedAccount.getCodeHash())
+          .orElseThrow(() -> new MissingCodeException(address, updatedAccount.getCodeHash()));
     }
 
     private Optional<Bytes> resolveCurrentCode(final Address address, final Hash codeHash) {

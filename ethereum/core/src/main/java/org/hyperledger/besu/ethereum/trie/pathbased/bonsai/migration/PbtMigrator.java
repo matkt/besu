@@ -39,6 +39,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldSt
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.MissingCodeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
@@ -717,7 +718,10 @@ public class PbtMigrator {
         bal,
         BinaryTrieFactory.createStateTrie(worldState, pool),
         (address, codeHash) ->
-            worldState.getCode(address, codeHash).map(Code::getBytes).orElse(Bytes.EMPTY));
+            worldState
+                .getCode(address, codeHash)
+                .map(Code::getBytes)
+                .orElseThrow(() -> new MissingCodeException(address, codeHash)));
   }
 
   /**

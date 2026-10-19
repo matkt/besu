@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.MissingCodeException;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.evm.account.Account;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
@@ -168,10 +169,11 @@ public final class BinaryBalEngine implements BalStateRootCommitter.Engine {
       if (priorAccount == null || Hash.EMPTY.equals(priorAccount.getCodeHash())) {
         return Bytes.EMPTY;
       }
+      // missing code would be written as empty code
       return worldState
           .getCode(address, priorAccount.getCodeHash())
           .map(Code::getBytes)
-          .orElse(Bytes.EMPTY);
+          .orElseThrow(() -> new MissingCodeException(address, priorAccount.getCodeHash()));
     }
 
     private static Bytes nullToEmpty(final Bytes value) {

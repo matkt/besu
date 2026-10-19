@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -26,7 +27,10 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.MissingCodeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.account.MutableAccount;
@@ -385,6 +389,31 @@ class DefaultBinaryStateRootCommitterTest extends AbstractBinaryStateRootCommitt
         worldState.persist(blockHeader, committer);
 
         assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
+      }
+    }
+
+    @Test
+    void rollOnACodeMissingFromStorageFailsInsteadOfWritingEmptyCode() {
+      final Address address = testAddress("81");
+      final Hash missingCodeHash = Hash.hash(Bytes.fromHexString("0x6001600155"));
+      try (BonsaiWorldState worldState = getWorldState(false)) {
+        final BonsaiWorldStateUpdateAccumulator accumulator =
+            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        // a migrator roll behind the head: the account's code is not in the code storage
+        accumulator.rollForward(
+            new TrieLogLayer()
+                .setBlockHash(Hash.ZERO)
+                .addAccountChange(
+                    address,
+                    new BinaryTrieAccountValue(1L, Wei.ONE, missingCodeHash),
+                    new BinaryTrieAccountValue(1L, Wei.of(2), missingCodeHash)));
+
+        assertThatThrownBy(
+                () ->
+                    new DefaultBinaryStateRootCommitter()
+                        .compute(worldState, null, accumulator)
+                        .root())
+            .isInstanceOf(MissingCodeException.class);
       }
     }
   }
