@@ -163,7 +163,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
         }
       }
 
@@ -226,7 +226,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(updatedAddress), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(updatedAddress), e.getHash(), e.getLocation());
         }
       }
 
@@ -299,7 +299,7 @@ public class DefaultPatriciaStateRootCommitter implements StateRootCommitter {
           }
         } catch (MerkleTrieException e) {
           throw new MerkleTrieException(
-              e.getMessage(), Optional.of(address), e.getHash(), e.getLocation());
+              e.getMessage(), e, Optional.of(address), e.getHash(), e.getLocation());
         }
       }
     }

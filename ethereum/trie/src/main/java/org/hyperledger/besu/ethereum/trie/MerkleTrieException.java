@@ -46,12 +46,32 @@ public class MerkleTrieException extends RuntimeException {
     super(message, cause);
   }
 
+  public MerkleTrieException(final String message, final Throwable cause) {
+    super(message, cause);
+  }
+
   public MerkleTrieException(
       final String message,
       final Optional<Address> maybeAddress,
       final Bytes32 hash,
       final Bytes location) {
     super(message);
+    this.hash = hash;
+    this.location = location;
+    this.maybeAddress = maybeAddress;
+  }
+
+  /**
+   * World-state heal path: keeps location metadata while preserving the underlying failure for logs
+   * and diagnostics (avoids opaque {@code "invalid"} wraps).
+   */
+  public MerkleTrieException(
+      final String message,
+      final Throwable cause,
+      final Optional<Address> maybeAddress,
+      final Bytes32 hash,
+      final Bytes location) {
+    super(message, cause);
     this.hash = hash;
     this.location = location;
     this.maybeAddress = maybeAddress;

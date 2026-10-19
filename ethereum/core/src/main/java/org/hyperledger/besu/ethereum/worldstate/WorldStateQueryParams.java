@@ -29,6 +29,7 @@ public class WorldStateQueryParams {
   private final Hash blockHash;
   private final Optional<Hash> stateRoot;
   private final Optional<BlockAccessListOverlay> blockAccessListOverlay;
+  private final Optional<Long> timeStamp;
 
   /**
    * Private constructor to enforce the use of the Builder.
@@ -41,6 +42,7 @@ public class WorldStateQueryParams {
     this.blockHash = builder.blockHash;
     this.stateRoot = builder.stateRoot;
     this.blockAccessListOverlay = builder.blockAccessListOverlay;
+    this.timeStamp = builder.timeStamp;
   }
 
   /**
@@ -84,6 +86,11 @@ public class WorldStateQueryParams {
     return blockAccessListOverlay;
   }
 
+  /** Timestamp of the next block, to detect the binary trie fork; defaults to the header's. */
+  public Optional<Long> getTimeStamp() {
+    return timeStamp;
+  }
+
   /**
    * Creates a new builder for WorldStateQueryParams.
    *
@@ -113,6 +120,23 @@ public class WorldStateQueryParams {
   public static WorldStateQueryParams withBlockHeaderAndNoUpdateNodeHead(
       final BlockHeader blockHeader) {
     return newBuilder().withBlockHeader(blockHeader).withShouldWorldStateUpdateHead(false).build();
+  }
+
+  /**
+   * Creates an instance with a block header and the next block timestamp, and does not update the
+   * node head.
+   *
+   * @param blockHeader the block header
+   * @param timeStamp the next block timestamp
+   * @return an instance of WorldStateQueryParams
+   */
+  public static WorldStateQueryParams withBlockHeaderAndNoUpdateNodeHead(
+      final BlockHeader blockHeader, final long timeStamp) {
+    return newBuilder()
+        .withBlockHeader(blockHeader)
+        .withTimeStamp(timeStamp)
+        .withShouldWorldStateUpdateHead(false)
+        .build();
   }
 
   /**
@@ -181,17 +205,19 @@ public class WorldStateQueryParams {
     private Hash blockHash;
     private Optional<Hash> stateRoot = Optional.empty();
     private Optional<BlockAccessListOverlay> blockAccessListOverlay = Optional.empty();
+    private Optional<Long> timeStamp = Optional.empty();
 
     private Builder() {}
 
     /**
-     * Sets the block header.
+     * Sets the block header, and the timestamp to the header's one.
      *
      * @param blockHeader the block header
      * @return the builder
      */
     public Builder withBlockHeader(final BlockHeader blockHeader) {
       this.blockHeader = blockHeader;
+      this.timeStamp = Optional.of(blockHeader.getTimestamp());
       this.blockHash = blockHeader.getBlockHash();
       this.stateRoot = Optional.of(blockHeader.getStateRoot());
       return this;
@@ -239,6 +265,17 @@ public class WorldStateQueryParams {
      */
     public Builder withBalOverlay(final BlockAccessListOverlay blockAccessListOverlay) {
       this.blockAccessListOverlay = Optional.of(blockAccessListOverlay);
+      return this;
+    }
+
+    /**
+     * Sets the next block timestamp, to call after {@link #withBlockHeader}.
+     *
+     * @param timeStamp the next block timestamp
+     * @return the builder
+     */
+    public Builder withTimeStamp(final long timeStamp) {
+      this.timeStamp = Optional.of(timeStamp);
       return this;
     }
 

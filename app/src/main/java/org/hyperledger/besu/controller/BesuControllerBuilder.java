@@ -29,6 +29,9 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.ConsensusContext;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.api.ApiConfiguration;
+import org.hyperledger.besu.ethereum.api.jsonrpc.RpcMethod;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.DebugShadowStateRoot;
+import org.hyperledger.besu.ethereum.api.jsonrpc.internal.methods.JsonRpcMethod;
 import org.hyperledger.besu.ethereum.api.jsonrpc.methods.JsonRpcMethods;
 import org.hyperledger.besu.ethereum.blockcreation.MiningCoordinator;
 import org.hyperledger.besu.ethereum.chain.BadBlockManager;
@@ -63,6 +66,7 @@ import org.hyperledger.besu.ethereum.eth.peervalidation.PeerValidator;
 import org.hyperledger.besu.ethereum.eth.peervalidation.RequiredBlocksPeerValidator;
 import org.hyperledger.besu.ethereum.eth.sync.DefaultSynchronizer;
 import org.hyperledger.besu.ethereum.eth.sync.MissingCodeFetcher;
+import org.hyperledger.besu.ethereum.eth.sync.PeerBlockAccessListFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.PivotBlockSelector;
 import org.hyperledger.besu.ethereum.eth.sync.SyncMode;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
@@ -80,17 +84,21 @@ import org.hyperledger.besu.ethereum.forkid.ForkIdManager;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSpec;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.p2p.config.NetworkingConfiguration;
 import org.hyperledger.besu.ethereum.p2p.config.SubProtocolConfiguration;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.transaction.TransactionSimulator;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiArchiveFlatDbStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiArchiveWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.BonsaiFlatDbToArchiveMigrator;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.archive.trienode.ArchiveTrieNodeStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PmtPruner;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogManager;
@@ -117,6 +125,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -125,6 +134,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
@@ -220,6 +230,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
 
   /** Configuration flags related to block access lists. */
   protected BalConfiguration balConfiguration = BalConfiguration.DEFAULT;
+
+  /** EIP-8347 snapshot the PBT migrator starts from, instead of genesis. */
+  protected Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap = Optional.empty();
 
   /** The API configuration */
   protected ApiConfiguration apiConfiguration;
@@ -614,6 +627,18 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   }
 
   /**
+   * Sets the EIP-8347 snapshot the PBT migrator starts from.
+   *
+   * @param pbtSnapshotBootstrap the snapshot, preimages and anchor, or empty to start from genesis
+   * @return the besu controller builder
+   */
+  public BesuControllerBuilder pbtSnapshotBootstrap(
+      final Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap) {
+    this.pbtSnapshotBootstrap = pbtSnapshotBootstrap;
+    return this;
+  }
+
+  /**
    * check if early round change is enabled when f+1 RC messages from higher rounds are received
    *
    * @param isEarlyRoundChangeEnabled whether to enable early round change
@@ -949,7 +974,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
     final SubProtocolConfiguration subProtocolConfiguration =
         createSubProtocolConfiguration(ethProtocolManager, maybeSnapProtocolManager);
 
-    final JsonRpcMethods additionalJsonRpcMethodFactory =
+    JsonRpcMethods additionalJsonRpcMethodFactory =
         createAdditionalJsonRpcMethodFactory(
             protocolContext, protocolSchedule, miningConfiguration);
 
@@ -1013,6 +1038,37 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       }
     }
 
+    if (DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())
+        && worldStateArchive instanceof BonsaiWorldStateProvider bonsaiProvider) {
+      final Optional<Long> binaryTrieMilestone = bonsaiProvider.getBinaryTrieMilestone();
+      if (binaryTrieMilestone.isPresent()) {
+        final PbtMigrator pbtMigrator =
+            createPbtMigrator(
+                bonsaiProvider,
+                blockchain,
+                binaryTrieMilestone,
+                new PeerBlockAccessListFetcher(ethProtocolManager.ethContext())::fetch);
+        additionalJsonRpcMethodFactory =
+            withShadowStateRoot(additionalJsonRpcMethodFactory, protocolContext, pbtMigrator);
+        closeables.addFirst(pbtMigrator::close);
+        final PmtPruner pmtPruner = bonsaiProvider.getPmtPruner();
+        pmtPruner.start(MonitoredExecutors.newFixedThreadPool("pmt-pruner", 1, metricsSystem));
+        closeables.addFirst(pmtPruner::stop);
+        final AtomicBoolean pbtMigrationStarted = new AtomicBoolean(false);
+        final AtomicLong pbtSyncSubscriptionId = new AtomicLong();
+        pbtSyncSubscriptionId.set(
+            synchronizer.subscribeInSync(
+                (inSync) -> {
+                  if (inSync && pbtMigrationStarted.compareAndSet(false, true)) {
+                    synchronizer.unsubscribeInSync(pbtSyncSubscriptionId.get());
+                    LOG.info("Node is in sync, starting PBT background migrator");
+                    pbtMigrator.start();
+                  }
+                },
+                0));
+      }
+    }
+
     return new BesuController(
         protocolSchedule,
         protocolContext,
@@ -1032,6 +1088,38 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         storageProvider,
         dataStorageConfiguration,
         transactionSimulator);
+  }
+
+  private JsonRpcMethods withShadowStateRoot(
+      final JsonRpcMethods existing,
+      final ProtocolContext protocolContext,
+      final PbtMigrator pbtMigrator) {
+    return apis -> {
+      final Map<String, JsonRpcMethod> methods = new HashMap<>(existing.create(apis));
+      methods.put(
+          RpcMethod.DEBUG_SHADOW_STATE_ROOT.getMethodName(),
+          new DebugShadowStateRoot(protocolContext, pbtMigrator));
+      return methods;
+    };
+  }
+
+  private PbtMigrator createPbtMigrator(
+      final BonsaiWorldStateProvider provider,
+      final Blockchain blockchain,
+      final Optional<Long> binaryTrieMilestone,
+      final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers) {
+    final ScheduledExecutorService migrationExecutor =
+        MonitoredExecutors.newScheduledThreadPool("pbt-migrator", 1, metricsSystem);
+    // Poll every second; the migrator is idle when caught up and bursts when new blocks arrive.
+    return new PbtMigrator(
+        provider,
+        blockchain,
+        binaryTrieMilestone,
+        migrationExecutor,
+        genesisConfig::streamAllocations,
+        pbtSnapshotBootstrap,
+        balsFromPeers,
+        1000L);
   }
 
   private void preloadBlockHeaderCache(
@@ -1436,6 +1524,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
       final ProtocolSchedule protocolSchedule) {
     final Optional<Long> amsterdamMilestone = amsterdamOrLaterMilestone(protocolSchedule);
+    final Optional<Long> binaryTrieMilestone =
+        BinaryTrieForkSupport.binaryTrieMilestone(genesisConfigOptions);
     return switch (dataStorageConfiguration.getDataStorageFormat()) {
       case BONSAI -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
@@ -1449,7 +1539,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             besuComponent.map(BesuComponent::getBesuPluginContext).orElse(null),
             evmConfiguration,
             codeCache,
-            amsterdamMilestone);
+            amsterdamMilestone,
+            binaryTrieMilestone);
       }
       case X_BONSAI_ARCHIVE -> {
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
@@ -1464,7 +1555,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
             evmConfiguration,
             codeCache,
             metricsSystem,
-            amsterdamMilestone);
+            amsterdamMilestone,
+            binaryTrieMilestone);
       }
       case FOREST -> {
         final WorldStatePreimageStorage preimageStorage =

@@ -18,10 +18,12 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.plugin.data.BlockHeader;
@@ -38,13 +40,52 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
+/**
+ * Unified Bonsai trie-log factory for both MPT and partitioned-binary-trie branches.
+ *
+ * <p>Wire container layout:
+ *
+ * <ul>
+ *   <li>Version 0 (legacy, implicit): {@code [blockHash, changes...]} with storage entries {@code
+ *       [slotHash, prior, updated, isCleared?]}
+ *   <li>Version 1 (extended): {@code [1, blockHash]} with storage entries {@code [slotKey, prior,
+ *       updated, isCleared?]}
+ * </ul>
+ *
+ * <p>Version is detected on decode: if the first element is not a 32-byte block hash, it is read as
+ * an explicit version scalar; absent version means 0.
+ *
+ * <p>Account values preserve the shape read from flat storage: Patricia priors are 4-field {@code
+ * [nonce, balance, storageRoot, codeHash]}; binary updates are 3-field {@code [nonce, balance,
+ * codeHash]}.
+ */
 public class BonsaiTrieLogFactory implements TrieLogFactory {
+
+  /** Legacy wire format: no version prefix, storage entries carry slot hash only. */
+  public static final int WIRE_VERSION_LEGACY = 0;
+
+  /** Extended wire format: slot-key preimages and introduced-code hash list. */
+  public static final int WIRE_VERSION_EXTENDED = 1;
+
+  private static final int BINARY_ACCOUNT_FIELD_COUNT = 3;
+  private static final int PATRICIA_ACCOUNT_FIELD_COUNT = 4;
+
+  private final Optional<Long> binaryTrieMilestone;
+
+  public BonsaiTrieLogFactory(final Optional<Long> binaryTrieMilestone) {
+    this.binaryTrieMilestone = binaryTrieMilestone;
+  }
+
+  public BonsaiTrieLogFactory() {
+    this(Optional.empty());
+  }
 
   @Override
   public TrieLogLayer create(final TrieLogAccumulator accumulator, final BlockHeader blockHeader) {
-    TrieLogLayer layer = new TrieLogLayer();
+    final TrieLogLayer layer = new TrieLogLayer();
     layer.setBlockHash(blockHeader.getBlockHash());
     layer.setBlockNumber(blockHeader.getNumber());
     for (final var updatedAccount : accumulator.getAccountsToUpdate().entrySet()) {
@@ -52,7 +93,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
       final var oldAccountValue = bonsaiValue.getPrior();
       final var newAccountValue = bonsaiValue.getUpdated();
       if (oldAccountValue == null && newAccountValue == null) {
-        // by default do not persist empty reads of accounts to the trie log
         continue;
       }
       layer.addAccountChange(updatedAccount.getKey(), oldAccountValue, newAccountValue);
@@ -69,15 +109,16 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     for (final var updatesStorage : accumulator.getStorageToUpdate().entrySet()) {
       final Address address = updatesStorage.getKey();
       for (final var slotUpdate : updatesStorage.getValue().entrySet()) {
-        var val = slotUpdate.getValue();
-
+        final var val = slotUpdate.getValue();
         if (val.getPrior() == null && val.getUpdated() == null) {
-          // by default do not persist empty reads to the trie log
           continue;
         }
-
         layer.addStorageChange(address, slotUpdate.getKey(), val.getPrior(), val.getUpdated());
       }
+    }
+
+    if (binaryTrieMilestone.isPresent()) {
+      layer.setWireVersion(WIRE_VERSION_EXTENDED);
     }
     return layer;
   }
@@ -91,53 +132,14 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
 
   public static void writeTo(final TrieLog layer, final RLPOutput output) {
     layer.freeze();
+    final int wireVersion = wireVersion(layer);
+    final Set<Address> addresses = collectChangedAddresses(layer);
 
-    final Set<Address> addresses = new TreeSet<>();
-    addresses.addAll(layer.getAccountChanges().keySet());
-    addresses.addAll(layer.getCodeChanges().keySet());
-    addresses.addAll(layer.getStorageChanges().keySet());
-
-    output.startList(); // container
-    output.writeBytes(layer.getBlockHash().getBytes());
-
+    writeContainerHeader(output, layer, wireVersion);
     for (final Address address : addresses) {
-      output.startList(); // this change
-      output.writeBytes(address.getBytes());
-
-      final TrieLog.LogTuple<AccountValue> accountChange = layer.getAccountChanges().get(address);
-      if (accountChange == null || accountChange.isUnchanged()) {
-        output.writeNull();
-      } else {
-        writeRlp(accountChange, output, (o, sta) -> sta.writeTo(o));
-      }
-
-      final TrieLog.LogTuple<Bytes> codeChange = layer.getCodeChanges().get(address);
-      if (codeChange == null || codeChange.isUnchanged()) {
-        output.writeNull();
-      } else {
-        writeRlp(codeChange, output, RLPOutput::writeBytes);
-      }
-
-      final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges =
-          layer.getStorageChanges().get(address);
-      if (storageChanges == null) {
-        output.writeNull();
-      } else {
-        output.startList();
-        for (final Map.Entry<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChangeEntry :
-            storageChanges.entrySet()) {
-          output.startList();
-          // do not write slotKey, it is not used in mainnet bonsai trielogs
-          output.writeBytes(storageChangeEntry.getKey().getSlotHash().getBytes());
-          writeInnerRlp(storageChangeEntry.getValue(), output, RLPOutput::writeUInt256Scalar);
-          output.endList();
-        }
-        output.endList();
-      }
-
-      output.endList(); // this change
+      writeAddressChange(output, layer, address, wireVersion);
     }
-    output.endList(); // container
+    output.endList();
   }
 
   @Override
@@ -149,78 +151,230 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
     final TrieLogLayer newLayer = new TrieLogLayer();
 
     input.enterList();
+    final int wireVersion = readWireVersion(input);
     newLayer.setBlockHash(Hash.wrap(input.readBytes32()));
+    newLayer.setWireVersion(wireVersion);
 
     while (!input.isEndOfCurrentList()) {
-      input.enterList();
-      final Address address = Address.readFrom(input);
-
-      if (input.nextIsNull()) {
-        input.skipNext();
-      } else {
-        input.enterList();
-        final PatriciaTrieAccountValue oldValue =
-            nullOrValue(input, PatriciaTrieAccountValue::readFrom);
-        final PatriciaTrieAccountValue newValue =
-            nullOrValue(input, PatriciaTrieAccountValue::readFrom);
-        final boolean isCleared = getOptionalIsCleared(input);
-        input.leaveList();
-        newLayer.getAccountChanges().put(address, new BonsaiValue<>(oldValue, newValue, isCleared));
-      }
-
-      if (input.nextIsNull()) {
-        input.skipNext();
-      } else {
-        input.enterList();
-        final Bytes oldCode = nullOrValue(input, RLPInput::readBytes);
-        final Bytes newCode = nullOrValue(input, RLPInput::readBytes);
-        final boolean isCleared = getOptionalIsCleared(input);
-        input.leaveList();
-        newLayer.getCodeChanges().put(address, new BonsaiValue<>(oldCode, newCode, isCleared));
-      }
-
-      if (input.nextIsNull()) {
-        input.skipNext();
-      } else {
-        final Map<StorageSlotKey, BonsaiValue<UInt256>> storageChanges = new TreeMap<>();
-        input.enterList();
-        while (!input.isEndOfCurrentList()) {
-          input.enterList();
-          final Hash slotHash = Hash.wrap(input.readBytes32());
-          final StorageSlotKey storageSlotKey = new StorageSlotKey(slotHash, Optional.empty());
-          final UInt256 oldValue = nullOrValue(input, RLPInput::readUInt256Scalar);
-          final UInt256 newValue = nullOrValue(input, RLPInput::readUInt256Scalar);
-          final boolean isCleared = getOptionalIsCleared(input);
-          storageChanges.put(storageSlotKey, new BonsaiValue<>(oldValue, newValue, isCleared));
-          input.leaveList();
-        }
-        input.leaveList();
-        newLayer.getStorageChanges().put(address, storageChanges);
-      }
-
-      // TODO add trie nodes
-
-      // lenient leave list for forward compatible additions.
-      input.leaveListLenient();
+      readAddressChange(input, newLayer, wireVersion);
     }
+
     input.leaveListLenient();
     newLayer.freeze();
-
     return newLayer;
+  }
+
+  private static int wireVersion(final TrieLog layer) {
+    return layer instanceof TrieLogLayer trieLogLayer
+        ? trieLogLayer.getWireVersion()
+        : WIRE_VERSION_LEGACY;
+  }
+
+  private static Set<Address> collectChangedAddresses(final TrieLog layer) {
+    final Set<Address> addresses = new TreeSet<>();
+    addresses.addAll(layer.getAccountChanges().keySet());
+    addresses.addAll(layer.getCodeChanges().keySet());
+    addresses.addAll(layer.getStorageChanges().keySet());
+    return addresses;
+  }
+
+  private static void writeContainerHeader(
+      final RLPOutput output, final TrieLog layer, final int wireVersion) {
+    output.startList();
+    if (wireVersion >= WIRE_VERSION_EXTENDED) {
+      output.writeInt(wireVersion);
+    }
+    output.writeBytes(layer.getBlockHash().getBytes());
+  }
+
+  private static void writeAddressChange(
+      final RLPOutput output, final TrieLog layer, final Address address, final int wireVersion) {
+    output.startList();
+    output.writeBytes(address.getBytes());
+    writeAccountChange(output, layer.getAccountChanges().get(address));
+    writeCodeChange(output, layer.getCodeChanges().get(address));
+    writeStorageChanges(output, layer.getStorageChanges().get(address), wireVersion);
+    output.endList();
+  }
+
+  private static void writeAccountChange(
+      final RLPOutput output, final TrieLog.LogTuple<AccountValue> accountChange) {
+    if (accountChange == null || accountChange.isUnchanged()) {
+      output.writeNull();
+      return;
+    }
+    writeRlp(accountChange, output, (out, accountValue) -> accountValue.writeTo(out));
+  }
+
+  private static void writeCodeChange(
+      final RLPOutput output, final TrieLog.LogTuple<Bytes> codeChange) {
+    if (codeChange == null || codeChange.isUnchanged()) {
+      output.writeNull();
+      return;
+    }
+    writeRlp(codeChange, output, RLPOutput::writeBytes);
+  }
+
+  private static void writeStorageChanges(
+      final RLPOutput output,
+      final Map<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChanges,
+      final int wireVersion) {
+    if (storageChanges == null) {
+      output.writeNull();
+      return;
+    }
+    output.startList();
+    for (final Map.Entry<StorageSlotKey, TrieLog.LogTuple<UInt256>> storageChangeEntry :
+        storageChanges.entrySet()) {
+      output.startList();
+      writeStorageSlotKey(output, storageChangeEntry.getKey(), wireVersion);
+      writeInnerRlp(storageChangeEntry.getValue(), output, RLPOutput::writeUInt256Scalar);
+      output.endList();
+    }
+    output.endList();
+  }
+
+  private static void writeStorageSlotKey(
+      final RLPOutput output, final StorageSlotKey slotKey, final int wireVersion) {
+    if (wireVersion >= WIRE_VERSION_EXTENDED) {
+      final UInt256 slotKeyPreimage =
+          slotKey
+              .getSlotKey()
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "Extended trie-log storage entry must include a slot key preimage"));
+      output.writeBytes(slotKeyPreimage);
+      return;
+    }
+    output.writeBytes(slotKey.getSlotHash().getBytes());
+  }
+
+  private static void readAddressChange(
+      final RLPInput input, final TrieLogLayer newLayer, final int wireVersion) {
+    input.enterList();
+    final Address address = Address.readFrom(input);
+    readAccountChange(input, newLayer, address);
+    readCodeChange(input, newLayer, address);
+    readStorageChanges(input, newLayer, address, wireVersion);
+    input.leaveListLenient();
+  }
+
+  private static void readAccountChange(
+      final RLPInput input, final TrieLogLayer newLayer, final Address address) {
+    if (input.nextIsNull()) {
+      input.skipNext();
+      return;
+    }
+    input.enterList();
+    final AccountValue oldValue = nullOrValue(input, BonsaiTrieLogFactory::readAccountValue);
+    final AccountValue newValue = nullOrValue(input, BonsaiTrieLogFactory::readAccountValue);
+    final boolean isCleared = getOptionalIsCleared(input);
+    input.leaveList();
+    newLayer.getAccountChanges().put(address, new BonsaiValue<>(oldValue, newValue, isCleared));
+  }
+
+  private static void readCodeChange(
+      final RLPInput input, final TrieLogLayer newLayer, final Address address) {
+    if (input.nextIsNull()) {
+      input.skipNext();
+      return;
+    }
+    input.enterList();
+    final Bytes oldCode = nullOrValue(input, RLPInput::readBytes);
+    final Bytes newCode = nullOrValue(input, RLPInput::readBytes);
+    final boolean isCleared = getOptionalIsCleared(input);
+    input.leaveList();
+    newLayer.getCodeChanges().put(address, new BonsaiValue<>(oldCode, newCode, isCleared));
+  }
+
+  private static void readStorageChanges(
+      final RLPInput input,
+      final TrieLogLayer newLayer,
+      final Address address,
+      final int wireVersion) {
+    if (input.nextIsNull()) {
+      input.skipNext();
+      return;
+    }
+    final Map<StorageSlotKey, BonsaiValue<UInt256>> storageChanges = new TreeMap<>();
+    input.enterList();
+    while (!input.isEndOfCurrentList()) {
+      input.enterList();
+      final StorageSlotKey storageSlotKey = readStorageSlotKey(input, wireVersion);
+      final UInt256 oldValue = nullOrValue(input, RLPInput::readUInt256Scalar);
+      final UInt256 newValue = nullOrValue(input, RLPInput::readUInt256Scalar);
+      final boolean isCleared = getOptionalIsCleared(input);
+      storageChanges.put(storageSlotKey, new BonsaiValue<>(oldValue, newValue, isCleared));
+      input.leaveList();
+    }
+    input.leaveList();
+    newLayer.getStorageChanges().put(address, storageChanges);
+  }
+
+  private static int readWireVersion(final RLPInput input) {
+    if (input.nextSize() == Bytes32.SIZE) {
+      return WIRE_VERSION_LEGACY;
+    }
+    return input.readInt();
+  }
+
+  private static StorageSlotKey readStorageSlotKey(final RLPInput input, final int wireVersion) {
+    if (wireVersion >= WIRE_VERSION_EXTENDED) {
+      final UInt256 slotKey = nullOrValue(input, in -> UInt256.fromBytes(in.readBytes32()));
+      if (slotKey == null) {
+        throw new IllegalArgumentException(
+            "Extended trie-log storage entry must include a slot key preimage");
+      }
+      return new StorageSlotKey(slotKey);
+    }
+    return new StorageSlotKey(Hash.wrap(input.readBytes32()), Optional.empty());
+  }
+
+  /**
+   * Account RLP list length selects the codec: 3 fields = binary trie, 4 fields = Patricia trie.
+   */
+  private static AccountValue readAccountValue(final RLPInput input) {
+    final int fieldCount = input.enterList();
+    if (fieldCount == BINARY_ACCOUNT_FIELD_COUNT) {
+      return readBinaryAccountValue(input);
+    }
+    if (fieldCount == PATRICIA_ACCOUNT_FIELD_COUNT) {
+      return readPatriciaAccountValue(input);
+    }
+    input.leaveList();
+    throw new IllegalArgumentException(
+        "Unexpected trie-log account field count: " + fieldCount + " (expected 3 or 4)");
+  }
+
+  private static BinaryTrieAccountValue readBinaryAccountValue(final RLPInput input) {
+    final long nonce = input.readLongScalar();
+    final Wei balance = Wei.of(input.readUInt256Scalar());
+    final Hash codeHash = Hash.wrap(input.readBytes32());
+    input.leaveList();
+    return new BinaryTrieAccountValue(nonce, balance, codeHash);
+  }
+
+  private static PatriciaTrieAccountValue readPatriciaAccountValue(final RLPInput input) {
+    final long nonce = input.readLongScalar();
+    final Wei balance = Wei.of(input.readUInt256Scalar());
+    final Hash storageRoot = Hash.wrap(input.readBytes32());
+    final Hash codeHash = Hash.wrap(input.readBytes32());
+    input.leaveList();
+    return new PatriciaTrieAccountValue(nonce, balance, storageRoot, codeHash);
   }
 
   protected static <T> T nullOrValue(final RLPInput input, final Function<RLPInput, T> reader) {
     if (input.nextIsNull()) {
       input.skipNext();
       return null;
-    } else {
-      return reader.apply(input);
     }
+    return reader.apply(input);
   }
 
   protected static boolean getOptionalIsCleared(final RLPInput input) {
     return Optional.of(input.isEndOfCurrentList())
-        .filter(isEnd -> !isEnd) // isCleared is optional
+        .filter(isEnd -> !isEnd)
         .map(__ -> nullOrValue(input, RLPInput::readInt))
         .filter(i -> i == 1)
         .isPresent();

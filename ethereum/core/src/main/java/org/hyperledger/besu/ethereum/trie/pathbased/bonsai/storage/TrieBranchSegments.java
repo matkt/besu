@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
@@ -27,8 +28,7 @@ public final class TrieBranchSegments {
   public static SegmentIdentifier segmentFor(final TrieBranchType trieBranchType) {
     return switch (trieBranchType) {
       case PATRICIA -> TRIE_BRANCH_STORAGE;
-      case BINARY ->
-          throw new UnsupportedOperationException("The binary trie branch has no storage yet");
+      case BINARY -> BINARY_TRIE_BRANCH_STORAGE;
     };
   }
 }

@@ -147,6 +147,10 @@ public class MilestoneDefinitions {
         createTimestampMilestone(
             MainnetHardforkId.BOGOTA, config.getBogotaTime(), specFactory::bogotaDefinition),
         createTimestampMilestone(
+            MainnetHardforkId.BINARY_TRIE,
+            config.getBinaryTrieTime(),
+            specFactory::binaryTrieDefinition),
+        createTimestampMilestone(
             MainnetHardforkId.FUTURE_EIPS,
             config.getFutureEipsTime(),
             specFactory::futureEipsDefinition),

@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 /**
  * Owns the storage root of an account and its field in the account RLP, which depend on the trie
@@ -40,6 +41,15 @@ public interface StorageRootStrategy {
   void setStorageRoot(Hash root);
 
   /**
+   * Whether accounts with this strategy carry a storage root: the binary trie has none.
+   *
+   * @return {@code true} unless the account belongs to the binary trie.
+   */
+  default boolean hasStorageRoot() {
+    return true;
+  }
+
+  /**
    * Writes the storage root field of the account RLP list.
    *
    * @param out the RLP output, positioned between {@code balance} and {@code codeHash}.
@@ -52,6 +62,17 @@ public interface StorageRootStrategy {
    * @param in the RLP input, positioned between {@code balance} and {@code codeHash}.
    */
   void readStorageRoot(RLPInput in);
+
+  /**
+   * Reads the storage root field of an account RLP list with {@code listSize} items. The binary
+   * strategy uses it to skip the storage root of an account migrated from the MPT.
+   *
+   * @param in the RLP input, positioned between {@code balance} and {@code codeHash}.
+   * @param listSize the number of items of the account RLP list.
+   */
+  default void readStorageRoot(final RLPInput in, final int listSize) {
+    readStorageRoot(in);
+  }
 
   /**
    * Returns an independent copy, so that two accounts never share a mutable storage root.
@@ -68,4 +89,16 @@ public interface StorageRootStrategy {
    * @throws IllegalStateException if the storage roots differ.
    */
   void assertStorageRootMatches(AccountValue other, String context);
+
+  /**
+   * The strategy of the accounts of a trie branch.
+   *
+   * @param trieBranchType the trie branch.
+   * @return the binary strategy, or an MPT strategy holding the empty trie root.
+   */
+  static StorageRootStrategy forTrieBranchType(final TrieBranchType trieBranchType) {
+    return trieBranchType == TrieBranchType.BINARY
+        ? BinaryStorageRootStrategy.INSTANCE
+        : new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
+  }
 }

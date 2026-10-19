@@ -231,10 +231,12 @@ public class MainnetBlockValidator implements BlockValidator {
       final Optional<BlockAccessList> blockAccessList,
       final boolean shouldUpdateHead,
       final boolean shouldRecordBadBlock) {
+    // the block timestamp lets the archive open the parent on the binary trie at the fork block
     final WorldStateQueryParams worldStateQueryParams =
         WorldStateQueryParams.newBuilder()
             .withBlockHeader(parentHeader)
             .withShouldWorldStateUpdateHead(shouldUpdateHead)
+            .withTimeStamp(block.getHeader().getTimestamp())
             .build();
     try (final var worldState =
         context.getWorldStateArchive().getWorldState(worldStateQueryParams).orElse(null)) {

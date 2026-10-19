@@ -205,7 +205,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
 
     try (final DisposableWorldState disposable =
         new DisposableWorldState(
-            duplicateWorldStateAtParent(parentHeader), parentHeader.getNumber() + 1)) {
+            duplicateWorldStateAtParent(parentHeader, timestamp), parentHeader.getNumber() + 1)) {
       final MutableWorldState disposableWorldState = disposable.worldState;
       timings.register("duplicateWorldState");
       final ProtocolSpec newProtocolSpec =
@@ -446,11 +446,12 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
     }
   }
 
-  private MutableWorldState duplicateWorldStateAtParent(final BlockHeader parentHeader) {
+  private MutableWorldState duplicateWorldStateAtParent(
+      final BlockHeader parentHeader, final long timestamp) {
     final Hash parentStateRoot = parentHeader.getStateRoot();
     return protocolContext
         .getWorldStateArchive()
-        .getWorldState(withBlockHeaderAndNoUpdateNodeHead(parentHeader))
+        .getWorldState(withBlockHeaderAndNoUpdateNodeHead(parentHeader, timestamp))
         .orElseThrow(
             () -> {
               LOG.info("Unable to create block because world state is not available");

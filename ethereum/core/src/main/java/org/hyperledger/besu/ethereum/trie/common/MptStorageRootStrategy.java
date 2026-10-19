@@ -71,7 +71,14 @@ public final class MptStorageRootStrategy implements StorageRootStrategy {
 
   @Override
   public void assertStorageRootMatches(final AccountValue other, final String context) {
-    if (!Objects.equals(storageRoot, other.getStorageRoot())) {
+    final Hash otherRoot;
+    try {
+      otherRoot = other.getStorageRoot();
+    } catch (final UnsupportedOperationException e) {
+      // a binary trie account has no storage root
+      throw new IllegalStateException(context + ": Storage Roots differ (mpt vs binary)", e);
+    }
+    if (!Objects.equals(storageRoot, otherRoot)) {
       throw new IllegalStateException(context + ": Storage Roots differ");
     }
   }

@@ -14,15 +14,19 @@
  */
 package org.hyperledger.besu.plugin.services.storage;
 
+import org.hyperledger.besu.plugin.Unstable;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.io.Closeable;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
@@ -267,6 +271,63 @@ public interface SegmentedKeyValueStorage extends Closeable {
       throw e;
     }
     transaction.commit();
+  }
+
+  /**
+   * Starts a file of entries for {@code segment}, built with the segment's own options, that {@link
+   * #ingestSortedFiles} adds to it in bulk instead of through transactions.
+   *
+   * <p>Storages that cannot ingest files throw {@link UnsupportedOperationException}.
+   *
+   * @param segment the segment the file is for
+   * @param file the file to write
+   * @return the writer
+   * @throws StorageException the storage exception
+   */
+  @Unstable
+  default SortedFileWriter createSortedFileWriter(final SegmentIdentifier segment, final Path file)
+      throws StorageException {
+    throw new UnsupportedOperationException("sorted file ingestion not supported");
+  }
+
+  /**
+   * Adds files written by {@link #createSortedFileWriter} to {@code segment}, all of them or none.
+   * The files are moved into the storage. Files whose key ranges overlap neither each other nor the
+   * segment's entries are added as they are, without being rewritten.
+   *
+   * <p>Storages that cannot ingest files throw {@link UnsupportedOperationException}.
+   *
+   * @param segment the segment to add the files to
+   * @param files the finished files
+   * @throws StorageException the storage exception
+   */
+  @Unstable
+  default void ingestSortedFiles(final SegmentIdentifier segment, final List<Path> files)
+      throws StorageException {
+    throw new UnsupportedOperationException("sorted file ingestion not supported");
+  }
+
+  /**
+   * Deletes every entry of {@code segment} but {@code keysToKeep}, in one atomic write, then frees
+   * the space they used. Unlike {@link #clear}, the segment is not dropped, so the kept entries
+   * stay readable throughout; snapshots taken before may stop seeing the deleted ones.
+   *
+   * <p>Entries written while it runs may be kept. This may take a while on a large segment: call it
+   * off the critical path.
+   *
+   * @param segment the segment to delete from
+   * @param keysToKeep the keys whose entries are kept
+   * @throws StorageException the storage exception
+   */
+  @Unstable
+  default void deleteAllExcept(final SegmentIdentifier segment, final Collection<byte[]> keysToKeep)
+      throws StorageException {
+    final Set<Bytes> kept = keysToKeep.stream().map(Bytes::wrap).collect(Collectors.toSet());
+    final SegmentedKeyValueStorageTransaction tx = startTransaction();
+    try (final Stream<byte[]> keys = streamKeys(segment)) {
+      keys.filter(key -> !kept.contains(Bytes.wrap(key))).forEach(key -> tx.remove(segment, key));
+    }
+    tx.commit();
   }
 
   /**

@@ -53,10 +53,20 @@ public class TrieLogManager {
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final long maxLayersToLoad,
       final ServiceManager pluginContext) {
+    this(blockchain, worldStateKeyValueStorage, maxLayersToLoad, pluginContext, Optional.empty());
+  }
+
+  /** The default trie log factory encodes accounts for the binary trie from its fork on. */
+  public TrieLogManager(
+      final Blockchain blockchain,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final long maxLayersToLoad,
+      final ServiceManager pluginContext,
+      final Optional<Long> binaryTrieMilestone) {
     this.blockchain = blockchain;
     this.rootWorldStateStorage = worldStateKeyValueStorage;
     this.maxLayersToLoad = maxLayersToLoad;
-    this.trieLogFactory = setupTrieLogFactory(pluginContext);
+    this.trieLogFactory = setupTrieLogFactory(pluginContext, binaryTrieMilestone);
   }
 
   public synchronized void saveTrieLog(
@@ -138,7 +148,8 @@ public class TrieLogManager {
     trieLogObservers.unsubscribe(id);
   }
 
-  private TrieLogFactory setupTrieLogFactory(final ServiceManager pluginContext) {
+  private TrieLogFactory setupTrieLogFactory(
+      final ServiceManager pluginContext, final Optional<Long> binaryTrieMilestone) {
     // if we have a TrieLogService from pluginContext, use it.
     var trieLogServicez =
         Optional.ofNullable(pluginContext)
@@ -158,7 +169,7 @@ public class TrieLogManager {
       }
     }
     // Otherwise default to BonsaiTrieLogFactory
-    return new BonsaiTrieLogFactory();
+    return new BonsaiTrieLogFactory(binaryTrieMilestone);
   }
 
   private TrieLogProvider getTrieLogProvider() {

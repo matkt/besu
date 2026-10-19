@@ -85,6 +85,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
   protected boolean isAccumulatorStateChanged;
+  // set while rolling a world state whose flat DB is already at the roll target
+  private boolean rollFromTrieLogPriors;
 
   public PathBasedWorldStateUpdateAccumulator(
       final BonsaiWorldView world,
@@ -499,7 +501,8 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       }
 
       final ACCOUNT originalValue = accountValue.getPrior();
-      if (originalValue != null) {
+      // a binary trie account has no storage trie to enumerate
+      if (originalValue != null && originalValue.hasStorageRoot()) {
         // Enumerate and delete addresses not updated
         wrappedWorldView()
             .getAllAccountStorage(deletedAddress, originalValue.getStorageRoot())
@@ -772,6 +775,14 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     return wrappedWorldView().getWorldStateStorage();
   }
 
+  /**
+   * Starts the rolled values from the trie log priors rather than from the world state, whose flat
+   * DB is already at the roll target.
+   */
+  public void setRollFromTrieLogPriors(final boolean rollFromTrieLogPriors) {
+    this.rollFromTrieLogPriors = rollFromTrieLogPriors;
+  }
+
   public void rollForward(final TrieLog layer) {
     layer
         .getAccountChanges()
@@ -822,7 +833,10 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     }
     BonsaiValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
     if (accountValue == null) {
-      accountValue = loadAccountFromParent(address, accountValue);
+      accountValue =
+          rollFromTrieLogPriors
+              ? loadAccountFromTrieLog(address, expectedValue)
+              : loadAccountFromParent(address, accountValue);
     }
     if (accountValue == null) {
       if (expectedValue == null && replacementValue != null) {
@@ -860,6 +874,19 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     }
   }
 
+  // the account as the trie log saw it before the change
+  private BonsaiValue<ACCOUNT> loadAccountFromTrieLog(
+      final Address address, final AccountValue expectedValue) {
+    if (expectedValue == null) {
+      return null;
+    }
+    final ACCOUNT account = createAccount(wrappedWorldView(), address, expectedValue, true);
+    final BonsaiValue<ACCOUNT> loadedAccountValue =
+        new BonsaiValue<>(copyAccount(account), account);
+    accountsToUpdate.put(address, loadedAccountValue);
+    return loadedAccountValue;
+  }
+
   private BonsaiValue<ACCOUNT> loadAccountFromParent(
       final Address address, final BonsaiValue<ACCOUNT> defaultValue) {
     try {
@@ -888,11 +915,13 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     BonsaiValue<Bytes> codeValue = codeToUpdate.get(address);
     if (codeValue == null) {
       final Bytes storedCode =
-          wrappedWorldView()
-              .getCode(
-                  address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
-              .map(Code::getBytes)
-              .orElse(Bytes.EMPTY);
+          rollFromTrieLogPriors
+              ? Optional.ofNullable(expectedCode).orElse(Bytes.EMPTY)
+              : wrappedWorldView()
+                  .getCode(
+                      address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
+                  .map(Code::getBytes)
+                  .orElse(Bytes.EMPTY);
       if (!storedCode.isEmpty()) {
         codeValue = new BonsaiValue<>(storedCode, storedCode);
         codeToUpdate.put(address, codeValue);
@@ -958,7 +987,9 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     BonsaiValue<UInt256> slotValue = storageMap == null ? null : storageMap.get(storageSlotKey);
     if (slotValue == null) {
       final Optional<UInt256> storageValue =
-          wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
+          rollFromTrieLogPriors
+              ? Optional.ofNullable(expectedValue).filter(value -> !value.isZero())
+              : wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
       if (storageValue.isPresent()) {
         slotValue = new BonsaiValue<>(storageValue.get(), storageValue.get());
         storageToUpdate

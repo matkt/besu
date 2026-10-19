@@ -97,6 +97,8 @@ public interface HardforkId {
     AMSTERDAM(false, "Amsterdam"),
     /** Bogota fork. */
     BOGOTA(false, "Bogota"),
+    /** binaryTrie fork: Bogota on the partitioned binary trie (EIP-8347). */
+    BINARY_TRIE(false, "binaryTrie"),
     /** Polis fork. (from the greek form of an earlier incarnation of the city of Istanbul. */
     POLIS(false, "Polis"),
     /** Bangkok fork. */

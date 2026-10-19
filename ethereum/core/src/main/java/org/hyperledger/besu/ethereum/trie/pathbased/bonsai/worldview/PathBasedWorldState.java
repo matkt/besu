@@ -23,6 +23,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListOverlay;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.TrieDisabledStateRootCommitter;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiSnapshotWorldStateKeyValueStorage;
@@ -71,6 +72,10 @@ public abstract class PathBasedWorldState
    * trie; otherwise the default trie-based committer is used.
    */
   protected StateRootCommitter resolveDefaultCommitter() {
+    // the binary trie has no flat-only mode: it is still computed
+    if (trieBranchType == TrieBranchType.BINARY) {
+      return new DefaultBinaryStateRootCommitter();
+    }
     return isTrieDisabled()
         ? TrieDisabledStateRootCommitter.INSTANCE
         : DEFAULT_STATE_ROOT_COMMITTER;
@@ -97,19 +102,40 @@ public abstract class PathBasedWorldState
    */
   protected boolean isStorageFrozen;
 
+  // the trie branch whose world state keys this world state reads and writes
+  protected TrieBranchType trieBranchType;
+
+  private boolean skipStateRootVerification;
+
   protected PathBasedWorldState(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedWorldStateCacheManager worldStateCacheManager,
       final TrieLogManager trieLogManager,
       final WorldStateConfig worldStateConfig) {
+    this(
+        worldStateKeyValueStorage,
+        worldStateCacheManager,
+        trieLogManager,
+        worldStateConfig,
+        TrieBranchType.PATRICIA);
+  }
+
+  protected PathBasedWorldState(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final PathBasedWorldStateCacheManager worldStateCacheManager,
+      final TrieLogManager trieLogManager,
+      final WorldStateConfig worldStateConfig,
+      final TrieBranchType trieBranchType) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
+    this.trieBranchType = trieBranchType;
     this.worldStateRootHash =
         Hash.wrap(
             Bytes32.wrap(
                 worldStateKeyValueStorage
-                    .getWorldStateRootHash()
+                    .getWorldStateRootHash(trieBranchType)
                     .orElse(getEmptyTrieHash().getBytes())));
-    this.worldStateBlockHash = worldStateKeyValueStorage.getWorldStateBlockHash().orElse(Hash.ZERO);
+    this.worldStateBlockHash =
+        worldStateKeyValueStorage.getWorldStateBlockHash(trieBranchType).orElse(Hash.ZERO);
     this.worldStateCacheManager = worldStateCacheManager;
     this.trieLogManager = trieLogManager;
     this.worldStateConfig = worldStateConfig;
@@ -176,6 +202,27 @@ public abstract class PathBasedWorldState
   public void resetWorldStateTo(final BlockHeader blockHeader) {
     worldStateBlockHash = blockHeader.getBlockHash();
     worldStateRootHash = blockHeader.getStateRoot();
+  }
+
+  /** Resets the world state to a block and root of a trie branch. */
+  public void resetWorldStateTo(
+      final Hash blockHash, final Hash stateroot, final TrieBranchType trieBranchType) {
+    this.trieBranchType = trieBranchType;
+    this.worldStateRootHash = stateroot;
+    this.worldStateBlockHash = blockHash;
+  }
+
+  /** The trie branch used for the world state keys and the default state root computation. */
+  public TrieBranchType getTrieBranchType() {
+    return trieBranchType;
+  }
+
+  public WorldStateConfig getWorldStateConfig() {
+    return worldStateConfig;
+  }
+
+  public void setSkipStateRootVerification(final boolean skipStateRootVerification) {
+    this.skipStateRootVerification = skipStateRootVerification;
   }
 
   @Override
@@ -263,8 +310,10 @@ public abstract class PathBasedWorldState
               trieBranchSegment,
               WORLD_BLOCK_HASH_KEY,
               blockHeader.getBlockHash().getBytes().toArrayUnsafe());
+      stateUpdater.putFlatDbBlockHash(blockHeader.getBlockHash());
     } else {
       stateUpdater.getWorldStateTransaction().remove(trieBranchSegment, WORLD_BLOCK_HASH_KEY);
+      stateUpdater.removeFlatDbBlockHash();
     }
     stateUpdater
         .getWorldStateTransaction()
@@ -284,6 +333,9 @@ public abstract class PathBasedWorldState
   }
 
   protected void verifyWorldStateRoot(final Hash calculatedStateRoot, final BlockHeader header) {
+    if (skipStateRootVerification) {
+      return;
+    }
     if (!worldStateConfig.isTrieDisabled() && !calculatedStateRoot.equals(header.getStateRoot())) {
       throw new StateRootMismatchException(header.getStateRoot(), calculatedStateRoot);
     }

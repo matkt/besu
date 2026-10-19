@@ -27,8 +27,7 @@ import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
 public interface StateRootCommitter {
 
   /**
-   * The trie branch whose root, block hash and block number this committer persists. For now the
-   * trie nodes still go to the Patricia branch.
+   * The trie branch whose trie nodes, root, block hash and block number this committer persists.
    *
    * @return the trie branch type, Patricia by default
    */

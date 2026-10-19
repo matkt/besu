@@ -25,6 +25,7 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.rocksdb.OptimisticTransactionDB;
 import org.rocksdb.RocksDB;
@@ -70,6 +71,12 @@ public class OptimisticRocksDBColumnarKeyValueStorage extends RocksDBColumnarKey
   @Override
   RocksDB getDB() {
     return db;
+  }
+
+  @Override
+  Optional<RocksDB> getBaseDB() {
+    // Transactions reject range deletions; the base database, writing to the same WAL, takes them.
+    return Optional.of(db.getBaseDB());
   }
 
   /**

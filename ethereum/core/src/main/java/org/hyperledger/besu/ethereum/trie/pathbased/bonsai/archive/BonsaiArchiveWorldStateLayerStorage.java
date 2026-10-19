@@ -65,7 +65,7 @@ public class BonsaiArchiveWorldStateLayerStorage extends BonsaiWorldStateLayerSt
     // flat-DB strategy so getStateArchiveContextForRead returns the queried block, not HEAD.
     return getFlatDbStrategy()
         .getFlatAccount(
-            this::getWorldStateRootHash,
+            this::getActiveWorldStateRootHash,
             this::getTrieNode,
             accountHash,
             getComposedWorldStateStorage());
@@ -83,7 +83,7 @@ public class BonsaiArchiveWorldStateLayerStorage extends BonsaiWorldStateLayerSt
     // flat-DB strategy so getStateArchiveContextForRead returns the queried block, not HEAD.
     return getFlatDbStrategy()
         .getFlatStorageValueByStorageSlotKey(
-            this::getWorldStateRootHash,
+            this::getActiveWorldStateRootHash,
             storageRootSupplier,
             (location, hash) -> getTrieNode(TrieNodeKey.of(accountHash, location), hash),
             accountHash,

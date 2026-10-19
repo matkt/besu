@@ -373,6 +373,11 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
   }
 
   @Override
+  public OptionalLong getBinaryTrieTime() {
+    return getOptionalLong("binarytrietime");
+  }
+
+  @Override
   public OptionalLong getFutureEipsTime() {
     return getOptionalLong("futureeipstime");
   }
@@ -495,6 +500,7 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
     getBpo5Time().ifPresent(l -> builder.put("bpo5Time", l));
     getAmsterdamTime().ifPresent(l -> builder.put("amsterdamTime", l));
     getBogotaTime().ifPresent(l -> builder.put("bogotaTime", l));
+    getBinaryTrieTime().ifPresent(l -> builder.put("binaryTrieTime", l));
     getTerminalBlockNumber().ifPresent(l -> builder.put("terminalBlockNumber", l));
     getTerminalBlockHash()
         .ifPresent(h -> builder.put("terminalBlockHash", h.getBytes().toHexString()));
@@ -641,6 +647,7 @@ public class JsonGenesisConfigOptions implements GenesisConfigOptions {
             getBpo5Time(),
             getAmsterdamTime(),
             getBogotaTime(),
+            getBinaryTrieTime(),
             getFutureEipsTime(),
             getExperimentalEipsTime());
     // when adding forks add an entry to ${REPO_ROOT}/config/src/test/resources/all_forks.json

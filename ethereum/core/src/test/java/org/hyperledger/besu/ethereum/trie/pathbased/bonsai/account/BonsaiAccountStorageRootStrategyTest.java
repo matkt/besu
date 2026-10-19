@@ -21,6 +21,8 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStorageRootStrategy;
+import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.common.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.common.StorageRootStrategy;
@@ -47,7 +49,28 @@ class BonsaiAccountStorageRootStrategyTest {
     assertThat(decoded.getNonce()).isEqualTo(1L);
     assertThat(decoded.getBalance()).isEqualTo(Wei.ONE);
     assertThat(decoded.getCodeHash()).isEqualTo(Hash.EMPTY);
+    assertThat(decoded.hasStorageRoot()).isTrue();
     assertThat(decoded.getStorageRoot()).isEqualTo(storageRoot);
+  }
+
+  @Test
+  void binaryRoundTripProducesThreeFieldRlpAndThrowsOnRootAccessors() {
+    final Hash codeHash = Hash.hash(Bytes.fromHexString("0x60016000"));
+    final BonsaiAccount account = binaryAccount(codeHash);
+
+    final Bytes encoded = account.serializeAccount();
+    final BonsaiAccount decoded =
+        BonsaiAccount.fromRLP(null, account.getAddress(), encoded, true, new BonsaiCodeCache());
+
+    assertThat(encoded)
+        .isEqualTo(RLP.encode(new BinaryTrieAccountValue(1L, Wei.ONE, codeHash)::writeTo));
+    assertThat(account.hasStorageRoot()).isFalse();
+    assertThatThrownBy(account::getStorageRoot).isInstanceOf(UnsupportedOperationException.class);
+    assertThat(decoded.getNonce()).isEqualTo(1L);
+    assertThat(decoded.getBalance()).isEqualTo(Wei.ONE);
+    assertThat(decoded.getCodeHash()).isEqualTo(codeHash);
+    assertThat(decoded.hasStorageRoot()).isFalse();
+    assertThatThrownBy(decoded::getStorageRoot).isInstanceOf(UnsupportedOperationException.class);
   }
 
   @Test
@@ -67,6 +90,23 @@ class BonsaiAccountStorageRootStrategyTest {
   }
 
   @Test
+  void assertStorageRootMatchesMptVsBinaryThrows() {
+    final MptStorageRootStrategy mpt = new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
+    final BonsaiAccount binary = binaryAccount(Hash.EMPTY);
+    assertThatThrownBy(() -> mpt.assertStorageRootMatches(binary, "ctx"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("mpt vs binary");
+  }
+
+  @Test
+  void assertStorageRootMatchesBinaryVsMptIsNoOp() {
+    BinaryStorageRootStrategy.INSTANCE.assertStorageRootMatches(
+        mptAccountWithRoot(Hash.EMPTY_TRIE_HASH), "ctx");
+    BinaryStorageRootStrategy.INSTANCE.assertStorageRootMatches(binaryAccount(Hash.EMPTY), "ctx");
+    // no exception thrown: binary accounts have no storage root to compare
+  }
+
+  @Test
   void accountValueOwnsStrategyMatchingItsEncodedShape() {
     final Hash storageRoot = Hash.hash(Bytes.of(1, 2, 3));
     final PatriciaTrieAccountValue accountValue =
@@ -77,6 +117,12 @@ class BonsaiAccountStorageRootStrategyTest {
     assertThat(strategy).isInstanceOf(MptStorageRootStrategy.class);
     assertThat(strategy.getStorageRoot()).isEqualTo(storageRoot);
     assertThat(strategy).isNotSameAs(accountValue.storageRootStrategy());
+  }
+
+  @Test
+  void binaryAccountValueOwnsTheBinaryStrategy() {
+    assertThat(new BinaryTrieAccountValue(2L, Wei.of(2), Hash.EMPTY).storageRootStrategy())
+        .isSameAs(BinaryStorageRootStrategy.INSTANCE);
   }
 
   @Test
@@ -103,6 +149,20 @@ class BonsaiAccountStorageRootStrategyTest {
         Wei.ONE,
         new MptStorageRootStrategy(storageRoot),
         Hash.EMPTY,
+        true,
+        new BonsaiCodeCache());
+  }
+
+  private static BonsaiAccount binaryAccount(final Hash codeHash) {
+    final Address address = Address.fromHexString("0x00000000000000000000000000000000000000ee");
+    return new BonsaiAccount(
+        null,
+        address,
+        address.addressHash(),
+        1L,
+        Wei.ONE,
+        BinaryStorageRootStrategy.INSTANCE,
+        codeHash,
         true,
         new BonsaiCodeCache());
   }

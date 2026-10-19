@@ -16,8 +16,11 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage;
 
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_INFO_STATE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.FLAT_DB_METADATA_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.FlatDbStrategyProvider.FLAT_DB_MODE;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
@@ -79,6 +82,15 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   // 0x776f726c64426c6f636b4e756d626572
   public static final byte[] WORLD_BLOCK_NUMBER_KEY =
       "worldBlockNumber".getBytes(StandardCharsets.UTF_8);
+  public static final byte[] FLAT_DB_BLOCK_HASH_KEY =
+      "flatDbBlockHash".getBytes(StandardCharsets.UTF_8);
+
+  /** Set once the PBT fork has been crossed; the migrator never runs again after this. */
+  public static final byte[] PBT_MIGRATOR_RETIRED_KEY =
+      "pbtMigratorRetired".getBytes(StandardCharsets.UTF_8);
+
+  /** Set once the PMT has been deleted, after a block past the PBT fork was finalized. */
+  public static final byte[] PMT_PRUNED_KEY = "pmtPruned".getBytes(StandardCharsets.UTF_8);
 
   private final AtomicBoolean shouldClose = new AtomicBoolean(false);
   protected final AtomicBoolean isClosed = new AtomicBoolean(false);
@@ -110,7 +122,12 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     this.composedWorldStateStorage =
         provider.getStorageBySegmentIdentifiers(
             List.of(
-                ACCOUNT_INFO_STATE, CODE_STORAGE, ACCOUNT_STORAGE_STORAGE, TRIE_BRANCH_STORAGE));
+                ACCOUNT_INFO_STATE,
+                CODE_STORAGE,
+                ACCOUNT_STORAGE_STORAGE,
+                TRIE_BRANCH_STORAGE,
+                BINARY_TRIE_BRANCH_STORAGE,
+                FLAT_DB_METADATA_STORAGE));
     this.trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
     this.flatDbStrategyProvider =
@@ -230,6 +247,76 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .map(bytes -> Bytes.wrap(bytes).toLong());
   }
 
+  /** Root hash from whichever trie branch column currently holds world metadata. */
+  public Optional<Bytes> getActiveWorldStateRootHash() {
+    return getWorldStateRootHash(resolveActiveTrieBranchType());
+  }
+
+  /** Returns which trie branch column holds the persisted world root hash. */
+  public TrieBranchType resolveActiveTrieBranchType() {
+    if (composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY)
+        .isPresent()) {
+      return TrieBranchType.BINARY;
+    }
+    return TrieBranchType.PATRICIA;
+  }
+
+  /** {@code true} once the PBT fork has been crossed and the migrator has permanently retired. */
+  public boolean isPbtMigratorRetired() {
+    return composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, PBT_MIGRATOR_RETIRED_KEY)
+        .isPresent();
+  }
+
+  /** Marks the PBT migrator as permanently retired; FCU owns the binary column from here on. */
+  public void markPbtMigratorRetired() {
+    final Updater updater = updater();
+    updater
+        .getWorldStateTransaction()
+        .put(BINARY_TRIE_BRANCH_STORAGE, PBT_MIGRATOR_RETIRED_KEY, new byte[] {1});
+    updater.commit();
+  }
+
+  /** {@code true} once the PMT has been deleted, after the PBT fork was finalized. */
+  public boolean isPmtPruned() {
+    return composedWorldStateStorage.get(BINARY_TRIE_BRANCH_STORAGE, PMT_PRUNED_KEY).isPresent();
+  }
+
+  /** Marks the PMT as deleted, for good; written once {@link #deletePatriciaTrie()} returned. */
+  public void markPmtPruned() {
+    final Updater updater = updater();
+    updater
+        .getWorldStateTransaction()
+        .put(BINARY_TRIE_BRANCH_STORAGE, PMT_PRUNED_KEY, new byte[] {1});
+    updater.commit();
+  }
+
+  /**
+   * Deletes the PMT: its nodes, root and block hash. Keeps the flat DB metadata its column also
+   * holds: the flat DB mode, and the block number the archive flat DB is versioned by.
+   */
+  public void deletePatriciaTrie() {
+    // No onClearTrie: it would close the binary-trie snapshots and cached states still in use.
+    composedWorldStateStorage.deleteAllExcept(
+        TRIE_BRANCH_STORAGE, List.of(FLAT_DB_MODE, WORLD_BLOCK_NUMBER_KEY));
+  }
+
+  /**
+   * Empties the binary-trie column only: its nodes, code reference counts and cursor. Used by the
+   * PBT migrator before a snapshot load and after a rejected one, never once the chain owns it.
+   */
+  public void clearBinaryTrie() {
+    composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
+  }
+
+  public Optional<Hash> getFlatDbBlockHash() {
+    return composedWorldStateStorage
+        .get(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY)
+        .map(Bytes32::wrap)
+        .map(Hash::wrap);
+  }
+
   public NavigableMap<Bytes32, Bytes> streamFlatAccounts(
       final Bytes startKeyHash, final Bytes32 endKeyHash, final long max) {
     return getFlatDbStrategy()
@@ -258,7 +345,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   public boolean isWorldStateAvailable(final Bytes32 rootHash, final Hash blockHash) {
-    return isWorldStateAvailable(TrieBranchType.PATRICIA, rootHash, blockHash);
+    return isWorldStateAvailable(TrieBranchType.PATRICIA, rootHash, blockHash)
+        || isWorldStateAvailable(TrieBranchType.BINARY, rootHash, blockHash);
   }
 
   public boolean isWorldStateAvailable(
@@ -349,7 +437,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatAccount(
-                    this::getWorldStateRootHash,
+                    this::getActiveWorldStateRootHash,
                     this::getTrieNode,
                     accountHash,
                     composedWorldStateStorage));
@@ -382,7 +470,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatStorageValueByStorageSlotKey(
-                    this::getWorldStateRootHash,
+                    this::getActiveWorldStateRootHash,
                     storageRootSupplier,
                     (location, hash) -> getTrieNode(TrieNodeKey.of(accountHash, location), hash),
                     accountHash,
@@ -444,6 +532,31 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     return composedWorldStateStorage.get(TRIE_BRANCH_STORAGE, key.toArrayUnsafe()).map(Bytes::wrap);
   }
 
+  /**
+   * Returns the trie node stored under {@code key} in a trie branch. Binary trie nodes are not
+   * keccak hashed, so only the Patricia branch checks {@code nodeHash}.
+   */
+  public Optional<Bytes> getTrieNode(
+      final TrieBranchType trieBranchType, final Bytes key, final Bytes32 nodeHash) {
+    if (trieBranchType == TrieBranchType.PATRICIA) {
+      return getTrieNode(key, nodeHash);
+    }
+    if (MerkleTrie.EMPTY_TRIE_NODE_HASH.equals(nodeHash)) {
+      return Optional.of(MerkleTrie.EMPTY_TRIE_NODE);
+    }
+    return getTrieNodeUnsafe(trieBranchType, key);
+  }
+
+  /** Returns the trie node stored under {@code key} in a trie branch, without checking it. */
+  public Optional<Bytes> getTrieNodeUnsafe(final TrieBranchType trieBranchType, final Bytes key) {
+    if (trieBranchType == TrieBranchType.PATRICIA) {
+      return getTrieNodeUnsafe(key);
+    }
+    return composedWorldStateStorage
+        .get(TrieBranchSegments.segmentFor(trieBranchType), key.toArrayUnsafe())
+        .map(Bytes::wrap);
+  }
+
   public NavigableMap<Bytes32, AccountStorageEntry> storageEntriesFrom(
       final Hash addressHash, final Bytes32 startKeyHash, final int limit) {
     throw new RuntimeException("Bonsai Tries does not currently support enumerating storage");
@@ -475,6 +588,8 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     subscribers.forEach(StorageSubscriber::onClearStorage);
     getFlatDbStrategy().clearAll(composedWorldStateStorage);
     composedWorldStateStorage.clear(TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
+    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
     trieLogStorage.clear();
     clearCrossBlockCache();
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
@@ -483,6 +598,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void clearFlatDatabase() {
     subscribers.forEach(StorageSubscriber::onClearFlatDatabaseStorage);
     getFlatDbStrategy().resetOnResync(composedWorldStateStorage);
+    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
     clearCrossBlockCache();
   }
 
@@ -645,6 +761,45 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
      */
     public synchronized Updater removeTrieNode(final Bytes key) {
       trieNodeStrategy.removeTrieNode(worldStorage, composedWorldStateTransaction, key);
+      return this;
+    }
+
+    /** Stores a trie node of a trie branch under {@code key}. */
+    public synchronized Updater putTrieNode(
+        final TrieBranchType trieBranchType,
+        final Bytes key,
+        final Bytes32 nodeHash,
+        final Bytes node) {
+      if (trieBranchType == TrieBranchType.PATRICIA) {
+        return putTrieNode(key, nodeHash, node);
+      }
+      if (MerkleTrie.EMPTY_TRIE_NODE_HASH.equals(nodeHash)) {
+        return this;
+      }
+      composedWorldStateTransaction.put(
+          TrieBranchSegments.segmentFor(trieBranchType), key.toArrayUnsafe(), node.toArrayUnsafe());
+      return this;
+    }
+
+    /** Removes the trie node of a trie branch stored under {@code key}. */
+    public synchronized Updater removeTrieNode(
+        final TrieBranchType trieBranchType, final Bytes key) {
+      if (trieBranchType == TrieBranchType.PATRICIA) {
+        return removeTrieNode(key);
+      }
+      composedWorldStateTransaction.remove(
+          TrieBranchSegments.segmentFor(trieBranchType), key.toArrayUnsafe());
+      return this;
+    }
+
+    public Updater putFlatDbBlockHash(final Hash blockHash) {
+      composedWorldStateTransaction.put(
+          FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY, blockHash.getBytes().toArrayUnsafe());
+      return this;
+    }
+
+    public Updater removeFlatDbBlockHash() {
+      composedWorldStateTransaction.remove(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY);
       return this;
     }
 

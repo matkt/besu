@@ -21,9 +21,11 @@ import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.wit
 import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withStateRootAndBlockHashAndUpdateNodeHead;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -343,6 +345,21 @@ class BonsaiWorldStateProviderTest {
         new BonsaiCodeCache());
   }
 
+  private BonsaiWorldStateProvider createBonsaiWorldStateProvider(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final Optional<Long> binaryTrieMilestone) {
+    return new BonsaiWorldStateProvider(
+        worldStateCacheManager,
+        DEFAULT_CONFIG.getExtraStorageConfiguration(),
+        trieLogManager,
+        worldStateKeyValueStorage,
+        blockchain,
+        new BonsaiCachedMerkleTrieLoader(new NoOpMetricsSystem()),
+        EvmConfiguration.DEFAULT,
+        new BonsaiCodeCache(),
+        binaryTrieMilestone);
+  }
+
   private BonsaiWorldState createMockWorldState(final Hash blockHash) {
     final BonsaiWorldState mockWorldState = mock(BonsaiWorldState.class);
     when(mockWorldState.blockHash()).thenReturn(blockHash);
@@ -354,5 +371,52 @@ class BonsaiWorldStateProviderTest {
     final TrieLogLayer trieLogLayer = mock(TrieLogLayer.class);
     when(trieLogLayer.getBlockHash()).thenReturn(blockHash);
     return trieLogLayer;
+  }
+
+  @Test
+  void shouldSynchronizeFlatDbBeforeTrieDuringForkReorg() {
+    final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
+        spy(
+            new BonsaiWorldStateKeyValueStorage(
+                storageProvider, new NoOpMetricsSystem(), DEFAULT_CONFIG));
+
+    // the flat DB rolls apart from the trie on a chain with a binary trie fork, here not reached
+    bonsaiWorldStateArchive =
+        spy(createBonsaiWorldStateProvider(worldStateKeyValueStorage, Optional.of(1_000L)));
+
+    final BlockHeader genesis = blockBuilder.number(0).buildHeader();
+    final BlockHeader blockHeader1 =
+        blockBuilder.number(1).timestamp(1).parentHash(genesis.getHash()).buildHeader();
+    final BlockHeader blockHeader1Reorg =
+        blockBuilder.number(1).timestamp(2).parentHash(genesis.getHash()).buildHeader();
+
+    when(blockchain.getBlockHeader(genesis.getHash())).thenReturn(Optional.of(genesis));
+    when(blockchain.getBlockHeader(blockHeader1.getHash())).thenReturn(Optional.of(blockHeader1));
+    when(blockchain.getBlockHeader(blockHeader1Reorg.getHash()))
+        .thenReturn(Optional.of(blockHeader1Reorg));
+
+    bonsaiWorldStateArchive.getWorldState().persist(genesis);
+    bonsaiWorldStateArchive.getWorldState().persist(blockHeader1);
+
+    final TrieLogLayer trieLogLayer1 = mockTrieLogLayer(blockHeader1.getHash());
+    final TrieLogLayer trieLogLayer1Reorg = mockTrieLogLayer(blockHeader1Reorg.getHash());
+
+    when(trieLogManager.getTrieLogLayer(blockHeader1.getHash()))
+        .thenReturn(Optional.of(trieLogLayer1));
+    when(trieLogManager.getTrieLogLayer(blockHeader1Reorg.getHash()))
+        .thenReturn(Optional.of(trieLogLayer1Reorg));
+    doReturn(Optional.of(blockHeader1.getHash()))
+        .when(worldStateKeyValueStorage)
+        .getFlatDbBlockHash();
+
+    assertThat(
+            bonsaiWorldStateArchive.getWorldState(
+                withStateRootAndBlockHashAndUpdateNodeHead(null, blockHeader1Reorg.getHash())))
+        .isPresent()
+        .containsInstanceOf(BonsaiWorldState.class);
+
+    // Phase one synchronizes the flat DB; phase two performs the normal trie roll.
+    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1.getHash());
+    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1Reorg.getHash());
   }
 }

@@ -39,6 +39,7 @@ import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.Map;
 import java.util.Optional;
@@ -64,13 +65,31 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache) {
     this(
+        archive,
+        worldStateKeyValueStorage,
+        evmConfiguration,
+        worldStateConfig,
+        codeCache,
+        archive.getBlockchain().getChainHeadHeader());
+  }
+
+  /** A world state on the trie branch of {@code blockHeader}. */
+  public BonsaiWorldState(
+      final BonsaiWorldStateProvider archive,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final EvmConfiguration evmConfiguration,
+      final WorldStateConfig worldStateConfig,
+      final BonsaiCodeCache codeCache,
+      final BlockHeader blockHeader) {
+    this(
         worldStateKeyValueStorage,
         archive.getCachedMerkleTrieLoader(),
         archive.getWorldStateCacheManager(),
         archive.getTrieLogManager(),
         evmConfiguration,
         worldStateConfig,
-        codeCache);
+        codeCache,
+        archive.resolveTrieBranchType(blockHeader));
   }
 
   public BonsaiWorldState(
@@ -81,7 +100,32 @@ public class BonsaiWorldState extends PathBasedWorldState {
       final EvmConfiguration evmConfiguration,
       final WorldStateConfig worldStateConfig,
       final BonsaiCodeCache codeCache) {
-    super(worldStateKeyValueStorage, worldStateCacheManager, trieLogManager, worldStateConfig);
+    this(
+        worldStateKeyValueStorage,
+        bonsaiCachedMerkleTrieLoader,
+        worldStateCacheManager,
+        trieLogManager,
+        evmConfiguration,
+        worldStateConfig,
+        codeCache,
+        TrieBranchType.PATRICIA);
+  }
+
+  public BonsaiWorldState(
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final BonsaiCachedMerkleTrieLoader bonsaiCachedMerkleTrieLoader,
+      final PathBasedWorldStateCacheManager worldStateCacheManager,
+      final TrieLogManager trieLogManager,
+      final EvmConfiguration evmConfiguration,
+      final WorldStateConfig worldStateConfig,
+      final BonsaiCodeCache codeCache,
+      final TrieBranchType trieBranchType) {
+    super(
+        worldStateKeyValueStorage,
+        worldStateCacheManager,
+        trieLogManager,
+        worldStateConfig,
+        trieBranchType);
     this.bonsaiCachedMerkleTrieLoader = bonsaiCachedMerkleTrieLoader;
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
     this.evmConfiguration = evmConfiguration;
@@ -133,6 +177,10 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   @Override
   public Hash frontierRootHash() {
+    // the tracker builds Patricia tries
+    if (trieBranchType == TrieBranchType.BINARY) {
+      return resolveDefaultCommitter().compute(this, null, accumulator.copy()).root();
+    }
     return frontierRootHashTracker.frontierRootHash(worldStateRootHash);
   }
 
@@ -229,7 +277,8 @@ public class BonsaiWorldState extends PathBasedWorldState {
 
   @Override
   protected Hash getEmptyTrieHash() {
-    return Hash.EMPTY_TRIE_HASH;
+    // the empty binary trie has the zero root, not the empty MPT one
+    return trieBranchType == TrieBranchType.BINARY ? Hash.ZERO : Hash.EMPTY_TRIE_HASH;
   }
 
   @Override

@@ -64,6 +64,19 @@ public class TrieLogLayer implements TrieLog {
   protected final Map<Address, Map<StorageSlotKey, BonsaiValue<UInt256>>> storage;
   protected boolean frozen = false;
 
+  /** On-disk trie-log wire format version ({@code 0} = legacy slot hash, {@code 1} = slot key). */
+  protected int wireVersion = 0;
+
+  public int getWireVersion() {
+    return wireVersion;
+  }
+
+  public TrieLogLayer setWireVersion(final int wireVersion) {
+    checkState(!frozen, "Layer is Frozen");
+    this.wireVersion = wireVersion;
+    return this;
+  }
+
   public TrieLogLayer() {
     // TODO when tuweni fixes zero length byte comparison consider TreeMap
     this.accounts = new HashMap<>();

@@ -84,6 +84,10 @@ public class BonsaiWorldStateKeyValueStorageTest {
         new Object[][] {{FlatDbMode.FULL}, {FlatDbMode.PARTIAL}, {FlatDbMode.ARCHIVE}});
   }
 
+  public static Collection<Object[]> trieBranchTypes() {
+    return Arrays.asList(new Object[][] {{TrieBranchType.PATRICIA}, {TrieBranchType.BINARY}});
+  }
+
   public static Collection<Object[]> flatDbModeAndCodeStorageMode() {
     return Arrays.asList(
         new Object[][] {
@@ -1115,5 +1119,59 @@ public class BonsaiWorldStateKeyValueStorageTest {
         WORLD_BLOCK_NUMBER_KEY,
         Bytes.ofUnsignedLong(blockNumber).toArrayUnsafe());
     tx.commit();
+  }
+
+  @Test
+  void putFlatDbBlockHash_persistsIndependentCursor() {
+    setUp(FlatDbMode.FULL);
+    final Hash blockHash = Hash.hash(Bytes.fromHexString("0x1234"));
+
+    assertThat(storage.getFlatDbBlockHash()).isEmpty();
+
+    storage.updater().putFlatDbBlockHash(blockHash).commitComposedOnly();
+
+    assertThat(storage.getFlatDbBlockHash()).contains(blockHash);
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.PATRICIA)).isEmpty();
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isEmpty();
+
+    storage.clearFlatDatabase();
+
+    assertThat(storage.getFlatDbBlockHash()).isEmpty();
+  }
+
+  @ParameterizedTest
+  @MethodSource("trieBranchTypes")
+  void putGetRemoveTrieNode_usesCorrectBranchColumn(final TrieBranchType trieBranchType) {
+    setUp(FlatDbMode.FULL);
+    final Bytes location = Bytes.fromHexString("0x01");
+    final Bytes node = Bytes.fromHexString("0x123456");
+    final Bytes32 nodeHash = Bytes32.wrap(Hash.hash(node).getBytes());
+
+    storage.updater().putTrieNode(trieBranchType, location, nodeHash, node).commit();
+
+    assertThat(storage.getTrieNode(trieBranchType, location, nodeHash)).contains(node);
+    assertThat(storage.getTrieNodeUnsafe(trieBranchType, location)).contains(node);
+
+    storage.updater().removeTrieNode(trieBranchType, location).commit();
+
+    assertThat(storage.getTrieNode(trieBranchType, location, nodeHash)).isEmpty();
+    assertThat(storage.getTrieNodeUnsafe(trieBranchType, location)).isEmpty();
+  }
+
+  @ParameterizedTest
+  @MethodSource("trieBranchTypes")
+  void putTrieNode_isIsolatedBetweenBranchColumns(final TrieBranchType trieBranchType) {
+    setUp(FlatDbMode.FULL);
+    final Bytes location = Bytes.fromHexString("0x02");
+    final Bytes node = Bytes.fromHexString("0xabcdef");
+    final Bytes32 nodeHash = Bytes32.wrap(Hash.hash(node).getBytes());
+    final TrieBranchType otherBranchType =
+        trieBranchType == TrieBranchType.PATRICIA ? TrieBranchType.BINARY : TrieBranchType.PATRICIA;
+
+    storage.updater().putTrieNode(trieBranchType, location, nodeHash, node).commit();
+
+    assertThat(storage.getTrieNode(trieBranchType, location, nodeHash)).contains(node);
+    assertThat(storage.getTrieNode(otherBranchType, location, nodeHash)).isEmpty();
+    assertThat(storage.getTrieNodeUnsafe(otherBranchType, location)).isEmpty();
   }
 }

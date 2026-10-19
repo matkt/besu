@@ -146,8 +146,9 @@ public abstract class AbstractIsolationTests {
           .filter(ga -> ga.privateKey() != null)
           .toList();
 
-  KeyPair sender1 = Optional.ofNullable(accounts.get(0).privateKey()).map(asKeyPair).orElseThrow();
-  TransactionPool transactionPool;
+  protected KeyPair sender1 =
+      Optional.ofNullable(accounts.get(0).privateKey()).map(asKeyPair).orElseThrow();
+  protected TransactionPool transactionPool;
 
   @TempDir private Path tempData;
 
@@ -157,8 +158,7 @@ public abstract class AbstractIsolationTests {
         // FYI: BonsaiSnapshoIsolationTests  work with frozen/cached worldstates, using PARTIAL
         // flat db strategy allows the tests to make account assertions based on trie
         // (whereas a full db strategy will not, since the worldstates are frozen/cached)
-        createKeyValueStorageProvider()
-            .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_PARTIAL_DB_CONFIG);
+        createKeyValueStorageProvider().createWorldStateStorage(getDataStorageConfiguration());
     archive =
         new BonsaiWorldStateProvider(
             (BonsaiWorldStateKeyValueStorage) worldStateKeyValueStorage,
@@ -253,7 +253,7 @@ public abstract class AbstractIsolationTests {
 
               @Override
               public DataStorageFormat getDatabaseFormat() {
-                return DataStorageFormat.BONSAI;
+                return getDataStorageFormat();
               }
 
               @Override
@@ -267,7 +267,7 @@ public abstract class AbstractIsolationTests {
                 return new org.hyperledger.besu.plugin.services.storage.DataStorageConfiguration() {
                   @Override
                   public DataStorageFormat getDatabaseFormat() {
-                    return DataStorageFormat.BONSAI;
+                    return getDataStorageFormat();
                   }
 
                   @Override
@@ -279,6 +279,18 @@ public abstract class AbstractIsolationTests {
             })
         .withMetricsSystem(new NoOpMetricsSystem())
         .build();
+  }
+
+  /** The format of the world state storage and the storage provider. */
+  protected DataStorageFormat getDataStorageFormat() {
+    return DataStorageFormat.BONSAI;
+  }
+
+  /**
+   * The configuration of the world state storage, overridden to run the suite on the binary trie.
+   */
+  protected DataStorageConfiguration getDataStorageConfiguration() {
+    return DataStorageConfiguration.DEFAULT_BONSAI_PARTIAL_DB_CONFIG;
   }
 
   static class TestBlockCreator extends AbstractBlockCreator {

@@ -19,15 +19,18 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.StorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.TrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldView;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.Consumer;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.evm.worldstate.UpdateTrackingAccount;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -122,7 +125,9 @@ public class BonsaiWorldStateUpdateAccumulator
         addressHash,
         nonce,
         balance,
-        new MptStorageRootStrategy(storageRoot),
+        isBinaryTrie()
+            ? BinaryStorageRootStrategy.INSTANCE
+            : new MptStorageRootStrategy(storageRoot),
         codeHash,
         mutable,
         codeCache);
@@ -131,7 +136,19 @@ public class BonsaiWorldStateUpdateAccumulator
   @Override
   protected BonsaiAccount createAccount(
       final BonsaiWorldView context, final UpdateTrackingAccount<BonsaiAccount> tracked) {
-    return new BonsaiAccount(context, tracked, codeCache);
+    return new BonsaiAccount(
+        context,
+        tracked,
+        isBinaryTrie()
+            ? BinaryStorageRootStrategy.INSTANCE
+            : new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH),
+        codeCache);
+  }
+
+  // the accounts of a binary trie world state have no storage root
+  private boolean isBinaryTrie() {
+    return wrappedWorldView() instanceof PathBasedWorldState worldState
+        && worldState.getTrieBranchType() == TrieBranchType.BINARY;
   }
 
   @Override

@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWo
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.plugin.data.BlockHeader;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -134,7 +135,8 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
                   createWorldState(
                       archive,
                       createLayeredKeyValueStorage(cached.getWorldStateStorage()),
-                      evmConfiguration));
+                      evmConfiguration,
+                      cached.getBlockHeader()));
     }
     LOG.atDebug()
         .setMessage("did not find worldstate in cache for {}")
@@ -152,7 +154,6 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
 
     return Optional.ofNullable(
             cachedWorldStatesByHash.get(blockHeader.getParentHash())) // search parent block
-        .map(BonsaiCachedWorldStateView::getWorldStateStorage)
         .or(
             () -> {
               // or else search the nearest state in the cache
@@ -167,13 +168,15 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
                   .sorted(
                       Comparator.comparingLong(
                           view -> Math.abs(blockHeader.getNumber() - view.getBlockNumber())))
-                  .map(BonsaiCachedWorldStateView::getWorldStateStorage)
                   .findFirst();
             })
         .map(
-            storage ->
+            view ->
                 createWorldState( // wrap the state in a layered worldstate
-                    archive, createLayeredKeyValueStorage(storage), evmConfiguration));
+                    archive,
+                    createLayeredKeyValueStorage(view.getWorldStateStorage()),
+                    evmConfiguration,
+                    view.getBlockHeader()));
   }
 
   public Optional<PathBasedWorldState> getHeadWorldState(
@@ -187,7 +190,7 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
         createSnapshotKeyValueStorage(rootWorldStateStorage);
     final Optional<BlockHeader> maybeHeadHeader;
     try {
-      maybeHeadHeader = headSnapshot.getWorldStateBlockHash().flatMap(hashBlockHeaderFunction);
+      maybeHeadHeader = headBlockHash(headSnapshot).flatMap(hashBlockHeaderFunction);
     } catch (final RuntimeException e) {
       closeSnapshot(headSnapshot);
       throw e;
@@ -308,6 +311,26 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
       final PathBasedWorldStateProvider archive,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final EvmConfiguration evmConfiguration);
+
+  // the head block hash is saved in the trie branch the chain head is on
+  private Optional<Hash> headBlockHash(final BonsaiWorldStateKeyValueStorage headSnapshot) {
+    final TrieBranchType trieBranchType =
+        archive == null
+            ? TrieBranchType.PATRICIA
+            : archive.resolveTrieBranchType(archive.getBlockchain().getChainHeadHeader());
+    return trieBranchType == TrieBranchType.PATRICIA
+        ? headSnapshot.getWorldStateBlockHash()
+        : headSnapshot.getWorldStateBlockHash(trieBranchType);
+  }
+
+  /** A world state for a cached block, on the trie branch of that block. */
+  public PathBasedWorldState createWorldState(
+      final PathBasedWorldStateProvider archive,
+      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
+      final EvmConfiguration evmConfiguration,
+      final BlockHeader blockHeader) {
+    return createWorldState(archive, worldStateKeyValueStorage, evmConfiguration);
+  }
 
   public abstract BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage);

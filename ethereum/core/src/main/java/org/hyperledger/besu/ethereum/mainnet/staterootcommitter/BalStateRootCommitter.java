@@ -47,6 +47,11 @@ public final class BalStateRootCommitter implements StateRootCommitter {
 
     TrieBranchType getTrieBranchType();
 
+    /** Whether the parent is opened with the BAL overlay; the binary engine reads it without. */
+    default boolean useBalOverlay() {
+      return true;
+    }
+
     Result compute(
         BonsaiWorldState parent, BlockAccessListAccountLookup accountLookup, boolean storageFrozen);
   }
@@ -204,19 +209,22 @@ public final class BalStateRootCommitter implements StateRootCommitter {
                         String.format(
                             "Parent %s of block %s not found",
                             parentHash, blockHeader.getBlockHash())));
-    final WorldStateQueryParams queryParams =
+    // the block timestamp lets the archive open the parent on the binary trie at the fork block
+    final WorldStateQueryParams.Builder queryParams =
         WorldStateQueryParams.newBuilder()
             .withBlockHeader(parentHeader)
-            .withShouldWorldStateUpdateHead(false)
-            // The BAL overlay is attached for consistency with other BAL world-state callers, but
-            // this computation path does not read through the world-state accumulator: it replays
-            // the BAL directly onto tries/storage (see Engine), so the overlay is not
-            // consumed here. Kept so the parent is opened the same way as for EVM execution.
-            .withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE))
-            .build();
+            .withTimeStamp(blockHeader.getTimestamp())
+            .withShouldWorldStateUpdateHead(false);
+    if (engine.useBalOverlay()) {
+      // The BAL overlay is attached for consistency with other BAL world-state callers, but
+      // this computation path does not read through the world-state accumulator: it replays
+      // the BAL directly onto tries/storage (see Engine), so the overlay is not
+      // consumed here. Kept so the parent is opened the same way as for EVM execution.
+      queryParams.withBalOverlay(new BlockAccessListOverlay(accountLookup, Long.MAX_VALUE));
+    }
     final BonsaiWorldState worldState =
         (BonsaiWorldState)
-            protocolContext.getWorldStateArchive().getWorldState(queryParams).orElseThrow();
+            protocolContext.getWorldStateArchive().getWorldState(queryParams.build()).orElseThrow();
     worldState.disableCacheMerkleTrieLoader();
     return worldState;
   }

@@ -18,9 +18,12 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.BinaryBalEngine;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.PatriciaBalEngine;
 import org.hyperledger.besu.ethereum.trie.forest.ForestWorldStateArchive;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
@@ -35,7 +38,8 @@ import java.util.Optional;
  *   <li>{@link ForestStateRootCommitter} — Forest archive
  *   <li>{@link BalStateRootCommitter} — Bonsai + BAL background root
  *   <li>{@link TrieDisabledStateRootCommitter} — Bonsai flat (trie-disabled) mode
- *   <li>{@link DefaultPatriciaStateRootCommitter} — Bonsai accumulator at persist
+ *   <li>{@link DefaultPatriciaStateRootCommitter} or {@link DefaultBinaryStateRootCommitter} —
+ *       Bonsai accumulator at persist, by trie branch
  * </ul>
  */
 public final class StateRootCommitterFactory {
@@ -58,8 +62,7 @@ public final class StateRootCommitterFactory {
       final BlockHeader blockHeader,
       final Optional<BlockAccessList> maybeBal,
       final boolean storageFrozen) {
-    // Patricia is the only trie branch until the binary trie lands.
-    final TrieBranchType trieBranchType = TrieBranchType.PATRICIA;
+    final TrieBranchType trieBranchType = resolveTrieBranchType(protocolContext, blockHeader);
     return switch (resolveMode(protocolContext, maybeBal)) {
       case BAL ->
           new BalStateRootCommitter(
@@ -71,25 +74,35 @@ public final class StateRootCommitterFactory {
               .start();
       case DEFAULT -> defaultCommitter(trieBranchType);
       case FOREST -> ForestStateRootCommitter.INSTANCE;
-      case TRIE_DISABLED -> TrieDisabledStateRootCommitter.INSTANCE;
+      // the binary trie has no flat-only mode: it is still computed
+      case TRIE_DISABLED ->
+          trieBranchType == TrieBranchType.BINARY
+              ? defaultCommitter(trieBranchType)
+              : TrieDisabledStateRootCommitter.INSTANCE;
     };
   }
 
   private static BalStateRootCommitter.Engine balEngine(final TrieBranchType trieBranchType) {
     return switch (trieBranchType) {
       case PATRICIA -> PatriciaBalEngine.INSTANCE;
-      case BINARY ->
-          throw new UnsupportedOperationException("The binary trie branch has no BAL engine yet");
+      case BINARY -> BinaryBalEngine.INSTANCE;
     };
   }
 
   private static StateRootCommitter defaultCommitter(final TrieBranchType trieBranchType) {
     return switch (trieBranchType) {
       case PATRICIA -> new DefaultPatriciaStateRootCommitter();
-      case BINARY ->
-          throw new UnsupportedOperationException(
-              "The binary trie branch has no state root committer yet");
+      case BINARY -> new DefaultBinaryStateRootCommitter();
     };
+  }
+
+  /** Binary once the binary trie fork is active at the block, Patricia otherwise. */
+  private static TrieBranchType resolveTrieBranchType(
+      final ProtocolContext protocolContext, final BlockHeader blockHeader) {
+    if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider provider) {
+      return provider.resolveTrieBranchType(blockHeader);
+    }
+    return TrieBranchType.PATRICIA;
   }
 
   private Mode resolveMode(

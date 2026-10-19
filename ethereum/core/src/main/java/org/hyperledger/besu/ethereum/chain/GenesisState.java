@@ -31,11 +31,15 @@ import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Withdrawal;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.ScheduleBasedBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.net.URL;
 import java.util.List;
@@ -166,13 +170,14 @@ public final class GenesisState {
    * @param target WorldView to write genesis state to
    */
   public void writeStateTo(final MutableWorldState target) {
-    writeAccountsTo(target, genesisConfig.streamAllocations(), block.getHeader());
+    writeAccountsTo(target, genesisConfig.streamAllocations(), block.getHeader(), genesisConfig);
   }
 
   private static void writeAccountsTo(
       final MutableWorldState target,
       final Stream<GenesisAccount> genesisAccounts,
-      final BlockHeader rootHeader) {
+      final BlockHeader rootHeader,
+      final GenesisConfig genesisConfig) {
     final WorldUpdater updater = target.updater();
     genesisAccounts.forEach(
         genesisAccount -> {
@@ -183,15 +188,31 @@ public final class GenesisState {
           genesisAccount.storage().forEach(account::setStorageValue);
         });
     updater.commit();
-    target.persist(rootHeader);
+    // the binary committer persists a binary genesis, so its metadata is in the BINARY column
+    if (usesBinaryTrieCommitterAtGenesis(target, genesisConfig)) {
+      target.persist(rootHeader, new DefaultBinaryStateRootCommitter());
+    } else {
+      target.persist(rootHeader);
+    }
+  }
+
+  private static boolean usesBinaryTrieCommitterAtGenesis(
+      final MutableWorldState target, final GenesisConfig genesisConfig) {
+    return target instanceof BonsaiWorldState
+        && BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(genesisConfig);
   }
 
   private static Hash calculateGenesisStateRoot(
       final DataStorageConfiguration dataStorageConfiguration,
       final GenesisConfig genesisConfig,
       final BonsaiCodeCache codeCache) {
-    try (var worldState = createGenesisWorldState(dataStorageConfiguration, codeCache)) {
-      writeAccountsTo(worldState, genesisConfig.streamAllocations(), null);
+    final TrieBranchType trieBranchType =
+        BinaryTrieForkSupport.isBinaryTrieActiveAtGenesis(genesisConfig)
+            ? TrieBranchType.BINARY
+            : TrieBranchType.PATRICIA;
+    try (var worldState =
+        createGenesisWorldState(dataStorageConfiguration, codeCache, trieBranchType)) {
+      writeAccountsTo(worldState, genesisConfig.streamAllocations(), null, genesisConfig);
       return worldState.rootHash();
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -355,6 +376,14 @@ public final class GenesisState {
     final OptionalLong bogotaTimestamp = genesis.getConfigOptions().getBogotaTime();
     if (bogotaTimestamp.isPresent()) {
       return genesis.getTimestamp() >= bogotaTimestamp.getAsLong();
+    }
+    return isBinaryTrieAtGenesis(genesis);
+  }
+
+  private static boolean isBinaryTrieAtGenesis(final GenesisConfig genesis) {
+    final OptionalLong binaryTrieTimestamp = genesis.getConfigOptions().getBinaryTrieTime();
+    if (binaryTrieTimestamp.isPresent()) {
+      return genesis.getTimestamp() >= binaryTrieTimestamp.getAsLong();
     }
     return isFutureEipsTimeAtGenesis(genesis);
   }

@@ -24,8 +24,10 @@ import org.hyperledger.besu.plugin.services.metrics.OperationTimer;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
+import org.hyperledger.besu.plugin.services.storage.SortedFileWriter;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetrics;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
+import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBSortedFileWriter;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBWriteBatchTransaction;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbIterator;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDbSegmentIdentifier;
@@ -34,8 +36,10 @@ import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksD
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -64,10 +68,12 @@ import org.rocksdb.BloomFilter;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.CompactRangeOptions;
 import org.rocksdb.CompressionType;
 import org.rocksdb.ConfigOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Env;
+import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.LRUCache;
 import org.rocksdb.LiveFileMetaData;
 import org.rocksdb.Options;
@@ -79,6 +85,7 @@ import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
 import org.rocksdb.Status;
 import org.rocksdb.TransactionDBOptions;
+import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -701,6 +708,93 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   @Override
+  public SortedFileWriter createSortedFileWriter(
+      final SegmentIdentifier segmentIdentifier, final Path file) throws StorageException {
+    throwIfClosed();
+    final ColumnFamilyOptions columnFamilyOptions =
+        columnDescriptors.stream()
+            .filter(descriptor -> Arrays.equals(descriptor.getName(), segmentIdentifier.getId()))
+            .findFirst()
+            .map(ColumnFamilyDescriptor::getOptions)
+            .orElseThrow(
+                () ->
+                    new RuntimeException(
+                        "Column options not found for segment " + segmentIdentifier.getName()));
+    return new RocksDBSortedFileWriter(options, columnFamilyOptions, file);
+  }
+
+  @Override
+  public void ingestSortedFiles(final SegmentIdentifier segmentIdentifier, final List<Path> files)
+      throws StorageException {
+    throwIfClosed();
+    // Moved, not copied: RocksDB links each file into the database, or copies it across disks.
+    try (final IngestExternalFileOptions ingestOptions =
+        new IngestExternalFileOptions().setMoveFiles(true)) {
+      getDB()
+          .ingestExternalFile(
+              safeColumnHandle(segmentIdentifier),
+              files.stream().map(Path::toString).toList(),
+              ingestOptions);
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
+  @Override
+  public void deleteAllExcept(
+      final SegmentIdentifier segmentIdentifier, final Collection<byte[]> keysToKeep)
+      throws StorageException {
+    throwIfClosed();
+    final Optional<RocksDB> maybeBaseDB = getBaseDB();
+    if (maybeBaseDB.isEmpty()) {
+      SegmentedKeyValueStorage.super.deleteAllExcept(segmentIdentifier, keysToKeep);
+      return;
+    }
+    final RocksDB baseDB = maybeBaseDB.get();
+    final ColumnFamilyHandle handle = safeColumnHandle(segmentIdentifier);
+    final byte[] lastKey;
+    try (final RocksIterator iterator = baseDB.newIterator(handle)) {
+      iterator.seekToLast();
+      if (!iterator.isValid()) {
+        return;
+      }
+      lastKey = iterator.key();
+    }
+    // [begin, end) pairs between kept keys; the last ends on the last key, deleted on its own.
+    final List<byte[]> ranges = new ArrayList<>();
+    byte[] begin = new byte[0];
+    for (final byte[] kept : keysToKeep.stream().sorted(Arrays::compareUnsigned).toList()) {
+      if (Arrays.compareUnsigned(begin, kept) < 0) {
+        ranges.add(begin);
+        ranges.add(kept);
+      }
+      begin = Arrays.copyOf(kept, kept.length + 1);
+    }
+    final boolean deleteLastKey = Arrays.compareUnsigned(begin, lastKey) <= 0;
+    if (deleteLastKey) {
+      ranges.add(begin);
+      ranges.add(lastKey);
+    }
+    try (final WriteBatch batch = new WriteBatch();
+        final WriteOptions writeOptions = new WriteOptions();
+        final CompactRangeOptions compactOptions =
+            new CompactRangeOptions().setExclusiveManualCompaction(false)) {
+      for (int i = 0; i < ranges.size(); i += 2) {
+        batch.deleteRange(handle, ranges.get(i), ranges.get(i + 1));
+      }
+      if (deleteLastKey) {
+        batch.delete(handle, lastKey);
+      }
+      baseDB.write(writeOptions, batch);
+      // Files holding only deleted entries are dropped unread; compaction purges what is left.
+      baseDB.deleteFilesInRanges(handle, ranges, false);
+      baseDB.compactRange(handle, null, null, compactOptions);
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
+  @Override
   public void close() {
     if (closed.compareAndSet(false, true)) {
       txOptions.close();
@@ -740,6 +834,11 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
   }
 
   abstract RocksDB getDB();
+
+  /** The database under the transaction layer, which takes range deletions; empty if none. */
+  Optional<RocksDB> getBaseDB() {
+    return Optional.empty();
+  }
 
   record SegmentRecord(String name, byte[] id) {
     public String forDisplay() {

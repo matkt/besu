@@ -23,6 +23,7 @@ import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.rlp.RLPException;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.StorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.TrieAccountValue;
@@ -91,6 +92,15 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
 
   public BonsaiAccount(
       final BonsaiAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
+    this(toCopy, context, mutable, toCopy.storageRootStrategy.copy());
+  }
+
+  /** Copies an account under another storage root strategy, as the binary trie migration does. */
+  public BonsaiAccount(
+      final BonsaiAccount toCopy,
+      final BonsaiWorldView context,
+      final boolean mutable,
+      final StorageRootStrategy storageRootStrategy) {
     this.context = context;
     this.address = toCopy.address;
     this.addressHash = toCopy.addressHash;
@@ -99,7 +109,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
     this.codeHash = toCopy.codeHash;
     this.immutable = !mutable;
     this.codeCache = toCopy.codeCache;
-    this.storageRootStrategy = toCopy.storageRootStrategy.copy();
+    this.storageRootStrategy = storageRootStrategy;
     this.updatedStorage.putAll(toCopy.updatedStorage);
 
     if (toCopy.code == null && toCopy.codeHash.equals(Hash.EMPTY)) {
@@ -115,6 +125,14 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
       final BonsaiWorldView context,
       final UpdateTrackingAccount<BonsaiAccount> tracked,
       final CodeCache codeCache) {
+    this(context, tracked, new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH), codeCache);
+  }
+
+  public BonsaiAccount(
+      final BonsaiWorldView context,
+      final UpdateTrackingAccount<BonsaiAccount> tracked,
+      final StorageRootStrategy storageRootStrategy,
+      final CodeCache codeCache) {
     this.context = context;
     this.address = tracked.getAddress();
     this.addressHash = tracked.getAddressHash();
@@ -124,7 +142,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
     this.immutable = false;
     this.codeCache = codeCache;
     this.code = new Code(tracked.getCode());
-    this.storageRootStrategy = new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
+    this.storageRootStrategy = storageRootStrategy;
     this.updatedStorage.putAll(tracked.getUpdatedStorage());
   }
 
@@ -136,13 +154,20 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
       final CodeCache codeCache)
       throws RLPException {
     final RLPInput in = RLP.input(encoded);
-    in.enterList();
+    final int listSize = in.enterList();
+    // a binary trie account has no storage root field
+    final StorageRootStrategy storageRootStrategy =
+        switch (listSize) {
+          case 4 -> new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
+          case 3 -> BinaryStorageRootStrategy.INSTANCE;
+          default ->
+              throw new IllegalArgumentException(
+                  "Unexpected account field count: " + listSize + " (expected 3 or 4)");
+        };
 
     final long nonce = in.readLongScalar();
     final Wei balance = Wei.of(in.readUInt256Scalar());
-    final StorageRootStrategy storageRootStrategy =
-        new MptStorageRootStrategy(Hash.EMPTY_TRIE_HASH);
-    storageRootStrategy.readStorageRoot(in);
+    storageRootStrategy.readStorageRoot(in, listSize);
     final Hash codeHash = Hash.wrap(in.readBytes32());
 
     in.leaveList();
@@ -160,7 +185,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
   }
 
   /** Returns the {@link StorageRootStrategy} held by this account. */
-  StorageRootStrategy getStorageRootStrategy() {
+  public StorageRootStrategy getStorageRootStrategy() {
     return storageRootStrategy;
   }
 
@@ -349,6 +374,11 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
     return storageRootStrategy.getStorageRoot();
   }
 
+  @Override
+  public boolean hasStorageRoot() {
+    return storageRootStrategy.hasStorageRoot();
+  }
+
   public void setStorageRoot(final Hash storageRoot) {
     if (immutable) {
       throw new ModificationNotAllowedException();
@@ -366,7 +396,9 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
         + ", balance="
         + balance
         + ", storageRoot="
-        + storageRootStrategy.getStorageRoot()
+        + (storageRootStrategy.hasStorageRoot()
+            ? storageRootStrategy.getStorageRoot()
+            : "<binary: no storage root>")
         + ", codeHash="
         + codeHash
         + '}';

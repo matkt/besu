@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -22,6 +23,7 @@ import static org.mockito.Mockito.when;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.trie.common.BinaryStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.common.MptStorageRootStrategy;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -145,5 +147,29 @@ public class BonsaiAccountTest {
         codeHash,
         false,
         codeCache);
+  }
+
+  @Test
+  void binaryAccountDelegatesToBinaryStorageRootStrategy() {
+    final BonsaiAccount account =
+        new BonsaiAccount(
+            bonsaiWorldState,
+            Address.ZERO,
+            Hash.hash(Address.ZERO.getBytes()),
+            1L,
+            Wei.ONE,
+            BinaryStorageRootStrategy.INSTANCE,
+            Hash.EMPTY,
+            true,
+            new BonsaiCodeCache());
+
+    assertThat(account.hasStorageRoot()).isFalse();
+    // MPT-specific accessors throw for binary accounts (no storage root).
+    assertThatThrownBy(account::getStorageRoot)
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("not applicable for binary trie accounts");
+    // setStorageRoot throws for binary (the strategy owns the state and rejects MPT roots).
+    assertThatThrownBy(() -> account.setStorageRoot(Hash.EMPTY_TRIE_HASH))
+        .isInstanceOf(UnsupportedOperationException.class);
   }
 }

@@ -36,6 +36,7 @@ import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
+import org.hyperledger.besu.plugin.services.storage.SortedFileWriter;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageAdapter;
 
 import java.io.IOException;
@@ -53,10 +54,12 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.rocksdb.ColumnFamilyHandle;
 
 public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValueStorageTest {
 
@@ -496,6 +499,132 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
     assertThatThrownBy(
             () -> tx.put(TestSegment.FOO, bytesFromHexString("0001"), bytesFromHexString("0FFF")))
         .isInstanceOf(IllegalStateException.class);
+    store.close();
+  }
+
+  @Test
+  public void sortedFilesAreIngestedIntoTheLastLevelOfTheirSegment() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final Path first = folder.resolve("first.sst");
+    final Path second = folder.resolve("second.sst");
+    try (final SortedFileWriter writer = store.createSortedFileWriter(TestSegment.FOO, first)) {
+      writer.put(bytesFromHexString("0001"), bytesFromHexString("0AAA"));
+      writer.put(bytesFromHexString("0002"), bytesFromHexString("0BBB"));
+      writer.finish();
+    }
+    try (final SortedFileWriter writer = store.createSortedFileWriter(TestSegment.FOO, second)) {
+      writer.put(bytesFromHexString("0003"), bytesFromHexString("0CCC"));
+      writer.finish();
+    }
+
+    store.ingestSortedFiles(TestSegment.FOO, List.of(first, second));
+
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0001")))
+        .contains(bytesFromHexString("0AAA"));
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0002")))
+        .contains(bytesFromHexString("0BBB"));
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0003")))
+        .contains(bytesFromHexString("0CCC"));
+    assertThat(store.get(TestSegment.BAR, bytesFromHexString("0001"))).isEmpty();
+    assertThat(first).doesNotExist();
+    assertThat(second).doesNotExist();
+    // Disjoint files in an empty segment go to its last level as they are: nothing to compact.
+    final ColumnFamilyHandle foo = store.safeColumnHandle(TestSegment.FOO);
+    assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level0")).isEqualTo("0");
+    assertThat(store.getDB().getProperty(foo, "rocksdb.num-files-at-level6")).isEqualTo("2");
+    store.close();
+  }
+
+  @Test
+  public void sortedFileRejectsKeysOutOfOrder() throws Exception {
+    final SegmentedKeyValueStorage store = createSegmentedStore();
+    try (final SortedFileWriter writer =
+        store.createSortedFileWriter(TestSegment.FOO, folder.resolve("unsorted.sst"))) {
+      writer.put(bytesFromHexString("0002"), bytesFromHexString("0BBB"));
+      assertThatThrownBy(() -> writer.put(bytesFromHexString("0001"), bytesFromHexString("0AAA")))
+          .isInstanceOf(StorageException.class);
+    }
+    store.close();
+  }
+
+  @Test
+  public void deleteAllExceptKeepsOnlyTheGivenKeys() throws Exception {
+    final SegmentedKeyValueStorage store = createSegmentedStore();
+    final List<byte[]> kept = List.of(bytesFromHexString("66"), bytesFromHexString("77AA"));
+    final List<byte[]> deleted =
+        List.of(
+            new byte[0],
+            bytesFromHexString("00"),
+            bytesFromHexString("6600"),
+            bytesFromHexString("66FF"),
+            bytesFromHexString("77"),
+            bytesFromHexString("77AA00"),
+            bytesFromHexString("FFFFFFFF"));
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    Stream.concat(kept.stream(), deleted.stream())
+        .forEach(key -> tx.put(TestSegment.FOO, key, key));
+    tx.put(TestSegment.BAR, bytesFromHexString("00"), bytesFromHexString("0BBB"));
+    tx.commit();
+
+    store.deleteAllExcept(TestSegment.FOO, kept);
+
+    assertThat(store.streamKeys(TestSegment.FOO).map(Bytes::wrap))
+        .containsExactlyElementsOf(kept.stream().map(Bytes::wrap).toList());
+    assertThat(store.get(TestSegment.FOO, kept.get(1))).contains(kept.get(1));
+    assertThat(store.get(TestSegment.BAR, bytesFromHexString("00")))
+        .contains(bytesFromHexString("0BBB"));
+    store.close();
+  }
+
+  @Test
+  public void deleteAllExceptKeepsTheLastKeyWhenKept() throws Exception {
+    final SegmentedKeyValueStorage store = createSegmentedStore();
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    tx.put(TestSegment.FOO, bytesFromHexString("01"), bytesFromHexString("01"));
+    tx.put(TestSegment.FOO, bytesFromHexString("FF"), bytesFromHexString("FF"));
+    tx.commit();
+
+    store.deleteAllExcept(TestSegment.FOO, List.of(bytesFromHexString("FF")));
+
+    assertThat(store.streamKeys(TestSegment.FOO).map(Bytes::wrap))
+        .containsExactly(Bytes.fromHexString("FF"));
+    store.close();
+  }
+
+  @Test
+  public void deleteAllExceptOnAnEmptySegmentDoesNothing() throws Exception {
+    final SegmentedKeyValueStorage store = createSegmentedStore();
+
+    store.deleteAllExcept(TestSegment.FOO, List.of(bytesFromHexString("01")));
+
+    assertThat(store.streamKeys(TestSegment.FOO)).isEmpty();
+    store.close();
+  }
+
+  @Test
+  public void deleteAllExceptLastsAcrossARestart(@TempDir final Path dbPath) throws Exception {
+    final List<SegmentIdentifier> segments = List.of(TestSegment.DEFAULT, TestSegment.FOO);
+    final byte[] keptKey = bytesFromHexString("8000");
+    SegmentedKeyValueStorage store = createSegmentedStore(dbPath, segments, List.of());
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    for (int i = 0; i < 10_000; i++) {
+      final byte[] key = Bytes.ofUnsignedInt(i * 429_497L).toArrayUnsafe();
+      tx.put(TestSegment.FOO, key, key);
+    }
+    tx.put(TestSegment.FOO, keptKey, bytesFromHexString("0AAA"));
+    tx.commit();
+    // Reopened, so the entries sit in files rather than in the memtable.
+    store.close();
+    store = createSegmentedStore(dbPath, segments, List.of());
+
+    store.deleteAllExcept(TestSegment.FOO, List.of(keptKey));
+    store.close();
+    store = createSegmentedStore(dbPath, segments, List.of());
+
+    assertThat(store.streamKeys(TestSegment.FOO).map(Bytes::wrap))
+        .containsExactly(Bytes.wrap(keptKey));
+    assertThat(store.get(TestSegment.FOO, keptKey)).contains(bytesFromHexString("0AAA"));
     store.close();
   }
 
