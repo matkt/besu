@@ -35,7 +35,6 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.ServiceManager;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.SegmentedInMemoryKeyValueStorage;
@@ -134,23 +133,6 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         blockchain, EvmConfiguration.DEFAULT, null, codeCache, dataStorageConfiguration);
   }
 
-  /** An archive whose chain has the given Amsterdam and binary trie forks. */
-  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain,
-      final BonsaiCodeCache codeCache,
-      final DataStorageConfiguration dataStorageConfiguration,
-      final Optional<Long> amsterdamMilestone,
-      final Optional<Long> binaryTrieMilestone) {
-    return createBonsaiInMemoryWorldStateArchive(
-        blockchain,
-        EvmConfiguration.DEFAULT,
-        null,
-        codeCache,
-        dataStorageConfiguration,
-        amsterdamMilestone,
-        binaryTrieMilestone);
-  }
-
   private static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain,
       final EvmConfiguration evmConfiguration,
@@ -163,71 +145,16 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         serviceManager,
         codeCache,
         dataStorageConfiguration,
-        Optional.empty(),
         Optional.empty());
   }
 
+  /** An archive whose chain has the given binary trie fork. */
   public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain, final DataStorageFormat dataStorageFormat) {
-    return createBonsaiInMemoryWorldStateArchive(
-        blockchain, EvmConfiguration.DEFAULT, null, dataStorageFormat);
-  }
-
-  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain,
-      final EvmConfiguration evmConfiguration,
-      final ServiceManager serviceManager,
-      final DataStorageFormat dataStorageFormat) {
-    return createBonsaiInMemoryWorldStateArchive(
-        blockchain, evmConfiguration, serviceManager, dataStorageFormat, Optional.empty());
-  }
-
-  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain,
-      final EvmConfiguration evmConfiguration,
-      final ServiceManager serviceManager,
-      final DataStorageFormat dataStorageFormat,
-      final Optional<Long> amsterdamMilestone) {
-    return createBonsaiInMemoryWorldStateArchive(
-        blockchain,
-        evmConfiguration,
-        serviceManager,
-        dataStorageFormat,
-        amsterdamMilestone,
-        Optional.empty());
-  }
-
-  /** An archive whose chain has the given Amsterdam and binary trie forks. */
-  public static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
-      final Blockchain blockchain,
-      final EvmConfiguration evmConfiguration,
-      final ServiceManager serviceManager,
-      final DataStorageFormat dataStorageFormat,
-      final Optional<Long> amsterdamMilestone,
-      final Optional<Long> binaryTrieMilestone) {
-    final DataStorageConfiguration storageConfiguration =
-        switch (dataStorageFormat) {
-          case X_BONSAI_ARCHIVE -> DataStorageConfiguration.DEFAULT_BONSAI_ARCHIVE_CONFIG;
-          case BONSAI -> DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
-          case FOREST -> DataStorageConfiguration.DEFAULT_FOREST_CONFIG;
-        };
-    return createBonsaiInMemoryWorldStateArchive(
-        blockchain,
-        evmConfiguration,
-        serviceManager,
-        new BonsaiCodeCache(),
-        storageConfiguration,
-        amsterdamMilestone,
-        binaryTrieMilestone);
-  }
-
-  private static BonsaiWorldStateProvider createBonsaiInMemoryWorldStateArchive(
       final Blockchain blockchain,
       final EvmConfiguration evmConfiguration,
       final ServiceManager serviceManager,
       final BonsaiCodeCache codeCache,
       final DataStorageConfiguration dataStorageConfiguration,
-      final Optional<Long> amsterdamMilestone,
       final Optional<Long> binaryTrieMilestone) {
     final InMemoryKeyValueStorageProvider inMemoryKeyValueStorageProvider =
         new InMemoryKeyValueStorageProvider();
@@ -242,7 +169,7 @@ public class InMemoryKeyValueStorageProvider extends KeyValueStorageProvider {
         serviceManager,
         evmConfiguration,
         codeCache,
-        amsterdamMilestone,
+        Optional.empty(),
         binaryTrieMilestone);
   }
 

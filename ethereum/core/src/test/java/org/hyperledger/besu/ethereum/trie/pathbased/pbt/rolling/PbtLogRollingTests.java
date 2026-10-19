@@ -94,8 +94,8 @@ class PbtLogRollingTests {
             blockchain,
             EvmConfiguration.DEFAULT,
             null,
-            DataStorageFormat.BONSAI,
-            Optional.of(0L),
+            new BonsaiCodeCache(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG,
             Optional.of(0L));
     trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
@@ -106,8 +106,8 @@ class PbtLogRollingTests {
             blockchain,
             EvmConfiguration.DEFAULT,
             null,
-            DataStorageFormat.BONSAI,
-            Optional.of(0L),
+            new BonsaiCodeCache(),
+            DataStorageConfiguration.DEFAULT_BONSAI_CONFIG,
             Optional.of(0L));
   }
 

@@ -14,7 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.core;
 
-import static org.hyperledger.besu.datatypes.HardforkId.MainnetHardforkId.AMSTERDAM;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createBonsaiInMemoryWorldStateArchive;
 import static org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider.createInMemoryWorldStateArchive;
 
@@ -83,9 +82,10 @@ public class ExecutionContextTestFixture {
       this.stateArchive =
           createBonsaiInMemoryWorldStateArchive(
               blockchain,
+              EvmConfiguration.DEFAULT,
+              null,
               codeCache,
               dataStorageConfiguration,
-              protocolSchedule.milestoneFor(AMSTERDAM),
               BinaryTrieForkSupport.binaryTrieMilestone(genesisConfig.getConfigOptions()));
     else this.stateArchive = createInMemoryWorldStateArchive();
     this.protocolSchedule = protocolSchedule;
