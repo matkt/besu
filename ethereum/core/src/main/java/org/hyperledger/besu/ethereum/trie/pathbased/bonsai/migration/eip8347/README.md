@@ -389,7 +389,8 @@ merge: open up to 512 runs at once, always take the smallest head
 
 Each run is sorted, so the smallest record overall is at the head of some run. Memory is one record
 per open run. A full buffer is sorted in parallel and written on a background thread while the next
-one fills. With up to 512 runs per merge, a mainnet-sized sort merges in a single pass.
+one fills. A merge takes at most 512 runs: past that, runs are merged 512 at a time into one until
+512 are left, so a mainnet-sized sort (thousands of runs) makes extra passes.
 
 ### The rank
 

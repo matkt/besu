@@ -32,9 +32,14 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
+
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Runs EIP-8347 offline pipelines on Besu's {@code services:pipeline}.
@@ -47,6 +52,8 @@ import java.util.function.ToIntFunction;
  * {@link #LIST_WEIGHT} entries.
  */
 public final class Eip8347Pipelines {
+
+  private static final Logger LOG = LoggerFactory.getLogger(Eip8347Pipelines.class);
 
   /** Items buffered between two stages. */
   public static final int BUFFER_SIZE = 256;
@@ -142,6 +149,10 @@ public final class Eip8347Pipelines {
       throw rethrow(e.getCause());
     } finally {
       executor.shutdownNow();
+      // Stages stopped before the caller closes what they use.
+      if (!Uninterruptibles.awaitTerminationUninterruptibly(executor, 1, TimeUnit.MINUTES)) {
+        LOG.warn("EIP-8347 pipeline stages still running a minute after the pipeline ended");
+      }
     }
   }
 

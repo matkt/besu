@@ -288,6 +288,29 @@ class Eip8347DualCheckVerifierTest {
   }
 
   @Test
+  void verifyAndLoadReportsAnErrorInTheCodeCheck() throws Exception {
+    final Eip8347Fixture fixture =
+        Eip8347Fixture.builder().contract(address(0xc4), 1L, Wei.ONE, CODE, Map.of()).build();
+    final Artifacts artifacts = fixture.write(tmp, "load-error");
+    final Bytes referenceCount =
+        TrieNodeCodec.codeRefCountKey(Bytes32.wrap(Hash.hash(CODE).getBytes()));
+    // An Error, not an exception, on the code check's thread.
+    final NodeUpdater failing =
+        (location, hash, value) -> {
+          if (location.equals(referenceCount)) {
+            throw new LinkageError("reference count not stored");
+          }
+        };
+
+    assertThatThrownBy(
+            () ->
+                Eip8347DualCheckVerifier.verifyAndLoad(
+                    artifacts.snapshot(), artifacts.preimages(), fixture.mptRoot(), tmp, failing))
+        .isInstanceOf(LinkageError.class)
+        .hasMessage("reference count not stored");
+  }
+
+  @Test
   void verifyAndLoadRejectsAWrongAnchor() throws Exception {
     final Eip8347Fixture fixture =
         Eip8347Fixture.builder().contract(address(0xc3), 1L, Wei.ONE, CODE, Map.of()).build();

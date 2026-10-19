@@ -36,6 +36,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 
+import com.google.common.io.MoreFiles;
+import com.google.common.io.RecursiveDeleteOption;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,10 +63,7 @@ public final class Eip8347ExternalSorter implements Closeable {
   /** Default in-heap buffer per sorter before spilling a run. */
   public static final long DEFAULT_BUFFER_BYTES = 64L << 20;
 
-  /**
-   * Maximum runs merged at once (bounds open files and merge buffers: 512 × 64 KiB). High enough
-   * that a mainnet-sized sort merges in a single pass.
-   */
+  /** Runs merged per pass, at most: bounds open files and merge buffers (512 × 64 KiB). */
   public static final int MAX_FAN_IN = 512;
 
   /** Approximate heap cost of one buffered record beyond its payload. */
@@ -360,23 +359,15 @@ public final class Eip8347ExternalSorter implements Closeable {
     }
   }
 
-  /** Deletes {@code dir} and everything under it; missing or undeletable paths are ignored. */
+  /** Deletes {@code dir} and everything under it, if it exists; a failure is logged. */
   public static void deleteRecursively(final Path dir) {
     if (!Files.exists(dir)) {
       return;
     }
-    try (final var walk = Files.walk(dir)) {
-      walk.sorted(Comparator.reverseOrder())
-          .forEach(
-              p -> {
-                try {
-                  Files.deleteIfExists(p);
-                } catch (final IOException e) {
-                  LOG.debug("failed deleting spill path {}", p, e);
-                }
-              });
+    try {
+      MoreFiles.deleteRecursively(dir, RecursiveDeleteOption.ALLOW_INSECURE);
     } catch (final IOException e) {
-      LOG.debug("failed walking spill dir {}", dir, e);
+      LOG.warn("Failed to delete {}", dir, e);
     }
   }
 }

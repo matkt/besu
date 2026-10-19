@@ -249,8 +249,9 @@ public final class Eip8347DualCheckVerifier {
               () -> {
                 try {
                   codeHashes.complete(codeCheck.finish(nodes));
-                } catch (final IOException | RuntimeException e) {
-                  codeHashes.completeExceptionally(e);
+                } catch (final Throwable t) {
+                  // An Error too: the verifying thread waits for this future.
+                  codeHashes.completeExceptionally(t);
                 }
               },
               "eip8347-verify-code-check");
