@@ -86,5 +86,7 @@ class BalStateRootCommitterTest {
     verify(worldStateArchive).getWorldState(queryParams.capture());
     assertThat(queryParams.getValue().getBlockHash()).isEqualTo(parentHeader.getHash());
     assertThat(queryParams.getValue().getTimeStamp()).contains(BLOCK_TIMESTAMP);
+    // the binary engine does not use the BAL overlay
+    assertThat(queryParams.getValue().getBlockAccessListOverlay()).isEmpty();
   }
 }
