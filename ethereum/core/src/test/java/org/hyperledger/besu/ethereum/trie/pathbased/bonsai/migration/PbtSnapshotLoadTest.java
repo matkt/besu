@@ -535,7 +535,7 @@ class PbtSnapshotLoadTest {
         headers -> Map.of(),
         1,
         // Two threads, and sorts that spill every few records.
-        new PbtMigrator.Tuning(2, 128, Duration.ZERO, 1 << 10),
+        new PbtMigrator.Tuning(2, 128, Optional.of(Duration.ZERO), 1 << 10),
         retryDelay);
   }
 

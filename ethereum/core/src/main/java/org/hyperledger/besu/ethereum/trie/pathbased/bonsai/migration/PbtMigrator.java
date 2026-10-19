@@ -46,6 +46,7 @@ import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -61,11 +62,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Suppliers;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.slf4j.Logger;
@@ -94,6 +95,12 @@ public class PbtMigrator {
   /** Wait after a failed snapshot load (e.g. a full disk) before trying again. */
   static final Duration SNAPSHOT_RETRY_DELAY = Duration.ofMinutes(5);
 
+  /** Longest wait between two rolls when the pause follows the last roll's duration. */
+  private static final long MAX_ROLL_PAUSE_MS = 10_000L;
+
+  /** Longest wait after rolls that failed in a row. */
+  private static final long MAX_ROLL_RETRY_DELAY_MS = 60_000L;
+
   private final BonsaiWorldStateProvider provider;
   private final Blockchain blockchain;
   private final Optional<Long> binaryTrieMilestone;
@@ -112,6 +119,16 @@ public class PbtMigrator {
   /** Earliest time, in epoch millis, of the next snapshot load after a failed one. */
   private long nextSnapshotLoadMillis;
 
+  /** Rolls that failed in a row, and the earliest time of the next attempt after them. */
+  private int failedRolls;
+
+  private long nextRollMillis;
+
+  /** Last waiting state logged, so that a wait is logged once and not on every tick. */
+  private String lastWait = "";
+
+  private final LongSupplier clock;
+
   /**
    * In-memory copy of the binary column's cursor: the block whose state the column holds. {@code
    * null} until bootstrapped.
@@ -121,8 +138,7 @@ public class PbtMigrator {
   /** BALs fetched from peers ahead of the blocks that need them, consumed one block at a time. */
   private final Map<Hash, BlockAccessList> prefetchedBals = new HashMap<>();
 
-  /** Genesis allocations as a trie log, built once: the allocation stream can be read only once. */
-  private final Supplier<TrieLog> genesisTrieLog;
+  private final Supplier<Stream<GenesisAccount>> genesisAllocations;
 
   public PbtMigrator(
       final BonsaiWorldStateProvider provider,
@@ -159,6 +175,33 @@ public class PbtMigrator {
       final long pollIntervalMs,
       final Tuning tuning,
       final Duration snapshotRetryDelay) {
+    this(
+        provider,
+        blockchain,
+        binaryTrieMilestone,
+        scheduler,
+        genesisAllocations,
+        snapshotBootstrap,
+        balsFromPeers,
+        pollIntervalMs,
+        tuning,
+        snapshotRetryDelay,
+        System::currentTimeMillis);
+  }
+
+  /** Same, on {@code clock} (epoch millis). */
+  PbtMigrator(
+      final BonsaiWorldStateProvider provider,
+      final Blockchain blockchain,
+      final Optional<Long> binaryTrieMilestone,
+      final ScheduledExecutorService scheduler,
+      final Supplier<Stream<GenesisAccount>> genesisAllocations,
+      final Optional<SnapshotBootstrap> snapshotBootstrap,
+      final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
+      final long pollIntervalMs,
+      final Tuning tuning,
+      final Duration snapshotRetryDelay,
+      final LongSupplier clock) {
     this.provider = provider;
     this.blockchain = blockchain;
     this.binaryTrieMilestone = binaryTrieMilestone;
@@ -169,18 +212,11 @@ public class PbtMigrator {
     this.snapshotRetryDelay = snapshotRetryDelay;
     this.tuning = tuning;
     this.pool = newPool(tuning.threads());
-    this.genesisTrieLog =
-        Suppliers.memoize(
-            () ->
-                genesisAllocationsToTrieLogLayer(
-                    genesisAllocations.get(), blockchain.getBlockHeader(0L).orElseThrow()));
+    this.genesisAllocations = genesisAllocations;
+    this.clock = clock;
   }
 
   public void start() {
-    if (binaryTrieMilestone.isEmpty()) {
-      LOG.info("PBT migrator disabled: no binaryTrieTime fork configured");
-      return;
-    }
     final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
     // Once the fork has been crossed, the migrator is permanently retired — even if a reorg
     // brings the chain head back to a PMT-era block. FCU owns the binary column from then on.
@@ -225,22 +261,33 @@ public class PbtMigrator {
   }
 
   private void tick() {
+    if (clock.getAsLong() < nextRollMillis) {
+      return;
+    }
     try {
-      // Rolls back to back until caught up, each under its own hold of the binary-column lock, so
-      // the chain can claim the column between two rolls (at most blocksPerRoll blocks).
+      // Steps until caught up; each writes under the binary-column lock only, see writeColumn
       boolean progressed = true;
       while (started.get() && progressed) {
-        final Optional<Boolean> step =
-            provider.getBinaryColumnOwnership().runAsMigrator(this::step);
-        if (step.isEmpty()) {
+        if (provider.getBinaryColumnOwnership().isClaimedByChain()) {
           LOG.info("PBT migrator stopping: the chain owns the binary column");
+          prefetchedBals.clear();
           stop();
           return;
         }
-        progressed = step.get();
-        if (progressed && !tuning.rollPause().isZero()) {
-          // Outside the lock: block import has the cores and the disk to itself meanwhile.
-          pauseBetweenRolls(tuning.rollPause());
+        final long stepStart = clock.getAsLong();
+        progressed = step();
+        if (progressed) {
+          // block import has the cores and the disk to itself meanwhile
+          final Duration pause =
+              tuning
+                  .rollPause()
+                  .orElseGet(
+                      () ->
+                          Duration.ofMillis(
+                              Math.min(MAX_ROLL_PAUSE_MS, clock.getAsLong() - stepStart)));
+          if (!pause.isZero()) {
+            pauseBetweenRolls(pause);
+          }
         }
       }
     } catch (final InterruptedException e) {
@@ -265,11 +312,15 @@ public class PbtMigrator {
       final Hash baseHash = existing.get();
       final Optional<BlockHeader> base = blockchain.getBlockHeader(baseHash);
       if (base.isEmpty()) {
-        LOG.warn(
-            "PBT migrator waiting: binary column block {} not in the blockchain yet", baseHash);
+        logWait("PBT migrator waiting: binary column block " + baseHash + " not in the chain yet");
         return;
       }
       cursor = base.get();
+      // a crash after the snapshot cursor left the work dir behind
+      snapshotBootstrap
+          .map(SnapshotBootstrap::workDir)
+          .filter(Files::exists)
+          .ifPresent(Eip8347ExternalSorter::deleteRecursively);
       LOG.info(
           "PBT migrator resuming from previously-materialised base block {} ({})",
           cursor.getNumber(),
@@ -289,8 +340,10 @@ public class PbtMigrator {
       LOG.warn("PBT migrator cannot bootstrap: genesis block header not found");
       return;
     }
-    storage.clearBinaryTrie();
-    applyAndPersist(genesis.get(), List.of(), List.of(genesisTrieLog.get()));
+    if (!writeColumn(storage::clearBinaryTrie)
+        || !applyAndPersist(genesis.get(), List.of(), List.of(genesisTrieLog()))) {
+      return;
+    }
     // Only once genesis is durably in the column: a failed first write is retried from scratch.
     cursor = genesis.get();
     LOG.info("PBT migrator bootstrapped at genesis {}", cursor.getBlockHash());
@@ -305,13 +358,13 @@ public class PbtMigrator {
    * the load retried.
    */
   private void bootstrapFromSnapshot(final SnapshotBootstrap bootstrap) {
-    if (System.currentTimeMillis() < nextSnapshotLoadMillis) {
+    if (clock.getAsLong() < nextSnapshotLoadMillis) {
       return;
     }
     final Optional<BlockHeader> maybeAnchor =
         blockchain.getBlockHeader(bootstrap.anchorBlockHash());
     if (maybeAnchor.isEmpty()) {
-      LOG.info("PBT migrator waiting for snapshot anchor {}", bootstrap.anchorBlockHash());
+      logWait("PBT migrator waiting for snapshot anchor " + bootstrap.anchorBlockHash());
       return;
     }
     final BlockHeader anchor = maybeAnchor.get();
@@ -333,15 +386,32 @@ public class PbtMigrator {
             .filter(f -> f.getNumber() >= anchor.getNumber())
             .isPresent();
     if (!canonical || !finalized) {
-      LOG.info(
-          "PBT migrator waiting for snapshot anchor {} to be canonical and finalized",
-          anchor.getNumber());
+      logWait(
+          "PBT migrator waiting for snapshot anchor "
+              + anchor.getNumber()
+              + " to be canonical and finalized");
+      return;
+    }
+    if (!Files.isReadable(bootstrap.snapshotPath())
+        || !Files.isReadable(bootstrap.preimagesPath())) {
+      LOG.error(
+          "PBT snapshot {} or preimages {} unreadable, migrator stopped",
+          bootstrap.snapshotPath(),
+          bootstrap.preimagesPath());
+      stop();
+      return;
+    }
+    // a failed load, whatever failed, waits before the next one
+    nextSnapshotLoadMillis = clock.getAsLong() + snapshotRetryDelay.toMillis();
+    if (!hasRoomForLoad(bootstrap)) {
       return;
     }
 
     final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
     // No cursor yet: whatever the column and the work dir hold is a previous, interrupted attempt.
-    storage.clearBinaryTrie();
+    if (!writeColumn(storage::clearBinaryTrie)) {
+      return;
+    }
     Eip8347ExternalSorter.deleteRecursively(bootstrap.workDir());
     // The writer is closed, and its files deleted, before a catch below runs.
     try (final SnapshotColumnWriter writer =
@@ -361,7 +431,9 @@ public class PbtMigrator {
               writer,
               tuning.sortBufferBytes(),
               pool);
-      writer.finish(loaded.pbtRoot(), anchor.getBlockHash());
+      if (!writeColumn(() -> writer.finish(loaded.pbtRoot(), anchor.getBlockHash()))) {
+        return;
+      }
       cursor = anchor;
       LOG.info(
           "PBT migrator bootstrapped from snapshot at block {} (leaves={}, codes={}, root={})",
@@ -373,13 +445,15 @@ public class PbtMigrator {
       // Nothing reached the column: its files are only added once the snapshot is accepted.
       LOG.error("PBT snapshot rejected, migrator stopped: {}", e.getMessage());
       stop();
+    } catch (final UnsupportedOperationException e) {
+      LOG.error("PBT snapshot cannot be loaded into this storage, migrator stopped", e);
+      stop();
     } catch (final IOException | RuntimeException e) {
-      storage.clearBinaryTrie();
+      writeColumn(storage::clearBinaryTrie);
       if (!started.get()) {
         LOG.info("PBT snapshot load stopped with the node");
         return;
       }
-      nextSnapshotLoadMillis = System.currentTimeMillis() + snapshotRetryDelay.toMillis();
       LOG.error(
           "PBT snapshot bootstrap failed (will retry in {} min): {}",
           snapshotRetryDelay.toMinutes(),
@@ -413,6 +487,7 @@ public class PbtMigrator {
         cursor.getNumber(),
         cursor.getBlockHash());
     provider.getWorldStateKeyValueStorage().markPbtMigratorRetired();
+    prefetchedBals.clear();
     stop();
     return false;
   }
@@ -431,7 +506,10 @@ public class PbtMigrator {
             .filter(cursor.getBlockHash()::equals)
             .isPresent();
     BlockHeader step = target;
-    if (cursorCanonical && target.getNumber() - cursor.getNumber() > tuning.blocksPerRoll()) {
+    if (!cursorCanonical) {
+      // off the canonical chain: back to the common ancestor first, the next roll is capped
+      step = canonicalAncestor(cursor);
+    } else if (target.getNumber() - cursor.getNumber() > tuning.blocksPerRoll()) {
       step = blockchain.getBlockHeader(cursor.getNumber() + tuning.blocksPerRoll()).orElseThrow();
     }
     return rollOnce(step);
@@ -484,21 +562,89 @@ public class PbtMigrator {
         forwardTrieLogs.add(balTrieLog(reached, forward));
       }
 
-      applyAndPersist(reached, rollBacks, forwardTrieLogs);
+      if (!applyAndPersist(reached, rollBacks, forwardTrieLogs)) {
+        return false;
+      }
       cursor = reached;
+      failedRolls = 0;
       return true;
     } catch (final MissingRollData e) {
-      LOG.warn("PBT migrator cannot roll to block {} yet: {}", target.getNumber(), e.getMessage());
+      rollFailed("PBT migrator cannot roll to block " + target.getNumber() + " yet", e);
       return false;
     } catch (final RuntimeException e) {
-      LOG.atError()
-          .setMessage("PBT migrator failed while rolling to block {} ({}): {}")
-          .addArgument(target.getNumber())
-          .addArgument(target.getBlockHash())
-          .addArgument(e)
-          .log();
+      rollFailed(
+          "PBT migrator failed while rolling to block "
+              + target.getNumber()
+              + " ("
+              + target.getBlockHash()
+              + ")",
+          e);
       return false;
     }
+  }
+
+  // the first failure in a row is logged, the next ones wait longer each time and log at debug
+  private void rollFailed(final String message, final RuntimeException e) {
+    failedRolls++;
+    nextRollMillis =
+        clock.getAsLong() + Math.min(MAX_ROLL_RETRY_DELAY_MS, 1000L << Math.min(failedRolls, 6));
+    if (failedRolls == 1) {
+      LOG.warn("{}: {}", message, e.getMessage());
+    } else {
+      LOG.debug("{} ({} failures in a row)", message, failedRolls, e);
+    }
+  }
+
+  // a wait is logged once, then at debug while it lasts
+  private void logWait(final String message) {
+    if (message.equals(lastWait)) {
+      LOG.debug(message);
+    } else {
+      LOG.info(message);
+      lastWait = message;
+    }
+  }
+
+  /** The highest ancestor of {@code header} on the canonical chain. */
+  private BlockHeader canonicalAncestor(final BlockHeader header) {
+    BlockHeader current = header;
+    while (!blockchain
+        .getBlockHashByNumber(current.getNumber())
+        .filter(current.getBlockHash()::equals)
+        .isPresent()) {
+      current = parentOf(current);
+    }
+    return current;
+  }
+
+  // the load needs about 4 times the snapshot in its work dir, at its peak
+  private boolean hasRoomForLoad(final SnapshotBootstrap bootstrap) {
+    try {
+      final Path dir = bootstrap.workDir().toAbsolutePath().getParent();
+      final long needed = 4 * Files.size(bootstrap.snapshotPath());
+      final long usable = Files.getFileStore(dir).getUsableSpace();
+      if (usable < needed) {
+        LOG.error(
+            "PBT snapshot load needs {} bytes free under {}, {} left; retrying later",
+            needed,
+            dir,
+            usable);
+        return false;
+      }
+    } catch (final IOException e) {
+      LOG.debug("Free space for the PBT snapshot load unknown", e);
+    }
+    return true;
+  }
+
+  // a write of the migrator, refused once the chain has claimed the column, which stops it
+  private boolean writeColumn(final Runnable write) {
+    if (provider.getBinaryColumnOwnership().writeAsMigrator(write)) {
+      return true;
+    }
+    LOG.info("PBT migrator stopping: the chain owns the binary column");
+    stop();
+    return false;
   }
 
   private BlockHeader parentOf(final BlockHeader header) {
@@ -515,9 +661,24 @@ public class PbtMigrator {
 
   private Optional<TrieLog> trieLog(final BlockHeader header) {
     if (header.getNumber() == 0L) {
-      return Optional.of(genesisTrieLog.get());
+      return Optional.of(genesisTrieLog());
     }
-    return provider.getTrieLogManager().getTrieLogLayer(header.getBlockHash());
+    // main's trie log format keeps no slot key, which the binary trie keys slots by
+    return provider
+        .getTrieLogManager()
+        .getTrieLogLayer(header.getBlockHash())
+        .filter(PbtMigrator::hasSlotKeys);
+  }
+
+  private static boolean hasSlotKeys(final TrieLog trieLog) {
+    return trieLog.getStorageChanges().values().stream()
+        .flatMap(slots -> slots.keySet().stream())
+        .allMatch(slot -> slot.getSlotKey().isPresent());
+  }
+
+  private TrieLog genesisTrieLog() {
+    return genesisAllocationsToTrieLogLayer(
+        genesisAllocations.get(), blockchain.getBlockHeader(0L).orElseThrow());
   }
 
   /**
@@ -561,9 +722,10 @@ public class PbtMigrator {
 
   /**
    * Applies the rolls to one accumulator, computes the binary root and persists it together with
-   * the column cursor, never touching the flat DB.
+   * the column cursor, never touching the flat DB. Returns {@code false}, writing nothing, once the
+   * chain owns the column.
    */
-  private void applyAndPersist(
+  private boolean applyAndPersist(
       final BlockHeader blockHeader,
       final List<TrieLog> rollBacks,
       final List<TrieLog> rollForwards) {
@@ -573,31 +735,37 @@ public class PbtMigrator {
         (BonsaiWorldStateUpdateAccumulator) bonsaiWorldState.updater();
     final BonsaiWorldStateKeyValueStorage worldStateStorage =
         bonsaiWorldState.getWorldStateStorage();
+    final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
+        new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
+    final StateRootComputation computation;
     try {
       rollBacks.forEach(accumulator::rollBack);
       rollForwards.forEach(accumulator::rollForward);
-
-      final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
-          new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
-      final StateRootComputation computation =
+      computation =
           new DefaultBinaryStateRootCommitter(pool)
               .compute(bonsaiWorldState, blockHeader, accumulator);
       computation.applyTo(stateUpdater);
       putCursor(
           stateUpdater, Bytes32.wrap(computation.root().getBytes()), blockHeader.getBlockHash());
-      stateUpdater.commit();
-
-      LOG.atInfo()
-          .setMessage("PBT migrator rolled to block {} ({}); root from {} to {}")
-          .addArgument(blockHeader.getNumber())
-          .addArgument(blockHeader.getBlockHash().toShortLogString())
-          .addArgument(previousRoot.toShortLogString())
-          .addArgument(computation.root().toShortLogString())
-          .log();
     } catch (final RuntimeException e) {
+      stateUpdater.rollback();
       accumulator.revert();
       throw e;
     }
+    // computed without the lock: the chain waits for the commit at most
+    if (!writeColumn(stateUpdater::commit)) {
+      stateUpdater.rollback();
+      return false;
+    }
+    // following the head, one block at a time, is logged at debug
+    (rollBacks.size() + rollForwards.size() > 1 ? LOG.atInfo() : LOG.atDebug())
+        .setMessage("PBT migrator rolled to block {} ({}); root from {} to {}")
+        .addArgument(blockHeader.getNumber())
+        .addArgument(blockHeader.getBlockHash().toShortLogString())
+        .addArgument(previousRoot.toShortLogString())
+        .addArgument(computation.root().toShortLogString())
+        .log();
+    return true;
   }
 
   /**
@@ -697,33 +865,48 @@ public class PbtMigrator {
    *
    * @param threads threads of the migrator's pool, for the snapshot load and the binary roots
    * @param blocksPerRoll most blocks applied in one roll
-   * @param rollPause wait after each migration step that moved the column
+   * @param rollPause wait after each migration step that moved the column; empty to wait as long as
+   *     the step took
    * @param sortBufferBytes in-heap buffer of each external sort of the snapshot load
    */
   @SuppressWarnings("MethodInputParametersMustBeFinal") // compact record constructor
-  public record Tuning(int threads, int blocksPerRoll, Duration rollPause, long sortBufferBytes) {
+  public record Tuning(
+      int threads, int blocksPerRoll, Optional<Duration> rollPause, long sortBufferBytes) {
 
-    /** Half the cores, 128 blocks per roll, no pause and 64 MiB sort buffers. */
+    /** Most blocks per roll: the trie logs a node keeps by default. */
+    public static final int MAX_BLOCKS_PER_ROLL = 512;
+
+    /** Largest buffer of an external sort. */
+    public static final long MAX_SORT_BUFFER_BYTES = 1L << 30;
+
+    /** Half the cores, 128 blocks per roll, a pause as long as the step and 64 MiB sort buffers. */
     public static final Tuning DEFAULT =
         new Tuning(
             Math.max(1, Runtime.getRuntime().availableProcessors() / 2),
             DEFAULT_BLOCKS_PER_ROLL,
-            Duration.ZERO,
+            Optional.empty(),
             Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES);
 
     public Tuning {
-      checkArgument(threads > 0, "PBT migration threads must be positive, got %s", threads);
+      final int cores = Runtime.getRuntime().availableProcessors();
       checkArgument(
-          blocksPerRoll > 0,
-          "PBT migration blocks per roll must be positive, got %s",
+          threads > 0 && threads <= cores,
+          "PBT migration threads must be between 1 and %s, got %s",
+          cores,
+          threads);
+      checkArgument(
+          blocksPerRoll > 0 && blocksPerRoll <= MAX_BLOCKS_PER_ROLL,
+          "PBT migration blocks per roll must be between 1 and %s, got %s",
+          MAX_BLOCKS_PER_ROLL,
           blocksPerRoll);
       checkArgument(
-          !rollPause.isNegative(),
+          rollPause.map(pause -> !pause.isNegative()).orElse(true),
           "PBT migration roll pause must not be negative, got %s",
           rollPause);
       checkArgument(
-          sortBufferBytes > 0,
-          "PBT migration sort buffer must be positive, got %s bytes",
+          sortBufferBytes > 0 && sortBufferBytes <= MAX_SORT_BUFFER_BYTES,
+          "PBT migration sort buffer must be between 1 byte and %s bytes, got %s bytes",
+          MAX_SORT_BUFFER_BYTES,
           sortBufferBytes);
     }
   }

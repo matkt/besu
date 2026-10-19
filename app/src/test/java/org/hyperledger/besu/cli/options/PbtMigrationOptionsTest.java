@@ -22,6 +22,7 @@ import org.hyperledger.besu.cli.CommandTestAbstract;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,7 +43,7 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
             new PbtMigrator.Tuning(
                 Math.max(1, Runtime.getRuntime().availableProcessors() / 2),
                 128,
-                Duration.ZERO,
+                Optional.empty(),
                 64L << 20));
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
   }
@@ -51,7 +52,7 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
   public void tuningOptionsReachTheMigrator() {
     parseCommand(
         "--Xpbt-migration-threads",
-        "3",
+        "1",
         "--Xpbt-migration-blocks-per-roll",
         "16",
         "--Xpbt-migration-roll-pause",
@@ -59,7 +60,8 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
         "--Xpbt-migration-sort-buffer",
         "8");
 
-    assertThat(tuning()).isEqualTo(new PbtMigrator.Tuning(3, 16, Duration.ofMillis(250), 8L << 20));
+    assertThat(tuning())
+        .isEqualTo(new PbtMigrator.Tuning(1, 16, Optional.of(Duration.ofMillis(250)), 8L << 20));
     assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
   }
 
@@ -69,7 +71,16 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
 
     Mockito.verifyNoInteractions(mockRunnerBuilder);
     assertThat(commandErrorOutput.toString(UTF_8))
-        .contains("PBT migration threads must be positive, got 0");
+        .contains("PBT migration threads must be between 1 and");
+  }
+
+  @Test
+  public void rollsLongerThanTheKeptTrieLogsAreRejected() {
+    parseCommand("--Xpbt-migration-blocks-per-roll", "513");
+
+    Mockito.verifyNoInteractions(mockRunnerBuilder);
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("PBT migration blocks per roll must be between 1 and 512, got 513");
   }
 
   @Test

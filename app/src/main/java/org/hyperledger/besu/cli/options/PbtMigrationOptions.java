@@ -73,8 +73,8 @@ public class PbtMigrationOptions {
       paramLabel = "<MS>",
       description =
           "Milliseconds the PBT migrator waits between two rolls while it catches up "
-              + "(default: ${DEFAULT-VALUE}).")
-  long rollPauseMillis = PbtMigrator.Tuning.DEFAULT.rollPause().toMillis();
+              + "(default: as long as the last roll took).")
+  Long rollPauseMillis = null;
 
   @CommandLine.Option(
       names = {"--Xpbt-migration-sort-buffer"},
@@ -92,17 +92,8 @@ public class PbtMigrationOptions {
    * @throws IllegalArgumentException when only some of the options are set
    */
   public Optional<PbtMigrator.SnapshotBootstrap> toDomainObject(final Path dataDir) {
-    final int set =
-        (snapshotFile != null ? 1 : 0)
-            + (preimagesFile != null ? 1 : 0)
-            + (anchorBlockHash != null ? 1 : 0);
-    if (set == 0) {
+    if (!isSnapshotSet()) {
       return Optional.empty();
-    }
-    if (set != 3) {
-      throw new IllegalArgumentException(
-          "--Xpbt-snapshot-file, --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash "
-              + "must be set together");
     }
     return Optional.of(
         new PbtMigrator.SnapshotBootstrap(
@@ -120,6 +111,36 @@ public class PbtMigrationOptions {
    */
   public PbtMigrator.Tuning toTuning() {
     return new PbtMigrator.Tuning(
-        threads, blocksPerRoll, Duration.ofMillis(rollPauseMillis), (long) sortBufferMib << 20);
+        threads,
+        blocksPerRoll,
+        Optional.ofNullable(rollPauseMillis).map(Duration::ofMillis),
+        (long) sortBufferMib << 20);
+  }
+
+  /**
+   * Checks the options.
+   *
+   * @param commandLine the command line, to report an invalid option
+   */
+  public void validate(final CommandLine commandLine) {
+    try {
+      isSnapshotSet();
+      toTuning();
+    } catch (final IllegalArgumentException e) {
+      throw new CommandLine.ParameterException(commandLine, e.getMessage());
+    }
+  }
+
+  private boolean isSnapshotSet() {
+    final int set =
+        (snapshotFile != null ? 1 : 0)
+            + (preimagesFile != null ? 1 : 0)
+            + (anchorBlockHash != null ? 1 : 0);
+    if (set != 0 && set != 3) {
+      throw new IllegalArgumentException(
+          "--Xpbt-snapshot-file, --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash "
+              + "must be set together");
+    }
+    return set == 3;
   }
 }

@@ -16,9 +16,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 
-import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.BooleanSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,8 +24,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Single-writer handoff of the binary-trie column. Before the PBT fork the background {@link
  * PbtMigrator} writes it; from the first time the chain itself rolls or reads it in {@code BINARY}
- * mode (the fork transition), the chain owns it for good. The lock makes the claim wait for an
- * in-flight migration step, so the two never write the column at the same time.
+ * mode (the fork transition), the chain owns it for good. The lock makes the claim wait for a write
+ * of the migrator in flight, so the two never write the column at the same time.
  */
 public final class PbtColumnOwnership {
 
@@ -41,29 +39,37 @@ public final class PbtColumnOwnership {
     this.storage = storage;
   }
 
+  /** {@code true} once the chain has claimed the column, for good. */
+  public boolean isClaimedByChain() {
+    return ownedByChain;
+  }
+
   /**
-   * Runs one migration step while the migrator still owns the column.
+   * Runs one write of the migrator while it still owns the column; the migrator computes it without
+   * the lock, so the chain waits for a write at most.
    *
-   * @return the step's result, or empty, without running it, once the chain has claimed the column
+   * @return {@code false}, without running it, once the chain has claimed the column
    */
-  public Optional<Boolean> runAsMigrator(final BooleanSupplier migrationStep) {
+  public boolean writeAsMigrator(final Runnable write) {
     lock.lock();
     try {
-      return ownedByChain ? Optional.empty() : Optional.of(migrationStep.getAsBoolean());
+      if (ownedByChain) {
+        return false;
+      }
+      write.run();
+      return true;
     } finally {
       lock.unlock();
     }
   }
 
-  /** Hands the column to the chain, for good; waits for an in-flight migration step. */
+  /** Hands the column to the chain, for good; waits for a write of the migrator in flight. */
   public void claimForChain() {
     if (ownedByChain) {
       return;
     }
     if (!lock.tryLock()) {
-      // The PBT is not ready yet (e.g. a snapshot still being verified and loaded): the chain
-      // cannot use the binary column before that step ends, so it waits for it.
-      LOG.info("Waiting for the PBT migrator to finish its current step before using the PBT");
+      LOG.info("Waiting for the PBT migrator to finish its current write before using the PBT");
       lock.lock();
     }
     try {

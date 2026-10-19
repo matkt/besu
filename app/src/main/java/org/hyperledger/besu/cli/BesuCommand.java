@@ -1595,6 +1595,7 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
     validateAndResolveCheckpointRelatedConfig();
     validateTransactionPoolOptions();
     validateDataStorageOptions();
+    pbtMigrationOptions.validate(commandLine);
     validateGraphQlOptions();
     validatePluginOptions();
     validateUnstableNetworkingOptions();

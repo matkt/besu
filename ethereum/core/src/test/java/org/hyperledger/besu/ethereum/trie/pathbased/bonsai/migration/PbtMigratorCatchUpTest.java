@@ -55,6 +55,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -83,6 +84,9 @@ class PbtMigratorCatchUpTest {
 
   /** The block the binary column holds at each pause. */
   private final List<Long> pausedAt = new ArrayList<>();
+
+  private final List<Duration> pauses = new ArrayList<>();
+  private Runnable onPause = () -> {};
 
   private SegmentedKeyValueStorage database;
   private BonsaiWorldStateKeyValueStorage storage;
@@ -128,7 +132,7 @@ class PbtMigratorCatchUpTest {
 
   @Test
   void catchUpRollsAtMostBlocksPerRollAndPausesAfterEachStep() {
-    tick(2, Duration.ofSeconds(1));
+    tick(2, Optional.of(Duration.ofSeconds(1)));
 
     // Genesis, then rolls of two blocks at most, each followed by a pause.
     assertThat(pausedAt).containsExactly(0L, 2L, 4L, 5L);
@@ -137,7 +141,7 @@ class PbtMigratorCatchUpTest {
 
   @Test
   void noPauseWhenThePauseIsZero() {
-    tick(PbtMigrator.Tuning.DEFAULT.blocksPerRoll(), Duration.ZERO);
+    tick(PbtMigrator.Tuning.DEFAULT.blocksPerRoll(), Optional.of(Duration.ZERO));
 
     assertThat(pausedAt).isEmpty();
     assertThat(cursor()).isEqualTo(BLOCKS);
@@ -148,15 +152,49 @@ class PbtMigratorCatchUpTest {
   void everyStepCommitsAtLowPriority() {
     clearInvocations(database);
 
-    tick(2, Duration.ZERO);
+    tick(2, Optional.of(Duration.ZERO));
 
     // Genesis and three rolls.
     assertThat(cursor()).isEqualTo(BLOCKS);
     verify(database, times(4)).startLowPriorityTransaction();
   }
 
-  /** Runs one tick of a migrator with no cursor yet, recording its pauses instead of sleeping. */
-  private void tick(final int blocksPerRoll, final Duration rollPause) {
+  @Test
+  void pausesAsLongAsTheLastStepTookByDefault() {
+    tick(2, Optional.empty(), Duration.ofSeconds(3));
+
+    assertThat(pauses).hasSize(4).containsOnly(Duration.ofSeconds(3));
+  }
+
+  @Test
+  void capsTheDefaultPauseAtTenSeconds() {
+    tick(2, Optional.empty(), Duration.ofMinutes(1));
+
+    assertThat(pauses).hasSize(4).containsOnly(Duration.ofSeconds(10));
+  }
+
+  @Test
+  void stopsOnceTheChainClaimsTheBinaryColumn() {
+    onPause = () -> provider.getBinaryColumnOwnership().claimForChain();
+
+    tick(2, Optional.of(Duration.ofSeconds(1)));
+
+    // Genesis only: the chain claims the column during the pause after it.
+    assertThat(pausedAt).containsExactly(0L);
+    assertThat(cursor()).isZero();
+  }
+
+  private void tick(final int blocksPerRoll, final Optional<Duration> rollPause) {
+    tick(blocksPerRoll, rollPause, Duration.ZERO);
+  }
+
+  /**
+   * Runs one tick of a migrator with no cursor yet, recording its pauses instead of sleeping; its
+   * clock moves by {@code stepTime} at each read, so each step takes that long.
+   */
+  private void tick(
+      final int blocksPerRoll, final Optional<Duration> rollPause, final Duration stepTime) {
+    final AtomicLong now = new AtomicLong();
     migrator =
         new PbtMigrator(
             provider,
@@ -167,11 +205,14 @@ class PbtMigratorCatchUpTest {
             Optional.empty(),
             headers -> Map.of(),
             1,
-            new PbtMigrator.Tuning(1, blocksPerRoll, rollPause, 1 << 20)) {
+            new PbtMigrator.Tuning(1, blocksPerRoll, rollPause, 1 << 20),
+            Duration.ZERO,
+            () -> now.addAndGet(stepTime.toMillis())) {
           @Override
           void pauseBetweenRolls(final Duration pause) {
-            assertThat(pause).isEqualTo(rollPause);
+            pauses.add(pause);
             pausedAt.add(cursor());
+            onPause.run();
           }
         };
     migrator.start();
