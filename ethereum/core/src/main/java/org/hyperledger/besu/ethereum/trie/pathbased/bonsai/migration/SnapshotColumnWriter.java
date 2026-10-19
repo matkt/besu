@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
@@ -65,8 +66,11 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   /** Files added per ingestion, which stops every write to the database while it runs. */
   static final int DEFAULT_FILES_PER_INGESTION = 16;
 
-  /** Nodes handed to the sorting thread at a time. */
+  /** Nodes handed to the sorting thread at a time, at most. */
   private static final int NODES_PER_BATCH = 100_000;
+
+  /** Heap of the nodes handed to the sorting thread at a time, at most (a full stem is ~8.7 KB). */
+  private static final long BATCH_BYTES = 8L << 20;
 
   /** Batches, then halves of the window, queued for the next thread: at most this many. */
   private static final int QUEUED = 2;
@@ -86,8 +90,10 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   private final ExecutorService fileWriter = singleThread("pbt-column-files");
   private final Semaphore batchesQueued = new Semaphore(QUEUED);
   private final Semaphore halvesQueued = new Semaphore(QUEUED);
-  private final AtomicReference<RuntimeException> failure = new AtomicReference<>();
+  private final AtomicReference<Throwable> failure = new AtomicReference<>();
   private List<Node> batch = new ArrayList<>(NODES_PER_BATCH);
+  private long batchBytes;
+  private long stored;
 
   // Sorting thread only.
   private final TreeMap<byte[], byte[]> window = new TreeMap<>(Arrays::compareUnsigned);
@@ -100,6 +106,7 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   private final List<Path> files = new ArrayList<>();
   private SortedFileWriter file;
   private long fileSize;
+  private long written;
 
   /**
    * @param worldStateStorage storage of the binary-trie column
@@ -135,10 +142,14 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
     if (value == null) {
       throw new IllegalStateException("a snapshot load removes no node");
     }
-    batch.add(new Node(location.toArrayUnsafe(), value.toArrayUnsafe()));
-    if (batch.size() >= NODES_PER_BATCH) {
+    final Node node = new Node(location.toArrayUnsafe(), value.toArrayUnsafe());
+    batch.add(node);
+    batchBytes += node.heapSize();
+    stored++;
+    if (batch.size() >= NODES_PER_BATCH || batchBytes >= BATCH_BYTES) {
       sort(batch);
       batch = new ArrayList<>(NODES_PER_BATCH);
+      batchBytes = 0;
     }
   }
 
@@ -159,8 +170,18 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
     awaitQueued(batchesQueued);
     awaitQueued(halvesQueued);
     throwIfFailed();
+    if (written + late.size() != stored) {
+      throw new IllegalStateException(
+          String.format(
+              "PBT column writer lost nodes: %d stored, %d written",
+              stored, written + late.size()));
+    }
     // Disjoint and ascending, so each batch also lands at the column's last level.
     for (final List<Path> ingestion : Lists.partition(files, filesPerIngestion)) {
+      // The node is closing: the caller empties the column, no cursor was written.
+      if (Thread.currentThread().isInterrupted()) {
+        throw new CancellationException("PBT column load interrupted");
+      }
       worldStateStorage
           .getComposedWorldStateStorage()
           .ingestSortedFiles(BINARY_TRIE_BRANCH_STORAGE, ingestion);
@@ -248,6 +269,7 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
       }
       file.put(node.key(), node.value());
       fileSize += node.key().length + node.value().length;
+      written++;
       if (fileSize >= fileBytes) {
         finishFile();
       }
@@ -275,8 +297,8 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
             if (failure.get() == null) {
               task.run();
             }
-          } catch (final RuntimeException e) {
-            failure.compareAndSet(null, e);
+          } catch (final Throwable t) {
+            failure.compareAndSet(null, t);
           } finally {
             queued.release();
           }
@@ -289,9 +311,12 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
   }
 
   private void throwIfFailed() {
-    final RuntimeException e = failure.get();
-    if (e != null) {
+    final Throwable t = failure.get();
+    if (t instanceof RuntimeException e) {
       throw e;
+    }
+    if (t != null) {
+      throw new IllegalStateException("PBT column writer failed", t);
     }
   }
 

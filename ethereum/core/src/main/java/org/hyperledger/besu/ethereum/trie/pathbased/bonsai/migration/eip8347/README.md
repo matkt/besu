@@ -478,7 +478,7 @@ Memory stays bounded whatever the state size:
 | Between pipeline stages | 4 × threads lists of about 1024 entries (accounts, slots, stems) |
 | Snapshot reader / writer | one record |
 | Tries | their right edge only |
-| Column writer | about 100 MB of heap: the 32 MiB window, two of its halves and up to three batches of 100,000 nodes waiting |
+| Column writer | about 90 MiB of heap: the 32 MiB window and two 16 MiB halves of it being written, up to three batches of at most 8 MiB or 100,000 nodes, and the nodes written last (a few MB; the load fails past 64 MiB) |
 | Check 2 | one account per unit, or a range of keys (a few thousand) |
 | Code check | one code per thread, ≤ 1 MiB |
 

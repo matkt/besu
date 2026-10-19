@@ -25,6 +25,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -67,9 +68,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -81,6 +79,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 /** The snapshot load into RocksDB through sorted files, alone and through the migrator. */
 class PbtSnapshotLoadTest {
@@ -262,41 +261,72 @@ class PbtSnapshotLoadTest {
   }
 
   @Test
-  void closingTheNodeWaitsForALoadInProgress() throws Exception {
+  void errorWritingTheFilesFailsTheLoadBeforeAnythingIsAdded() throws Exception {
     final Eip8347Fixture fixture = fixture();
     final Artifacts artifacts = fixture.write(tmp, "state");
     final SegmentedKeyValueStorage database = spy(rocksDb("db"));
     final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(database);
-    // The load stops at its first file until the node starts closing.
-    final CountDownLatch writing = new CountDownLatch(1);
-    final CountDownLatch closing = new CountDownLatch(1);
-    doAnswer(
-            invocation -> {
-              writing.countDown();
-              closing.await();
-              return invocation.callRealMethod();
-            })
+    // An Error, not a RuntimeException, on the file thread: the nodes it held must not be lost.
+    doThrow(new LinkageError("file writer failed"))
         .when(database)
         .createSortedFileWriter(any(), any());
-    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    final PbtMigrator migrator =
-        newMigrator(storage, artifacts, fixture.mptRoot(), scheduler, Duration.ZERO);
-    migrator.start();
-    assertThat(writing.await(1, TimeUnit.MINUTES)).isTrue();
 
-    final CompletableFuture<Void> closed = CompletableFuture.runAsync(migrator::close);
-    while (!scheduler.isShutdown()) {
-      Thread.sleep(10);
-    }
-    closing.countDown();
-    closed.get(1, TimeUnit.MINUTES);
+    final Migrator migrator = migrator(storage, artifacts, fixture.mptRoot());
+    migrator.tick();
 
-    // close() returned once the load was over, with the database still open.
-    assertThat(scheduler.isTerminated()).isTrue();
-    assertThat(database.isClosed()).isFalse();
-    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY))
-        .contains(anchorHeader(fixture.mptRoot()).getBlockHash());
+    verify(database, never()).ingestSortedFiles(any(), any());
+    verify(migrator.scheduler(), never()).shutdown();
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isEmpty();
+    assertThat(column(database)).isEmpty();
     assertNoFileLeft();
+  }
+
+  @Test
+  void closingTheNodeStopsALoadInProgress() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final SegmentedKeyValueStorage database = spy(rocksDb("db"));
+    final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(database);
+    final Migrator migrator = migrator(storage, artifacts, fixture.mptRoot());
+    final ScheduledExecutorService scheduler = migrator.scheduler();
+    // shutdownNow interrupts the tick, which runs on this thread here.
+    final Thread tickThread = Thread.currentThread();
+    doAnswer(
+            invocation -> {
+              tickThread.interrupt();
+              return List.of();
+            })
+        .when(scheduler)
+        .shutdownNow();
+    when(scheduler.awaitTermination(anyLong(), any())).thenReturn(true);
+    // The node starts closing while the load writes its first file.
+    doAnswer(
+            invocation -> {
+              migrator.migrator().close();
+              return invocation.callRealMethod();
+            })
+        .doCallRealMethod()
+        .when(database)
+        .createSortedFileWriter(any(), any());
+
+    migrator.tick();
+
+    // Still interrupted, for the scheduler's thread to stop.
+    assertThat(Thread.interrupted()).isTrue();
+    final InOrder closing = inOrder(scheduler);
+    closing.verify(scheduler).shutdownNow();
+    closing.verify(scheduler).awaitTermination(anyLong(), any());
+    // Stopped with the node: nothing added, no cursor, and the database still usable.
+    verify(database, never()).ingestSortedFiles(any(), any());
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isEmpty();
+    assertThat(column(database)).isEmpty();
+    assertNoFileLeft();
+    assertThat(database.isClosed()).isFalse();
+    final SegmentedKeyValueStorageTransaction transaction = database.startTransaction();
+    transaction.put(BINARY_TRIE_BRANCH_STORAGE, new byte[] {1}, new byte[] {2});
+    transaction.commit();
+    assertThat(database.get(BINARY_TRIE_BRANCH_STORAGE, new byte[] {1}).map(Bytes::wrap))
+        .contains(Bytes.of(2));
   }
 
   @Test
