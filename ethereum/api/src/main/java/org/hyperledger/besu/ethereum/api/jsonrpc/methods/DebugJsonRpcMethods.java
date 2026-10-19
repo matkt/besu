@@ -54,9 +54,11 @@ import org.hyperledger.besu.ethereum.core.Synchronizer;
 import org.hyperledger.besu.ethereum.eth.transactions.TransactionPool;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.transaction.TransactionSimulator;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.metrics.ObservableMetricsSystem;
 
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 
 public class DebugJsonRpcMethods extends ApiGroupJsonRpcMethods {
@@ -104,40 +106,53 @@ public class DebugJsonRpcMethods extends ApiGroupJsonRpcMethods {
     final BlockReplay blockReplay =
         new BlockReplay(protocolSchedule, protocolContext, blockchainQueries.getBlockchain());
 
-    return mapOf(
-        new DebugTraceTransaction(
-            blockchainQueries,
-            new TransactionTracer(blockReplay),
-            protocolSchedule,
-            apiConfiguration),
-        new DebugAccountRange(blockchainQueries),
-        new DebugStorageRangeAt(blockchainQueries, blockReplay),
-        new DebugMetrics(metricsSystem),
-        new DebugResyncWorldstate(protocolContext, synchronizer),
-        new DebugTraceBlock(protocolSchedule, blockchainQueries, apiConfiguration),
-        new DebugSetHead(blockchainQueries, protocolContext),
-        new DebugReplayBlock(blockchainQueries, protocolContext, protocolSchedule),
-        new DebugTraceBlockByNumber(protocolSchedule, blockchainQueries, apiConfiguration),
-        new DebugTraceBlockByHash(protocolSchedule, blockchainQueries, apiConfiguration),
-        new DebugBatchSendRawTransaction(transactionPool),
-        new DebugGetBadBlocks(protocolContext, blockResult),
-        new DebugStandardTraceBlockToFile(
-            () -> new TransactionTracer(blockReplay), blockchainQueries, dataDir),
-        new DebugStandardTraceBadBlockToFile(
-            () -> new TransactionTracer(blockReplay), blockchainQueries, protocolContext, dataDir),
-        new DebugAccountAt(blockchainQueries, () -> new BlockTracer(blockReplay)),
-        new DebugGetRawHeader(blockchainQueries),
-        new DebugGetRawBlock(blockchainQueries),
-        new DebugGetRawReceipts(blockchainQueries),
-        new DebugGetRawBlockAccessList(blockchainQueries),
-        new DebugGetRawExecutionRequests(blockchainQueries, protocolContext, protocolSchedule),
-        new DebugGetRawTransaction(blockchainQueries),
-        new DebugExecutionWitness(blockchainQueries, protocolContext, protocolSchedule),
-        new DebugTraceCall(
-            blockchainQueries, protocolSchedule, transactionSimulator, apiConfiguration),
-        new DebugGetModifiedAccountsByHash(blockchainQueries),
-        new DebugGetModifiedAccountsByNumber(blockchainQueries),
-        new DebugMigrationProgress(protocolContext),
-        new DebugShadowStateRoot(protocolContext));
+    final Map<String, JsonRpcMethod> methods =
+        new HashMap<>(
+            mapOf(
+                new DebugTraceTransaction(
+                    blockchainQueries,
+                    new TransactionTracer(blockReplay),
+                    protocolSchedule,
+                    apiConfiguration),
+                new DebugAccountRange(blockchainQueries),
+                new DebugStorageRangeAt(blockchainQueries, blockReplay),
+                new DebugMetrics(metricsSystem),
+                new DebugResyncWorldstate(protocolContext, synchronizer),
+                new DebugTraceBlock(protocolSchedule, blockchainQueries, apiConfiguration),
+                new DebugSetHead(blockchainQueries, protocolContext),
+                new DebugReplayBlock(blockchainQueries, protocolContext, protocolSchedule),
+                new DebugTraceBlockByNumber(protocolSchedule, blockchainQueries, apiConfiguration),
+                new DebugTraceBlockByHash(protocolSchedule, blockchainQueries, apiConfiguration),
+                new DebugBatchSendRawTransaction(transactionPool),
+                new DebugGetBadBlocks(protocolContext, blockResult),
+                new DebugStandardTraceBlockToFile(
+                    () -> new TransactionTracer(blockReplay), blockchainQueries, dataDir),
+                new DebugStandardTraceBadBlockToFile(
+                    () -> new TransactionTracer(blockReplay),
+                    blockchainQueries,
+                    protocolContext,
+                    dataDir),
+                new DebugAccountAt(blockchainQueries, () -> new BlockTracer(blockReplay)),
+                new DebugGetRawHeader(blockchainQueries),
+                new DebugGetRawBlock(blockchainQueries),
+                new DebugGetRawReceipts(blockchainQueries),
+                new DebugGetRawBlockAccessList(blockchainQueries),
+                new DebugGetRawExecutionRequests(
+                    blockchainQueries, protocolContext, protocolSchedule),
+                new DebugGetRawTransaction(blockchainQueries),
+                new DebugExecutionWitness(blockchainQueries, protocolContext, protocolSchedule),
+                new DebugTraceCall(
+                    blockchainQueries, protocolSchedule, transactionSimulator, apiConfiguration),
+                new DebugGetModifiedAccountsByHash(blockchainQueries),
+                new DebugGetModifiedAccountsByNumber(blockchainQueries)));
+    // PBT migration RPCs, only on chains with a binary trie fork
+    if (protocolContext.getWorldStateArchive() instanceof BonsaiWorldStateProvider bonsai
+        && bonsai.getBinaryTrieMilestone().isPresent()) {
+      methods.putAll(
+          mapOf(
+              new DebugMigrationProgress(protocolContext),
+              new DebugShadowStateRoot(protocolContext)));
+    }
+    return methods;
   }
 }

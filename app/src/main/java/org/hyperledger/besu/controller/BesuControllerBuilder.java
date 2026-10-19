@@ -1078,6 +1078,13 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
       }
     }
 
+    if (pbtSnapshotBootstrap.isPresent()
+        && !(DataStorageFormat.BONSAI.equals(dataStorageConfiguration.getDataStorageFormat())
+            && worldStateArchive instanceof BonsaiWorldStateProvider bonsaiProvider
+            && bonsaiProvider.getBinaryTrieMilestone().isPresent())) {
+      LOG.warn("PBT snapshot ignored: it needs the Bonsai format and a binaryTrieTime fork");
+    }
+
     return new BesuController(
         protocolSchedule,
         protocolContext,
