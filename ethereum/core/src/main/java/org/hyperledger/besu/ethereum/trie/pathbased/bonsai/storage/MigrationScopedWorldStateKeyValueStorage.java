@@ -59,11 +59,6 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
       }
 
       @Override
-      public Updater putCode(final Hash accountHash, final Bytes code) {
-        return this;
-      }
-
-      @Override
       public Updater putCode(final Hash accountHash, final Hash codeHash, final Bytes code) {
         return this;
       }
@@ -98,22 +93,10 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
       public synchronized void removeStorageValueBySlotHash(
           final Hash accountHash, final Hash slotHash) {}
 
+      // nothing goes to the trie log transaction: it is closed, not committed
       @Override
       public void commit() {
-        composedWorldStateTransaction.commit();
-      }
-
-      @Override
-      public void commitTrieLogOnly() {}
-
-      @Override
-      public void commitComposedOnly() {
-        composedWorldStateTransaction.commit();
-      }
-
-      @Override
-      public void rollback() {
-        composedWorldStateTransaction.rollback();
+        commitComposedOnly();
       }
     };
   }
