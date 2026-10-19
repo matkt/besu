@@ -39,19 +39,10 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 /**
- * The EIP-8347 preimage file: streaming reader, plus {@link #write} / {@link #writeGenesis}.
- *
- * <p>Concatenation of records with no framing: {@code address[20] | slotCount[4, BE] | slotKey[32]
- * * slotCount}. Records strictly ascending by {@code keccak256(address)}; slots strictly ascending
- * by {@code keccak256(slotKey)}; no trailing byte.
- *
- * <p>{@link #nextAccount()} / {@link #nextSlot()} keep one slot in memory, and {@link #batches} at
- * most a bounded batch, whatever the account's storage size.
- *
- * <p>Checking the order costs a keccak per address and slot. A pass that needs neither the keccak
- * nor the check, because a later pass over the same file makes it, or that hashes on other threads
- * and checks with {@link #checkAccountOrder} / {@link #checkSlotOrder}, can open the file with
- * {@link #withoutOrderCheck}.
+ * The EIP-8347 preimage file, {@code address[20] | slotCount[4] | slotKey[32] * slotCount} per
+ * account, accounts by {@code keccak256(address)} and slots by {@code keccak256(slotKey)}: a
+ * streaming reader holding one slot or one bounded batch, and writers. {@link #withoutOrderCheck}
+ * skips the keccak order check, for a pass whose order another pass checks.
  */
 public final class Eip8347PreimageFile implements Closeable {
 

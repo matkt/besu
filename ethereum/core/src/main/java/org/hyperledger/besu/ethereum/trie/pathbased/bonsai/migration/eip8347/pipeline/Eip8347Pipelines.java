@@ -42,14 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Runs EIP-8347 offline pipelines on Besu's {@code services:pipeline}.
- *
- * <p>Pipes between stages are bounded ({@link #BUFFER_SIZE} items), so a fast stage blocks rather
- * than piling items up in heap. Errors from any stage abort the pipeline and are rethrown as-is.
- *
- * <p>Every item costs a few microseconds of hand-off between stages, which dominates when items are
- * as small as one account or one stem. {@link #fromLists} therefore moves items in lists of about
- * {@link #LIST_WEIGHT} entries.
+ * Runs EIP-8347 pipelines on Besu's {@code services:pipeline}: pipes between stages are bounded,
+ * the first stage failure is rethrown as-is, and {@link #fromLists} moves items in lists, as a
+ * hand-off costs more than the work on one account or stem.
  */
 public final class Eip8347Pipelines {
 

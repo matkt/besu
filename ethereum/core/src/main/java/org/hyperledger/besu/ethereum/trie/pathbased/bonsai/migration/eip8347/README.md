@@ -4,17 +4,6 @@ Besu's implementation of the [EIP-8347](https://eips.ethereum.org/EIPS/eip-8347)
 the typed, stem-grouped snapshot format of EIP PR 12379, `pbtRoot` at the end (EIP PR 12403), and
 tagged records instead of section counts (EIP PR 12404).
 
-- [What it is for](#what-it-is-for)
-- [The two files](#the-two-files)
-- [Importing a snapshot into a node](#importing-a-snapshot-into-a-node)
-- [How verify works, step by step](#how-verify-works-step-by-step)
-- [A worked example](#a-worked-example)
-- [Why passing verify means the snapshot is right](#why-passing-verify-means-the-snapshot-is-right)
-- [The techniques that keep it bounded](#the-techniques-that-keep-it-bounded)
-- [How convert works](#how-convert-works)
-- [Resources](#resources) · [Code map](#code-map) · [CLI](#cli) · [Spec notes](#spec-notes) ·
-  [File layouts](#file-layouts) · [Tests](#tests)
-
 ## What it is for
 
 At the PBT fork, every node needs the pre-fork state as a PBT (the binary trie of EIP-8297)
@@ -22,11 +11,9 @@ instead of an MPT. A node can build it alone by replaying the chain from genesis
 binary-trie column, which is slow. EIP-8347 lets it start instead from a **PBT snapshot** taken at
 a finalized pre-fork **anchor** block.
 
-The node trusts nothing about that snapshot. The one thing it can trust is the anchor's
-`stateRoot`: it is in the block header, and consensus validated it. The **dual check** proves that
-the snapshot is exactly the state that `stateRoot` commits to.
-
-The difficulty is that the two tries index the state differently:
+The node trusts nothing about that snapshot, only the anchor's `stateRoot`, which consensus
+validated. The **dual check** proves that the snapshot is exactly the state that `stateRoot`
+commits to. The two tries index the state differently:
 
 | | MPT (what the header commits) | PBT (what the snapshot holds) |
 |---|---|---|
@@ -34,36 +21,20 @@ The difficulty is that the two tries index the state differently:
 | Slot key | `keccak(slotKey)`, in the account's storage trie | a header leaf `ACCOUNT_ZONE ‖ blake3(address32) ‖ (64 + slot)` if `slot < 64`, else `STORAGE_ZONE ‖ blake3(address32) ‖ blake3(address32 ‖ slot / 256) ‖ slot % 256` |
 | Order | keccak order | BLAKE3 order |
 
-Hashes cannot be inverted, so going from a PBT key to an MPT key needs the **preimages**: the actual
-addresses and slot keys.
-
-This package provides both sides:
-
-- **Convert**: anchor state (MPT) + preimages → PBT snapshot.
-- **Verify** (the *dual check*): PBT snapshot + preimages → accept or reject against the anchor's
-  `stateRoot`.
-
-Both run offline from the CLI. In the node, the PBT migrator bootstraps with `verifyAndLoad`,
-which verifies the snapshot and writes the PBT into sorted files in the same pass. The files are
-added to the binary-trie column once the snapshot is accepted.
+Hashes cannot be inverted, so going from a PBT key to an MPT key needs the **preimages**: the
+addresses and slot keys. This package provides **convert** (anchor state and preimages → snapshot)
+and **verify** (snapshot and preimages → accept or reject against the anchor's `stateRoot`), both
+run offline from the CLI. In the node, the PBT migrator bootstraps with `verifyAndLoad`, which
+verifies the snapshot and writes the PBT into sorted files in the same pass. The files are added to
+the binary-trie column once the snapshot is accepted.
 
 ## The two files
 
-### Preimages
+**Preimages**: `address[20] | slotCount[4] | slotKey[32] × slotCount` per account, accounts sorted
+by `keccak256(address)` and slots by `keccak256(slotKey)`. This is the exact list of accounts and
+non-zero slots of the anchor state, in MPT order.
 
-```text
-per account, sorted by keccak256(address):
-  address[20] | slotCount[4] | slotKey[32] × slotCount      (slots sorted by keccak256(slotKey))
-```
-
-This is the exact list of accounts and non-zero slots of the anchor state, **in MPT order**. That
-order matters later (see [the rank](#the-rank)).
-
-### Snapshot
-
-```text
-record × | end | pbtRoot[32]          every record opens with a one-byte tag; the root comes last
-```
+**Snapshot**: `record × | end | pbtRoot[32]`, every record opening with a one-byte tag.
 
 | Tag | Record |
 |---|---|
@@ -74,69 +45,54 @@ record × | end | pbtRoot[32]          every record opens with a one-byte tag; t
 | `0x06` | **storage group with more than one leaf** |
 | `0x07` | **end**, followed by `pbtRoot` |
 
-Records come in PBT key order, so in zone order: headers, then code groups, then storage. Most
-storage slots sit alone in their stem, hence the shorter one-leaf group.
+Records come in PBT key order: headers, then code groups, then storage. With tags and the root at
+the end, a producer writes the file in the same pass that hashes the PBT, with no section count to
+patch and no storage record to buffer.
 
-With tags and the root at the end, nothing in the file depends on what comes after it: a producer
-writes it in the same single pass that hashes the PBT, with no section count to patch and no
-storage record to buffer, and can hash the bytes (`snapshotDigest`) as they go out.
-
-The records hold typed fields (nonce, balance, code reference…) rather than raw leaves. The PBT
-leaves are **derived** from them deterministically. This makes the file smaller and
-**byte-canonical**: one state gives exactly one file. The reader therefore rejects anything
-non-canonical:
-
-- records or entries not in strictly ascending order;
-- non-minimal integers (a leading zero byte);
-- zero values;
-- empty accounts (excluded by EIP-7523);
-- an unknown tag;
-- a storage account with no storage group after it, or a storage group with none before it;
-- a one-leaf storage group in the multi-leaf encoding;
-- a missing end tag, or trailing bytes after the root.
-
-The exact layouts are in [File layouts](#file-layouts).
+The records hold typed fields rather than raw leaves, and the PBT leaves are derived from them. One
+state gives exactly one file, so the reader rejects anything non-canonical: records or entries not
+in strictly ascending order, non-minimal integers, zero values, empty accounts (EIP-7523), an
+unknown tag, a storage account with no group after it or a group with none before it, a one-leaf
+group in the multi-leaf encoding, a missing end tag, or trailing bytes after the root. The layouts
+are in [File layouts](#file-layouts).
 
 ## Importing a snapshot into a node
 
-1. **Configuration.** The node is started with `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
-   `--Xpbt-snapshot-anchor-block-hash`. They become a `PbtMigrator.SnapshotBootstrap`: the two files, the
-   anchor hash, and the work directory `<data-path>/pbt-migration`.
-2. **The migrator starts.** `PbtMigrator` ticks every second. While it has no **cursor** (the block
-   whose state the binary column holds), it tries to bootstrap.
-3. **Waiting for the anchor.** `bootstrapFromSnapshot` waits until the anchor is known, canonical,
-   finalized, and before the fork. Until then it retries on the next tick.
-4. **Cleaning up.** It empties the binary column and the work directory. With no cursor, whatever
+1. **Configuration.** `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
+   `--Xpbt-snapshot-anchor-block-hash` become a `PbtMigrator.SnapshotBootstrap`, with the work
+   directory `<data-path>/pbt-migration`.
+2. **Waiting for the anchor.** The migrator ticks every second. While the binary column has no
+   **cursor** (the block whose state it holds), it waits until the anchor is known, canonical,
+   finalized and before the fork.
+3. **Cleaning up.** It empties the binary column and the work directory: with no cursor, whatever
    they hold comes from an interrupted attempt.
-5. **Verify and load.** It creates a `SnapshotColumnWriter`, a `NodeUpdater` that writes the PBT
-   into sorted files (SST files, with the binary column's own options) under
-   `<data-path>/pbt-migration/pbt-column`. The migrator then calls
-   `Eip8347DualCheckVerifier.verifyAndLoad(...)`. Nothing touches the database yet.
-6. **Accepted.** `writer.finish(root, anchorHash)` adds the files to the binary column, then writes
-   the **cursor, last**, and the migrator's cursor becomes the anchor.
-7. **Rejected** (`Eip8347ArtifactVerificationException`). The files are deleted and the migrator
+4. **Verify and load.** `Eip8347DualCheckVerifier.verifyAndLoad` writes the PBT through a
+   `SnapshotColumnWriter` into SST files, with the binary column's own options, under
+   `<data-path>/pbt-migration/pbt-column`. Nothing touches the database yet.
+5. **Accepted.** `writer.finish(root, anchorHash)` adds the files to the binary column, then writes
+   the **cursor, last**.
+6. **Rejected** (`Eip8347ArtifactVerificationException`). The files are deleted and the migrator
    stops: reading the same file again would give the same rejection. The column was not touched.
-8. **Any other failure** (disk full, I/O…). The files are deleted, the column is emptied, and the
+7. **Any other failure** (disk full, I/O…). The files are deleted, the column is emptied, and the
    load is retried 5 minutes later.
-9. **Node shutdown.** The load is interrupted, and the node waits for it to clean up before it
-   closes the database.
+8. **Node shutdown.** The load is interrupted, at the latest between two ingestions, and the node
+   waits for it, at most a minute, before it closes the database. Stopped before its cursor, the
+   load empties the column.
 
 The migrator holds the binary-column lock (`PbtColumnOwnership`) for the whole load. If the chain
-reaches the fork meanwhile, it waits for the load to end ("Waiting for the PBT migrator…").
+reaches the fork meanwhile, it waits for the load to end.
 
 **Crash safety** rests on one rule: no cursor means the column is not valid. A crash mid-load leaves
 no cursor, even after the files were added, so on restart the column and the work directory are
 emptied and the load starts over.
 
-**After the import**, the migrator follows the chain from the anchor as usual, at most 128 blocks
-per step (`--Xpbt-migration-blocks-per-roll`): through trie logs when the node has them, otherwise
-through each block's BAL (EIP-7928), stored locally or fetched from eth/71 peers. A BAL records
-post-values only, so it can only roll forward. At the fork, the chain claims the column and the
-migrator retires.
+**After the import**, the migrator follows the chain from the anchor, at most 128 blocks per roll:
+through trie logs when the node has them, otherwise through each block's BAL (EIP-7928), stored
+locally or fetched from peers. At the fork, the chain claims the column and the migrator retires.
 
-## How verify works, step by step
+## How verify works
 
-`run` creates a temporary sub-directory of the work directory and four **external sorts**:
+`run` creates a temporary sub-directory of the work directory and four external sorts:
 
 | Sort | Key → value |
 |---|---|
@@ -145,302 +101,94 @@ migrator retires.
 | `code-group-requests` | code group stem → `codeHash, group, codeSize` |
 | `code-groups-by-code` | `codeHash ‖ group` → `codeSize, references, chunks` |
 
-### Step 1: requests (first read of the preimages)
+1. **Requests.** The preimages are read without computing any keccak. Each entry gets its **rank**,
+   its position in the file (an account's slots first, then the account), and becomes a request
+   `PBT key → rank`. Sorted, the requests are in PBT order, the order of the snapshot.
+2. **One pass over the snapshot**, as a pipeline:
 
-The preimage file is read in batches of at most 1024 slots, **without computing any keccak**: this
-pass only needs PBT keys, and step 4 checks the keccak order.
+   ```text
+   reader ──► hash stems (N threads, order kept) ──► attach to the PBT ──► join
+   ```
 
-Each entry gets its **rank**, its position in the file, an account's slots first and the account
-right after them. Its PBT key is computed in parallel (`blake3(address)` once per account). Each
-entry becomes a **request** `PBT key → rank` in `preimage-requests`.
+   Each unit is one whole stem. `AscendingCollapseBinaryTrie.prepare` hashes it on a worker, and
+   `insert` attaches its top node in order; when loading, its nodes go to the column writer. The
+   join walks the sorted requests alongside: each header, header slot and storage leaf must match
+   its request, and emits `rank → value` into `mpt-values`. A `kind 0x01` header also requests the
+   code groups its `codeSize` spans. Each code group must match a request; identical requests
+   (accounts sharing a code) are folded, and their count is the code's reference count.
+3. **End of the pass.** The reader must be at the end of the file, the computed PBT root must equal
+   `pbtRoot` (**check 1**; when loading, the root node is written now), and no request may be left.
+4. **Two checks at the same time:**
+   - **Check 2, consensus anchoring.** `mpt-values` sorted by rank is back in preimage order, that
+     is MPT order. The preimages are read again, checking the keccak order. A worker builds each
+     account's storage trie, then its leaf `RLP(nonce, balance, storageRoot, codeHash)` under
+     `keccak(address)`. The account trie, and any storage of more than 4,096 slots, is built from
+     ranges cut on a nibble prefix of the keccak keys. The root must equal the anchor's
+     `stateRoot`.
+   - **Code check**, on another thread. `code-groups-by-code` sorted puts the rows of one code
+     together; when loading, each code's reference count is written. Then, one code per worker,
+     the bytecode is reassembled from its chunks, must hash to `codeHash`, and re-chunked must give
+     exactly the snapshot's groups (a missing leaf stands for a zero chunk). A delegation indicator
+     in a `kind 0x01` account rejects.
 
-Once sorted, the requests are **in PBT order**, the order of the snapshot.
+   If check 2 fails, its error is the one reported. The verifier always waits for the code check
+   before deleting its files.
 
-### Step 2: one pass over the snapshot
-
-```text
-reader ──► hash stems (N threads, order kept) ──► attach to the PBT ──► join
-```
-
-1. **Reader.** Returns units: a header, a code group, or a storage group. Each unit is **one whole
-   stem**. The reader enforces the canonical rules above, and reads the claimed root after the end
-   tag.
-2. **Hash stems**, in parallel. `AscendingCollapseBinaryTrie.prepare` builds the stem's small
-   subtree and hashes every leaf and inner node. When only verifying, it then replaces the subtree by
-   hash stubs.
-3. **Attach**, on one thread, in order. `AscendingCollapseBinaryTrie.insert` attaches the stem's
-   top node, the only hash that depends on where the stem lands. When loading, the stem goes to the
-   column writer as one entry (see [writing the PBT](#writing-the-pbt)).
-4. **Join**, against the sorted requests, like merging two sorted lists:
-   - **Header:**
-     - its account request must be next;
-     - each of its slots 0–63 must match a slot request;
-     - a `kind 0x01` header requests the code groups its `codeSize` spans;
-     - it emits `rank → (nonce, MPT code hash, balance)` into `mpt-values`. The MPT code hash is
-       `EMPTY` for no code, `codeHash` for code, and `keccak(0xef0100 ‖ target)` for a delegation.
-   - **Storage leaf:** must match its request, and emits `rank → value`.
-   - **Code group:**
-     - every code request is known by then, because headers come first;
-     - the requests are sorted by stem, and the group must match one;
-     - identical requests (accounts sharing a code) are folded and **counted**, which gives the
-       code's reference count. Two `codeSize` values for one `codeHash` reject;
-     - the group, or "no leaf" for a group that has none, is re-emitted under `codeHash ‖ group`.
-
-### Step 3: end of the pass
-
-- The reader must be exactly at the end of the file.
-- **Check 1, internal consistency:** the computed PBT root must equal the claimed `pbtRoot`. When
-  loading, the root node is written now.
-- No request may be left, otherwise a preimage has no leaf.
-- `preimage-requests` is deleted: it is no longer needed.
-
-### Step 4: two checks at the same time
-
-**Check 2, consensus anchoring** (second read of the preimages, this time checking the keccak
-order):
-
-```text
-reader ──► hash (N) ──► cut large storages ──► build their ranges (N) ──► join them
-       ──► build account ranges (N) ──► account trie
-```
-
-1. `mpt-values` is sorted by rank, which puts the values back in preimage order, that is MPT
-   order.
-2. The preimages are read alongside, account by account. Storage tries are independent, so each
-   account goes to a worker:
-   - each slot's value goes into the account's storage trie under `keccak(slotKey)`;
-   - then `RLP(nonce, balance, storageRoot, codeHash)` is the account's leaf, under
-     `keccak(address)`.
-3. The leaves are cut into **ranges** on a nibble prefix of `keccak(address)`. Each range is a
-   complete subtree of the account trie: a worker builds it, and one thread attaches the ranges.
-4. The resulting root must equal the anchor's **`stateRoot`**.
-
-The keccak order is checked inside each range by its worker, and between ranges when they are
-attached: a range must start after the end of the one before.
-
-An account with more than 4,096 slots is not sent as one unit: the reader sends its slots in chunks
-of 1,024, which workers hash. One thread checks the order between chunks and cuts the slots into
-ranges the same way, on a nibble prefix of `keccak(slotKey)`. Workers build the ranges and one
-thread joins them into the storage trie, which then gives the account's leaf.
-
-Ranges average 256 to 4,096 keys, sized from the key count: the account count from step 1, an
-account's `slotCount`. A range that grows past 16,384 keys (keys ground to share a prefix) is
-inserted key by key instead.
-
-**Code check**, on another thread:
-
-1. `code-groups-by-code` is sorted, so the rows of one code come together.
-2. When loading, each code's reference count (accounts using it, chunk count) is written: the live
-   trie needs it to know when a shared code can be deleted.
-3. In parallel, one code per thread:
-   - reassemble the bytecode from its chunks (each chunk is one byte counting the PUSH data that
-     spills over from the previous chunk, then 31 bytes of code). A chunk beyond `codeSize`
-     rejects;
-   - reject a delegation indicator (`0xef0100…`) in a `kind 0x01` account;
-   - `keccak(bytecode)` must equal `codeHash`;
-   - re-chunk the bytecode: the result must be exactly the snapshot's groups, where a missing leaf
-     stands for a zero chunk.
-
-If the MPT check fails, its error is the one reported. The verifier always waits for the code check
-before deleting its files.
-
-### Step 5: done
-
-`verifyAndLoad` returns the PBT root, the leaf count and the number of codes, then deletes its
-temporary directory. The migrator writes the cursor.
-
-## A worked example
-
-Hashes are made up and shortened. Only their order matters.
-
-**Anchor state:**
-
-| Account | Content |
-|---|---|
-| Alice (EOA) | nonce 1, balance 50, slot `5 = 7`, slot `1000 = 3` |
-| Bob (contract) | nonce 0, balance 9, code `0x6001600055` (5 bytes) with hash `H` |
-
-| | keccak (MPT) | blake3 (PBT) |
-|---|---|---|
-| Alice | `0x8f…` | `0x2d…` |
-| Bob | `0x3a…` | `0x71…` |
-| slot 5 | `0xc1…` | |
-| slot 1000 | `0x44…` | |
-
-In MPT order Bob comes first (`0x3a < 0x8f`); in PBT order Alice does (`0x2d < 0x71`).
-
-**Preimage file** (MPT order):
-
-```text
-Bob   | 0 slots
-Alice | 2 slots | slot 1000 | slot 5         (1000 first: 0x44 < 0xc1)
-```
-
-**PBT keys:**
-
-- Alice's header: `00‖2d`. Slot 5 is below 64, so it is in the header: `00‖2d‖69` (`64 + 5`).
-- Slot 1000 goes to the storage zone: `FF‖2d‖blake3(A‖3)‖232` (`1000 = 3 × 256 + 232`).
-- Bob's header: `00‖71`. His 5-byte code is one chunk, so one code group:
-  `01‖stem(H, group 0)‖0`.
-
-**Snapshot:**
-
-```text
-0x00 [Alice: nonce 1, balance 50, slots {5: 7}]
-0x01 [Bob:   nonce 0, balance 9, H, size 5]
-0x03 [code group stem(H,0): {0: chunk0}]
-0x04 [storage account Alice]
-0x05 [one-leaf group {232: 3}]
-0x07 R
-```
-
-**Step 1, ranks and requests.** Ranks in file order, slots before their account:
-
-```text
-Bob → 0      Alice.1000 → 1      Alice.5 → 2      Alice → 3
-```
-
-Requests sorted by PBT key:
-
-```text
-00‖2d     → 3   (Alice)
-00‖2d‖69  → 2   (Alice.5: same start, longer, so right after)
-00‖71     → 0   (Bob)
-FF‖…‖232  → 1   (Alice.1000)
-```
-
-**Step 2, the join** walks both lists together:
-
-```text
-snapshot                      requests
-header Alice (00‖2d)     ─▶   00‖2d → 3      matched  → mpt-values: 3 → (1, EMPTY, 50)
-  slot 5 (00‖2d‖69)      ─▶   00‖2d‖69 → 2   matched  → mpt-values: 2 → 7
-header Bob (00‖71)       ─▶   00‖71 → 0      matched  → mpt-values: 0 → (0, H, 9)
-                                                         and requests group 0 of H (size 5)
-code group stem(H,0)          meets Bob's code request → row H‖0 → (5, 1 reference, chunk0)
-storage Alice (FF‖…‖232) ─▶   FF‖…‖232 → 1   matched  → mpt-values: 1 → 3
-end                           no request left
-```
-
-Meanwhile the PBT is hashed, and its root compared with `R` (check 1).
-
-**Step 4, back to MPT order.** Sorted by rank, the values read `0: Bob, 1: 3, 2: 7, 3: Alice`,
-which is the preimage order:
-
-```text
-preimages       values       action
-Bob, 0 slots    0: Bob    →  account Bob at 0x3a…, empty storage root
-Alice, 2 slots
-  slot 1000     1: 3      →  Alice's storage trie: 0x44… → 3
-  slot 5        2: 7      →                        0xc1… → 7
-                3: Alice  →  account Alice at 0x8f…, with that storage root
-```
-
-The root must equal the anchor's `stateRoot` (check 2). In parallel, the code check reassembles 5
-bytes from `chunk0`, checks `keccak = H`, re-chunks, and records that `H` has 1 reference and 1
-chunk.
+`verifyAndLoad` returns the PBT root, the leaf count and the number of codes; the migrator then
+writes the cursor.
 
 ## Why passing verify means the snapshot is right
-
-Every part of the snapshot is tied to the `stateRoot`:
 
 - **Check 1** proves the PBT is exactly the set of leaves derived from the records.
 - **The join** proves there is one leaf per preimage and one preimage per leaf.
 - **Check 2** proves the leaves' values (nonces, balances, slots, code hashes, delegation targets)
-  are the ones the `stateRoot` commits to. The rebuild uses the snapshot's values and the
-  preimages' paths.
+  are the ones the `stateRoot` commits to, with the snapshot's values at the preimages' paths.
 - **The code check** ties code chunks and header code sizes to the code hash, which check 2 ties to
   the `stateRoot`.
-
-What each kind of tampering runs into:
 
 | Tampering | Caught by | Why |
 |---|---|---|
 | A slot value changed, `pbtRoot` recomputed to match | check 2 | The join passes, but the storage root, hence the MPT root, changes |
-| An extra leaf in the snapshot | join | No request covers its key: "not covered by consensus anchoring" |
-| A leaf missing from the snapshot | join | Its request is never consumed: "preimage … has no snapshot leaf" |
+| An extra leaf in the snapshot | join | No request covers its key |
+| A leaf missing from the snapshot | join | Its request is never consumed |
 | A fake account in both files | check 2 | The rebuilt MPT has one account too many |
-| A wrong address in the preimages | join or check 2 | Its PBT key matches no leaf; or, if the snapshot uses the same wrong address, `keccak` puts it at the wrong MPT path |
+| A wrong address in the preimages | join or check 2 | Its PBT key matches no leaf; or `keccak` puts it at the wrong MPT path |
 | A code chunk changed | code check | The reassembled code no longer hashes to `codeHash` |
 | A wrong `codeSize` | code check | The reassembled code has the wrong length, so the wrong hash |
-| One shared code with two sizes | code check | Same request key, different values: "disagree on codeSize" |
-| A code group nobody references | code check | No request for its stem: "not referenced" |
+| One shared code with two sizes | code check | Same request key, different values |
+| A code group nobody references | code check | No request for its stem |
 | A leaf changed without recomputing `pbtRoot` | check 1 | The computed root differs |
 | Malformed file | reader | The canonical rules |
 
-## The techniques that keep it bounded
+## Keeping it bounded
 
-### Sort, then walk, instead of looking up
-
-The naive approach is to load every preimage into a hash map and look each leaf up. At mainnet
-scale (over a billion entries) that is tens of gigabytes of heap. Instead, both sides are sorted
-into the same order and walked together, one entry of each at a time, like checking that two decks
-of cards match by sorting both and turning one card of each at a time.
-
-### Sorting more than fits in memory
-
-```text
-records ──► [64 MiB buffer] ─sort─► run 1
-        ──► [64 MiB buffer] ─sort─► run 2
-        ──► …                       run N
-
-merge: open up to 512 runs at once, always take the smallest head
-```
-
-Each run is sorted, so the smallest record overall is at the head of some run. Memory is one record
-per open run. A full buffer is sorted in parallel and written on a background thread while the next
-one fills. A merge takes at most 512 runs: past that, runs are merged 512 at a time into one until
-512 are left, so a mainnet-sized sort (thousands of runs) makes extra passes.
-
-### The rank
-
-After the join, values come out in PBT order, but the MPT needs them in MPT order. Re-sorting them by
-`keccak(address) ‖ keccak(slot)` would carry 64 bytes of key per entry. The preimage file is
-already in MPT order, so an entry's position in it (8 bytes) is enough: sorting by rank puts the
-values back in MPT order, and re-reading the file gives the keccak paths. Slots are numbered before
-their account because the storage root has to be known before the account is inserted.
-
-### A trie that only keeps its right edge
-
-Keys arrive in ascending order. Once a key goes right at a node, no later key will go left of it:
-the left subtree is **complete**. It is hashed, written when loading, and replaced by its hash.
-
-```text
-        root
-       /    \
-   [hash]    •          only the rightmost path stays in memory
-            / \
-        [hash] •
-              / \
-          [hash] ◄ last key
-```
-
-Memory is the trie's depth, not its size. The PBT and the rebuilt MPT both work this way
-(`AscendingCollapseBinaryTrie`, `AscendingCollapsePatriciaTrie`).
-
-### Hashing stems and storage tries in parallel
-
-A snapshot unit holds every leaf of a stem (keys equal in all but their last byte). Their subtree
-depends on nothing else, except for its top node, whose stored prefix depends on its neighbours.
-So the heavy work (hashing leaves and inner nodes) runs on many threads, and one thread attaches
-the top nodes in order.
-
-Check 2 does the same with the MPT. A whole storage trie depends on nothing else, so a worker
-builds it. A range of the account trie, or of a large storage, holds every key under a nibble
-prefix: a worker builds it (`AscendingCollapsePatriciaTrie.prepare`), and only its top node, whose
-path depends on where it lands, is hashed on the attaching thread.
+- **Sort, then walk.** Both sides are sorted into the same order and walked together, instead of
+  looking each leaf up in a map of over a billion preimages.
+- **External sorts.** Records fill a 64 MiB buffer, which is sorted in parallel and written as a
+  run on a background thread while the next one fills. A merge takes at most 512 runs: past that,
+  runs are merged 512 at a time into one until 512 are left, so a mainnet-sized sort (thousands of
+  runs) makes extra passes.
+- **The rank.** Sorting the joined values by rank (8 bytes) rather than by
+  `keccak(address) ‖ keccak(slot)` puts them back in MPT order, and re-reading the preimages gives
+  the keccak paths. Slots come before their account because the storage root is needed first.
+- **Right-edge tries.** Keys arrive in ascending order, so once a key goes right at a node, the left
+  subtree is complete: it is hashed, written when loading, and replaced by its hash. Memory is the
+  trie's depth (`AscendingCollapseBinaryTrie`, `AscendingCollapsePatriciaTrie`).
+- **Parallel subtrees.** A stem, a storage trie, or a range of keys under a nibble prefix depends
+  on nothing else except its top node: workers build and hash it, and one thread attaches the top
+  nodes in order.
 
 ### Writing the PBT
 
-Each stem is written as one entry, and each branch above the stems on its own, at its **location**,
-the bit path from the root, with the same encoding the live Besu trie uses. The column therefore
-reads back like any stored PBT.
+Each stem is written as one entry, and each branch above the stems on its own, at its
+**location**, the bit path from the root, with the live trie's encoding. The column therefore reads
+back like any stored PBT.
 
-The entries go to sorted files, which RocksDB adds to the column as they are. Their key ranges do
-not overlap, and the column is empty, so they land at its last level: no write-ahead log, no
-memtable, no compaction, and no write stall for the rest of the database, which keeps processing
-blocks. RocksDB stops every write to the database while it adds files, so they are added 16 at a
-time: each batch starts above the last one, so it lands at the last level too.
+The entries go to sorted files that RocksDB adds to the column as they are: their key ranges do not
+overlap and the column is empty, so they land at its last level, with no write-ahead log, memtable
+or compaction. Each ingestion stops every write to the database while it runs, so files are added
+16 at a time, each batch above the previous one. The global seqno each file gets stays in the
+manifest, and an ingestion that would need a memtable flush fails instead of flushing.
 
 A location is `0x00 ‖ path bits ‖ 1`, so stems, which arrive in key order, are in location order
 too. A branch arrives after its subtree, but its location sorts before the subtree when its prefix
@@ -456,22 +204,14 @@ stems, branches ──► window (sorted, 32 MiB) ──► sorted files ──�
 
 ## How convert works
 
-It streams the preimages, reads each account and slot from the anchor state (one thread: the state
-view need not be thread-safe), derives the header and storage leaves in parallel, and sorts them by
-PBT key on disk.
-
-Code is handled apart, because codes are widely shared: thousands of contracts can run the same
-bytecode. Each contract only records `codeHash → address` in a small sort; each distinct code is
-then read once, from the first account that holds it, and chunked in parallel. Emitting the chunks
-once per contract instead would multiply the sort by the number of contracts sharing each code (10×
-the snapshot on the benchmark below).
-
-The sorted leaves are then written and the PBT root hashed in one pass, with each stem hashed in
-parallel. The CLI runs verify on the result.
+It streams the preimages, reads each account and slot from the anchor state on one thread (the
+state view need not be thread-safe), derives the header and storage leaves in parallel, and sorts
+them by PBT key on disk. Codes are widely shared, so each contract only records
+`codeHash → address`, and each distinct code is read once and chunked in parallel. The sorted
+leaves are then written and the PBT root hashed in one pass, each stem hashed in parallel. The CLI
+runs verify on the result.
 
 ## Resources
-
-Memory stays bounded whatever the state size:
 
 | Piece | Bound |
 |---|---|
@@ -483,44 +223,17 @@ Memory stays bounded whatever the state size:
 | Check 2 | one account per unit, or a range of keys (a few thousand) |
 | Code check | one code per thread, ≤ 1 MiB |
 
-Disk: the sorts write temporary files under `<data-path>/pbt-migration` (next to `database`, so on
-the same disk). They are deleted at the end, and the migrator empties the directory before each
-bootstrap attempt. Verify needs about **1.3–1.5× the snapshot size** of free space at its peak,
-convert about 1.25×. Loading also needs room for the column, about **2.5× the snapshot**: its
-files wait in the work directory, then are linked into the database, not copied. On the 5M state
-below, the data directory peaked at 3.7 GB, against 4.7 GB through transactions (WAL, compactions).
-Three things keep this low:
+Disk: the sorts write temporary files under `<data-path>/pbt-migration`, on the same disk as the
+database. They are deleted at the end, and the migrator empties the directory before each
+bootstrap attempt. Loading also needs room for the column: its files wait in the work directory,
+then are linked into the database, not copied. Sorted records carry a rank, never a 32-byte keccak;
+run files store each key as the part that differs from the previous one; convert sorts each
+distinct code's chunks once.
 
-- Sorted records carry a rank (8 bytes), never a 32-byte keccak.
-- Sorted files store each key as the part that differs from the previous one. Slots of one
-  contract share their first 33 bytes.
-- Convert sorts each distinct code's chunks once, not once per contract.
-
-Parallel: PBT keys of the preimages, stem hashing, code chunking and checks, the storage tries of
-check 2, its account ranges, and the code check alongside check 2. In the node, all of it runs on
-the migrator's own pool (`--Xpbt-migration-threads`, half the cores by default), as do the binary
-roots of the rolls that follow: block import's pools and the common pool stay free. The CLI uses
-the common pool. Sequential: attaching stems to the PBT, writing the snapshot, and reading the
-preimages with the values of check 2. When loading, sorting the window and writing the files run on
-two background threads, overlapping the hashing.
-
-Items move between pipeline stages in lists of about 1024 entries: one item per account or per
-stem would cost more in hand-offs between threads than the work itself.
-
-Measured on a synthetic state with mainnet-like proportions (1.5% of accounts hold storage, heavy
-tail, shared bytecode), 14 cores, 2 GiB heap:
-
-| State | Snapshot | Convert | Verify | Verify + load into RocksDB |
-|---|---|---|---|---|
-| 1M accounts, 2.3M slots | 185 MB | 9 s, 217 MB of temp files | 8 s, 212 MB | 9 s, 450 MB database |
-| 5M accounts, 13M slots | 997 MB | 38 s, 1.2 GB | 31 s, 1.3 GB | 43 s, 2.5 GB database |
-
-Check 2 takes 1.1 s and 4.5 s of that; it took 4.4 s and 25 s with the MPT rebuilt on one thread.
-Loading writes the column once, as files RocksDB adds as they are, with no compaction after.
-Through transactions it took 17 s and 87 s, and wrote 4.4 times the column on the 5M state (WAL,
-flushes and compactions: 10.8 GB for 2.5 GB). What loading still adds is encoding the nodes on the
-attaching thread. The PBT stores about 1.4 entries per leaf: one per
-stem, plus the branches joining them.
+In the node, the parallel work runs on the migrator's own pool (`--Xpbt-migration-threads`, half
+the cores by default), as do the binary roots of the rolls that follow; the CLI uses the common
+pool. Attaching stems, writing the snapshot and reading the preimages stay sequential. When
+loading, sorting the window and writing the files run on two background threads.
 
 ## Code map
 
@@ -538,12 +251,11 @@ stem, plus the branches joining them.
 | | `Eip8347AnchorJoin` | Steps 1–2: requests, and the join against headers and storage |
 | | `Eip8347CodeCheck` | Code: requests against code groups, then each code's reassembly |
 
-In the parent package: `PbtMigrator` (bootstrap and chain following; it nests the configured
-artifacts, `SnapshotBootstrap`), `SnapshotColumnWriter` (the bulk load into the binary column,
-through sorted files), `PbtColumnOwnership` (migrator / chain handoff) and `BalTrieLogs` (a
-block's BAL as a roll-forward trie log). The sorted files are a storage feature:
-`SegmentedKeyValueStorage.createSortedFileWriter` and `ingestSortedFiles`, which RocksDB implements
-with `SstFileWriter` and `IngestExternalFile`.
+In the parent package: `PbtMigrator` (bootstrap and chain following), `SnapshotColumnWriter` (the
+bulk load into the binary column through sorted files), `PbtColumnOwnership` (migrator / chain
+handoff) and `BalTrieLogs` (a block's BAL as a roll-forward trie log). The sorted files are a
+storage feature: `SegmentedKeyValueStorage.createSortedFileWriter` and `ingestSortedFiles`, which
+RocksDB implements with `SstFileWriter` and `IngestExternalFile`.
 
 ## CLI
 
@@ -554,9 +266,6 @@ besu storage pbt convert --preimages-out pre.bin --snapshot snap.bin --anchor 0 
 ```
 
 Exit code: **0** accepted, **1** rejected, **2** any other failure. `verify` writes nothing.
-
-To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
-`--Xpbt-snapshot-anchor-block-hash`, set together.
 
 How much of the node the migrator takes, so that block import keeps up:
 
@@ -603,18 +312,3 @@ or more storage groups.
 
 Preimages: `address[20] | slotCount[4] | slotKey[32] * slotCount` per account, accounts sorted by
 `keccak256(address)`, slots by `keccak256(slotKey)`.
-
-## Tests
-
-`Eip8347Fixture` (test sources) builds a small anchor state and computes, independently of the code
-under test, what EIP-8347 derives from it: PBT leaves and root, preimages, MPT root.
-
-| Test | Covers |
-|---|---|
-| `verify/Eip8347DualCheckVerifierTest` | Accepted snapshots, accounts and large storage cut into ranges included; `verifyAndLoad` output; every kind of rejection (roots, preimage mismatches, keys out of order inside or across ranges, tampering caught by check 2, code) |
-| `convert/Eip8347SnapshotGeneratorTest` | Generated snapshot byte-equal to the fixture's, whatever the sort buffer; convert rejections |
-| `artifact/Eip8347SnapshotFormatTest` | Write → read round trip; byte layout (end tag, trailing bytes, unknown tag, record order, storage accounts and groups); non-canonical records and leaves |
-| `artifact/Eip8347PreimageFileTest` | Genesis preimages; unsorted or truncated files |
-| `pipeline/Eip8347ExternalSorterTest` | Sort order, multi-pass merges, on-disk encoding, cleanup |
-| `../BinaryTrieNodeOrderTest` | Stems sort by location in depth-first order; where a branch sorts; only branches and the root come back below a stored location |
-| `../PbtSnapshotLoadTest` | The sorted-file load equals the transactional one (many files, many nodes written last, empty state); a rejection leaves the database untouched; a crash before the cursor empties and reloads the column |

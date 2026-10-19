@@ -45,30 +45,10 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Consensus-anchoring join between the preimages and the snapshot's header and storage records.
- *
- * <p>Preimages are keccak-ordered, snapshot records {@code key_hash}-ordered (BLAKE3), so every
- * preimage account and slot is first turned into a <em>request</em> keyed by its PBT position and
- * externally sorted. The snapshot is then walked once, in the same order, as a merge: each record
- * and header slot / storage entry must meet exactly one request, and each request exactly one
- * snapshot entry. A snapshot entry without a request is a surplus leaf (e.g. an extra header slot);
- * a request without a snapshot entry is a missing leaf. No index and no per-leaf bitset is kept.
- *
- * <p>The link back to MPT order is the entry's <em>ordinal</em>: its rank in the preimage file,
- * which is already in MPT order. Each account's slots are numbered first and the account right
- * after them, the order {@link Eip8347MptRebuild} consumes (a storage root before its account).
- * Matched values are re-emitted keyed by that ordinal, so neither sort carries a keccak: the MPT
- * rebuild re-reads the preimage file for the paths. Contract code is handed to {@link
- * Eip8347CodeCheck}.
- *
- * <pre>
- * request key                            request value
- *   ACCOUNT_ZONE|addressHash (33 B)        ordinal[8]
- *   header or storage leaf key (34/66 B)   ordinal[8]
- * MPT value key                          MPT value
- *   ordinal[8] of a slot                   value, leading zeros trimmed
- *   ordinal[8] of an account               {@code AccountFields}
- * </pre>
+ * Consensus-anchoring join: each preimage account and slot becomes a request keyed by its PBT key,
+ * externally sorted, then merged once against the snapshot's header and storage leaves, each leaf
+ * meeting exactly one request. Matched values are re-emitted keyed by their rank in the preimage
+ * file (MPT order, an account's slots before it) for {@link Eip8347MptRebuild}.
  */
 final class Eip8347AnchorJoin {
 

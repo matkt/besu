@@ -42,19 +42,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Bounded-memory external sort of {@code (key, value)} byte records, ordered by unsigned
- * byte-lexicographic key (the order EIP-8347 uses for every sorted artifact).
- *
- * <p>Records are buffered until {@code maxBufferedBytes}, then written as a sorted run. Runs are
- * merged at most {@link #MAX_FAN_IN} at a time, in as many passes as needed, so neither heap nor
- * open file handles grow with the input. Equal keys are all kept; callers decide what a duplicate
- * means.
- *
- * <p>A full buffer is sorted (in parallel) and written on a background thread while the next one
- * fills, so the producer only waits when it fills a buffer before the previous run is written. Heap
- * is therefore up to two buffers.
- *
- * <p>Usage: {@link #add} any number of times, then {@link #sorted} once, then {@link #close}.
+ * External sort of {@code (key, value)} records by unsigned key, in bounded heap: full buffers are
+ * sorted and written as runs on a background thread, then merged in passes of at most {@link
+ * #MAX_FAN_IN} runs. Equal keys are all kept. Call {@link #add}, then {@link #sorted} once, then
+ * {@link #close}.
  */
 public final class Eip8347ExternalSorter implements Closeable {
 
@@ -157,8 +148,7 @@ public final class Eip8347ExternalSorter implements Closeable {
   public void close() throws IOException {
     buffer.clear();
     if (pendingRun != null) {
-      // Wait for the writer so its file can be deleted. A failure was reported by add() or
-      // sorted().
+      // Wait for the writer so its file can be deleted; add() or sorted() reported its failure.
       final Path run = pendingRun.exceptionally(failure -> null).join();
       if (run != null) {
         runs.add(run);

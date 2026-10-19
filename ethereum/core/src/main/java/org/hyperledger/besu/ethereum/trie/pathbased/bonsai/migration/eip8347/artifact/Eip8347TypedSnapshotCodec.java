@@ -46,20 +46,8 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 
 /**
- * Typed, stem-grouped records of the EIP-8347 PBT snapshot and their leaf derivation.
- *
- * <pre>
- * snapshot           = record * | end[1] | pbtRoot[32]
- * headerRecord       = kind[1] | addressHash[32] | nonce[≤8] | balance[≤16] | codeRef
- *                    | slotCount[1] | (slot[1] | value[≤32]) * slotCount
- * codeGroup          = 0x03 | group
- * storageAccount     = 0x04 | addressHash[32]
- * singleStorageGroup = 0x05 | stemHash[32] | subIndex[1] | value[≤32]
- * storageGroup       = 0x06 | group                                     (more than one leaf)
- * group              = stemHash[32] | n[1] | (subIndex[1] | value[≤32]) * (n + 1)
- * </pre>
- *
- * <p>Every record opens with its tag; a header record's tag is the account {@code kind}.
+ * Typed, stem-grouped records of the EIP-8347 PBT snapshot (layouts in the package README) and the
+ * leaves they derive. Every record opens with its tag; a header record's tag is the account kind.
  */
 public final class Eip8347TypedSnapshotCodec {
 

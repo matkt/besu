@@ -42,29 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * EIP-8347 dual-check verifier: internal PBT consistency plus consensus anchoring against an MPT
- * {@code stateRoot}, in bounded memory.
- *
- * <p>Nothing is indexed or random-accessed. Every step streams, and the two order changes the check
- * needs (keccak preimages → PBT order, then PBT order → MPT order) go through external sorts in a
- * work directory:
- *
- * <ol>
- *   <li>Preimages → join requests sorted by PBT key ({@link
- *       Eip8347AnchorJoin#sortPreimageRequests}).
- *   <li>One pass over the snapshot, as a pipeline: read units → PBT insert → join (headers and
- *       storage against the requests, code groups against the code requests).
- *   <li>Code check per {@code code_hash} ({@link Eip8347CodeCheck}).
- *   <li>MPT rebuild from the preimage file and the matched values sorted by ordinal ({@link
- *       Eip8347MptRebuild}), storage tries in parallel.
- * </ol>
- *
- * <p>The code check (3) and the MPT rebuild (4) are independent and run at the same time.
- *
- * <p>{@link #verify} only checks. {@link #verifyAndLoad} also writes the PBT during the same read:
- * the PBT-insert step persists every node through a {@link NodeUpdater}, and the code check writes
- * the code reference counts the live trie needs. It writes no cursor, so on a rejection the caller
- * discards what was written.
+ * EIP-8347 dual check, in bounded memory: internal PBT consistency, then consensus anchoring
+ * against an MPT {@code stateRoot}. {@link #verifyAndLoad} also writes the PBT nodes and the code
+ * reference counts during the same read, but no cursor: on an exception the caller discards them.
  */
 public final class Eip8347DualCheckVerifier {
 
@@ -205,9 +185,7 @@ public final class Eip8347DualCheckVerifier {
       final Bytes32 claimedRoot;
       final long leafCount;
       try (final Eip8347SnapshotReader snapshot = new Eip8347SnapshotReader(snapshotPath)) {
-        // A unit is one whole stem: its leaves are hashed (and encoded) in parallel, and only the
-        // stem's top node is attached on the PBT thread. Units travel in lists of about
-        // LIST_WEIGHT leaves.
+        // A unit is one whole stem, hashed in parallel; only its top node is attached in order.
         Eip8347Pipelines.run(
             Eip8347Pipelines.fromLists("eip8347-verify-snapshot", snapshot.units(), Unit::leafCount)
                 .thenProcessAsyncOrdered(
@@ -273,8 +251,7 @@ public final class Eip8347DualCheckVerifier {
         codeCheckThread.interrupt();
         throw e;
       } finally {
-        // The code check reads files under sortDir: let it end before they are deleted. Its own
-        // failure, if the MPT already failed, is the second fault and is not reported.
+        // Let the code check, which reads files under sortDir, end; its later failure is dropped.
         codeHashes.exceptionally(failure -> 0L).join();
       }
     } finally {

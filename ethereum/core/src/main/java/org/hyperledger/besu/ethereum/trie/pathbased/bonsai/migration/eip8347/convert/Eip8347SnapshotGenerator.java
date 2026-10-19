@@ -54,23 +54,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * EIP-8347 converter (snapshot half): preimages + anchor MPT state → byte-canonical PBT snapshot.
- *
- * <p>Bounded memory end to end: preimages stream in lists of about {@link
- * Eip8347Pipelines#LIST_WEIGHT} slots, leaves go through an external sort ({@link
- * Eip8347ExternalSorter}), and the sorted leaves are written and hashed in one pass. Pipeline
- * stages ({@code services:pipeline}):
- *
- * <pre>
- * preimages → read anchor state (1 thread) → derive header and storage leaves (N threads) → sort
- *                                          → code references (codeHash → address)       → sort
- * distinct codes → read code (1 thread) → chunk (N threads)                               → sort
- * sorted leaves, by stem → hash stems (N threads) → PBT + snapshot writer (1 thread)
- * </pre>
- *
- * <p>State reads stay on one thread because {@link StateSource} is not required to be thread-safe.
- * CODE_ZONE chunks are content-addressed by {@code code_hash} and codes are widely shared, so each
- * distinct code is chunked once, from one account that references it.
+ * EIP-8347 converter, in bounded memory: preimages and the anchor's MPT state to a byte-canonical
+ * PBT snapshot. State is read on one thread ({@link StateSource} need not be thread-safe), leaves
+ * go through an external sort, and each distinct code is chunked once.
  */
 public final class Eip8347SnapshotGenerator {
 

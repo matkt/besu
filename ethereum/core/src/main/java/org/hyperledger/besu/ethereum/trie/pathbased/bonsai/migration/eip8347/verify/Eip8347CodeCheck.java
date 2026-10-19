@@ -51,26 +51,10 @@ import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.bytes.MutableBytes;
 
 /**
- * Code limb of the dual-check: anchors CODE_ZONE leaves and {@code codeSize} to the {@code
- * code_hash} values the MPT commits.
- *
- * <ol>
- *   <li>Each {@code kind 0x01} header requests the code groups its {@code (codeHash, codeSize)}
- *       spans, keyed by group stem and externally sorted. Equal stems collapse, so each code is
- *       checked once; two sizes for one {@code code_hash} are rejected.
- *   <li>The CODE_ZONE section is merged against those requests in stem order: an unrequested group
- *       is a surplus code leaf; a requested but absent group is all-zero chunks.
- *   <li>Groups are re-sorted by {@code (codeHash, groupIndex)} and each code is reassembled, hashed
- *       and re-chunked on its own, in parallel. Heap holds a few codes, never all of them.
- * </ol>
- *
- * <p>Folding equal requests also counts the headers that reference each code: that count is the
- * code's reference count, which {@link #finish} writes when loading.
- *
- * <pre>
- * request key  CODE_ZONE|stemHash (33 B)   value  {@code GroupRequest}
- * row key      codeHash[32] | group[4]     value  codeSize[4] | references[8] | (subIndex[1] | chunk[32])*
- * </pre>
+ * Code part of the dual check: each code group must be requested by a {@code kind 0x01} header's
+ * {@code (codeHash, codeSize)}, then each code is reassembled, hashed and re-chunked on its own, in
+ * parallel. The headers folded into a request give the code's reference count, which {@link
+ * #finish} writes when loading.
  */
 final class Eip8347CodeCheck {
 
