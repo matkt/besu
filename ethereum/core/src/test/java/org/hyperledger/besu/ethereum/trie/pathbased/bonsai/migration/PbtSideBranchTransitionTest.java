@@ -61,7 +61,7 @@ class PbtSideBranchTransitionTest {
 
   private static final long PBT_TIME = 100L;
   private static final DataStorageConfiguration CONFIG =
-      DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
+      DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
   private static final Address CONTRACT = Address.fromHexString("0xc0");
   private static final Address OTHER = Address.fromHexString("0x0e");
   private static final UInt256 SLOT = UInt256.ONE;

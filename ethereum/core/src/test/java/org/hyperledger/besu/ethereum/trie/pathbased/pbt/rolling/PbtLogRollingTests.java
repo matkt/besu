@@ -66,7 +66,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class PbtLogRollingTests {
 
   private static final DataStorageConfiguration CONFIG =
-      DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
+      DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
   private static final Address ADDRESS_ONE =
       Address.fromHexString("0x1111111111111111111111111111111111111111");
   private static final Address ADDRESS_TWO =

@@ -70,7 +70,7 @@ class PbtMigratorCatchUpTest {
 
   private static final long PBT_TIME = 1_000L;
   private static final DataStorageConfiguration CONFIG =
-      DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG;
+      DataStorageConfiguration.DEFAULT_BONSAI_CONFIG;
 
   /**
    * Blocks after genesis; block {@code i} creates account {@code i} with a balance of {@code i}.

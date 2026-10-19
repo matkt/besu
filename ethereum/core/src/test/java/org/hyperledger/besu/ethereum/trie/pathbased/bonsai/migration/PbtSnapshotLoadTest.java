@@ -502,7 +502,7 @@ class PbtSnapshotLoadTest {
     return (BonsaiWorldStateKeyValueStorage)
         new KeyValueStorageProvider(
                 segments -> database, new InMemoryKeyValueStorage(), new NoOpMetricsSystem())
-            .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_PBT_CONFIG);
+            .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
   }
 
   /** A migrator with no cursor yet, its anchor canonical and finalized, and its first tick. */

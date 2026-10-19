@@ -53,20 +53,6 @@ public interface DataStorageConfiguration {
           .extraStorageConfiguration(ExtraStorageConfiguration.DISABLED)
           .build();
 
-  DataStorageConfiguration DEFAULT_BONSAI_PBT_CONFIG =
-      ImmutableDataStorageConfiguration.builder()
-          .dataStorageFormat(DataStorageFormat.BONSAI)
-          .extraStorageConfiguration(
-              ImmutableExtraStorageConfiguration.builder()
-                  // The partitioned binary trie stores code content-addressed by code hash, so the
-                  // flat DB must mirror that layout when the binary trie fork is active.
-                  .unstable(
-                      ImmutableExtraStorageConfiguration.Unstable.builder()
-                          .codeStoredByCodeHashEnabled(true)
-                          .build())
-                  .build())
-          .build();
-
   DataStorageFormat getDataStorageFormat();
 
   @Value.Default
