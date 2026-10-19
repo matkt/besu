@@ -39,6 +39,7 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
   /**
    * Returns a base {@link Updater} that drops flat-DB, code and trie-log writes. Trie-node writes
    * pass through unchanged: the PBT migrator only writes binary-trie nodes and the column cursor.
+   * They are low priority, so RocksDB throttles them before block import's writes.
    *
    * <p>Overridden (rather than reusing {@code CachedUpdater}) to prevent migration-suppressed flat
    * writes from polluting the shared flat-DB cache.
@@ -46,7 +47,7 @@ public class MigrationScopedWorldStateKeyValueStorage extends BonsaiWorldStateKe
   @Override
   public Updater updater() {
     return new Updater(
-        composedWorldStateStorage.startTransaction(),
+        composedWorldStateStorage.startLowPriorityTransaction(),
         trieLogStorage.startTransaction(),
         getFlatDbStrategy(),
         composedWorldStateStorage,

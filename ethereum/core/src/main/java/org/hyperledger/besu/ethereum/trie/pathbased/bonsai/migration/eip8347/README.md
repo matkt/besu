@@ -565,6 +565,8 @@ How much of the node the migrator takes, so that block import keeps up:
 | `--Xpbt-migration-roll-pause` | 0 ms | wait after each roll while catching up |
 | `--Xpbt-migration-sort-buffer` | 64 MiB | heap of each external sort of the load |
 
+Its writes are low priority: RocksDB slows them down first when compactions fall behind.
+
 ## Spec notes
 
 - **Order.** Artifacts are compared as unsigned bytes, as the spec requires. The PBT library

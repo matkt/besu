@@ -50,6 +50,7 @@ import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfigurationBuilder;
 import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.OptimisticRocksDBColumnarKeyValueStorage;
@@ -150,6 +151,25 @@ class PbtSnapshotLoadTest {
   }
 
   @Test
+  void loadCommitsAtLowPriority() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final SegmentedKeyValueStorage database = spy(rocksDb("db"));
+    final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(database);
+    final List<SegmentedKeyValueStorageTransaction> normal = recordTransactions(database, false);
+    final List<SegmentedKeyValueStorageTransaction> lowPriority =
+        recordTransactions(database, true);
+
+    migrator(storage, artifacts, fixture.mptRoot()).tick();
+
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isPresent();
+    // The nodes written last and the cursor: RocksDB throttles them before block import's writes.
+    assertThat(lowPriority).hasSize(1);
+    verify(lowPriority.getFirst()).commit();
+    normal.forEach(transaction -> verify(transaction, never()).commit());
+  }
+
+  @Test
   void rejectedSnapshotLeavesTheDatabaseUntouched() throws Exception {
     final Eip8347Fixture fixture = fixture();
     final Artifacts artifacts = fixture.write(tmp, "state");
@@ -164,6 +184,7 @@ class PbtSnapshotLoadTest {
     verify(migrator.scheduler()).shutdown();
     verify(database, never()).ingestSortedFiles(any(), any());
     verify(database, never()).startTransaction();
+    verify(database, never()).startLowPriorityTransaction();
     assertThat(column(database)).isEmpty();
     assertNoFileLeft();
   }
@@ -360,6 +381,27 @@ class PbtSnapshotLoadTest {
     PbtMigrator.putCursor(updater, loaded.pbtRoot(), migratorAnchor(fixture.mptRoot()));
     updater.commit();
     return column(database);
+  }
+
+  /** The transactions {@code database} starts from now on, of one priority, as spies. */
+  private static List<SegmentedKeyValueStorageTransaction> recordTransactions(
+      final SegmentedKeyValueStorage database, final boolean lowPriority) {
+    final List<SegmentedKeyValueStorageTransaction> started = new ArrayList<>();
+    final SegmentedKeyValueStorage stub =
+        doAnswer(
+                invocation -> {
+                  final SegmentedKeyValueStorageTransaction transaction =
+                      spy((SegmentedKeyValueStorageTransaction) invocation.callRealMethod());
+                  started.add(transaction);
+                  return transaction;
+                })
+            .when(database);
+    if (lowPriority) {
+      stub.startLowPriorityTransaction();
+    } else {
+      stub.startTransaction();
+    }
+    return started;
   }
 
   private static List<Map.Entry<Bytes, Bytes>> column(final SegmentedKeyValueStorage database) {

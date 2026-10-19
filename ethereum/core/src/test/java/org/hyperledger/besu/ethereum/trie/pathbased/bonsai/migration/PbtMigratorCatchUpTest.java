@@ -18,7 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,7 +64,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-/** The migrator catching up from genesis through trie logs: roll size and pauses. */
+/** The migrator catching up from genesis through trie logs: roll size, pauses, write priority. */
 class PbtMigratorCatchUpTest {
 
   private static final long PBT_TIME = 1_000L;
@@ -88,7 +91,7 @@ class PbtMigratorCatchUpTest {
 
   @BeforeEach
   void buildChain() throws Exception {
-    database = new SegmentedInMemoryKeyValueStorage();
+    database = spy(new SegmentedInMemoryKeyValueStorage());
     storage =
         (BonsaiWorldStateKeyValueStorage)
             new KeyValueStorageProvider(
@@ -139,6 +142,17 @@ class PbtMigratorCatchUpTest {
     assertThat(pausedAt).isEmpty();
     assertThat(cursor()).isEqualTo(BLOCKS);
     assertThat(binaryRoot()).contains(binaryRootFromScratch());
+  }
+
+  @Test
+  void everyStepCommitsAtLowPriority() {
+    clearInvocations(database);
+
+    tick(2, Duration.ZERO);
+
+    // Genesis and three rolls.
+    assertThat(cursor()).isEqualTo(BLOCKS);
+    verify(database, times(4)).startLowPriorityTransaction();
   }
 
   /** Runs one tick of a migrator with no cursor yet, recording its pauses instead of sleeping. */
