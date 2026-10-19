@@ -12,11 +12,9 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider;
+package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
-import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -30,9 +28,9 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.TrieBranchSegments;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.preload.BonsaiCachedMerkleTrieLoader;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
@@ -49,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
+import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
 
@@ -198,18 +197,8 @@ class PbtSideBranchTransitionTest {
     final BonsaiWorldStateKeyValueStorage.Updater updater =
         new MigrationScopedWorldStateKeyValueStorage(storage).updater();
     computation.applyTo(updater);
-    updater
-        .getWorldStateTransaction()
-        .put(
-            TrieBranchSegments.segmentFor(TrieBranchType.BINARY),
-            WORLD_ROOT_HASH_KEY,
-            computation.root().getBytes().toArrayUnsafe());
-    updater
-        .getWorldStateTransaction()
-        .put(
-            TrieBranchSegments.segmentFor(TrieBranchType.BINARY),
-            WORLD_BLOCK_HASH_KEY,
-            block.getBlockHash().getBytes().toArrayUnsafe());
+    PbtMigrator.putCursor(
+        updater, Bytes32.wrap(computation.root().getBytes()), block.getBlockHash());
     updater.commit();
     migration.updater().reset();
   }
