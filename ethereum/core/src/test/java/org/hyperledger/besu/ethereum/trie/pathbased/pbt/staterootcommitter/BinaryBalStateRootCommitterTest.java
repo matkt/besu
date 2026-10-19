@@ -15,74 +15,32 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import org.hyperledger.besu.config.GenesisConfig;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
-import org.hyperledger.besu.ethereum.mainnet.ImmutableBalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.CodeChange;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.SlotChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.StorageChange;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.trie.common.StateRootMismatchException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
-import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
-import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class BinaryBalStateRootCommitterTest {
-
-  private static final GenesisConfig EMPTY_BINARY_GENESIS =
-      GenesisConfig.fromResource(
-          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
-
-  private ExecutionContextTestFixture contextTestFixture;
-  private ProtocolContext protocolContext;
-  private BlockHeader chainHeadHeader;
-  private StateRootCommitterFactory factory;
-
-  @BeforeEach
-  void setUp() {
-    contextTestFixture =
-        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
-            .dataStorageFormat(DataStorageFormat.BONSAI)
-            .build();
-    protocolContext = contextTestFixture.getProtocolContext();
-    chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
-    factory = new StateRootCommitterFactory(ImmutableBalConfiguration.builder().build());
-  }
-
-  @AfterEach
-  void tearDown() throws Exception {
-    contextTestFixture.getStateArchive().close();
-  }
+class BinaryBalStateRootCommitterTest extends AbstractBinaryStateRootCommitterTest {
 
   @Test
   void binaryAndBalCommitterProduceSameRoot_balanceAndNonce() {
@@ -155,94 +113,6 @@ class BinaryBalStateRootCommitterTest {
   }
 
   @Test
-  void emptyBalAccessList_producesParentRoot() {
-    final BlockAccessList bal = new BlockAccessList(List.of());
-
-    try (BonsaiWorldState worldState = getWorldState(false)) {
-      final Hash expectedRoot = worldState.rootHash();
-      final BlockHeader blockHeader = childHeader(expectedRoot);
-      final StateRootCommitter committer =
-          factory.forBlock(
-              protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
-      worldState.persist(blockHeader, committer);
-      assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
-    }
-  }
-
-  @Test
-  void balRootMismatchThrowsException() {
-    final Address address = testAddress("b2");
-    final Wei balBalance = Wei.of(1_000_000L);
-    final BlockAccessList bal = balanceAndNonceBal(address, balBalance, 0L);
-    final Hash wrongRoot =
-        Hash.fromHexString("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-    final BlockHeader blockHeader = childHeader(wrongRoot);
-
-    try (BonsaiWorldState worldState = getWorldState(false)) {
-      applyBalanceAndNonce(worldState, address, balBalance, 0L);
-      final StateRootCommitter committer =
-          factory.forBlock(
-              protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
-
-      assertThatThrownBy(() -> worldState.persist(blockHeader, committer))
-          .isInstanceOf(StateRootMismatchException.class)
-          .hasMessageContaining(wrongRoot.getBytes().toHexString());
-    }
-  }
-
-  @Test
-  void cancel_preventsSubsequentCompute() {
-    final Address address = testAddress("28");
-    final Wei newBalance = Wei.of(9_999_999L);
-    final BlockAccessList bal = balanceAndNonceBal(address, newBalance, 0L);
-    final Hash expectedRoot =
-        computeBinaryRoot(accumulator -> accumulator.getOrCreate(address).setBalance(newBalance));
-    final BlockHeader blockHeader = childHeader(expectedRoot);
-
-    try (BonsaiWorldState worldState = getWorldState(false)) {
-      applyBalanceAndNonce(worldState, address, newBalance, 0L);
-      final StateRootCommitter committer =
-          factory.forBlock(
-              protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
-      committer.cancel();
-
-      assertThatThrownBy(() -> committer.compute(worldState, blockHeader, worldState.updater()))
-          .isInstanceOf(CancellationException.class)
-          .hasMessageContaining("Background BAL state root computation was cancelled");
-    }
-  }
-
-  @Test
-  void frozenStorage_balComputesRootWithoutWriting() {
-    final Address address = testAddress("7e");
-    final Wei balBalance = Wei.of(2_345_678L);
-    final long balNonce = 7L;
-    final BlockAccessList bal = balanceAndNonceBal(address, balBalance, balNonce);
-    final Hash expectedRoot =
-        computeBinaryRoot(
-            accumulator -> {
-              final MutableAccount account = accumulator.getOrCreate(address);
-              account.setBalance(balBalance);
-              account.setNonce(balNonce);
-            });
-    final BlockHeader blockHeader = childHeader(expectedRoot);
-
-    try (BonsaiWorldState worldState = getWorldState(false)) {
-      worldState.freezeStorage();
-      assertThat(worldState.isStorageFrozen()).isTrue();
-      assertThat(worldState.get(address)).isNull();
-
-      final StateRootCommitter committer =
-          factory.forBlock(
-              protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
-      worldState.persist(blockHeader, committer);
-
-      assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
-      assertThat(worldState.get(address)).isNull();
-    }
-  }
-
-  @Test
   void eip7702Delegation_matchesBinaryCommitter() {
     final Address authority = testAddress("70");
     final Address target = testAddress("71");
@@ -274,77 +144,6 @@ class BinaryBalStateRootCommitterTest {
               protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
       worldState.persist(blockHeader, committer);
       assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
-    }
-  }
-
-  private BlockHeader childHeader(final Hash stateRoot) {
-    return new BlockHeaderTestFixture()
-        .parentHash(chainHeadHeader.getHash())
-        .number(chainHeadHeader.getNumber() + 1L)
-        .stateRoot(stateRoot)
-        .buildHeader();
-  }
-
-  private static Address testAddress(final String suffix) {
-    return Address.fromHexString("0x00000000000000000000000000000000000000" + suffix);
-  }
-
-  private static BlockAccessList balanceAndNonceBal(
-      final Address address, final Wei balance, final long nonce) {
-    return new BlockAccessList(
-        List.of(
-            new AccountChanges(
-                address,
-                List.of(),
-                List.of(),
-                List.of(new BalanceChange(0, balance)),
-                List.of(new NonceChange(0, nonce)),
-                List.of())));
-  }
-
-  private static void applyBalanceAndNonce(
-      final BonsaiWorldState worldState,
-      final Address address,
-      final Wei balance,
-      final long nonce) {
-    final WorldUpdater updater = worldState.updater();
-    final MutableAccount account = updater.getOrCreate(address);
-    account.setBalance(balance);
-    if (nonce > 0) {
-      account.setNonce(nonce);
-    }
-    updater.commit();
-  }
-
-  private BonsaiWorldState getWorldState(final boolean shouldUpdateHead) {
-    return (BonsaiWorldState)
-        protocolContext
-            .getWorldStateArchive()
-            .getWorldState(
-                WorldStateQueryParams.newBuilder()
-                    .withBlockHeader(chainHeadHeader)
-                    .withShouldWorldStateUpdateHead(shouldUpdateHead)
-                    .build())
-            .orElseThrow();
-  }
-
-  private Hash computeBinaryRoot(
-      final Consumer<BonsaiWorldStateUpdateAccumulator> accumulatorConsumer) {
-    final BonsaiWorldState worldState =
-        (BonsaiWorldState)
-            protocolContext
-                .getWorldStateArchive()
-                .getWorldState(
-                    WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(chainHeadHeader))
-                .orElseThrow();
-    try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
-      accumulatorConsumer.accept(accumulator);
-      accumulator.commit();
-      return new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
-    } finally {
-      worldState.close();
     }
   }
 }
