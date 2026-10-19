@@ -61,6 +61,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.LiveFileMetaData;
+import org.rocksdb.Snapshot;
 
 public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValueStorageTest {
 
@@ -574,6 +576,54 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
       assertThatThrownBy(() -> writer.put(bytesFromHexString("0001"), bytesFromHexString("0AAA")))
           .isInstanceOf(StorageException.class);
     }
+    store.close();
+  }
+
+  @Test
+  public void sortedFileIngestedUnderASnapshotIsNotRewritten() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final Path file = folder.resolve("held.sst");
+    try (final SortedFileWriter writer = store.createSortedFileWriter(TestSegment.FOO, file)) {
+      writer.put(bytesFromHexString("0001"), bytesFromHexString("0AAA"));
+      writer.finish();
+    }
+    final byte[] written = Files.readAllBytes(file);
+
+    // A held snapshot gives the file a global seqno, kept in the manifest only.
+    final Snapshot snapshot = store.getDB().getSnapshot();
+    store.ingestSortedFiles(TestSegment.FOO, List.of(file));
+    store.getDB().releaseSnapshot(snapshot);
+
+    final LiveFileMetaData ingested =
+        store.getDB().getLiveFilesMetaData().stream()
+            .filter(meta -> Arrays.equals(meta.columnFamilyName(), TestSegment.FOO.getId()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(Path.of(ingested.path(), ingested.fileName())).hasBinaryContent(written);
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0001")))
+        .contains(bytesFromHexString("0AAA"));
+    store.close();
+  }
+
+  @Test
+  public void sortedFileOverlappingUnflushedWritesIsRejectedRatherThanFlushed() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    tx.put(TestSegment.FOO, bytesFromHexString("0001"), bytesFromHexString("0FFF"));
+    tx.commit();
+    final Path file = folder.resolve("overlap.sst");
+    try (final SortedFileWriter writer = store.createSortedFileWriter(TestSegment.FOO, file)) {
+      writer.put(bytesFromHexString("0001"), bytesFromHexString("0AAA"));
+      writer.finish();
+    }
+
+    // The flush would run while every write to the database is stopped.
+    assertThatThrownBy(() -> store.ingestSortedFiles(TestSegment.FOO, List.of(file)))
+        .isInstanceOf(StorageException.class);
+    assertThat(store.get(TestSegment.FOO, bytesFromHexString("0001")))
+        .contains(bytesFromHexString("0FFF"));
     store.close();
   }
 

@@ -45,7 +45,13 @@ public class RocksDBSortedFileWriter implements SortedFileWriter {
       final DBOptions dbOptions, final ColumnFamilyOptions columnFamilyOptions, final Path file)
       throws StorageException {
     this.options = new Options(dbOptions, columnFamilyOptions);
-    this.writer = new SstFileWriter(envOptions, options);
+    try {
+      this.writer = new SstFileWriter(envOptions, options);
+    } catch (final RuntimeException e) {
+      options.close();
+      envOptions.close();
+      throw e;
+    }
     try {
       writer.open(file.toString());
     } catch (final RocksDBException e) {

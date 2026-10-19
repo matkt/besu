@@ -728,8 +728,12 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
       throws StorageException {
     throwIfClosed();
     // Moved, not copied: RocksDB links each file into the database, or copies it across disks.
+    // Besu holds snapshots: don't write and fsync each file's seqno, or flush, with writes stopped.
     try (final IngestExternalFileOptions ingestOptions =
-        new IngestExternalFileOptions().setMoveFiles(true)) {
+        new IngestExternalFileOptions()
+            .setMoveFiles(true)
+            .setWriteGlobalSeqno(false)
+            .setAllowBlockingFlush(false)) {
       getDB()
           .ingestExternalFile(
               safeColumnHandle(segmentIdentifier),
