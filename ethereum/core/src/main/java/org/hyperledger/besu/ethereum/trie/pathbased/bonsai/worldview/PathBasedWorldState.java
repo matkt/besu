@@ -111,19 +111,6 @@ public abstract class PathBasedWorldState
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final PathBasedWorldStateCacheManager worldStateCacheManager,
       final TrieLogManager trieLogManager,
-      final WorldStateConfig worldStateConfig) {
-    this(
-        worldStateKeyValueStorage,
-        worldStateCacheManager,
-        trieLogManager,
-        worldStateConfig,
-        TrieBranchType.PATRICIA);
-  }
-
-  protected PathBasedWorldState(
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final PathBasedWorldStateCacheManager worldStateCacheManager,
-      final TrieLogManager trieLogManager,
       final WorldStateConfig worldStateConfig,
       final TrieBranchType trieBranchType) {
     this.worldStateKeyValueStorage = worldStateKeyValueStorage;
@@ -192,16 +179,6 @@ public abstract class PathBasedWorldState
   @Override
   public boolean isStorageFrozen() {
     return isStorageFrozen;
-  }
-
-  /**
-   * Reset the worldState to this block header
-   *
-   * @param blockHeader block to use
-   */
-  public void resetWorldStateTo(final BlockHeader blockHeader) {
-    worldStateBlockHash = blockHeader.getBlockHash();
-    worldStateRootHash = blockHeader.getStateRoot();
   }
 
   /** Resets the world state to a block and root of a trie branch. */

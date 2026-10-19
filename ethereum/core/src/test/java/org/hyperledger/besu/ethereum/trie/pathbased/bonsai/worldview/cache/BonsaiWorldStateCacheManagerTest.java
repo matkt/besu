@@ -220,7 +220,8 @@ class BonsaiWorldStateCacheManagerTest {
     public PathBasedWorldState createWorldState(
         final PathBasedWorldStateProvider archive,
         final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-        final EvmConfiguration evmConfiguration) {
+        final EvmConfiguration evmConfiguration,
+        final org.hyperledger.besu.plugin.data.BlockHeader blockHeader) {
       return Mockito.mock(PathBasedWorldState.class);
     }
 

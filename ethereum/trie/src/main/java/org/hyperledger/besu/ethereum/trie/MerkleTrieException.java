@@ -46,10 +46,6 @@ public class MerkleTrieException extends RuntimeException {
     super(message, cause);
   }
 
-  public MerkleTrieException(final String message, final Throwable cause) {
-    super(message, cause);
-  }
-
   public MerkleTrieException(
       final String message,
       final Optional<Address> maybeAddress,

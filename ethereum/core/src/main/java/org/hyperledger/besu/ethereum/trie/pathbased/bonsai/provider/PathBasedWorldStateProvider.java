@@ -78,19 +78,6 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final Blockchain blockchain,
       final ExtraStorageConfiguration extraStorageConfiguration,
-      final ServiceManager pluginContext) {
-    this(
-        worldStateKeyValueStorage,
-        blockchain,
-        extraStorageConfiguration,
-        pluginContext,
-        Optional.empty());
-  }
-
-  public PathBasedWorldStateProvider(
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final Blockchain blockchain,
-      final ExtraStorageConfiguration extraStorageConfiguration,
       final ServiceManager pluginContext,
       final Optional<Long> binaryTrieMilestone) {
     this(

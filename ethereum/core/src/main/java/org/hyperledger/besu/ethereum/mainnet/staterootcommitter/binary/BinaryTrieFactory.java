@@ -55,18 +55,6 @@ public final class BinaryTrieFactory {
         forkJoinPool);
   }
 
-  /**
-   * Builds a binary trie from an arbitrary {@link NodeLoader} and root hash. Defaults to the
-   * account-trie fork join pool, matching {@link #createStateTrie}.
-   */
-  public static StoredPartitionedBinaryTrie createTrie(
-      final NodeLoader nodeLoader,
-      final Bytes32 rootHash,
-      final WorldStateConfig worldStateConfig) {
-    return createTrie(
-        nodeLoader, rootHash, worldStateConfig, BlockProcessingExecutors.accountTrieForkJoinPool());
-  }
-
   private static StoredPartitionedBinaryTrie createTrie(
       final NodeLoader nodeLoader,
       final Bytes32 rootHash,

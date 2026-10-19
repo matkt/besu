@@ -307,10 +307,12 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
     this.stateRootToBlockHeaderCache.clear();
   }
 
+  /** A world state for a cached block, on the trie branch of that block. */
   public abstract PathBasedWorldState createWorldState(
       final PathBasedWorldStateProvider archive,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final EvmConfiguration evmConfiguration);
+      final EvmConfiguration evmConfiguration,
+      final BlockHeader blockHeader);
 
   // the head block hash is saved in the trie branch the chain head is on
   private Optional<Hash> headBlockHash(final BonsaiWorldStateKeyValueStorage headSnapshot) {
@@ -321,15 +323,6 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
     return trieBranchType == TrieBranchType.PATRICIA
         ? headSnapshot.getWorldStateBlockHash()
         : headSnapshot.getWorldStateBlockHash(trieBranchType);
-  }
-
-  /** A world state for a cached block, on the trie branch of that block. */
-  public PathBasedWorldState createWorldState(
-      final PathBasedWorldStateProvider archive,
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final EvmConfiguration evmConfiguration,
-      final BlockHeader blockHeader) {
-    return createWorldState(archive, worldStateKeyValueStorage, evmConfiguration);
   }
 
   public abstract BonsaiWorldStateKeyValueStorage createLayeredKeyValueStorage(

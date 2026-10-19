@@ -43,16 +43,8 @@ public class GenesisWorldStateProvider {
    * Creates a Genesis world state based on the provided data storage format.
    *
    * @param dataStorageConfiguration the data storage configuration to use
+   * @param trieBranchType the trie branch of the genesis world state
    * @return a mutable world state for the Genesis block
-   */
-  public static MutableWorldState createGenesisWorldState(
-      final DataStorageConfiguration dataStorageConfiguration, final BonsaiCodeCache codeCache) {
-    return createGenesisWorldState(dataStorageConfiguration, codeCache, TrieBranchType.PATRICIA);
-  }
-
-  /**
-   * Creates a genesis world state on a trie branch: a chain born after the binary trie fork starts
-   * on the binary trie.
    */
   public static MutableWorldState createGenesisWorldState(
       final DataStorageConfiguration dataStorageConfiguration,

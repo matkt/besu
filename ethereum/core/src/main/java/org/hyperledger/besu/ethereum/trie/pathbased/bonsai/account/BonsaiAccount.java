@@ -92,15 +92,6 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
 
   public BonsaiAccount(
       final BonsaiAccount toCopy, final BonsaiWorldView context, final boolean mutable) {
-    this(toCopy, context, mutable, toCopy.storageRootStrategy.copy());
-  }
-
-  /** Copies an account under another storage root strategy, as the binary trie migration does. */
-  public BonsaiAccount(
-      final BonsaiAccount toCopy,
-      final BonsaiWorldView context,
-      final boolean mutable,
-      final StorageRootStrategy storageRootStrategy) {
     this.context = context;
     this.address = toCopy.address;
     this.addressHash = toCopy.addressHash;
@@ -109,7 +100,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
     this.codeHash = toCopy.codeHash;
     this.immutable = !mutable;
     this.codeCache = toCopy.codeCache;
-    this.storageRootStrategy = storageRootStrategy;
+    this.storageRootStrategy = toCopy.storageRootStrategy.copy();
     this.updatedStorage.putAll(toCopy.updatedStorage);
 
     if (toCopy.code == null && toCopy.codeHash.equals(Hash.EMPTY)) {
@@ -167,7 +158,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
 
     final long nonce = in.readLongScalar();
     final Wei balance = Wei.of(in.readUInt256Scalar());
-    storageRootStrategy.readStorageRoot(in, listSize);
+    storageRootStrategy.readStorageRoot(in);
     final Hash codeHash = Hash.wrap(in.readBytes32());
 
     in.leaveList();
@@ -185,7 +176,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
   }
 
   /** Returns the {@link StorageRootStrategy} held by this account. */
-  public StorageRootStrategy getStorageRootStrategy() {
+  StorageRootStrategy getStorageRootStrategy() {
     return storageRootStrategy;
   }
 
@@ -374,7 +365,7 @@ public class BonsaiAccount implements MutableAccount, TrieAccountValue {
     return storageRootStrategy.getStorageRoot();
   }
 
-  @Override
+  /** Whether this account carries a storage root: binary trie accounts do not. */
   public boolean hasStorageRoot() {
     return storageRootStrategy.hasStorageRoot();
   }

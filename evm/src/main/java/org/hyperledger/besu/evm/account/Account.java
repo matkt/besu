@@ -44,15 +44,6 @@ public interface Account extends AccountState {
   Address getAddress();
 
   /**
-   * Whether this account carries a storage root: MPT accounts do, binary trie accounts do not.
-   *
-   * @return {@code true} if the account has a storage root.
-   */
-  default boolean hasStorageRoot() {
-    return true;
-  }
-
-  /**
    * Gets the code cache.
    *
    * @return the code cache, or null if not supported

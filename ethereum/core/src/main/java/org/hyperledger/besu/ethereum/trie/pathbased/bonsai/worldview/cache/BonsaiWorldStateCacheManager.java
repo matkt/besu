@@ -55,19 +55,6 @@ public class BonsaiWorldStateCacheManager extends PathBasedWorldStateCacheManage
   public PathBasedWorldState createWorldState(
       final PathBasedWorldStateProvider archive,
       final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
-      final EvmConfiguration evmConfiguration) {
-    return new BonsaiWorldState(
-        (BonsaiWorldStateProvider) archive,
-        worldStateKeyValueStorage,
-        evmConfiguration,
-        WorldStateConfig.newBuilder(worldStateConfig).build(),
-        codeCache);
-  }
-
-  @Override
-  public PathBasedWorldState createWorldState(
-      final PathBasedWorldStateProvider archive,
-      final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage,
       final EvmConfiguration evmConfiguration,
       final BlockHeader blockHeader) {
     return new BonsaiWorldState(

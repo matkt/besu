@@ -16,7 +16,6 @@ package org.hyperledger.besu.ethereum.trie.common;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
 
 import java.util.Objects;
@@ -67,15 +66,6 @@ public final class BinaryTrieAccountValue implements TrieAccountValue {
     out.writeUInt256Scalar(balance);
     out.writeBytes(codeHash.getBytes());
     out.endList();
-  }
-
-  public static BinaryTrieAccountValue readFrom(final RLPInput input) {
-    input.enterList();
-    final long nonce = input.readLongScalar();
-    final Wei balance = Wei.of(input.readUInt256Scalar());
-    final Hash codeHash = Hash.wrap(input.readBytes32());
-    input.leaveList();
-    return new BinaryTrieAccountValue(nonce, balance, codeHash);
   }
 
   @Override

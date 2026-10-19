@@ -58,14 +58,6 @@ public final class BinaryStorageRootStrategy implements StorageRootStrategy {
   }
 
   @Override
-  public void readStorageRoot(final RLPInput in, final int listSize) {
-    if (listSize == 4) {
-      // an account migrated from the MPT: skip its storage root
-      in.skipNext();
-    }
-  }
-
-  @Override
   public void assertStorageRootMatches(final AccountValue other, final String context) {
     // a binary account has no storage root to compare
   }
