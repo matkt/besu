@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.FLAT_DB_BLOCK_HASH_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.FlatDbStrategyProvider.FLAT_DB_MODE;
 import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
@@ -108,6 +109,7 @@ class PmtPrunerTest {
             TRIE_BRANCH_STORAGE,
             WORLD_BLOCK_NUMBER_KEY,
             Bytes.ofUnsignedLong(preFork.getNumber()).toArrayUnsafe());
+    updater.putFlatDbBlockHash(postFork.getHash());
     // PBT at the first post-fork block, owned by the chain.
     updater.saveWorldState(TrieBranchType.BINARY, postFork.getHash().getBytes(), PBT_ROOT, NODE);
     updater.putTrieNode(TrieBranchType.BINARY, Bytes.of(0x01), NODE_HASH, NODE);
@@ -123,7 +125,9 @@ class PmtPrunerTest {
                     .get(TRIE_BRANCH_STORAGE, FLAT_DB_MODE)
                     .orElseThrow()),
             Bytes.wrap(WORLD_BLOCK_NUMBER_KEY),
-            Bytes.ofUnsignedLong(preFork.getNumber()));
+            Bytes.ofUnsignedLong(preFork.getNumber()),
+            Bytes.wrap(FLAT_DB_BLOCK_HASH_KEY),
+            postFork.getHash().getBytes());
   }
 
   @Test

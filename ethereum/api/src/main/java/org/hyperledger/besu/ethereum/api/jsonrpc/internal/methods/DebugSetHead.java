@@ -31,7 +31,6 @@ import org.hyperledger.besu.ethereum.api.query.BlockchainQueries;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 
 import java.util.Optional;
 
@@ -118,11 +117,11 @@ public class DebugSetHead extends AbstractBlockParameterOrBlockHashMethod {
         //          Ensure no block processing is occuring when using this feature.
         //          No engine-api, block import, sync, mining or other rpc calls should be running.
 
-        final BonsaiWorldStateKeyValueStorage worldStateStorage =
-            archive.getWorldStateKeyValueStorage();
         Optional<BlockHeader> currentHead =
-            worldStateStorage
-                .getWorldStateBlockHash(worldStateStorage.resolveActiveTrieBranchType())
+            archive
+                .getWorldStateKeyValueStorage()
+                .getWorldStateBlockHash(
+                    archive.resolveTrieBranchType(blockchain.getChainHeadHeader()))
                 .flatMap(blockchain::getBlockHeader);
 
         while (currentHead.isPresent()

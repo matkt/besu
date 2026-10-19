@@ -244,7 +244,10 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
             .isPresent()) {
       return false;
     }
-    return super.isWorldStateAvailable(rootHash, blockHash);
+    return super.isWorldStateAvailable(rootHash, blockHash)
+        || (binaryTrieMilestone.isPresent()
+            && worldStateKeyValueStorage.isWorldStateAvailable(
+                TrieBranchType.BINARY, Bytes32.wrap(rootHash.getBytes()), blockHash));
   }
 
   /**

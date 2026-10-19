@@ -155,7 +155,9 @@ public class SynchronizationServiceImpl implements SynchronizationService {
           archive.getWorldStateSharedSpec().setTrieDisabled(true);
           final BonsaiWorldStateKeyValueStorage worldStateStorage =
               archive.getWorldStateKeyValueStorage();
-          final TrieBranchType trieBranchType = worldStateStorage.resolveActiveTrieBranchType();
+          // the head world state is on the trie branch of the chain head
+          final TrieBranchType trieBranchType =
+              archive.resolveTrieBranchType(archive.getBlockchain().getChainHeadHeader());
           final Optional<Hash> worldStateBlockHash =
               worldStateStorage.getWorldStateBlockHash(trieBranchType);
           final Optional<Bytes> worldStateRootHash =

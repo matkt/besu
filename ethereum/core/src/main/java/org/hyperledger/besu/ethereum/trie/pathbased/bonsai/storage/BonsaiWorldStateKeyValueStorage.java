@@ -18,7 +18,6 @@ import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIden
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.ACCOUNT_STORAGE_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.CODE_STORAGE;
-import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.FLAT_DB_METADATA_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.FlatDbStrategyProvider.FLAT_DB_MODE;
 
@@ -82,6 +81,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   // 0x776f726c64426c6f636b4e756d626572
   public static final byte[] WORLD_BLOCK_NUMBER_KEY =
       "worldBlockNumber".getBytes(StandardCharsets.UTF_8);
+  // block whose state the flat DB holds, next to the flat DB mode
   public static final byte[] FLAT_DB_BLOCK_HASH_KEY =
       "flatDbBlockHash".getBytes(StandardCharsets.UTF_8);
 
@@ -130,8 +130,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
                 CODE_STORAGE,
                 ACCOUNT_STORAGE_STORAGE,
                 TRIE_BRANCH_STORAGE,
-                BINARY_TRIE_BRANCH_STORAGE,
-                FLAT_DB_METADATA_STORAGE));
+                BINARY_TRIE_BRANCH_STORAGE));
     this.trieLogStorage =
         provider.getStorageBySegmentIdentifier(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
     this.flatDbStrategyProvider =
@@ -251,21 +250,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .map(bytes -> Bytes.wrap(bytes).toLong());
   }
 
-  /** Root hash from whichever trie branch column currently holds world metadata. */
-  public Optional<Bytes> getActiveWorldStateRootHash() {
-    return getWorldStateRootHash(resolveActiveTrieBranchType());
-  }
-
-  /** Returns which trie branch column holds the persisted world root hash. */
-  public TrieBranchType resolveActiveTrieBranchType() {
-    if (composedWorldStateStorage
-        .get(BINARY_TRIE_BRANCH_STORAGE, WORLD_ROOT_HASH_KEY)
-        .isPresent()) {
-      return TrieBranchType.BINARY;
-    }
-    return TrieBranchType.PATRICIA;
-  }
-
   /** {@code true} once the PBT fork has been crossed and the migrator has permanently retired. */
   public boolean isPbtMigratorRetired() {
     return composedWorldStateStorage
@@ -322,7 +306,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void deletePatriciaTrie() {
     // No onClearTrie: it would close the binary-trie snapshots and cached states still in use.
     composedWorldStateStorage.deleteAllExcept(
-        TRIE_BRANCH_STORAGE, List.of(FLAT_DB_MODE, WORLD_BLOCK_NUMBER_KEY));
+        TRIE_BRANCH_STORAGE, List.of(FLAT_DB_MODE, WORLD_BLOCK_NUMBER_KEY, FLAT_DB_BLOCK_HASH_KEY));
   }
 
   /**
@@ -335,7 +319,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
   public Optional<Hash> getFlatDbBlockHash() {
     return composedWorldStateStorage
-        .get(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY)
+        .get(TRIE_BRANCH_STORAGE, FLAT_DB_BLOCK_HASH_KEY)
         .map(Bytes32::wrap)
         .map(Hash::wrap);
   }
@@ -368,8 +352,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   }
 
   public boolean isWorldStateAvailable(final Bytes32 rootHash, final Hash blockHash) {
-    return isWorldStateAvailable(TrieBranchType.PATRICIA, rootHash, blockHash)
-        || isWorldStateAvailable(TrieBranchType.BINARY, rootHash, blockHash);
+    return isWorldStateAvailable(TrieBranchType.PATRICIA, rootHash, blockHash);
   }
 
   public boolean isWorldStateAvailable(
@@ -460,7 +443,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatAccount(
-                    this::getActiveWorldStateRootHash,
+                    this::getWorldStateRootHash,
                     this::getTrieNode,
                     accountHash,
                     composedWorldStateStorage));
@@ -493,7 +476,7 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         () ->
             getFlatDbStrategy()
                 .getFlatStorageValueByStorageSlotKey(
-                    this::getActiveWorldStateRootHash,
+                    this::getWorldStateRootHash,
                     storageRootSupplier,
                     (location, hash) -> getTrieNode(TrieNodeKey.of(accountHash, location), hash),
                     accountHash,
@@ -612,7 +595,6 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
     getFlatDbStrategy().clearAll(composedWorldStateStorage);
     composedWorldStateStorage.clear(TRIE_BRANCH_STORAGE);
     composedWorldStateStorage.clear(BINARY_TRIE_BRANCH_STORAGE);
-    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
     trieLogStorage.clear();
     clearCrossBlockCache();
     flatDbStrategyProvider.loadFlatDbStrategy(composedWorldStateStorage);
@@ -621,7 +603,10 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   public void clearFlatDatabase() {
     subscribers.forEach(StorageSubscriber::onClearFlatDatabaseStorage);
     getFlatDbStrategy().resetOnResync(composedWorldStateStorage);
-    composedWorldStateStorage.clear(FLAT_DB_METADATA_STORAGE);
+    final SegmentedKeyValueStorageTransaction transaction =
+        composedWorldStateStorage.startTransaction();
+    transaction.remove(TRIE_BRANCH_STORAGE, FLAT_DB_BLOCK_HASH_KEY);
+    transaction.commit();
     clearCrossBlockCache();
   }
 
@@ -817,12 +802,12 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
 
     public Updater putFlatDbBlockHash(final Hash blockHash) {
       composedWorldStateTransaction.put(
-          FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY, blockHash.getBytes().toArrayUnsafe());
+          TRIE_BRANCH_STORAGE, FLAT_DB_BLOCK_HASH_KEY, blockHash.getBytes().toArrayUnsafe());
       return this;
     }
 
     public Updater removeFlatDbBlockHash() {
-      composedWorldStateTransaction.remove(FLAT_DB_METADATA_STORAGE, FLAT_DB_BLOCK_HASH_KEY);
+      composedWorldStateTransaction.remove(TRIE_BRANCH_STORAGE, FLAT_DB_BLOCK_HASH_KEY);
       return this;
     }
 

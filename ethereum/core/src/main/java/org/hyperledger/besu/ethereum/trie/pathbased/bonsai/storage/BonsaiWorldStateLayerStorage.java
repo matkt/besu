@@ -86,7 +86,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
                 () ->
                     getFlatDbStrategy()
                         .getFlatAccount(
-                            this::getActiveWorldStateRootHash,
+                            this::getWorldStateRootHash,
                             this::getTrieNode,
                             accountHash,
                             persistentStorage)));
@@ -116,7 +116,7 @@ public class BonsaiWorldStateLayerStorage extends BonsaiSnapshotWorldStateKeyVal
                 () ->
                     getFlatDbStrategy()
                         .getFlatStorageValueByStorageSlotKey(
-                            this::getActiveWorldStateRootHash,
+                            this::getWorldStateRootHash,
                             storageRootSupplier,
                             (location, hash) ->
                                 getTrieNode(TrieNodeKey.of(accountHash, location), hash),

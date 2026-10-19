@@ -3016,6 +3016,11 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
         && !dataStorageConfiguration.getHistoryExpiryPruneEnabled()) {
       rocksDBPlugin.addIgnorableSegmentIdentifier(KeyValueSegmentIdentifier.CHAIN_PRUNER_STATE);
     }
+    // the binary trie column exists only on chains that schedule the binary trie
+    if (genesisConfigOptionsSupplier.get().getBinaryTrieTime().isEmpty()) {
+      rocksDBPlugin.addIgnorableSegmentIdentifier(
+          KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE);
+    }
   }
 
   private void validateAndResolveCheckpointRelatedConfig() {
