@@ -16,71 +16,33 @@ package org.hyperledger.besu.ethereum.trie.pathbased.pbt.staterootcommitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.hyperledger.besu.config.GenesisConfig;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.mainnet.ImmutableBalConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
-import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.NonceChange;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.BalStateRootCommitter;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootCommitterFactory;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.patricia.DefaultPatriciaStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.account.MutableAccount;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 import org.hyperledger.besu.evm.worldstate.WorldUpdater;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootCommitter;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
-import java.util.List;
 import java.util.Optional;
-import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-class DefaultBinaryStateRootCommitterTest {
-
-  private static final GenesisConfig EMPTY_BINARY_GENESIS =
-      GenesisConfig.fromResource(
-          "/org/hyperledger/besu/ethereum/trie/pathbased/pbt/empty-amsterdam-genesis.json");
-
-  private ExecutionContextTestFixture contextTestFixture;
-  private ProtocolContext protocolContext;
-  private BlockHeader chainHeadHeader;
-
-  private StateRootCommitterFactory factory;
-
-  @BeforeEach
-  void setUp() {
-    contextTestFixture =
-        ExecutionContextTestFixture.builder(EMPTY_BINARY_GENESIS)
-            .dataStorageFormat(DataStorageFormat.BONSAI)
-            .build();
-    protocolContext = contextTestFixture.getProtocolContext();
-    chainHeadHeader = contextTestFixture.getBlockchain().getChainHeadHeader();
-    factory = new StateRootCommitterFactory(ImmutableBalConfiguration.builder().build());
-  }
-
-  @AfterEach
-  void tearDown() throws Exception {
-    contextTestFixture.getStateArchive().close();
-  }
+class DefaultBinaryStateRootCommitterTest extends AbstractBinaryStateRootCommitterTest {
 
   @Nested
   class FactorySelection {
@@ -100,16 +62,7 @@ class DefaultBinaryStateRootCommitterTest {
 
     @Test
     void factoryReturnsBinaryBal_whenBalPresentAndEnabled() {
-      final BlockAccessList bal =
-          new BlockAccessList(
-              List.of(
-                  new AccountChanges(
-                      testAddress("a1"),
-                      List.of(),
-                      List.of(),
-                      List.of(new BalanceChange(0, Wei.of(1))),
-                      List.of(new NonceChange(0, 1L)),
-                      List.of())));
+      final BlockAccessList bal = balanceAndNonceBal(testAddress("a1"), Wei.of(1), 1L);
       final BlockHeader blockHeader = childHeader(chainHeadHeader.getStateRoot());
 
       try (BonsaiWorldState worldState = getWorldState(false)) {
@@ -118,21 +71,15 @@ class DefaultBinaryStateRootCommitterTest {
                 protocolContext, blockHeader, Optional.of(bal), worldState.isStorageFrozen());
 
         assertThat(committer).isInstanceOf(BalStateRootCommitter.class);
+        assertThat(committer.getTrieBranchType()).isEqualTo(TrieBranchType.BINARY);
+        // waits for the background computation before the archive closes
+        committer.compute(worldState, null, worldState.updater());
       }
     }
 
     @Test
     void factoryReturnsBinary_whenBalPresentButDisabled() {
-      final BlockAccessList bal =
-          new BlockAccessList(
-              List.of(
-                  new AccountChanges(
-                      testAddress("a1"),
-                      List.of(),
-                      List.of(),
-                      List.of(new BalanceChange(0, Wei.of(1))),
-                      List.of(new NonceChange(0, 1L)),
-                      List.of())));
+      final BlockAccessList bal = balanceAndNonceBal(testAddress("a1"), Wei.of(1), 1L);
       final BlockHeader blockHeader = childHeader(chainHeadHeader.getStateRoot());
       final StateRootCommitterFactory disabledFactory =
           new StateRootCommitterFactory(
@@ -150,84 +97,6 @@ class DefaultBinaryStateRootCommitterTest {
 
   @Nested
   class BinaryRootComputation {
-
-    @Test
-    void balanceAndNonceUpdatesProduceDeterministicRoot() {
-      final Address address = testAddress("aa");
-      final Wei balance = Wei.of(1_234_567L);
-      final long nonce = 7L;
-
-      final Hash firstRoot =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(address);
-                account.setBalance(balance);
-                account.setNonce(nonce);
-              });
-      final Hash secondRoot =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(address);
-                account.setBalance(balance);
-                account.setNonce(nonce);
-              });
-
-      assertThat(firstRoot).isEqualTo(secondRoot);
-      assertThat(firstRoot).isNotEqualTo(chainHeadHeader.getStateRoot());
-    }
-
-    @Test
-    void codeAndStorageUpdatesProduceDeterministicRoot() {
-      final Address address = testAddress("bb");
-      final StorageSlotKey slotKey = new StorageSlotKey(UInt256.valueOf(12));
-      final UInt256 slotValue = UInt256.valueOf(0xdeadbeefL);
-      final Bytes code = Bytes.fromHexString("0x60016000");
-
-      final Hash root =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(address);
-                account.setCode(code);
-                account.setStorageValue(slotKey.getSlotKey().orElseThrow(), slotValue);
-              });
-
-      assertThat(root).isNotEqualTo(chainHeadHeader.getStateRoot());
-      assertThat(root).isNotEqualTo(Hash.EMPTY);
-    }
-
-    @Test
-    void binaryRootDiffersFromDefaultMerkleRoot() throws Exception {
-      final Address address = testAddress("cc");
-      final Wei balance = Wei.of(999_999L);
-      final long nonce = 5L;
-
-      final Hash binaryRoot =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(address);
-                account.setBalance(balance);
-                account.setNonce(nonce);
-              });
-
-      final ExecutionContextTestFixture bonsaiFixture =
-          ExecutionContextTestFixture.builder(GenesisConfig.mainnet())
-              .dataStorageFormat(DataStorageFormat.BONSAI)
-              .build();
-      try {
-        final Hash defaultRoot =
-            computeDefaultRoot(
-                bonsaiFixture.getProtocolContext(),
-                bonsaiFixture.getBlockchain().getChainHeadHeader(),
-                accumulator -> {
-                  final MutableAccount account = accumulator.getOrCreate(address);
-                  account.setBalance(balance);
-                  account.setNonce(nonce);
-                });
-        assertThat(binaryRoot).isNotEqualTo(defaultRoot);
-      } finally {
-        bonsaiFixture.getStateArchive().close();
-      }
-    }
 
     @Test
     void persistWithBinaryCommitter_updatesWorldStateRoot() {
@@ -284,130 +153,6 @@ class DefaultBinaryStateRootCommitterTest {
     }
 
     @Test
-    void codeReplacementRootMatchesDirectDeployment() {
-      final Address address = testAddress("11");
-      final Bytes firstCode = Bytes.fromHexString("0x6001");
-      final Bytes finalCode = Bytes.fromHexString("0x600160005260016000f3");
-
-      final Hash rootDirect =
-          computeBinaryRoot(accumulator -> accumulator.getOrCreate(address).setCode(finalCode));
-
-      final Hash rootAfterReplacement =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(address);
-                account.setCode(firstCode);
-                account.setCode(finalCode);
-              });
-
-      assertThat(rootAfterReplacement).isEqualTo(rootDirect);
-    }
-
-    @Test
-    void eip7702DelegationUsesHeaderLeafNotCodeZone() {
-      final Address authority = testAddress("70");
-      final Address target = testAddress("71");
-      final Bytes delegationCode =
-          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
-
-      final Hash rootWithDelegation =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-              });
-
-      final Hash rootCleared =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-                account.setCode(Bytes.EMPTY);
-              });
-
-      final Hash rootEmptyAccount =
-          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
-
-      assertThat(rootWithDelegation).isNotEqualTo(rootEmptyAccount);
-      assertThat(rootCleared).isEqualTo(rootEmptyAccount);
-    }
-
-    @Test
-    void eoaToDelegationToClearRestoresEmptyAccountRoot() {
-      final Address authority = testAddress("74");
-      final Address target = testAddress("75");
-      final Bytes delegationCode =
-          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
-
-      final Hash rootEmptyAccount =
-          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
-
-      final Hash rootAfterSwitchAndClear =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                // EOA empty → delegation → clear back to empty code-hash mode
-                account.setBalance(Wei.ZERO);
-                account.setCode(delegationCode);
-                account.setCode(Bytes.EMPTY);
-              });
-
-      assertThat(rootAfterSwitchAndClear).isEqualTo(rootEmptyAccount);
-    }
-
-    @Test
-    void delegationToContractCodeMatchesDirectDeploy() {
-      final Address authority = testAddress("76");
-      final Address target = testAddress("77");
-      final Bytes delegationCode =
-          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
-      final Bytes contractCode = Bytes.fromHexString("0x600160005260016000f3");
-
-      final Hash rootDirect =
-          computeBinaryRoot(
-              accumulator -> accumulator.getOrCreate(authority).setCode(contractCode));
-
-      final Hash rootViaDelegationSwitch =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-                account.setCode(contractCode);
-              });
-
-      assertThat(rootViaDelegationSwitch).isEqualTo(rootDirect);
-    }
-
-    @Test
-    void sameModeBalanceUpdateMatchesDirectDelegatedAccount() {
-      final Address authority = testAddress("78");
-      final Address target = testAddress("79");
-      final Bytes delegationCode =
-          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
-      final Wei balance = Wei.of(42);
-
-      final Hash rootDirect =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-                account.setBalance(balance);
-              });
-
-      // Same final mode (delegation): balance-only churn must not disturb header mutual exclusion.
-      final Hash rootAfterBalanceChurn =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-                account.setBalance(Wei.of(1));
-                account.setBalance(balance);
-              });
-
-      assertThat(rootAfterBalanceChurn).isEqualTo(rootDirect);
-    }
-
-    @Test
     void accountDeletionClearsHeaderLeaves() {
       final Address address = testAddress("80");
       final Wei balance = Wei.of(100);
@@ -449,7 +194,6 @@ class DefaultBinaryStateRootCommitterTest {
 
         final Hash rootAfterDelete =
             new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
-        assertThat(rootAfterDelete).isNotEqualTo(rootWithAccount);
         assertThat(rootAfterDelete).isEqualTo(Hash.ZERO);
       }
     }
@@ -507,27 +251,6 @@ class DefaultBinaryStateRootCommitterTest {
             new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
         assertThat(rootAfterZero).isEqualTo(rootAccountOnly);
       }
-    }
-
-    @Test
-    void codeClearOfDelegationRestoresEmptyAccountRoot() {
-      final Address authority = testAddress("83");
-      final Address target = testAddress("84");
-      final Bytes delegationCode =
-          Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, target.getBytes());
-
-      final Hash rootEmptyAccount =
-          computeBinaryRoot(accumulator -> accumulator.getOrCreate(authority));
-
-      final Hash rootCleared =
-          computeBinaryRoot(
-              accumulator -> {
-                final MutableAccount account = accumulator.getOrCreate(authority);
-                account.setCode(delegationCode);
-                account.setCode(Bytes.EMPTY);
-              });
-
-      assertThat(rootCleared).isEqualTo(rootEmptyAccount);
     }
 
     @Test
@@ -595,6 +318,45 @@ class DefaultBinaryStateRootCommitterTest {
     }
 
     @Test
+    void delegationBecomesContractAfterPersist() {
+      final Address address = testAddress("85");
+      final Bytes delegationCode =
+          Bytes.concatenate(
+              CodeDelegationHelper.CODE_DELEGATION_PREFIX, testAddress("86").getBytes());
+      final Bytes contractCode = Bytes.fromHexString("0x600160005260016000f3");
+
+      final Hash rootWithDelegation =
+          computeBinaryRoot(
+              accumulator -> accumulator.getOrCreate(address).setCode(delegationCode));
+      final Hash rootWithContract =
+          computeBinaryRoot(accumulator -> accumulator.getOrCreate(address).setCode(contractCode));
+      final BlockHeader headerWithDelegation = childHeader(rootWithDelegation);
+
+      try (BonsaiWorldState worldState = getWorldState(true)) {
+        final WorldUpdater updater = worldState.updater();
+        updater.getOrCreate(address).setCode(delegationCode);
+        updater.commit();
+        final StateRootCommitter committer =
+            factory.forBlock(
+                protocolContext,
+                headerWithDelegation,
+                Optional.empty(),
+                worldState.isStorageFrozen());
+        worldState.persist(headerWithDelegation, committer);
+        assertThat(worldState.rootHash()).isEqualTo(rootWithDelegation);
+
+        final BonsaiWorldStateUpdateAccumulator accumulator =
+            (BonsaiWorldStateUpdateAccumulator) worldState.updater();
+        accumulator.getOrCreate(address).setCode(contractCode);
+        accumulator.commit();
+
+        final Hash rootAfterChange =
+            new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
+        assertThat(rootAfterChange).isEqualTo(rootWithContract);
+      }
+    }
+
+    @Test
     void persistWithBinaryCommitter_codeAndStorageUpdates() {
       final Address address = testAddress("ee");
       final StorageSlotKey slotKey = new StorageSlotKey(UInt256.valueOf(5));
@@ -624,85 +386,6 @@ class DefaultBinaryStateRootCommitterTest {
 
         assertThat(worldState.rootHash()).isEqualTo(expectedRoot);
       }
-    }
-  }
-
-  private BlockHeader childHeader(final Hash stateRoot) {
-    return new BlockHeaderTestFixture()
-        .parentHash(chainHeadHeader.getHash())
-        .number(chainHeadHeader.getNumber() + 1L)
-        .stateRoot(stateRoot)
-        .buildHeader();
-  }
-
-  private static Address testAddress(final String suffix) {
-    return Address.fromHexString("0x00000000000000000000000000000000000000" + suffix);
-  }
-
-  private static void applyBalanceAndNonce(
-      final BonsaiWorldState worldState,
-      final Address address,
-      final Wei balance,
-      final long nonce) {
-    final WorldUpdater updater = worldState.updater();
-    final MutableAccount account = updater.getOrCreate(address);
-    account.setBalance(balance);
-    if (nonce > 0) {
-      account.setNonce(nonce);
-    }
-    updater.commit();
-  }
-
-  private BonsaiWorldState getWorldState(final boolean shouldUpdateHead) {
-    return (BonsaiWorldState)
-        protocolContext
-            .getWorldStateArchive()
-            .getWorldState(
-                WorldStateQueryParams.newBuilder()
-                    .withBlockHeader(chainHeadHeader)
-                    .withShouldWorldStateUpdateHead(shouldUpdateHead)
-                    .build())
-            .orElseThrow();
-  }
-
-  private Hash computeBinaryRoot(
-      final Consumer<BonsaiWorldStateUpdateAccumulator> accumulatorConsumer) {
-    final BonsaiWorldState worldState =
-        (BonsaiWorldState)
-            protocolContext
-                .getWorldStateArchive()
-                .getWorldState(
-                    WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(chainHeadHeader))
-                .orElseThrow();
-    try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
-      accumulatorConsumer.accept(accumulator);
-      accumulator.commit();
-      return new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
-    } finally {
-      worldState.close();
-    }
-  }
-
-  private Hash computeDefaultRoot(
-      final ProtocolContext context,
-      final BlockHeader headHeader,
-      final Consumer<BonsaiWorldStateUpdateAccumulator> accumulatorConsumer) {
-    final BonsaiWorldState worldState =
-        (BonsaiWorldState)
-            context
-                .getWorldStateArchive()
-                .getWorldState(WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(headHeader))
-                .orElseThrow();
-    try {
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
-      accumulatorConsumer.accept(accumulator);
-      accumulator.commit();
-      return new DefaultPatriciaStateRootCommitter().compute(worldState, null, accumulator).root();
-    } finally {
-      worldState.close();
     }
   }
 }
