@@ -38,7 +38,6 @@ import org.hyperledger.besu.ethereum.core.CodeDelegation;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.BalConfiguration;
-import org.hyperledger.besu.ethereum.mainnet.BlockExecutionContext;
 import org.hyperledger.besu.ethereum.mainnet.BlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.ImmutableBalConfiguration;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
@@ -223,23 +222,6 @@ class MissingCodeBlockImportTest extends AbstractParallelBlockProcessorIntegrati
     assertThat(worldState.rootHash()).isEqualTo(stateRoot);
   }
 
-  private void importBlock(final ExecutionContextTestFixture ctx, final Transaction... txs) {
-    final BlockHeader parent = ctx.getBlockchain().getChainHeadHeader();
-    final Hash stateRoot =
-        discoverStateRootAtParent(ctx, parent, Wei.of(5), MINING_BENEFICIARY, txs);
-    final MutableWorldState worldState =
-        ctx.getStateArchive()
-            .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(parent))
-            .orElseThrow();
-    final Block block = createBlock(ctx, parent, stateRoot, Wei.of(5), MINING_BENEFICIARY, txs);
-    final BlockProcessingResult result =
-        process(createSequentialProcessor(ctx), ctx, worldState, block);
-    assertThat(result.isSuccessful()).isTrue();
-    ctx.getBlockchain()
-        .appendBlock(
-            block, result.getYield().orElseThrow().getReceipts(), getBlockAccessList(result));
-  }
-
   private Transaction delegate(final KeyPair authority, final Address target) {
     final org.hyperledger.besu.datatypes.CodeDelegation delegation =
         CodeDelegation.builder()
@@ -270,20 +252,6 @@ class MissingCodeBlockImportTest extends AbstractParallelBlockProcessorIntegrati
             .orElseThrow()) {
       return ((BonsaiWorldState) worldState).getCode(contract, codeHash).map(Code::getBytes);
     }
-  }
-
-  private BlockProcessingResult process(
-      final BlockProcessor processor,
-      final ExecutionContextTestFixture ctx,
-      final MutableWorldState worldState,
-      final Block block) {
-    return processor.processBlock(
-        BlockExecutionContext.builder()
-            .protocolContext(ctx.getProtocolContext())
-            .worldState(worldState)
-            .block(block)
-            .blockAccessList(Optional.empty())
-            .build());
   }
 
   private void removeCode(

@@ -218,6 +218,40 @@ public abstract class AbstractParallelBlockProcessorIntegrationTest {
     return Hash.fromHexString(msg.substring(idx + marker.length()));
   }
 
+  /** Processes {@code block} on {@code worldState}, which persists it when its root matches. */
+  protected BlockProcessingResult process(
+      final BlockProcessor processor,
+      final ExecutionContextTestFixture ctx,
+      final MutableWorldState worldState,
+      final Block block) {
+    return processor.processBlock(
+        BlockExecutionContext.builder()
+            .protocolContext(ctx.getProtocolContext())
+            .worldState(worldState)
+            .block(block)
+            .blockAccessList(Optional.empty())
+            .build());
+  }
+
+  /** Imports a block of {@code txs} on the chain head and appends it, as block import does. */
+  protected Block importBlock(final ExecutionContextTestFixture ctx, final Transaction... txs) {
+    final BlockHeader parent = ctx.getBlockchain().getChainHeadHeader();
+    final Hash stateRoot =
+        discoverStateRootAtParent(ctx, parent, Wei.of(5), MINING_BENEFICIARY, txs);
+    final MutableWorldState worldState =
+        ctx.getStateArchive()
+            .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(parent))
+            .orElseThrow();
+    final Block block = createBlock(ctx, parent, stateRoot, Wei.of(5), MINING_BENEFICIARY, txs);
+    final BlockProcessingResult result =
+        process(createSequentialProcessor(ctx), ctx, worldState, block);
+    assertTrue(result.isSuccessful(), result.errorMessage.orElse("(no message)"));
+    ctx.getBlockchain()
+        .appendBlock(
+            block, result.getYield().orElseThrow().getReceipts(), getBlockAccessList(result));
+    return block;
+  }
+
   /** Header of the parent of the current chain head (i.e. chain head number minus one). */
   protected BlockHeader parentOfChainHead(final ExecutionContextTestFixture ctx) {
     final BlockHeader head = ctx.getBlockchain().getChainHeadHeader();

@@ -330,21 +330,22 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
       return;
     }
     final Hash currentFlatDbBlockHash = persistedFlatDbBlockHash.get();
+    // at the trie's block, or already at the target: the trie roll's persist moves it, as on main
+    if (currentFlatDbBlockHash.equals(mutableState.blockHash())
+        || currentFlatDbBlockHash.equals(targetBlockHash)) {
+      return;
+    }
+    LOG.debug(
+        "Synchronizing flat DB from {} to {} before trie rolling",
+        currentFlatDbBlockHash,
+        targetBlockHash);
     final BonsaiWorldStateKeyValueStorage.Updater updater = storage.updater();
     try {
-      if (!currentFlatDbBlockHash.equals(targetBlockHash)) {
-        LOG.debug(
-            "Synchronizing flat DB from {} to {} before trie rolling",
-            currentFlatDbBlockHash,
-            targetBlockHash);
-        for (final FlatDbRollStep step : planFlatDbRoll(currentFlatDbBlockHash, targetBlockHash)) {
-          applyFlatDbRollStep(updater, step);
-        }
-        updater.putFlatDbBlockHash(targetBlockHash);
-        updater.commitComposedOnly();
-      } else {
-        updater.rollback();
+      for (final FlatDbRollStep step : planFlatDbRoll(currentFlatDbBlockHash, targetBlockHash)) {
+        applyFlatDbRollStep(updater, step);
       }
+      updater.putFlatDbBlockHash(targetBlockHash);
+      updater.commitComposedOnly();
     } catch (final RuntimeException e) {
       updater.rollback();
       throw e;

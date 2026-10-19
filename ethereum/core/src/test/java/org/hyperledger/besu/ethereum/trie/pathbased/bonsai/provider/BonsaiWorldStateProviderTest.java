@@ -378,15 +378,29 @@ class BonsaiWorldStateProviderTest {
   }
 
   @Test
-  void shouldSynchronizeFlatDbBeforeTrieDuringForkReorg() {
+  void shouldLeaveTheFlatDbToTheTrieRollWhenItIsAtTheTrieBlock() {
+    final BlockHeader blockHeader1 = reorgFromFlatDbAt(1);
+
+    // the trie roll's persist moves the flat DB: each trie log is read once
+    verify(trieLogManager).getTrieLogLayer(blockHeader1.getHash());
+  }
+
+  @Test
+  void shouldSynchronizeFlatDbBeforeTrieWhenItIsBehindTheTrie() {
+    final BlockHeader blockHeader1 = reorgFromFlatDbAt(0);
+
+    // phase one rolls the flat DB from the genesis, phase two rolls the trie from block 1
+    verify(trieLogManager).getTrieLogLayer(blockHeader1.getHash());
+  }
+
+  /** Reorgs block 1 with the flat DB cursor at {@code flatDbBlock}, returning block 1. */
+  private BlockHeader reorgFromFlatDbAt(final long flatDbBlock) {
     final BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage =
         spy(
             new BonsaiWorldStateKeyValueStorage(
                 storageProvider, new NoOpMetricsSystem(), DEFAULT_CONFIG));
-
-    // the flat DB rolls apart from the trie on a chain with a binary trie fork, here not reached
     bonsaiWorldStateArchive =
-        spy(createBonsaiWorldStateProvider(worldStateKeyValueStorage, Optional.of(1_000L)));
+        spy(createBonsaiWorldStateProvider(worldStateKeyValueStorage, Optional.empty()));
 
     final BlockHeader genesis = blockBuilder.number(0).buildHeader();
     final BlockHeader blockHeader1 =
@@ -409,7 +423,7 @@ class BonsaiWorldStateProviderTest {
         .thenReturn(Optional.of(trieLogLayer1));
     when(trieLogManager.getTrieLogLayer(blockHeader1Reorg.getHash()))
         .thenReturn(Optional.of(trieLogLayer1Reorg));
-    doReturn(Optional.of(blockHeader1.getHash()))
+    doReturn(Optional.of(flatDbBlock == 0 ? genesis.getHash() : blockHeader1.getHash()))
         .when(worldStateKeyValueStorage)
         .getFlatDbBlockHash();
 
@@ -419,8 +433,9 @@ class BonsaiWorldStateProviderTest {
         .isPresent()
         .containsInstanceOf(BonsaiWorldState.class);
 
-    // Phase one synchronizes the flat DB; phase two performs the normal trie roll.
-    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1.getHash());
-    verify(trieLogManager, times(2)).getTrieLogLayer(blockHeader1Reorg.getHash());
+    // the flat DB is rolled to the target only when it is behind the trie
+    verify(trieLogManager, times(flatDbBlock == 0 ? 2 : 1))
+        .getTrieLogLayer(blockHeader1Reorg.getHash());
+    return blockHeader1;
   }
 }
