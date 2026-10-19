@@ -211,19 +211,15 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
 
   /** A world state on the binary trie branch, for the PBT migrator. */
   public BonsaiWorldState getMigrationWorldState() {
-    final BonsaiWorldState migrationWorldState =
-        new BonsaiWorldState(
-            worldStateKeyValueStorage,
-            new NoOpBonsaiCachedMerkleTrieLoader(),
-            worldStateCacheManager,
-            trieLogManager,
-            evmConfiguration,
-            worldStateConfig,
-            ((BonsaiWorldStateCacheManager) worldStateCacheManager).getCodeCache(),
-            TrieBranchType.BINARY);
-    // the flat DB is the head's, ahead of the binary column: rolls start from the trie log priors
-    migrationWorldState.updater().setRollFromTrieLogPriors(true);
-    return migrationWorldState;
+    return new BonsaiWorldState(
+        worldStateKeyValueStorage,
+        new NoOpBonsaiCachedMerkleTrieLoader(),
+        worldStateCacheManager,
+        trieLogManager,
+        evmConfiguration,
+        worldStateConfig,
+        ((BonsaiWorldStateCacheManager) worldStateCacheManager).getCodeCache(),
+        TrieBranchType.BINARY);
   }
 
   @Override
@@ -297,14 +293,10 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
   }
 
   @Override
-  protected boolean beforeRollingWorldState(
+  protected void beforeRollingWorldState(
       final PathBasedWorldState worldState, final Hash blockHash) {
-    // only a chain with the binary trie fork rolls its flat DB apart from the trie
-    if (binaryTrieMilestone.isEmpty()) {
-      return false;
-    }
     try {
-      return rollFlatDbToBlockHash(worldState, blockHash);
+      rollFlatDbToBlockHash(worldState, blockHash);
     } catch (final RuntimeException re) {
       LOG.warn("Flat DB rolling failed for block hash " + blockHash, re);
       if (re instanceof MerkleTrieException) {
@@ -320,22 +312,22 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
   }
 
   // the flat DB is shared by both trie branches, so it follows the trie logs to the target block
-  private boolean rollFlatDbToBlockHash(
+  private void rollFlatDbToBlockHash(
       final PathBasedWorldState mutableState, final Hash targetBlockHash) {
     if (mutableState.isStorageFrozen()) {
-      return false;
+      return;
     }
     final BonsaiWorldStateKeyValueStorage storage = mutableState.getWorldStateStorage();
     // PARTIAL reads fall back to the trie on a flat miss, so flat and trie cannot be rolled in
     // separate commits. ARCHIVE storage is already block-versioned and does not need rolling.
     if (storage.getFlatDbMode() != FlatDbMode.FULL) {
-      return false;
+      return;
     }
     final Optional<Hash> persistedFlatDbBlockHash = storage.getFlatDbBlockHash();
     // Existing databases have no flat cursor. Their flat DB and active trie were committed
     // together, so let the next normal persist establish the cursor.
     if (persistedFlatDbBlockHash.isEmpty()) {
-      return false;
+      return;
     }
     final Hash currentFlatDbBlockHash = persistedFlatDbBlockHash.get();
     final BonsaiWorldStateKeyValueStorage.Updater updater = storage.updater();
@@ -353,7 +345,6 @@ public class BonsaiWorldStateProvider extends PathBasedWorldStateProvider {
       } else {
         updater.rollback();
       }
-      return true;
     } catch (final RuntimeException e) {
       updater.rollback();
       throw e;

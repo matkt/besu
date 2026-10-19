@@ -55,8 +55,6 @@ import com.google.common.base.Suppliers;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("unchecked")
 public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends BonsaiAccount>
@@ -66,8 +64,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
   /** Minimum number of updated accounts for {@link #commit} to process them in parallel. */
   private static final int PARALLEL_COMMIT_MIN_ACCOUNTS = 64;
 
-  private static final Logger LOG =
-      LoggerFactory.getLogger(PathBasedWorldStateUpdateAccumulator.class);
   protected final Consumer<BonsaiValue<ACCOUNT>> accountPreloader;
   protected final Consumer<StorageSlotKey> storagePreloader;
 
@@ -85,8 +81,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
 
   private final Map<UInt256, Hash> storageKeyHashLookup = new ConcurrentHashMap<>();
   protected boolean isAccumulatorStateChanged;
-  // set while rolling a world state whose flat DB is already at the roll target
-  private boolean rollFromTrieLogPriors;
 
   public PathBasedWorldStateUpdateAccumulator(
       final BonsaiWorldView world,
@@ -775,14 +769,6 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
     return wrappedWorldView().getWorldStateStorage();
   }
 
-  /**
-   * Starts the rolled values from the trie log priors rather than from the world state, whose flat
-   * DB is already at the roll target.
-   */
-  public void setRollFromTrieLogPriors(final boolean rollFromTrieLogPriors) {
-    this.rollFromTrieLogPriors = rollFromTrieLogPriors;
-  }
-
   public void rollForward(final TrieLog layer) {
     layer
         .getAccountChanges()
@@ -831,60 +817,25 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       // non-change, a cached read.
       return;
     }
-    BonsaiValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
+    final BonsaiValue<ACCOUNT> accountValue = accountsToUpdate.get(address);
     if (accountValue == null) {
-      accountValue =
-          rollFromTrieLogPriors
-              ? loadAccountFromTrieLog(address, expectedValue)
-              : loadAccountFromParent(address, accountValue);
+      // account untouched since the roll base: the trie log prior is the base value
+      final ACCOUNT priorAccount =
+          expectedValue == null ? null : createAccount(this, address, expectedValue, true);
+      final ACCOUNT updatedAccount =
+          replacementValue == null ? null : createAccount(this, address, replacementValue, true);
+      accountsToUpdate.put(address, new BonsaiValue<>(priorAccount, updatedAccount));
+      return;
     }
-    if (accountValue == null) {
-      if (expectedValue == null && replacementValue != null) {
-        accountsToUpdate.put(
-            address, new BonsaiValue<>(null, createAccount(this, address, replacementValue, true)));
+    if (replacementValue == null) {
+      if (accountValue.getPrior() == null) {
+        accountsToUpdate.remove(address);
       } else {
-        throw new IllegalStateException(
-            String.format(
-                "Expected to update account, but the account does not exist. Address=%s", address));
+        accountValue.setUpdated(null);
       }
     } else {
-      if (expectedValue == null) {
-        if (accountValue.getUpdated() != null) {
-          throw new IllegalStateException(
-              String.format(
-                  "Expected to create account, but the account exists.  Address=%s", address));
-        }
-      } else {
-        assertCloseEnoughForDiffing(
-            accountValue.getUpdated(),
-            expectedValue,
-            "Address=" + address + " Prior Value in Rolling Change");
-      }
-      if (replacementValue == null) {
-        if (accountValue.getPrior() == null) {
-          // TODO: should we remove from the parent accumulated change also?  only if it is a
-          // private copy
-          accountsToUpdate.remove(address);
-        } else {
-          accountValue.setUpdated(null);
-        }
-      } else {
-        accountValue.setUpdated(createAccount(wrappedWorldView(), address, replacementValue, true));
-      }
+      accountValue.setUpdated(createAccount(this, address, replacementValue, true));
     }
-  }
-
-  // the account as the trie log saw it before the change
-  private BonsaiValue<ACCOUNT> loadAccountFromTrieLog(
-      final Address address, final AccountValue expectedValue) {
-    if (expectedValue == null) {
-      return null;
-    }
-    final ACCOUNT account = createAccount(wrappedWorldView(), address, expectedValue, true);
-    final BonsaiValue<ACCOUNT> loadedAccountValue =
-        new BonsaiValue<>(copyAccount(account), account);
-    accountsToUpdate.put(address, loadedAccountValue);
-    return loadedAccountValue;
   }
 
   private BonsaiValue<ACCOUNT> loadAccountFromParent(
@@ -912,49 +863,16 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       // non-change, a cached read.
       return;
     }
-    BonsaiValue<Bytes> codeValue = codeToUpdate.get(address);
+    final BonsaiValue<Bytes> codeValue = codeToUpdate.get(address);
     if (codeValue == null) {
-      final Bytes storedCode =
-          rollFromTrieLogPriors
-              ? Optional.ofNullable(expectedCode).orElse(Bytes.EMPTY)
-              : wrappedWorldView()
-                  .getCode(
-                      address, Optional.ofNullable(expectedCode).map(Hash::hash).orElse(Hash.EMPTY))
-                  .map(Code::getBytes)
-                  .orElse(Bytes.EMPTY);
-      if (!storedCode.isEmpty()) {
-        codeValue = new BonsaiValue<>(storedCode, storedCode);
-        codeToUpdate.put(address, codeValue);
-      }
+      // code untouched since the roll base: the trie log prior is the base value
+      codeToUpdate.put(address, new BonsaiValue<>(expectedCode, replacementCode));
+      return;
     }
-
-    if (codeValue == null) {
-      if ((expectedCode == null || expectedCode.isEmpty()) && replacementCode != null) {
-        codeToUpdate.put(address, new BonsaiValue<>(null, replacementCode));
-      } else {
-        throw new IllegalStateException(
-            String.format(
-                "Expected to update code, but the code does not exist.  Address=%s", address));
-      }
+    if (replacementCode == null && codeValue.getPrior() == null) {
+      codeToUpdate.remove(address);
     } else {
-      final Bytes existingCode = codeValue.getUpdated();
-      if ((expectedCode == null || expectedCode.isEmpty())
-          && existingCode != null
-          && !existingCode.isEmpty()) {
-        LOG.warn("At Address={}, expected to create code, but code exists. Overwriting.", address);
-      } else if (!Objects.equals(expectedCode, existingCode)) {
-        throw new IllegalStateException(
-            String.format(
-                "Old value of code does not match expected value.  Address=%s ExpectedHash=%s ActualHash=%s",
-                address,
-                expectedCode == null ? "null" : Hash.hash(expectedCode),
-                Hash.hash(codeValue.getUpdated())));
-      }
-      if (replacementCode == null && codeValue.getPrior() == null) {
-        codeToUpdate.remove(address);
-      } else {
-        codeValue.setUpdated(replacementCode);
-      }
+      codeValue.setUpdated(replacementCode);
     }
   }
 
@@ -984,69 +902,27 @@ public abstract class PathBasedWorldStateUpdateAccumulator<ACCOUNT extends Bonsa
       return;
     }
     final Map<StorageSlotKey, BonsaiValue<UInt256>> storageMap = storageToUpdate.get(address);
-    BonsaiValue<UInt256> slotValue = storageMap == null ? null : storageMap.get(storageSlotKey);
+    final BonsaiValue<UInt256> slotValue =
+        storageMap == null ? null : storageMap.get(storageSlotKey);
     if (slotValue == null) {
-      final Optional<UInt256> storageValue =
-          rollFromTrieLogPriors
-              ? Optional.ofNullable(expectedValue).filter(value -> !value.isZero())
-              : wrappedWorldView().getStorageValueByStorageSlotKey(address, storageSlotKey);
-      if (storageValue.isPresent()) {
-        slotValue = new BonsaiValue<>(storageValue.get(), storageValue.get());
-        storageToUpdate
-            .computeIfAbsent(
-                address,
-                k ->
-                    new StorageConsumingMap<>(address, new ConcurrentHashMap<>(), storagePreloader))
-            .put(storageSlotKey, slotValue);
-      }
+      // slot untouched since the roll base: the trie log prior is the base value
+      final UInt256 prior = expectedValue == null || expectedValue.isZero() ? null : expectedValue;
+      final UInt256 updated =
+          replacementValue == null || replacementValue.isZero() ? null : replacementValue;
+      maybeCreateStorageMap(storageMap, address)
+          .put(storageSlotKey, new BonsaiValue<>(prior, updated));
+      return;
     }
-    if (slotValue == null) {
-      if ((expectedValue == null || expectedValue.isZero()) && replacementValue != null) {
-        maybeCreateStorageMap(storageMap, address)
-            .put(storageSlotKey, new BonsaiValue<>(null, replacementValue));
-      } else {
-        throw new IllegalStateException(
-            String.format(
-                "Expected to update storage value, but the slot does not exist. Account=%s SlotKey=%s",
-                address, storageSlotKey));
+    if (replacementValue == null && slotValue.getPrior() == null) {
+      final Map<StorageSlotKey, BonsaiValue<UInt256>> thisStorageUpdate =
+          maybeCreateStorageMap(storageMap, address);
+      thisStorageUpdate.remove(storageSlotKey);
+      if (thisStorageUpdate.isEmpty()) {
+        storageToUpdate.remove(address);
       }
     } else {
-      final UInt256 existingSlotValue = slotValue.getUpdated();
-      if ((expectedValue == null || expectedValue.isZero())
-          && existingSlotValue != null
-          && !existingSlotValue.isZero()) {
-        throw new IllegalStateException(
-            String.format(
-                "Expected to create slot, but the slot exists. Account=%s SlotKey=%s expectedValue=%s existingValue=%s",
-                address, storageSlotKey, expectedValue, existingSlotValue));
-      }
-      if (!isSlotEquals(expectedValue, existingSlotValue)) {
-        throw new IllegalStateException(
-            String.format(
-                "Old value of slot does not match expected value. Account=%s SlotKey=%s Expected=%s Actual=%s",
-                address,
-                storageSlotKey,
-                expectedValue == null ? "null" : expectedValue.toShortHexString(),
-                existingSlotValue == null ? "null" : existingSlotValue.toShortHexString()));
-      }
-      if (replacementValue == null && slotValue.getPrior() == null) {
-        final Map<StorageSlotKey, BonsaiValue<UInt256>> thisStorageUpdate =
-            maybeCreateStorageMap(storageMap, address);
-        thisStorageUpdate.remove(storageSlotKey);
-        if (thisStorageUpdate.isEmpty()) {
-          storageToUpdate.remove(address);
-        }
-      } else {
-        slotValue.setUpdated(replacementValue);
-      }
+      slotValue.setUpdated(replacementValue);
     }
-  }
-
-  private boolean isSlotEquals(final UInt256 expectedValue, final UInt256 existingSlotValue) {
-    final UInt256 sanitizedExpectedValue = (expectedValue == null) ? UInt256.ZERO : expectedValue;
-    final UInt256 sanitizedExistingSlotValue =
-        (existingSlotValue == null) ? UInt256.ZERO : existingSlotValue;
-    return Objects.equals(sanitizedExpectedValue, sanitizedExistingSlotValue);
   }
 
   public boolean isAccumulatorStateChanged() {

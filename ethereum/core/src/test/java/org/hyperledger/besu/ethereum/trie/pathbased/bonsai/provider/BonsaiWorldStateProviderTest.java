@@ -362,8 +362,12 @@ class BonsaiWorldStateProviderTest {
 
   private BonsaiWorldState createMockWorldState(final Hash blockHash) {
     final BonsaiWorldState mockWorldState = mock(BonsaiWorldState.class);
+    final BonsaiWorldStateKeyValueStorage mockStorage = mock(BonsaiWorldStateKeyValueStorage.class);
     when(mockWorldState.blockHash()).thenReturn(blockHash);
     when(mockWorldState.freezeStorage()).thenReturn(mockWorldState);
+    // rolling first moves the flat DB, which this world state has no cursor for
+    when(mockWorldState.getWorldStateStorage()).thenReturn(mockStorage);
+    when(mockStorage.getFlatDbBlockHash()).thenReturn(Optional.empty());
     return mockWorldState;
   }
 

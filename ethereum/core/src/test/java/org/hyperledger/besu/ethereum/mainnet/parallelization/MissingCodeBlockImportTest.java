@@ -164,29 +164,16 @@ class MissingCodeBlockImportTest extends AbstractParallelBlockProcessorIntegrati
   }
 
   @Test
-  void rollingOverAMissingCodeRollsAgainOnceHealed() {
+  void rollingOverAMissingCodeNeedsNoHeal() {
     final ExecutionContextTestFixture ctx = createFreshContext();
     final BonsaiWorldStateProvider archive = (BonsaiWorldStateProvider) ctx.getStateArchive();
     final BlockHeader genesis = ctx.getBlockchain().getChainHeadHeader();
     importBlock(ctx, delegate(MINING_BENEFICIARY_KEYPAIR, contract));
     final Bytes delegation =
         Bytes.concatenate(Bytes.fromHexString("0xef0100"), contract.getBytes());
-    final Hash codeHash = Hash.hash(delegation);
-    removeCode(ctx, MINING_BENEFICIARY, codeHash);
+    removeCode(ctx, MINING_BENEFICIARY, Hash.hash(delegation));
 
-    // rolling the head back to the genesis reads the code block 1 replaced
-    assertThatThrownBy(
-            () ->
-                archive.getWorldState(
-                    WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(genesis)))
-        .isInstanceOf(MissingCodeException.class);
-    assertThat(archive.getWorldState().rootHash())
-        .isEqualTo(ctx.getBlockchain().getChainHeadHeader().getStateRoot());
-
-    archive.setCodeFetcher(hash -> Optional.of(delegation));
-    assertThat(archive.healMissingCode(MINING_BENEFICIARY, codeHash)).isTrue();
-
-    // the failed rolling left no change behind, so the head rolls again from block 1
+    // the trie log of block 1 holds the code it replaced, so rolling back reads no code
     assertThat(
             archive
                 .getWorldState(WorldStateQueryParams.withBlockHeaderAndUpdateNodeHead(genesis))

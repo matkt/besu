@@ -246,15 +246,9 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
     return TrieBranchType.PATRICIA;
   }
 
-  /**
-   * Called before a world state is rolled to {@code blockHash}, under the same lock.
-   *
-   * @return whether the flat DB of the world state is now at {@code blockHash}, ahead of its trie
-   */
-  protected boolean beforeRollingWorldState(
-      final PathBasedWorldState worldState, final Hash blockHash) {
-    return false;
-  }
+  /** Called before a world state is rolled to {@code blockHash}, under the same lock. */
+  protected void beforeRollingWorldState(
+      final PathBasedWorldState worldState, final Hash blockHash) {}
 
   // moves a world state to another trie branch, at the block and root that branch holds
   private void ensureTrieBranchType(
@@ -372,7 +366,7 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
       final Hash blockHash,
       final Level rollingFailureLogLevel,
       final boolean skipStateRootVerification) {
-    final boolean flatDbAtTarget = beforeRollingWorldState(mutableState, blockHash);
+    beforeRollingWorldState(mutableState, blockHash);
     if (blockHash.equals(mutableState.blockHash())) {
       return Optional.of(mutableState);
     } else {
@@ -423,8 +417,6 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
         // attempt the state rolling
         final PathBasedWorldStateUpdateAccumulator<?> pathBasedUpdater =
             (PathBasedWorldStateUpdateAccumulator<?>) mutableState.updater();
-        // a flat DB already at the target no longer holds the values the roll starts from
-        pathBasedUpdater.setRollFromTrieLogPriors(flatDbAtTarget);
         try {
           for (final TrieLog rollBack : rollBacks) {
             LOG.debug("Attempting Rollback of {}", rollBack.getBlockHash());
@@ -464,8 +456,6 @@ public abstract class PathBasedWorldStateProvider implements WorldStateArchive {
               .log();
 
           return Optional.empty();
-        } finally {
-          pathBasedUpdater.setRollFromTrieLogPriors(false);
         }
       } catch (final RuntimeException re) {
         LOG.warn("Archive rolling failed for block hash " + blockHash, re);
