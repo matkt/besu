@@ -15,7 +15,15 @@
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import org.hyperledger.besu.services.pipeline.Pipeline;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -36,5 +44,19 @@ class Eip8347PipelinesTest {
     assertThat(submitted).hasSize(1);
     submitted.getFirst().run();
     assertThat(doubled).isCompletedWithValue(42);
+  }
+
+  @Test
+  void runAbortsThePipelineWhenInterrupted() {
+    final Pipeline<?> pipeline = mock(Pipeline.class);
+    when(pipeline.start(any())).thenReturn(new CompletableFuture<>());
+
+    Thread.currentThread().interrupt();
+    final Throwable failure = catchThrowable(() -> Eip8347Pipelines.run(pipeline));
+
+    // Still interrupted for the caller (and cleared here for the next tests).
+    assertThat(Thread.interrupted()).isTrue();
+    assertThat(failure).isInstanceOf(IOException.class).hasMessage("EIP-8347 pipeline interrupted");
+    verify(pipeline).abort();
   }
 }

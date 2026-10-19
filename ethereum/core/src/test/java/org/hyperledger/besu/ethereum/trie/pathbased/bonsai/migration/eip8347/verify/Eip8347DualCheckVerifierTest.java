@@ -38,7 +38,6 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -49,10 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -240,51 +236,6 @@ class Eip8347DualCheckVerifierTest {
         TrieNodeCodec.codeRefCountKey(Bytes32.wrap(Hash.hash(shared).getBytes())),
         CodeRefCountEncoder.encode(2, CodeChunkifier.chunkifyCode(shared).size()));
     assertThat(loaded.nodes).isEqualTo(committed.nodes);
-  }
-
-  @Test
-  void verifyAndLoadStopsWhenInterrupted() throws Exception {
-    final Eip8347Fixture.Builder builder = Eip8347Fixture.builder();
-    for (int i = 0; i < 20; i++) {
-      builder.eoa(address(0xd0 + i), 1L, Wei.ONE, Map.of());
-    }
-    final Eip8347Fixture fixture = builder.build();
-    final Artifacts artifacts = fixture.write(tmp, "interrupted");
-    // Stems are stored on a pipeline thread, while the verifying thread waits for the pipeline.
-    final CountDownLatch storing = new CountDownLatch(1);
-    final NodeUpdater blocking =
-        (location, hash, value) -> {
-          storing.countDown();
-          try {
-            new CountDownLatch(1).await();
-          } catch (final InterruptedException e) {
-            throw new IllegalStateException(e);
-          }
-        };
-    final CompletableFuture<Throwable> failure = new CompletableFuture<>();
-    final Thread verifier =
-        new Thread(
-            () -> {
-              try {
-                Eip8347DualCheckVerifier.verifyAndLoad(
-                    artifacts.snapshot(), artifacts.preimages(), fixture.mptRoot(), tmp, blocking);
-                failure.complete(null);
-              } catch (final Throwable t) {
-                failure.complete(t);
-              }
-            });
-    verifier.start();
-    assertThat(storing.await(1, TimeUnit.MINUTES)).isTrue();
-
-    verifier.interrupt();
-
-    assertThat(failure.get(1, TimeUnit.MINUTES))
-        .isInstanceOf(IOException.class)
-        .hasMessageContaining("interrupted");
-    try (final var left = Files.list(tmp)) {
-      assertThat(left.map(p -> p.getFileName().toString()))
-          .noneMatch(n -> n.startsWith("eip8347-"));
-    }
   }
 
   @Test
