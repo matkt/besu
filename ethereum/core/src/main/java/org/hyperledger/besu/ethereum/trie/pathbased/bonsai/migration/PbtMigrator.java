@@ -74,18 +74,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Background builder of the PBT (binary-trie column) until the PBT fork.
- *
- * <p>Start point: a verified EIP-8347 snapshot when one is configured (dual-checked against its
- * anchor's {@code stateRoot}, then bulk-loaded into the binary column without touching the flat
- * DB), otherwise genesis. From there the column follows the canonical chain one bounded roll at a
- * time: back through trie logs, forward through each block's trie log or, when this node has none
- * (e.g. blocks before a snap sync), through the block's BAL, stored locally or fetched from peers.
- * BALs record post-values only, so they roll forward, never back.
- *
- * <p>The migrator writes the column only while it owns it ({@link PbtColumnOwnership}); the chain
- * claims it at the fork transition. It retires, permanently, once the column sits exactly on the
- * last pre-fork block of the canonical chain.
+ * Builds the binary trie column in the background until the PBT fork: from a verified EIP-8347
+ * snapshot or genesis, then along the canonical chain through trie logs, or BALs where the node has
+ * none. The chain claims the column at the fork ({@link PbtColumnOwnership}).
  */
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
