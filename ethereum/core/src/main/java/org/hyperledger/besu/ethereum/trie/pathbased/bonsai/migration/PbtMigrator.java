@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
@@ -53,13 +54,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Suppliers;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -83,8 +88,8 @@ import org.slf4j.LoggerFactory;
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
 
-  /** Most blocks applied in one roll, so a long catch-up never holds its whole range in heap. */
-  static final int MAX_BLOCKS_PER_ROLL = 128;
+  /** Default most blocks per roll, so a long catch-up never holds its whole range in heap. */
+  static final int DEFAULT_BLOCKS_PER_ROLL = 128;
 
   /** Wait after a failed snapshot load (e.g. a full disk) before trying again. */
   static final Duration SNAPSHOT_RETRY_DELAY = Duration.ofMinutes(5);
@@ -97,6 +102,10 @@ public class PbtMigrator {
   private final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers;
   private final long pollIntervalMs;
   private final Duration snapshotRetryDelay;
+  private final Tuning tuning;
+
+  /** Every CPU-bound task of the migrator, off the pools block import uses. */
+  private final ForkJoinPool pool;
 
   private final AtomicBoolean started = new AtomicBoolean(false);
 
@@ -123,7 +132,8 @@ public class PbtMigrator {
       final Supplier<Stream<GenesisAccount>> genesisAllocations,
       final Optional<SnapshotBootstrap> snapshotBootstrap,
       final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
-      final long pollIntervalMs) {
+      final long pollIntervalMs,
+      final Tuning tuning) {
     this(
         provider,
         blockchain,
@@ -133,6 +143,7 @@ public class PbtMigrator {
         snapshotBootstrap,
         balsFromPeers,
         pollIntervalMs,
+        tuning,
         SNAPSHOT_RETRY_DELAY);
   }
 
@@ -146,6 +157,7 @@ public class PbtMigrator {
       final Optional<SnapshotBootstrap> snapshotBootstrap,
       final Function<List<BlockHeader>, Map<Hash, BlockAccessList>> balsFromPeers,
       final long pollIntervalMs,
+      final Tuning tuning,
       final Duration snapshotRetryDelay) {
     this.provider = provider;
     this.blockchain = blockchain;
@@ -155,6 +167,8 @@ public class PbtMigrator {
     this.balsFromPeers = balsFromPeers;
     this.pollIntervalMs = pollIntervalMs;
     this.snapshotRetryDelay = snapshotRetryDelay;
+    this.tuning = tuning;
+    this.pool = newPool(tuning.threads());
     this.genesisTrieLog =
         Suppliers.memoize(
             () ->
@@ -179,7 +193,10 @@ public class PbtMigrator {
       LOG.warn("PBT migrator already started");
       return;
     }
-    LOG.info("PBT migrator starting; binaryTrieTime milestone={}", binaryTrieMilestone.get());
+    LOG.info(
+        "PBT migrator starting; binaryTrieTime milestone={}, {}",
+        binaryTrieMilestone.get(),
+        tuning);
     scheduler.scheduleWithFixedDelay(
         this::tick, pollIntervalMs, pollIntervalMs, TimeUnit.MILLISECONDS);
   }
@@ -204,12 +221,13 @@ public class PbtMigrator {
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+    pool.shutdownNow();
   }
 
   private void tick() {
     try {
       // Rolls back to back until caught up, each under its own hold of the binary-column lock, so
-      // the chain can claim the column between two rolls (at most MAX_BLOCKS_PER_ROLL blocks).
+      // the chain can claim the column between two rolls (at most blocksPerRoll blocks).
       boolean progressed = true;
       while (started.get() && progressed) {
         final Optional<Boolean> step =
@@ -220,10 +238,23 @@ public class PbtMigrator {
           return;
         }
         progressed = step.get();
+        if (progressed && !tuning.rollPause().isZero()) {
+          // Outside the lock: block import has the cores and the disk to itself meanwhile.
+          pauseBetweenRolls(tuning.rollPause());
+        }
       }
+    } catch (final InterruptedException e) {
+      // The node is closing.
+      Thread.currentThread().interrupt();
     } catch (final Throwable t) {
       LOG.atError().setMessage("PBT migrator tick failed (will retry): {}").addArgument(t).log();
     }
+  }
+
+  /** Waits between two migration steps. */
+  @VisibleForTesting
+  void pauseBetweenRolls(final Duration pause) throws InterruptedException {
+    Thread.sleep(pause);
   }
 
   private void bootstrap() {
@@ -327,7 +358,9 @@ public class PbtMigrator {
               bootstrap.preimagesPath(),
               Bytes32.wrap(anchor.getStateRoot().getBytes()),
               bootstrap.workDir(),
-              writer);
+              writer,
+              tuning.sortBufferBytes(),
+              pool);
       writer.finish(loaded.pbtRoot(), anchor.getBlockHash());
       cursor = anchor;
       LOG.info(
@@ -385,8 +418,8 @@ public class PbtMigrator {
   }
 
   /**
-   * One roll toward {@code target}, a canonical block (the head or an ancestor), of at most {@link
-   * #MAX_BLOCKS_PER_ROLL} blocks. Returns {@code true} when the column moved.
+   * One roll toward {@code target}, a canonical block (the head or an ancestor), of at most {@code
+   * blocksPerRoll} blocks. Returns {@code true} when the column moved.
    */
   private boolean rollToward(final BlockHeader target) {
     if (target.getBlockHash().equals(cursor.getBlockHash())) {
@@ -398,8 +431,8 @@ public class PbtMigrator {
             .filter(cursor.getBlockHash()::equals)
             .isPresent();
     BlockHeader step = target;
-    if (cursorCanonical && target.getNumber() - cursor.getNumber() > MAX_BLOCKS_PER_ROLL) {
-      step = blockchain.getBlockHeader(cursor.getNumber() + MAX_BLOCKS_PER_ROLL).orElseThrow();
+    if (cursorCanonical && target.getNumber() - cursor.getNumber() > tuning.blocksPerRoll()) {
+      step = blockchain.getBlockHeader(cursor.getNumber() + tuning.blocksPerRoll()).orElseThrow();
     }
     return rollOnce(step);
   }
@@ -499,7 +532,7 @@ public class PbtMigrator {
     if (bal == null) {
       final List<BlockHeader> batch = new ArrayList<>();
       for (final BlockHeader next : upcoming) {
-        if (batch.size() == MAX_BLOCKS_PER_ROLL) {
+        if (batch.size() == tuning.blocksPerRoll()) {
           break;
         }
         if (trieLog(next).isEmpty()
@@ -521,7 +554,7 @@ public class PbtMigrator {
     return BalTrieLogs.forward(
         header,
         bal,
-        BinaryTrieFactory.createStateTrie(worldState),
+        BinaryTrieFactory.createStateTrie(worldState, pool),
         (address, codeHash) ->
             worldState.getCode(address, codeHash).map(Code::getBytes).orElse(Bytes.EMPTY));
   }
@@ -547,7 +580,8 @@ public class PbtMigrator {
       final BonsaiWorldStateKeyValueStorage.Updater stateUpdater =
           new MigrationScopedWorldStateKeyValueStorage(worldStateStorage).updater();
       final StateRootComputation computation =
-          new DefaultBinaryStateRootCommitter().compute(bonsaiWorldState, blockHeader, accumulator);
+          new DefaultBinaryStateRootCommitter(pool)
+              .compute(bonsaiWorldState, blockHeader, accumulator);
       computation.applyTo(stateUpdater);
       putCursor(
           stateUpdater, Bytes32.wrap(computation.root().getBytes()), blockHeader.getBlockHash());
@@ -656,6 +690,57 @@ public class PbtMigrator {
     public static Path workDir(final Path dataDir) {
       return dataDir.resolve("pbt-migration");
     }
+  }
+
+  /**
+   * How much of the node the migrator takes, so that block import keeps up.
+   *
+   * @param threads threads of the migrator's pool, for the snapshot load and the binary roots
+   * @param blocksPerRoll most blocks applied in one roll
+   * @param rollPause wait after each migration step that moved the column
+   * @param sortBufferBytes in-heap buffer of each external sort of the snapshot load
+   */
+  @SuppressWarnings("MethodInputParametersMustBeFinal") // compact record constructor
+  public record Tuning(int threads, int blocksPerRoll, Duration rollPause, long sortBufferBytes) {
+
+    /** Half the cores, 128 blocks per roll, no pause and 64 MiB sort buffers. */
+    public static final Tuning DEFAULT =
+        new Tuning(
+            Math.max(1, Runtime.getRuntime().availableProcessors() / 2),
+            DEFAULT_BLOCKS_PER_ROLL,
+            Duration.ZERO,
+            Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES);
+
+    public Tuning {
+      checkArgument(threads > 0, "PBT migration threads must be positive, got %s", threads);
+      checkArgument(
+          blocksPerRoll > 0,
+          "PBT migration blocks per roll must be positive, got %s",
+          blocksPerRoll);
+      checkArgument(
+          !rollPause.isNegative(),
+          "PBT migration roll pause must not be negative, got %s",
+          rollPause);
+      checkArgument(
+          sortBufferBytes > 0,
+          "PBT migration sort buffer must be positive, got %s bytes",
+          sortBufferBytes);
+    }
+  }
+
+  private static ForkJoinPool newPool(final int threads) {
+    final AtomicInteger counter = new AtomicInteger();
+    return new ForkJoinPool(
+        threads,
+        pool -> {
+          final ForkJoinWorkerThread worker =
+              ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
+          worker.setName("pbt-migration-" + counter.getAndIncrement());
+          worker.setDaemon(true);
+          return worker;
+        },
+        null,
+        false);
   }
 
   /**

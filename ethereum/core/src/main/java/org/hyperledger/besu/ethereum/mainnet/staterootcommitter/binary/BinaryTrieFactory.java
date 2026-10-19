@@ -41,12 +41,18 @@ public final class BinaryTrieFactory {
 
   /** State trie rooted at the world state's current root. */
   public static StoredPartitionedBinaryTrie createStateTrie(final BonsaiWorldState worldState) {
+    return createStateTrie(worldState, BlockProcessingExecutors.accountTrieForkJoinPool());
+  }
+
+  /** Same, its parallel commit on {@code forkJoinPool} (the PBT migrator keeps its own). */
+  public static StoredPartitionedBinaryTrie createStateTrie(
+      final BonsaiWorldState worldState, final ForkJoinPool forkJoinPool) {
     return createTrie(
         (location, hash) ->
             worldState.getWorldStateStorage().getTrieNode(TrieBranchType.BINARY, location, hash),
         Bytes32.wrap(worldState.getWorldStateRootHash().getBytes()),
         worldState.getWorldStateConfig(),
-        BlockProcessingExecutors.accountTrieForkJoinPool());
+        forkJoinPool);
   }
 
   /**

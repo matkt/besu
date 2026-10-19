@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.BlockProcessingExecutors;
 import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.StateRootComputations;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -38,6 +39,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -57,6 +59,18 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
 
   private static final Logger LOG = LoggerFactory.getLogger(DefaultBinaryStateRootCommitter.class);
 
+  private final ForkJoinPool trieThreads;
+
+  /** Commits on block processing's account-trie pool. */
+  public DefaultBinaryStateRootCommitter() {
+    this(BlockProcessingExecutors.accountTrieForkJoinPool());
+  }
+
+  /** Commits on {@code trieThreads}, so the PBT migrator stays off block processing's pool. */
+  public DefaultBinaryStateRootCommitter(final ForkJoinPool trieThreads) {
+    this.trieThreads = trieThreads;
+  }
+
   @Override
   public TrieBranchType getTrieBranchType() {
     return TrieBranchType.BINARY;
@@ -74,7 +88,8 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
     final BonsaiWorldState bonsai = (BonsaiWorldState) mutableWorldState;
     final boolean storageFrozen = mutableWorldState.isStorageFrozen();
     final List<StateRootComputations.UpdaterWrite> writes = new ArrayList<>();
-    final Hash root = new BinaryComputation(bonsai, accumulator, storageFrozen).executeInto(writes);
+    final Hash root =
+        new BinaryComputation(bonsai, accumulator, storageFrozen, trieThreads).executeInto(writes);
     if (blockHeader != null && bonsai.isTrieDisabled()) {
       return StateRootComputations.pathBased(blockHeader.getStateRoot(), writes);
     }
@@ -89,10 +104,13 @@ public class DefaultBinaryStateRootCommitter implements StateRootCommitter {
     private BinaryComputation(
         final BonsaiWorldState bonsai,
         final BonsaiWorldStateUpdateAccumulator worldStateUpdater,
-        final boolean storageFrozen) {
+        final boolean storageFrozen,
+        final ForkJoinPool trieThreads) {
       this.bonsai = bonsai;
       this.worldStateUpdater = worldStateUpdater;
-      this.writer = new BinaryTrieWriter(storageFrozen, BinaryTrieFactory.createStateTrie(bonsai));
+      this.writer =
+          new BinaryTrieWriter(
+              storageFrozen, BinaryTrieFactory.createStateTrie(bonsai, trieThreads));
     }
 
     Hash executeInto(final List<StateRootComputations.UpdaterWrite> writeSink) {

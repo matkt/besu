@@ -129,9 +129,10 @@ no cursor, even after the files were added, so on restart the column and the wor
 emptied and the load starts over.
 
 **After the import**, the migrator follows the chain from the anchor as usual, at most 128 blocks
-per step: through trie logs when the node has them, otherwise through each block's BAL (EIP-7928),
-stored locally or fetched from eth/71 peers. A BAL records post-values only, so it can only roll
-forward. At the fork, the chain claims the column and the migrator retires.
+per step (`--Xpbt-migration-blocks-per-roll`): through trie logs when the node has them, otherwise
+through each block's BAL (EIP-7928), stored locally or fetched from eth/71 peers. A BAL records
+post-values only, so it can only roll forward. At the fork, the chain claims the column and the
+migrator retires.
 
 ## How verify works, step by step
 
@@ -494,9 +495,12 @@ Three things keep this low:
 - Convert sorts each distinct code's chunks once, not once per contract.
 
 Parallel: PBT keys of the preimages, stem hashing, code chunking and checks, the storage tries of
-check 2, its account ranges, and the code check alongside check 2. Sequential: attaching stems to
-the PBT, writing the snapshot, and reading the preimages with the values of check 2. When loading,
-sorting the window and writing the files run on two background threads, overlapping the hashing.
+check 2, its account ranges, and the code check alongside check 2. In the node, all of it runs on
+the migrator's own pool (`--Xpbt-migration-threads`, half the cores by default), as do the binary
+roots of the rolls that follow: block import's pools and the common pool stay free. The CLI uses
+the common pool. Sequential: attaching stems to the PBT, writing the snapshot, and reading the
+preimages with the values of check 2. When loading, sorting the window and writing the files run on
+two background threads, overlapping the hashing.
 
 Items move between pipeline stages in lists of about 1024 entries: one item per account or per
 stem would cost more in hand-offs between threads than the work itself.
@@ -551,6 +555,15 @@ Exit code: **0** accepted, **1** rejected, **2** any other failure. `verify` wri
 
 To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-file` and
 `--Xpbt-snapshot-anchor-block-hash`, set together.
+
+How much of the node the migrator takes, so that block import keeps up:
+
+| Option | Default | |
+|---|---|---|
+| `--Xpbt-migration-threads` | half the cores | threads of the snapshot load and of the binary roots |
+| `--Xpbt-migration-blocks-per-roll` | 128 | most blocks applied in one roll |
+| `--Xpbt-migration-roll-pause` | 0 ms | wait after each roll while catching up |
+| `--Xpbt-migration-sort-buffer` | 64 MiB | heap of each external sort of the load |
 
 ## Spec notes
 

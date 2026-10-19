@@ -51,6 +51,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -217,7 +218,13 @@ class Eip8347DualCheckVerifierTest {
     final NodeStore loaded = new NodeStore();
     final Eip8347DualCheckVerifier.Loaded result =
         Eip8347DualCheckVerifier.verifyAndLoad(
-            artifacts.snapshot(), artifacts.preimages(), fixture.mptRoot(), tmp, loaded, 1L);
+            artifacts.snapshot(),
+            artifacts.preimages(),
+            fixture.mptRoot(),
+            tmp,
+            loaded,
+            1L,
+            ForkJoinPool.commonPool());
 
     assertThat(result.pbtRoot()).isEqualTo(fixture.pbtRoot());
     assertThat(result.leafCount()).isEqualTo(fixture.leaves().size());

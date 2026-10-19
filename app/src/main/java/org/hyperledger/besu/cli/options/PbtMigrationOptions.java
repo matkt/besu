@@ -18,11 +18,12 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 
 import picocli.CommandLine;
 
-/** Command-line options for the EIP-8347 PBT migration (snapshot bootstrap). */
+/** Command-line options for the EIP-8347 PBT migration: snapshot bootstrap and tuning. */
 public class PbtMigrationOptions {
   /** Default constructor. */
   public PbtMigrationOptions() {}
@@ -50,6 +51,39 @@ public class PbtMigrationOptions {
       description = "Finalized pre-fork block the snapshot and preimages are anchored to.")
   String anchorBlockHash = null;
 
+  @CommandLine.Option(
+      names = {"--Xpbt-migration-threads"},
+      hidden = true,
+      paramLabel = "<INT>",
+      description =
+          "Threads of the PBT migrator, for the snapshot load and the binary roots "
+              + "(default: half the cores, ${DEFAULT-VALUE}).")
+  int threads = PbtMigrator.Tuning.DEFAULT.threads();
+
+  @CommandLine.Option(
+      names = {"--Xpbt-migration-blocks-per-roll"},
+      hidden = true,
+      paramLabel = "<INT>",
+      description = "Most blocks the PBT migrator applies in one roll (default: ${DEFAULT-VALUE}).")
+  int blocksPerRoll = PbtMigrator.Tuning.DEFAULT.blocksPerRoll();
+
+  @CommandLine.Option(
+      names = {"--Xpbt-migration-roll-pause"},
+      hidden = true,
+      paramLabel = "<MS>",
+      description =
+          "Milliseconds the PBT migrator waits between two rolls while it catches up "
+              + "(default: ${DEFAULT-VALUE}).")
+  long rollPauseMillis = PbtMigrator.Tuning.DEFAULT.rollPause().toMillis();
+
+  @CommandLine.Option(
+      names = {"--Xpbt-migration-sort-buffer"},
+      hidden = true,
+      paramLabel = "<MIB>",
+      description =
+          "Heap in MiB of each external sort of the PBT snapshot load (default: ${DEFAULT-VALUE}).")
+  int sortBufferMib = (int) (PbtMigrator.Tuning.DEFAULT.sortBufferBytes() >> 20);
+
   /**
    * The snapshot bootstrap, if configured.
    *
@@ -76,5 +110,16 @@ public class PbtMigrationOptions {
             preimagesFile,
             Hash.fromHexString(anchorBlockHash),
             PbtMigrator.SnapshotBootstrap.workDir(dataDir)));
+  }
+
+  /**
+   * How much of the node the PBT migrator takes.
+   *
+   * @return the migrator's threads, roll size, pause between rolls and sort buffer
+   * @throws IllegalArgumentException when a value is out of range
+   */
+  public PbtMigrator.Tuning toTuning() {
+    return new PbtMigrator.Tuning(
+        threads, blocksPerRoll, Duration.ofMillis(rollPauseMillis), (long) sortBufferMib << 20);
   }
 }

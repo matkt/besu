@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ForkJoinPool;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -114,14 +115,17 @@ final class Eip8347AnchorJoin {
   }
 
   /**
-   * Reads the preimage file into {@code preimageRequests}, hashing PBT keys in parallel. The keccak
-   * order is not checked here: {@link Eip8347MptRebuild} reads the file again and checks it, and
-   * nothing before relies on it.
+   * Reads the preimage file into {@code preimageRequests}, hashing PBT keys in parallel on {@code
+   * pool}. The keccak order is not checked here: {@link Eip8347MptRebuild} reads the file again and
+   * checks it, and nothing before relies on it.
    *
    * @return the number of accounts in the file
    */
   static long sortPreimageRequests(
-      final Path preimagesPath, final Eip8347ExternalSorter preimageRequests) throws IOException {
+      final Path preimagesPath,
+      final Eip8347ExternalSorter preimageRequests,
+      final ForkJoinPool pool)
+      throws IOException {
     try (final Eip8347PreimageFile preimages =
         Eip8347PreimageFile.withoutOrderCheck(preimagesPath)) {
       Eip8347Pipelines.run(
@@ -129,10 +133,13 @@ final class Eip8347AnchorJoin {
                   "eip8347-verify-preimages",
                   numbered(preimages.batches(Eip8347Pipelines.LIST_WEIGHT)),
                   numbered -> 1 + numbered.batch().slots().size())
-              .thenProcessInParallel(
+              .thenProcessAsync(
                   "eip8347-verify-preimage-requests",
-                  batches -> batches.stream().flatMap(batch -> requestsOf(batch).stream()).toList(),
-                  Eip8347Pipelines.PARALLELISM)
+                  Eip8347Pipelines.async(
+                      pool,
+                      batches ->
+                          batches.stream().flatMap(batch -> requestsOf(batch).stream()).toList()),
+                  pool.getParallelism())
               .andFinishWith(
                   "eip8347-verify-sort-preimage-requests",
                   requests -> {

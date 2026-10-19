@@ -33,6 +33,8 @@ import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +81,7 @@ public final class Eip8347ExternalSorter implements Closeable {
   private final Path workDir;
   private final String name;
   private final long maxBufferedBytes;
+  private final ForkJoinPool pool;
   private List<Entry> buffer = new ArrayList<>();
   private final List<Path> runs = new ArrayList<>();
   private final List<RunReader> openReaders = new ArrayList<>();
@@ -93,12 +96,19 @@ public final class Eip8347ExternalSorter implements Closeable {
   private CompletableFuture<Path> pendingRun;
 
   public Eip8347ExternalSorter(final Path workDir, final String name, final long maxBufferedBytes) {
+    this(workDir, name, maxBufferedBytes, ForkJoinPool.commonPool());
+  }
+
+  /** Same, sorting each buffer on {@code pool}. */
+  public Eip8347ExternalSorter(
+      final Path workDir, final String name, final long maxBufferedBytes, final ForkJoinPool pool) {
     if (maxBufferedBytes < 1) {
       throw new IllegalArgumentException("maxBufferedBytes must be positive");
     }
     this.workDir = workDir;
     this.name = name;
     this.maxBufferedBytes = maxBufferedBytes;
+    this.pool = pool;
   }
 
   public void add(final byte[] key, final byte[] value) throws IOException {
@@ -206,9 +216,12 @@ public final class Eip8347ExternalSorter implements Closeable {
     runs.add(Eip8347Pipelines.await(run));
   }
 
-  private static Entry[] sort(final List<Entry> entries) {
+  private Entry[] sort(final List<Entry> entries) {
     final Entry[] sorted = entries.toArray(Entry[]::new);
-    Arrays.parallelSort(sorted, Comparator.comparing(Entry::key, KEY_ORDER));
+    // A parallel sort forks its tasks into the pool of the thread that runs it.
+    pool.invoke(
+        ForkJoinTask.adapt(
+            () -> Arrays.parallelSort(sorted, Comparator.comparing(Entry::key, KEY_ORDER))));
     return sorted;
   }
 

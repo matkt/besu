@@ -34,6 +34,7 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -152,10 +153,14 @@ final class Eip8347MptRebuild {
    * are exactly the ordinals {@code 0..n-1}.
    *
    * @param accounts accounts in the preimage file, to size the ranges of the account trie
+   * @param pool where storage tries and ranges are built
    * @throws Eip8347ArtifactVerificationException if the preimages are not in keccak order
    */
   static Bytes32 rootHash(
-      final Path preimagesPath, final Iterator<Entry> values, final long accounts)
+      final Path preimagesPath,
+      final Iterator<Entry> values,
+      final long accounts,
+      final ForkJoinPool pool)
       throws IOException {
     final Eip8347MptRebuild rebuild = new Eip8347MptRebuild(accounts);
     try (final Eip8347PreimageFile preimages =
@@ -166,25 +171,28 @@ final class Eip8347MptRebuild {
               .thenProcessAsyncOrdered(
                   "eip8347-verify-mpt-hash",
                   Eip8347Pipelines.async(
+                      pool,
                       items ->
                           rejecting(() -> items.stream().map(Eip8347MptRebuild::hash).toList())),
-                  Eip8347Pipelines.PARALLELISM)
+                  pool.getParallelism())
               .thenProcess("eip8347-verify-mpt-cut-storage", rebuild::cutStorage)
               .thenProcessAsyncOrdered(
                   "eip8347-verify-mpt-storage-ranges",
                   Eip8347Pipelines.async(
+                      pool,
                       items ->
                           rejecting(() -> items.stream().map(Eip8347MptRebuild::build).toList())),
-                  Eip8347Pipelines.PARALLELISM)
+                  pool.getParallelism())
               .thenProcess(
                   "eip8347-verify-mpt-storage",
                   items -> rejecting(() -> rebuild.attachStorage(items)))
               .thenProcessAsyncOrdered(
                   "eip8347-verify-mpt-account-ranges",
                   Eip8347Pipelines.async(
+                      pool,
                       ranges ->
                           rejecting(() -> ranges.stream().map(rebuild::buildAccounts).toList())),
-                  Eip8347Pipelines.PARALLELISM)
+                  pool.getParallelism())
               .andFinishWith(
                   "eip8347-verify-mpt",
                   ranges ->

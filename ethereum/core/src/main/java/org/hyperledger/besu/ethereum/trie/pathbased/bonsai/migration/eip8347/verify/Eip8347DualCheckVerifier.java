@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -117,6 +118,7 @@ public final class Eip8347DualCheckVerifier {
         expectedMptStateRoot,
         workDir,
         sortBufferBytes,
+        ForkJoinPool.commonPool(),
         Optional.empty());
   }
 
@@ -140,20 +142,22 @@ public final class Eip8347DualCheckVerifier {
         expectedMptStateRoot,
         workDir,
         nodes,
-        Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES);
+        Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES,
+        ForkJoinPool.commonPool());
   }
 
   /**
-   * Same as {@link #verifyAndLoad(Path, Path, Bytes32, Path, NodeUpdater)} with an explicit sort
-   * buffer.
+   * Same as {@link #verifyAndLoad(Path, Path, Bytes32, Path, NodeUpdater)} with an explicit in-heap
+   * buffer per external sort, and the parallel stages on {@code pool}.
    */
-  static Loaded verifyAndLoad(
+  public static Loaded verifyAndLoad(
       final Path snapshotPath,
       final Path preimagesPath,
       final Bytes32 expectedMptStateRoot,
       final Path workDir,
       final NodeUpdater nodes,
-      final long sortBufferBytes)
+      final long sortBufferBytes,
+      final ForkJoinPool pool)
       throws IOException {
     return run(
         snapshotPath,
@@ -161,6 +165,7 @@ public final class Eip8347DualCheckVerifier {
         expectedMptStateRoot,
         workDir,
         sortBufferBytes,
+        pool,
         Optional.of(Objects.requireNonNull(nodes, "nodes")));
   }
 
@@ -170,6 +175,7 @@ public final class Eip8347DualCheckVerifier {
       final Bytes32 expectedMptStateRoot,
       final Path workDir,
       final long sortBufferBytes,
+      final ForkJoinPool pool,
       final Optional<NodeUpdater> nodes)
       throws IOException {
     Objects.requireNonNull(snapshotPath, "snapshotPath");
@@ -179,17 +185,19 @@ public final class Eip8347DualCheckVerifier {
     final Path sortDir =
         Files.createTempDirectory(Files.createDirectories(workDir), "eip8347-verify-");
     try (final Eip8347ExternalSorter preimageRequests =
-            new Eip8347ExternalSorter(sortDir, "preimage-requests", sortBufferBytes);
+            new Eip8347ExternalSorter(sortDir, "preimage-requests", sortBufferBytes, pool);
         final Eip8347ExternalSorter mptValues =
-            new Eip8347ExternalSorter(sortDir, "mpt-values", sortBufferBytes);
+            new Eip8347ExternalSorter(sortDir, "mpt-values", sortBufferBytes, pool);
         final Eip8347ExternalSorter codeGroupRequests =
-            new Eip8347ExternalSorter(sortDir, "code-group-requests", sortBufferBytes);
+            new Eip8347ExternalSorter(sortDir, "code-group-requests", sortBufferBytes, pool);
         final Eip8347ExternalSorter codeGroupsByCode =
-            new Eip8347ExternalSorter(sortDir, "code-groups-by-code", sortBufferBytes)) {
+            new Eip8347ExternalSorter(sortDir, "code-groups-by-code", sortBufferBytes, pool)) {
 
-      final long accounts = Eip8347AnchorJoin.sortPreimageRequests(preimagesPath, preimageRequests);
+      final long accounts =
+          Eip8347AnchorJoin.sortPreimageRequests(preimagesPath, preimageRequests, pool);
 
-      final Eip8347CodeCheck codeCheck = new Eip8347CodeCheck(codeGroupRequests, codeGroupsByCode);
+      final Eip8347CodeCheck codeCheck =
+          new Eip8347CodeCheck(codeGroupRequests, codeGroupsByCode, pool);
       final Eip8347AnchorJoin anchorJoin =
           new Eip8347AnchorJoin(preimagesPath, preimageRequests.sorted(), mptValues, codeCheck);
       final AscendingCollapseBinaryTrie pbt =
@@ -205,11 +213,12 @@ public final class Eip8347DualCheckVerifier {
                 .thenProcessAsyncOrdered(
                     "eip8347-verify-hash-stems",
                     Eip8347Pipelines.async(
+                        pool,
                         units ->
                             units.stream()
                                 .map(unit -> new HashedUnit(unit, prepare(pbt, unit)))
                                 .toList()),
-                    Eip8347Pipelines.PARALLELISM)
+                    pool.getParallelism())
                 .thenProcess("eip8347-verify-pbt", hashed -> attach(pbt, hashed))
                 .andFinishWith(
                     "eip8347-verify-join",
@@ -248,7 +257,7 @@ public final class Eip8347DualCheckVerifier {
       codeCheckThread.start();
       try {
         final Bytes32 computedMptRoot =
-            Eip8347MptRebuild.rootHash(preimagesPath, mptValues.sorted(), accounts);
+            Eip8347MptRebuild.rootHash(preimagesPath, mptValues.sorted(), accounts, pool);
         if (!computedMptRoot.equals(expectedMptStateRoot)) {
           throw new Eip8347ArtifactVerificationException(
               "MPT stateRoot mismatch: computed "

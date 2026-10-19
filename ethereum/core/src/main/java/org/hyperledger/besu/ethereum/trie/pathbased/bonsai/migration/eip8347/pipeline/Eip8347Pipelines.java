@@ -29,6 +29,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,7 +51,7 @@ public final class Eip8347Pipelines {
   /** Items buffered between two stages. */
   public static final int BUFFER_SIZE = 256;
 
-  /** Threads for CPU-bound parallel stages (hashing, code checks). */
+  /** Threads for CPU-bound parallel stages (hashing, code checks) of the offline tools. */
   public static final int PARALLELISM = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
 
   /** Weight (entries, leaves) grouped into one item by {@link #fromLists}. */
@@ -71,6 +72,12 @@ public final class Eip8347Pipelines {
    */
   public static <T, O> Function<T, CompletableFuture<O>> async(final Function<T, O> function) {
     return item -> CompletableFuture.supplyAsync(() -> function.apply(item));
+  }
+
+  /** Same as {@link #async(Function)}, on {@code pool}. */
+  public static <T, O> Function<T, CompletableFuture<O>> async(
+      final Executor pool, final Function<T, O> function) {
+    return item -> CompletableFuture.supplyAsync(() -> function.apply(item), pool);
   }
 
   /**

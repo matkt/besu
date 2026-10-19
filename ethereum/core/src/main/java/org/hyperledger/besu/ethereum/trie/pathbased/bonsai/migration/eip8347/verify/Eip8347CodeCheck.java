@@ -41,6 +41,7 @@ import java.util.NavigableMap;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.Iterators;
@@ -92,6 +93,7 @@ final class Eip8347CodeCheck {
 
   private final Eip8347ExternalSorter codeGroupRequests;
   private final Eip8347ExternalSorter codeGroupsByCode;
+  private final ForkJoinPool pool;
   private PeekingIterator<Entry> sortedRequests;
 
   /** One code group a header needs: {@code codeHash[32] | group[4] | codeSize[4]} when sorted. */
@@ -134,10 +136,14 @@ final class Eip8347CodeCheck {
       long references,
       List<NavigableMap<Integer, Bytes32>> groups) {}
 
+  /** Checks each code on {@code pool}. */
   Eip8347CodeCheck(
-      final Eip8347ExternalSorter codeGroupRequests, final Eip8347ExternalSorter codeGroupsByCode) {
+      final Eip8347ExternalSorter codeGroupRequests,
+      final Eip8347ExternalSorter codeGroupsByCode,
+      final ForkJoinPool pool) {
     this.codeGroupRequests = codeGroupRequests;
     this.codeGroupsByCode = codeGroupsByCode;
+    this.pool = pool;
   }
 
   /** Registers a {@code kind 0x01} header. Must precede the first {@link #group} call. */
@@ -193,8 +199,10 @@ final class Eip8347CodeCheck {
             });
     Eip8347Pipelines.run(
         Eip8347Pipelines.from("eip8347-verify-codes", codes, CODES_IN_FLIGHT)
-            .thenProcessInParallel(
-                "eip8347-verify-code", Eip8347CodeCheck::verify, Eip8347Pipelines.PARALLELISM)
+            .thenProcessAsync(
+                "eip8347-verify-code",
+                Eip8347Pipelines.async(pool, Eip8347CodeCheck::verify),
+                pool.getParallelism())
             .andFinishWith("eip8347-verify-code-done", ok -> {}));
     return distinct.get();
   }

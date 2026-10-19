@@ -23,6 +23,9 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -91,6 +94,52 @@ class Eip8347ExternalSorterTest {
       }
       assertThat(it.hasNext()).isFalse();
     }
+  }
+
+  @Test
+  void everyBufferIsSortedOnThePoolItIsGiven() throws Exception {
+    // One record per run: four runs, each sorted on the pool.
+    final CountingPool spilling = new CountingPool();
+    try (final Eip8347ExternalSorter sorter = new Eip8347ExternalSorter(tmp, "s", 1, spilling)) {
+      assertSortsDescendingKeys(sorter);
+    }
+    assertThat(spilling.sorts).hasValue(4);
+
+    // Nothing spilled: the one buffer is sorted on the pool too.
+    final CountingPool inMemory = new CountingPool();
+    try (final Eip8347ExternalSorter sorter =
+        new Eip8347ExternalSorter(tmp, "m", Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES, inMemory)) {
+      assertSortsDescendingKeys(sorter);
+    }
+    assertThat(inMemory.sorts).hasValue(1);
+  }
+
+  /** Counts the sorts handed to it and runs them on the calling thread, starting no thread. */
+  private static final class CountingPool extends ForkJoinPool {
+    private final AtomicInteger sorts = new AtomicInteger();
+
+    CountingPool() {
+      super(1);
+    }
+
+    @Override
+    public <T> T invoke(final ForkJoinTask<T> task) {
+      sorts.incrementAndGet();
+      // Under 8192 records, a parallel sort does not fork.
+      return task.invoke();
+    }
+  }
+
+  private static void assertSortsDescendingKeys(final Eip8347ExternalSorter sorter)
+      throws Exception {
+    for (int i = 3; i >= 0; i--) {
+      sorter.add(new byte[] {(byte) i}, new byte[0]);
+    }
+    final Iterator<Eip8347ExternalSorter.Entry> it = sorter.sorted();
+    for (int i = 0; i < 4; i++) {
+      assertThat(it.next().key()).containsExactly((byte) i);
+    }
+    assertThat(it.hasNext()).isFalse();
   }
 
   private void assertSortsLikeArraysSort(final long bufferBytes, final int count) throws Exception {

@@ -230,6 +230,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   /** EIP-8347 snapshot the PBT migrator starts from, instead of genesis. */
   protected Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap = Optional.empty();
 
+  /** How much of the node the PBT migrator takes. */
+  protected PbtMigrator.Tuning pbtMigrationTuning = PbtMigrator.Tuning.DEFAULT;
+
   /** The API configuration */
   protected ApiConfiguration apiConfiguration;
 
@@ -631,6 +634,18 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
   public BesuControllerBuilder pbtSnapshotBootstrap(
       final Optional<PbtMigrator.SnapshotBootstrap> pbtSnapshotBootstrap) {
     this.pbtSnapshotBootstrap = pbtSnapshotBootstrap;
+    return this;
+  }
+
+  /**
+   * Sets how much of the node the PBT migrator takes.
+   *
+   * @param pbtMigrationTuning the migrator's threads, roll size, pause between rolls and sort
+   *     buffer
+   * @return the besu controller builder
+   */
+  public BesuControllerBuilder pbtMigrationTuning(final PbtMigrator.Tuning pbtMigrationTuning) {
+    this.pbtMigrationTuning = pbtMigrationTuning;
     return this;
   }
 
@@ -1100,7 +1115,8 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         genesisConfig::streamAllocations,
         pbtSnapshotBootstrap,
         balsFromPeers,
-        1000L);
+        1000L,
+        pbtMigrationTuning);
   }
 
   private void preloadBlockHeaderCache(
