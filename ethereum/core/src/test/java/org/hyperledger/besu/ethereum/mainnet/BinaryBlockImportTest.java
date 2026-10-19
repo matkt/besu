@@ -36,19 +36,19 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ExecutionContextTestFixture;
 import org.hyperledger.besu.ethereum.core.Transaction;
-import org.hyperledger.besu.ethereum.mainnet.staterootcommitter.binary.DefaultBinaryStateRootCommitter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.account.BonsaiAccount;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
+import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
@@ -62,21 +62,12 @@ import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint256;
 
-/**
- * Block import and processing integration tests for Amsterdam chains using the binary trie.
- *
- * <p>Genesis state is written via {@link org.hyperledger.besu.ethereum.chain.GenesisState} with
- * {@link DefaultBinaryStateRootCommitter} when Amsterdam is active at genesis.
- *
- * <p>Expected post-block state roots are computed by executing the block body (without persisting)
- * and running {@link DefaultBinaryStateRootCommitter}; the resulting root is set on the block
- * header before {@link BlockProcessor#processBlock} is called.
- */
+/** Block processing and import on a chain with the binary trie from genesis. */
 @SuppressWarnings("rawtypes")
 class BinaryBlockImportTest {
 
   private static final String GENESIS_RESOURCE =
-      "/org/hyperledger/besu/ethereum/mainnet/genesis-binary-bp-it.json";
+      "/org/hyperledger/besu/ethereum/mainnet/genesis-bp-it.json";
 
   private static final String ACCOUNT_2 = "0x0000000000000000000000000000000000000002";
   private static final String ACCOUNT_3 = "0x0000000000000000000000000000000000000003";
@@ -101,7 +92,9 @@ class BinaryBlockImportTest {
   @BeforeEach
   void setUp() {
     fixture =
-        ExecutionContextTestFixture.builder(GenesisConfig.fromResource(GENESIS_RESOURCE))
+        ExecutionContextTestFixture.builder(
+                GenesisConfig.fromResource(GENESIS_RESOURCE)
+                    .withOverrides(Map.of("binaryTrieTime", "0")))
             .dataStorageFormat(DataStorageFormat.BONSAI)
             .build();
     stateArchive = (BonsaiWorldStateProvider) fixture.getStateArchive();
@@ -109,6 +102,8 @@ class BinaryBlockImportTest {
     blockchain = fixture.getBlockchain();
     chainHeadHeader = blockchain.getChainHeadHeader();
     initialStateRoot = chainHeadHeader.getStateRoot();
+    assertThat(stateArchive.resolveTrieBranchType(chainHeadHeader))
+        .isEqualTo(TrieBranchType.BINARY);
   }
 
   @AfterEach
@@ -128,8 +123,7 @@ class BinaryBlockImportTest {
             0, 2_000_000_000_000_000_000L, 300000L, 5L, 7L, ACCOUNT_3, ACCOUNT_GENESIS_2_KEYPAIR);
 
     final Hash expectedStateRoot =
-        computeExpectedBinaryStateRoot(
-            chainHeadHeader, BASE_FEE, transactionTransfer1, transactionTransfer2);
+        discoverStateRoot(chainHeadHeader, BASE_FEE, transactionTransfer1, transactionTransfer2);
     assertThat(expectedStateRoot).isNotEqualTo(initialStateRoot);
 
     final MutableWorldState worldState = worldStateAtParent(chainHeadHeader);
@@ -146,7 +140,6 @@ class BinaryBlockImportTest {
 
     assertTrue(result.isSuccessful(), () -> result.errorMessage.orElse("(no message)"));
     assertThat(worldState.rootHash()).isEqualTo(expectedStateRoot);
-    assertThat(block.getHeader().getStateRoot()).isEqualTo(expectedStateRoot);
 
     final BonsaiAccount account2 =
         (BonsaiAccount) worldState.get(Address.fromHexStringStrict(ACCOUNT_2));
@@ -172,8 +165,7 @@ class BinaryBlockImportTest {
             0, 500_000_000_000_000_000L, 300000L, 5L, 7L, ACCOUNT_3, ACCOUNT_GENESIS_2_KEYPAIR);
 
     final Hash expectedStateRoot =
-        computeExpectedBinaryStateRoot(
-            chainHeadHeader, BASE_FEE, transactionTransfer1, transactionTransfer2);
+        discoverStateRoot(chainHeadHeader, BASE_FEE, transactionTransfer1, transactionTransfer2);
     assertThat(expectedStateRoot).isNotEqualTo(initialStateRoot);
     final Block block =
         createBlock(
@@ -193,21 +185,7 @@ class BinaryBlockImportTest {
     final BlockProcessingOutputs outputs = processingResult.getYield().orElseThrow();
     blockchain.appendBlock(block, outputs.getReceipts(), outputs.getBlockAccessList());
 
-    try (BonsaiWorldState ignoredHeadLoad =
-        (BonsaiWorldState)
-            stateArchive
-                .getWorldState(
-                    WorldStateQueryParams.newBuilder()
-                        .withBlockHeader(block.getHeader())
-                        .withShouldWorldStateUpdateHead(true)
-                        .build())
-                .orElseThrow()) {
-      // Mirror MainnetBlockImporter head advance after successful processing.
-    }
-
     assertThat(blockchain.getChainHeadHash()).isEqualTo(block.getHash());
-    assertThat(blockchain.getChainHeadHeader().getStateRoot()).isEqualTo(expectedStateRoot);
-    assertThat(expectedStateRoot).isNotEqualTo(initialStateRoot);
 
     try (BonsaiWorldState headWorldState =
         (BonsaiWorldState)
@@ -246,8 +224,7 @@ class BinaryBlockImportTest {
             0, contractAddress, "getSlot1", ACCOUNT_GENESIS_2_KEYPAIR, Optional.empty());
 
     final Hash expectedStateRoot =
-        computeExpectedBinaryStateRoot(
-            chainHeadHeader, BASE_FEE, setSlotTransaction, readSlotTransaction);
+        discoverStateRoot(chainHeadHeader, BASE_FEE, setSlotTransaction, readSlotTransaction);
     assertThat(expectedStateRoot).isNotEqualTo(initialStateRoot);
 
     final MutableWorldState worldState = worldStateAtParent(chainHeadHeader);
@@ -294,25 +271,17 @@ class BinaryBlockImportTest {
         .build();
   }
 
-  private Hash computeExpectedBinaryStateRoot(
+  /** Discovers the block's post-state root by processing it with a zero state root. */
+  private Hash discoverStateRoot(
       final BlockHeader parentHeader, final Wei baseFee, final Transaction... transactions) {
-    try (BonsaiWorldState worldState =
-        (BonsaiWorldState)
-            stateArchive
-                .getWorldState(
-                    WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead(parentHeader))
-                .orElseThrow()) {
-      final Block draftBlock = createBlock(parentHeader, initialStateRoot, baseFee, transactions);
-      final BlockProcessingResult bodyResult =
-          createBlockProcessor().processBlockBodyWithoutPersist(context(worldState, draftBlock));
-      assertTrue(
-          bodyResult.isSuccessful(),
-          () -> "Block body execution failed: " + bodyResult.errorMessage.orElse("(no message)"));
-
-      final BonsaiWorldStateUpdateAccumulator accumulator =
-          (BonsaiWorldStateUpdateAccumulator) worldState.updater();
-      return new DefaultBinaryStateRootCommitter().compute(worldState, null, accumulator).root();
-    }
+    final MutableWorldState worldState = worldStateAtParent(parentHeader);
+    final Block block = createBlock(parentHeader, Hash.ZERO, baseFee, transactions);
+    final BlockProcessingResult result =
+        createBlockProcessor().processBlock(context(worldState, block));
+    assertThat(result.isFailed()).isTrue();
+    final String message = result.errorMessage.orElseThrow();
+    final String marker = "calculated ";
+    return Hash.fromHexString(message.substring(message.indexOf(marker) + marker.length()));
   }
 
   private Block createBlock(

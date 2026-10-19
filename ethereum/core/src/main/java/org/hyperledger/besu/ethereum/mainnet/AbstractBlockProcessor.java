@@ -150,19 +150,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
 
   @Override
   public BlockProcessingResult processBlock(final BlockExecutionContext context) {
-    return processBlock(context, true);
-  }
-
-  /**
-   * Executes block body processing (through coinbase reward) without persisting world state.
-   * Package-private for tests that must pre-compute the state root before sealing the header.
-   */
-  BlockProcessingResult processBlockBodyWithoutPersist(final BlockExecutionContext context) {
-    return processBlock(context, false);
-  }
-
-  private BlockProcessingResult processBlock(
-      final BlockExecutionContext context, final boolean persistWorldState) {
     final ProtocolContext protocolContext = context.getProtocolContext();
     final Blockchain blockchain = protocolContext.getBlockchain();
     final MutableWorldState worldState = context.getWorldState();
@@ -500,23 +487,6 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
       LOG.trace("traceEndBlock for {}", blockHeader.getNumber());
       blockTracer.traceEndBlock(blockHeader, blockBody);
 
-      // EIP-8037: gas_metered = max(cumulative_execution, cumulative_state)
-      final long gasMetered = Math.max(cumulativeExecutionGasUsed, cumulativeStateGasUsed);
-      final BlockProcessingOutputs blockProcessingOutputs =
-          new BlockProcessingOutputs(
-              worldState,
-              receipts,
-              maybeRequests,
-              maybeBlockAccessList,
-              gasMetered,
-              blockHashLookup.getAccessedAncestors());
-
-      if (!persistWorldState) {
-        return new BlockProcessingResult(
-            Optional.of(blockProcessingOutputs),
-            parallelizedTxFound ? Optional.of(nbParallelTx) : Optional.empty());
-      }
-
       try {
         worldState.persist(blockHeader, stateRootCommitter);
       } catch (MerkleTrieException e) {
@@ -533,8 +503,18 @@ public abstract class AbstractBlockProcessor implements BlockProcessor {
         return new BlockProcessingResult(Optional.empty(), e);
       }
 
+      // EIP-8037: gas_metered = max(cumulative_execution, cumulative_state)
+      final long gasMetered = Math.max(cumulativeExecutionGasUsed, cumulativeStateGasUsed);
+
       return new BlockProcessingResult(
-          Optional.of(blockProcessingOutputs),
+          Optional.of(
+              new BlockProcessingOutputs(
+                  worldState,
+                  receipts,
+                  maybeRequests,
+                  maybeBlockAccessList,
+                  gasMetered,
+                  blockHashLookup.getAccessedAncestors())),
           parallelizedTxFound ? Optional.of(nbParallelTx) : Optional.empty());
     } catch (final MerkleTrieException | MissingCodeException e) {
       // the block may be processed again on this world state, without the transactions before
