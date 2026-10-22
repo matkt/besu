@@ -31,6 +31,10 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
+import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
@@ -65,7 +69,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-/** The migrator catching up from genesis through trie logs: roll size, pauses, write priority. */
+/**
+ * The migrator catching up from genesis through trie logs or BALs: roll size, pauses, write
+ * priority.
+ */
 class PbtMigratorCatchUpTest {
 
   private static final long PBT_TIME = 1_000L;
@@ -78,6 +85,7 @@ class PbtMigratorCatchUpTest {
   private static final int BLOCKS = 5;
 
   private final Map<Hash, BlockHeader> headers = new HashMap<>();
+  private final Map<Hash, BlockAccessList> bals = new HashMap<>();
   private final List<BlockHeader> chain = new ArrayList<>();
   private final Blockchain blockchain = mock(Blockchain.class);
   private final ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
@@ -113,6 +121,8 @@ class PbtMigratorCatchUpTest {
     when(blockchain.getBlockHeader(anyLong())).thenAnswer(i -> canonical(i.getArgument(0)));
     when(blockchain.getBlockHashByNumber(anyLong()))
         .thenAnswer(i -> canonical(i.getArgument(0)).map(BlockHeader::getBlockHash));
+    when(blockchain.getBlockAccessList(any(Hash.class)))
+        .thenAnswer(i -> Optional.ofNullable(bals.get(i.<Hash>getArgument(0))));
     when(scheduler.awaitTermination(anyLong(), any())).thenReturn(true);
     provider = newProvider(storage, blockchain, PBT_TIME);
 
@@ -120,6 +130,17 @@ class PbtMigratorCatchUpTest {
     for (int i = 1; i <= BLOCKS; i++) {
       final int account = i;
       block(parentState(), u -> u.createAccount(address(account), 0, Wei.of(account)));
+      bals.put(
+          chain.getLast().getHash(),
+          new BlockAccessList(
+              List.of(
+                  new AccountChanges(
+                      address(account),
+                      List.of(),
+                      List.of(),
+                      List.of(new BalanceChange(0, Wei.of(account))),
+                      List.of(),
+                      List.of()))));
     }
   }
 
@@ -135,6 +156,18 @@ class PbtMigratorCatchUpTest {
     tick(2, Optional.of(Duration.ofSeconds(1)));
 
     // Genesis, then rolls of two blocks at most, each followed by a pause.
+    assertThat(pausedAt).containsExactly(0L, 2L, 4L, 5L);
+    assertThat(binaryRoot()).contains(binaryRootFromScratch());
+  }
+
+  @Test
+  void catchUpThroughBalsMergesUpToBlocksPerRollIntoEachRoll() {
+    // No trie log, as for blocks past the trie log retention: only the BALs are left.
+    database.clear(KeyValueSegmentIdentifier.TRIE_LOG_STORAGE);
+
+    tick(2, Optional.of(Duration.ofSeconds(1)));
+
+    // The same rolls as through trie logs, and the same root as block by block.
     assertThat(pausedAt).containsExactly(0L, 2L, 4L, 5L);
     assertThat(binaryRoot()).contains(binaryRootFromScratch());
   }

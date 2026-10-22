@@ -53,6 +53,8 @@ class BalTrieLogsTest {
       Address.fromHexString("0x00000000000000000000000000000000000000a1");
   private static final Address BOB =
       Address.fromHexString("0x00000000000000000000000000000000000000b0");
+  private static final Address CAROL =
+      Address.fromHexString("0x00000000000000000000000000000000000000c0");
   private static final StorageSlotKey SLOT = new StorageSlotKey(UInt256.valueOf(7));
 
   /** Parent-block PBT, in memory, and the code store. */
@@ -100,11 +102,20 @@ class BalTrieLogsTest {
   }
 
   private static TrieLog forward(final State state, final AccountChanges... accounts) {
+    return forward(state, List.of(bal(accounts)));
+  }
+
+  /** The trie log of consecutive blocks, {@code bals} oldest first. */
+  private static TrieLog forward(final State state, final List<BlockAccessList> bals) {
     return BalTrieLogs.forward(
         new BlockHeaderTestFixture().number(5).buildHeader(),
-        new BlockAccessList(List.of(accounts)),
+        bals,
         state.pbt,
         (address, codeHash) -> state.code.getOrDefault(codeHash, Bytes.EMPTY));
+  }
+
+  private static BlockAccessList bal(final AccountChanges... accounts) {
+    return new BlockAccessList(List.of(accounts));
   }
 
   @Test
@@ -227,5 +238,129 @@ class BalTrieLogsTest {
         .isEqualTo(new BinaryTrieAccountValue(3, Wei.ONE, Hash.hash(indicator)));
     assertThat(log.getCodeChanges().get(ALICE).getPrior()).isNull();
     assertThat(log.getCodeChanges().get(ALICE).getUpdated()).isEqualTo(indicator);
+  }
+
+  @Test
+  void consecutiveBalsKeepTheLastValueOfEachFieldAndTheParentAsPrior() {
+    final Bytes code = Bytes.fromHexString("0x6000");
+    final Hash codeHash = Hash.hash(code);
+    final State state = new State().account(ALICE, 3, Wei.of(100), code);
+
+    final TrieLog log =
+        forward(
+            state,
+            List.of(
+                bal(
+                    changes(
+                        ALICE,
+                        List.of(),
+                        List.of(new BalanceChange(0, Wei.of(40))),
+                        List.of(),
+                        List.of())),
+                bal(
+                    changes(
+                        ALICE, List.of(), List.of(), List.of(new NonceChange(0, 4)), List.of())),
+                bal(
+                    changes(
+                        ALICE,
+                        List.of(),
+                        List.of(new BalanceChange(0, Wei.of(70))),
+                        List.of(),
+                        List.of()))));
+
+    final TrieLog.LogTuple<?> change = log.getAccountChanges().get(ALICE);
+    assertThat(change.getPrior()).isEqualTo(new BinaryTrieAccountValue(3, Wei.of(100), codeHash));
+    assertThat(change.getUpdated()).isEqualTo(new BinaryTrieAccountValue(4, Wei.of(70), codeHash));
+  }
+
+  @Test
+  void slotWrittenThenZeroedAcrossBalsIsDeletedOnlyWhenTheParentHadIt() {
+    final StorageSlotKey fresh = new StorageSlotKey(UInt256.valueOf(8));
+    final State state =
+        new State().account(ALICE, 1, Wei.ONE, Bytes.EMPTY).slot(ALICE, SLOT, UInt256.valueOf(9));
+    final AccountChanges write =
+        changes(
+            ALICE,
+            List.of(
+                new SlotChanges(SLOT, List.of(new StorageChange(0, UInt256.valueOf(4)))),
+                new SlotChanges(fresh, List.of(new StorageChange(0, UInt256.valueOf(4))))),
+            List.of(),
+            List.of(),
+            List.of());
+    final AccountChanges clear =
+        changes(
+            ALICE,
+            List.of(
+                new SlotChanges(SLOT, List.of(new StorageChange(0, UInt256.ZERO))),
+                new SlotChanges(fresh, List.of(new StorageChange(0, UInt256.ZERO)))),
+            List.of(),
+            List.of(),
+            List.of());
+
+    final TrieLog log = forward(state, List.of(bal(write), bal(clear)));
+
+    final var slots = log.getStorageChanges().get(ALICE);
+    assertThat(slots.get(SLOT).getPrior()).isEqualTo(UInt256.valueOf(9));
+    assertThat(slots.get(SLOT).getUpdated()).isEqualTo(UInt256.ZERO);
+    assertThat(slots).doesNotContainKey(fresh);
+  }
+
+  @Test
+  void accountCreatedThenEmptiedAcrossBalsStaysAbsent() {
+    final TrieLog log =
+        forward(
+            new State(),
+            List.of(
+                bal(
+                    changes(
+                        BOB,
+                        List.of(),
+                        List.of(new BalanceChange(0, Wei.of(10))),
+                        List.of(),
+                        List.of())),
+                bal(
+                    changes(
+                        BOB,
+                        List.of(),
+                        List.of(new BalanceChange(0, Wei.ZERO)),
+                        List.of(),
+                        List.of()))));
+
+    final TrieLog.LogTuple<?> change = log.getAccountChanges().get(BOB);
+    assertThat(change.getPrior()).isNull();
+    assertThat(change.getUpdated()).isNull();
+  }
+
+  @Test
+  void delegationChangedAcrossBalsGoesFromTheParentCodeToTheLastIndicator() {
+    final State state = new State().account(ALICE, 2, Wei.ONE, Bytes.EMPTY);
+    final Bytes toBob =
+        Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, BOB.getBytes());
+    final Bytes toCarol =
+        Bytes.concatenate(CodeDelegationHelper.CODE_DELEGATION_PREFIX, CAROL.getBytes());
+
+    final TrieLog log =
+        forward(
+            state,
+            List.of(
+                bal(
+                    changes(
+                        ALICE,
+                        List.of(),
+                        List.of(),
+                        List.of(new NonceChange(0, 3)),
+                        List.of(new CodeChange(0, toBob)))),
+                bal(
+                    changes(
+                        ALICE,
+                        List.of(),
+                        List.of(),
+                        List.of(new NonceChange(0, 4)),
+                        List.of(new CodeChange(0, toCarol))))));
+
+    assertThat(log.getAccountChanges().get(ALICE).getUpdated())
+        .isEqualTo(new BinaryTrieAccountValue(4, Wei.ONE, Hash.hash(toCarol)));
+    assertThat(log.getCodeChanges().get(ALICE).getPrior()).isNull();
+    assertThat(log.getCodeChanges().get(ALICE).getUpdated()).isEqualTo(toCarol);
   }
 }

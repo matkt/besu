@@ -88,8 +88,9 @@ no cursor, even after the files were added, so on restart the column and the wor
 emptied and the load starts over.
 
 **After the import**, the migrator follows the chain from the anchor, at most 128 blocks per roll:
-through trie logs when the node has them, otherwise through each block's BAL (EIP-7928), stored
-locally or fetched from peers. At the fork, the chain claims the column and the migrator retires.
+through trie logs when the node has them, otherwise through the blocks' BALs (EIP-7928), stored
+locally or fetched from peers, merged into one trie log per roll. At the fork, the chain claims the
+column and the migrator retires.
 
 ## How verify works
 
@@ -254,9 +255,9 @@ loading, sorting the window and writing the files run on two background threads.
 
 In the parent package: `PbtMigrator` (bootstrap and chain following), `SnapshotColumnWriter` (the
 bulk load into the binary column through sorted files), `PbtColumnOwnership` (migrator / chain
-handoff) and `BalTrieLogs` (a block's BAL as a roll-forward trie log). The sorted files are a
-storage feature: `SegmentedKeyValueStorage.createSortedFileWriter` and `ingestSortedFiles`, which
-RocksDB implements with `SstFileWriter` and `IngestExternalFile`.
+handoff) and `BalTrieLogs` (the BALs of consecutive blocks as one roll-forward trie log). The
+sorted files are a storage feature: `SegmentedKeyValueStorage.createSortedFileWriter` and
+`ingestSortedFiles`, which RocksDB implements with `SstFileWriter` and `IngestExternalFile`.
 
 ## CLI
 

@@ -348,7 +348,7 @@ public class PbtMigrator {
       return;
     }
     if (!writeColumn(storage::clearBinaryTrie)
-        || !applyAndPersist(genesis.get(), List.of(), List.of(genesisTrieLog()))) {
+        || !applyAndPersist(genesis.get(), List.of(), List.of(genesisTrieLog()), 1)) {
       return;
     }
     // Only once genesis is durably in the column: a failed first write is retried from scratch.
@@ -524,9 +524,10 @@ public class PbtMigrator {
 
   /**
    * One roll from the cursor toward {@code target}: back to the common ancestor through trie logs,
-   * then forward through consecutive blocks that have a trie log, or else through a single block's
-   * BAL, built against the PBT the column holds for its parent. Returns {@code false}, leaving the
-   * cursor where it was, when the next block cannot be rolled yet.
+   * then forward through consecutive blocks that have a trie log, or else through the BALs of the
+   * consecutive blocks that have none, merged into one trie log built against the PBT the column
+   * holds. Returns {@code false}, leaving the cursor where it was, when the next block cannot be
+   * rolled yet.
    */
   private boolean rollOnce(final BlockHeader target) {
     try {
@@ -562,14 +563,17 @@ public class PbtMigrator {
         forwardTrieLogs.add(trieLog.get());
         reached = header;
       }
-      // No trie log for the next block: roll it through its BAL, which applies on committed parent
-      // state only. After rollbacks, this roll lands on the common ancestor and the next one does.
+      // No trie log for the next block: roll the blocks up to the next trie log through their BALs,
+      // which apply on committed state only. After rollbacks, this roll lands on the common
+      // ancestor and the next one does.
       if (forwardTrieLogs.isEmpty() && !forward.isEmpty() && rollBacks.isEmpty()) {
-        reached = forward.getFirst();
-        forwardTrieLogs.add(balTrieLog(reached, forward));
+        final List<BlockAccessList> bals = leadingBals(forward);
+        reached = forward.get(bals.size() - 1);
+        forwardTrieLogs.add(balTrieLog(reached, bals));
       }
 
-      if (!applyAndPersist(reached, rollBacks, forwardTrieLogs)) {
+      final long blocks = rollBacks.size() + reached.getNumber() - ancestor.getNumber();
+      if (!applyAndPersist(reached, rollBacks, forwardTrieLogs, blocks)) {
         return false;
       }
       cursor = reached;
@@ -689,39 +693,59 @@ public class PbtMigrator {
   }
 
   /**
-   * A roll-forward trie log for {@code header} built from its BAL: stored locally, else fetched
-   * from peers together with the BALs of the next blocks of {@code upcoming} that lack a trie log,
-   * so a catch-up asks the network once per batch rather than once per block.
+   * The BALs of the first blocks of {@code forward}, up to the first one that has a trie log or no
+   * BAL: stored locally, else fetched from peers together, so a catch-up asks the network once per
+   * roll rather than once per block.
+   *
+   * @throws MissingRollData when the first block has no BAL
    */
-  private TrieLog balTrieLog(final BlockHeader header, final List<BlockHeader> upcoming) {
-    final Hash hash = header.getBlockHash();
-    BlockAccessList bal =
-        blockchain.getBlockAccessList(hash).orElseGet(() -> prefetchedBals.remove(hash));
-    if (bal == null) {
-      final List<BlockHeader> batch = new ArrayList<>();
-      for (final BlockHeader next : upcoming) {
-        if (batch.size() == tuning.blocksPerRoll()) {
-          break;
-        }
-        if (trieLog(next).isEmpty()
-            && blockchain.getBlockAccessList(next.getBlockHash()).isEmpty()) {
-          batch.add(next);
-        }
+  private List<BlockAccessList> leadingBals(final List<BlockHeader> forward) {
+    final List<BlockHeader> blocks = new ArrayList<>();
+    for (final BlockHeader header : forward) {
+      if (!blocks.isEmpty() && trieLog(header).isPresent()) {
+        break;
       }
+      blocks.add(header);
+    }
+    final List<BlockAccessList> bals = knownBals(blocks);
+    if (bals.size() < blocks.size()) {
+      final List<BlockHeader> rest = blocks.subList(bals.size(), blocks.size());
       prefetchedBals.clear();
-      prefetchedBals.putAll(balsFromPeers.apply(batch));
+      prefetchedBals.putAll(balsFromPeers.apply(rest));
       LOG.info(
-          "PBT migrator fetched {} of {} BAL(s) from peers", prefetchedBals.size(), batch.size());
-      bal = prefetchedBals.remove(hash);
+          "PBT migrator fetched {} of {} BAL(s) from peers", prefetchedBals.size(), rest.size());
+      bals.addAll(knownBals(rest));
     }
-    if (bal == null) {
+    if (bals.isEmpty()) {
       throw new MissingRollData(
-          "neither trie log nor BAL to roll forward block " + header.getNumber());
+          "neither trie log nor BAL to roll forward block " + forward.getFirst().getNumber());
     }
+    return bals;
+  }
+
+  /** The BALs of the first blocks of {@code blocks}, stored or fetched, up to a missing one. */
+  private List<BlockAccessList> knownBals(final List<BlockHeader> blocks) {
+    final List<BlockAccessList> bals = new ArrayList<>();
+    for (final BlockHeader header : blocks) {
+      final Hash hash = header.getBlockHash();
+      final Optional<BlockAccessList> bal =
+          blockchain
+              .getBlockAccessList(hash)
+              .or(() -> Optional.ofNullable(prefetchedBals.remove(hash)));
+      if (bal.isEmpty()) {
+        break;
+      }
+      bals.add(bal.get());
+    }
+    return bals;
+  }
+
+  /** One roll-forward trie log, ending at {@code header}, for the blocks of {@code bals}. */
+  private TrieLog balTrieLog(final BlockHeader header, final List<BlockAccessList> bals) {
     final BonsaiWorldState worldState = provider.getMigrationWorldState();
     return BalTrieLogs.forward(
         header,
-        bal,
+        bals,
         BinaryTrieFactory.createStateTrie(worldState, pool),
         (address, codeHash) ->
             worldState
@@ -731,14 +755,15 @@ public class PbtMigrator {
   }
 
   /**
-   * Applies the rolls to one accumulator, computes the binary root and persists it together with
-   * the column cursor, never touching the flat DB. Returns {@code false}, writing nothing, once the
-   * chain owns the column.
+   * Applies the rolls, over {@code blocks} blocks, to one accumulator, computes the binary root and
+   * persists it together with the column cursor, never touching the flat DB. Returns {@code false},
+   * writing nothing, once the chain owns the column.
    */
   private boolean applyAndPersist(
       final BlockHeader blockHeader,
       final List<TrieLog> rollBacks,
-      final List<TrieLog> rollForwards) {
+      final List<TrieLog> rollForwards,
+      final long blocks) {
     final BonsaiWorldState bonsaiWorldState = provider.getMigrationWorldState();
     final Hash previousRoot = bonsaiWorldState.getWorldStateRootHash();
     final BonsaiWorldStateUpdateAccumulator accumulator =
@@ -768,7 +793,7 @@ public class PbtMigrator {
       return false;
     }
     // following the head, one block at a time, is logged at debug
-    (rollBacks.size() + rollForwards.size() > 1 ? LOG.atInfo() : LOG.atDebug())
+    (blocks > 1 ? LOG.atInfo() : LOG.atDebug())
         .setMessage("PBT migrator rolled to block {} ({}); root from {} to {}")
         .addArgument(blockHeader.getNumber())
         .addArgument(blockHeader.getBlockHash().toShortLogString())
