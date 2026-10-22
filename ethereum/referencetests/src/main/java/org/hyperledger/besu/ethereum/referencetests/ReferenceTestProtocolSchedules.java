@@ -84,7 +84,8 @@ public class ReferenceTestProtocolSchedules {
 
   /**
    * The EVM configuration the reference tests run with: EVM v2 when the system property test.evm.v2
-   * is set to true, the default configuration otherwise.
+   * is set to true, with block gas when test.evm.v2.block.gas is also set to true, the default
+   * configuration otherwise.
    *
    * @return the EVM configuration
    */
@@ -94,7 +95,8 @@ public class ReferenceTestProtocolSchedules {
             EvmConfiguration.DEFAULT.jumpDestCacheWeightKB(),
             EvmConfiguration.DEFAULT.worldUpdaterMode(),
             EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
-            true)
+            true,
+            Boolean.getBoolean("test.evm.v2.block.gas"))
         : EvmConfiguration.DEFAULT;
   }
 

@@ -152,11 +152,25 @@ public class EvmToolCommandOptionsModule {
       arity = "1")
   private boolean enableEvmV2 = false;
 
+  @CommandLine.Option(
+      names = {"--Xevm-v2-block-gas"},
+      description =
+          "Charge the fixed gas of a block of operations at once, on EVM v2 (default: false)",
+      fallbackValue = "false",
+      defaultValue = "false",
+      hidden = true,
+      arity = "1")
+  private boolean enableBlockGas = false;
+
   @Provides
   @Singleton
   EvmConfiguration provideEvmConfiguration() {
     return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+        jumpDestCacheWeightKilobytes,
+        worldstateUpdateMode,
+        enableOptimizedOpcodes,
+        enableEvmV2,
+        enableBlockGas);
   }
 
   /**

@@ -83,14 +83,14 @@ class RandomProgramV1V2DifferentialTest {
       List.of(Bytes.of(0), Bytes.of(1), Bytes.of(2), Bytes.of(32));
 
   /** The operations that leave state behind for, or read state left by, other operations. */
-  private static final List<Integer> STATEFUL_OPCODES =
+  static final List<Integer> STATEFUL_OPCODES =
       List.of(
           0x20, 0x31, 0x35, 0x37, 0x39, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x47, 0x51, 0x52, 0x53, 0x54,
           0x55, 0x5c, 0x5d, 0x5e, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5,
           0xfa, 0xfd);
 
   /** The storage and transient storage slots the operands can address. */
-  private static final List<Bytes32> SLOTS = OPERANDS.stream().map(Bytes32::leftPad).toList();
+  static final List<Bytes32> SLOTS = OPERANDS.stream().map(Bytes32::leftPad).toList();
 
   @ParameterizedTest(name = "{0}")
   @FieldSource("FORKS")
@@ -136,7 +136,7 @@ class RandomProgramV1V2DifferentialTest {
   }
 
   /** A random program of operations, each preceded by pushes of the operands it takes. */
-  private static Bytes program(
+  static Bytes program(
       final Random random,
       final List<Integer> opcodes,
       final List<Integer> statefulOpcodes,

@@ -513,11 +513,16 @@ tasks.withType(Test).configureEach {
   maxHeapSize = '2g'
 }
 
-// -Dtest.evm.v2=true runs the reference tests on EVM v2 (--Xevm-v2).
+// -Dtest.evm.v2=true runs the reference tests on EVM v2 (--Xevm-v2), and with
+// -Dtest.evm.v2.block.gas=true also with block gas (--Xevm-v2-block-gas).
 tasks.withType(Test).configureEach {
   def evmV2 = System.getProperty('test.evm.v2')
   if (evmV2 != null) {
     systemProperty 'test.evm.v2', evmV2
+  }
+  def blockGas = System.getProperty('test.evm.v2.block.gas')
+  if (blockGas != null) {
+    systemProperty 'test.evm.v2.block.gas', blockGas
   }
 }
 

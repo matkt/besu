@@ -22,7 +22,7 @@ import org.hyperledger.besu.evm.internal.OverflowException;
 import org.hyperledger.besu.evm.internal.UnderflowException;
 
 /** The Abstract fixed cost operation. */
-abstract class AbstractFixedCostOperation extends AbstractOperation {
+public abstract class AbstractFixedCostOperation extends AbstractOperation {
 
   /** The Success response. */
   protected final OperationResult successResponse;

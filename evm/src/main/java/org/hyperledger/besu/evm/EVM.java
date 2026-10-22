@@ -86,6 +86,7 @@ import org.hyperledger.besu.evm.operation.VirtualOperation;
 import org.hyperledger.besu.evm.operation.XorOperation;
 import org.hyperledger.besu.evm.operation.XorOperationOptimized;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
+import org.hyperledger.besu.evm.v2.GasBlocks;
 import org.hyperledger.besu.evm.v2.operation.AddModOperationV2;
 import org.hyperledger.besu.evm.v2.operation.AddOperationV2;
 import org.hyperledger.besu.evm.v2.operation.AndOperationV2;
@@ -94,6 +95,7 @@ import org.hyperledger.besu.evm.v2.operation.CountLeadingZerosOperationV2;
 import org.hyperledger.besu.evm.v2.operation.DivOperationV2;
 import org.hyperledger.besu.evm.v2.operation.DupNOperationV2;
 import org.hyperledger.besu.evm.v2.operation.DupOperationV2;
+import org.hyperledger.besu.evm.v2.operation.EqOperationV2;
 import org.hyperledger.besu.evm.v2.operation.ExchangeOperationV2;
 import org.hyperledger.besu.evm.v2.operation.ExpOperationV2;
 import org.hyperledger.besu.evm.v2.operation.GtOperationV2;
@@ -161,6 +163,11 @@ public class EVM {
 
   private final Operation[] operationsV2;
 
+  /** The fixed cost of each opcode that runs inside gas blocks, null without block gas. */
+  private final int[] blockGasCosts;
+
+  private final EqOperationV2 eqV2;
+
   /**
    * Instantiates a new Evm.
    *
@@ -190,6 +197,11 @@ public class EVM {
         evmConfiguration.enableEvmV2()
             ? OperationsV2.of(operations.getOperations(), gasCalculator, evmSpecVersion)
             : null;
+    blockGasCosts =
+        evmConfiguration.enableEvmV2() && evmConfiguration.enableBlockGas()
+            ? GasBlocks.costs(operations.getOperations(), operationsV2)
+            : null;
+    eqV2 = operationsV2 != null && operationsV2[0x14] instanceof EqOperationV2 eq ? eq : null;
   }
 
   /**
@@ -514,8 +526,19 @@ public class EVM {
     byte[] code = frame.getCode().getBytes().toArrayUnsafe();
     final boolean tracing = operationTracer.tracesOperations();
     final Operation[] operationArray = tracing ? operations.getOperations() : null;
+    // a tracer sees the gas of every operation, so it runs them one at a time
+    final int[] blocks =
+        blockGasCosts != null && !tracing ? GasBlocks.of(frame.getCode(), blockGasCosts) : null;
     while (frame.getState() == MessageFrame.State.CODE_EXECUTING) {
       int pc = frame.getPC();
+      if (blocks != null && pc < blocks.length) {
+        final int block = blocks[pc];
+        // without the block's gas, run one operation at a time to halt where the gas runs out
+        if (block != 0 && frame.getRemainingGas() >= block >>> 16) {
+          runGasBlockV2(frame, code, pc, block);
+          continue;
+        }
+      }
       final int opcode = pc < code.length ? code[pc] & 0xff : 0;
       if (tracing) {
         frame.setCurrentOperation(pc < code.length ? operationArray[opcode] : endOfScriptStop);
@@ -680,6 +703,147 @@ public class EVM {
         operationTracer.tracePostExecution(frame, result);
       }
     }
+  }
+
+  /**
+   * Runs the operations of a gas block, charging the gas of the whole block first.
+   *
+   * @param frame the frame, which has the gas of the block
+   * @param code the code
+   * @param start the pc of the block
+   * @param block the entry of the block, from {@link GasBlocks#of}
+   */
+  // Separate from runToHaltV2, so that it is compiled with its own inlining budget.
+  private void runGasBlockV2(
+      final MessageFrame frame, final byte[] code, final int start, final int block) {
+    frame.decrementRemainingGas(block >>> 16);
+    final int end = start + (block & GasBlocks.MAX_LENGTH);
+    int pc = start;
+    while (pc < end) {
+      final int opcode = code[pc] & 0xff;
+      OperationResult result;
+      try {
+        result =
+            switch (opcode) {
+              case 0x01 -> AddOperationV2.staticOperation(frame);
+              case 0x02 -> MulOperationV2.staticOperation(frame);
+              case 0x03 -> SubOperationV2.staticOperation(frame);
+              case 0x04 -> DivOperationV2.staticOperation(frame);
+              case 0x05 -> SDivOperationV2.staticOperation(frame);
+              case 0x06 -> ModOperationV2.staticOperation(frame);
+              case 0x07 -> SModOperationV2.staticOperation(frame);
+              case 0x08 -> AddModOperationV2.staticOperation(frame);
+              case 0x09 -> MulModOperationV2.staticOperation(frame);
+              case 0x0b -> SignExtendOperationV2.staticOperation(frame);
+              case 0x10 -> LtOperationV2.staticOperation(frame);
+              case 0x11 -> GtOperationV2.staticOperation(frame);
+              case 0x12 -> SLtOperationV2.staticOperation(frame);
+              case 0x13 -> SGtOperationV2.staticOperation(frame);
+              case 0x14 -> eqV2.executeFixedCostOperation(frame);
+              case 0x15 -> IsZeroOperationV2.staticOperation(frame);
+              case 0x16 -> AndOperationV2.staticOperation(frame);
+              case 0x17 -> OrOperationV2.staticOperation(frame);
+              case 0x18 -> XorOperationV2.staticOperation(frame);
+              case 0x19 -> NotOperationV2.staticOperation(frame);
+              case 0x1a -> ByteOperationV2.staticOperation(frame);
+              case 0x1b -> ShlOperationV2.staticOperation(frame);
+              case 0x1c -> ShrOperationV2.staticOperation(frame);
+              case 0x1d -> SarOperationV2.staticOperation(frame);
+              case 0x1e -> CountLeadingZerosOperationV2.staticOperation(frame);
+              case 0x50 -> PopOperationV2.staticOperation(frame);
+              case 0x5b -> JumpDestOperationV2.JUMPDEST_SUCCESS;
+              case 0x5F -> // PUSH0
+                  PushOperationV2.SingleByte.staticOperation(frame, code, pc, 0);
+              case 0x60 -> // PUSH1
+                  PushOperationV2.SingleByte.staticOperation(frame, code, pc, 1);
+              case 0x61, // PUSH2-8
+                  0x62,
+                  0x63,
+                  0x64,
+                  0x65,
+                  0x66,
+                  0x67 ->
+                  PushOperationV2.SingleLimb.staticOperation(frame, code, pc, opcode - PUSH_BASE);
+              case 0x68, // PUSH9-32
+                  0x69,
+                  0x6a,
+                  0x6b,
+                  0x6c,
+                  0x6d,
+                  0x6e,
+                  0x6f,
+                  0x70,
+                  0x71,
+                  0x72,
+                  0x73,
+                  0x74,
+                  0x75,
+                  0x76,
+                  0x77,
+                  0x78,
+                  0x79,
+                  0x7a,
+                  0x7b,
+                  0x7c,
+                  0x7d,
+                  0x7e,
+                  0x7f ->
+                  PushOperationV2.MultiLimb.staticOperation(frame, code, pc, opcode - PUSH_BASE);
+              case 0x80, // DUP1-16
+                  0x81,
+                  0x82,
+                  0x83,
+                  0x84,
+                  0x85,
+                  0x86,
+                  0x87,
+                  0x88,
+                  0x89,
+                  0x8a,
+                  0x8b,
+                  0x8c,
+                  0x8d,
+                  0x8e,
+                  0x8f ->
+                  DupOperationV2.staticOperation(frame, opcode - DupOperationV2.DUP_BASE);
+              case 0x90, // SWAP1-16
+                  0x91,
+                  0x92,
+                  0x93,
+                  0x94,
+                  0x95,
+                  0x96,
+                  0x97,
+                  0x98,
+                  0x99,
+                  0x9a,
+                  0x9b,
+                  0x9c,
+                  0x9d,
+                  0x9e,
+                  0x9f ->
+                  SwapOperationV2.staticOperation(frame, opcode - SwapOperationV2.SWAP_BASE);
+              default -> throw new IllegalStateException("Opcode " + opcode + " is not in blocks");
+            };
+      } catch (final OverflowException oe) {
+        result = OVERFLOW_RESPONSE;
+      } catch (final UnderflowException ue) {
+        result = UNDERFLOW_RESPONSE;
+      }
+      final ExceptionalHaltReason haltReason = result.getHaltReason();
+      if (haltReason != null) {
+        // the frame loses all its gas, as it would have with the gas charged one operation at a
+        // time
+        LOG.trace("MessageFrame evaluation halted because of {}", haltReason);
+        frame.setPC(pc);
+        frame.setExceptionalHaltReason(Optional.of(haltReason));
+        frame.setState(MessageFrame.State.EXCEPTIONAL_HALT);
+        return;
+      }
+      assert result.getGasCost() == blockGasCosts[opcode] : "gas of opcode " + opcode;
+      pc += GasBlocks.size(opcode);
+    }
+    frame.setPC(pc);
   }
 
   /**

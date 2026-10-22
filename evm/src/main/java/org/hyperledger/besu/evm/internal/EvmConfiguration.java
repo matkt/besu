@@ -26,6 +26,7 @@ import java.util.OptionalInt;
  * @param worldUpdaterMode the world updater mode
  * @param enableOptimizedOpcodes enable optimized implementation of certain opcodes in the EVM
  * @param enableEvmV2 enable experimental EVM v2 with long[] stack representation
+ * @param enableBlockGas charge the fixed gas of a block of operations at once, on EVM v2
  * @param evmStackSize the maximum evm stack size
  * @param maxCodeSizeOverride An optional override of the maximum code size set by the EVM fork
  * @param maxInitcodeSizeOverride An optional override of the maximum initcode size set by the EVM
@@ -36,6 +37,7 @@ public record EvmConfiguration(
     WorldUpdaterMode worldUpdaterMode,
     boolean enableOptimizedOpcodes,
     boolean enableEvmV2,
+    boolean enableBlockGas,
     Integer evmStackSize,
     Optional<Integer> maxCodeSizeOverride,
     Optional<Integer> maxInitcodeSizeOverride) {
@@ -70,6 +72,7 @@ public record EvmConfiguration(
         worldstateUpdateMode,
         enableOptimizedOpcodes,
         false,
+        false,
         MessageFrame.DEFAULT_MAX_STACK_SIZE,
         Optional.empty(),
         Optional.empty());
@@ -93,6 +96,30 @@ public record EvmConfiguration(
         worldstateUpdateMode,
         enableOptimizedOpcodes,
         enableEvmV2,
+        false);
+  }
+
+  /**
+   * Create an EVM Configuration without any overrides, with explicit EVM v2 and block gas flags
+   *
+   * @param jumpDestCacheWeightKilobytes the jump dest cache weight (in kibibytes)
+   * @param worldstateUpdateMode the world update mode
+   * @param enableOptimizedOpcodes enabled opcode optimizations
+   * @param enableEvmV2 enable experimental EVM v2 with long[] stack representation
+   * @param enableBlockGas charge the fixed gas of a block of operations at once, on EVM v2
+   */
+  public EvmConfiguration(
+      final Long jumpDestCacheWeightKilobytes,
+      final WorldUpdaterMode worldstateUpdateMode,
+      final boolean enableOptimizedOpcodes,
+      final boolean enableEvmV2,
+      final boolean enableBlockGas) {
+    this(
+        jumpDestCacheWeightKilobytes,
+        worldstateUpdateMode,
+        enableOptimizedOpcodes,
+        enableEvmV2,
+        enableBlockGas,
         MessageFrame.DEFAULT_MAX_STACK_SIZE,
         Optional.empty(),
         Optional.empty());
@@ -125,6 +152,7 @@ public record EvmConfiguration(
         worldUpdaterMode,
         enableOptimizedOpcodes,
         enableEvmV2,
+        enableBlockGas,
         newEvmStackSize.orElse(MessageFrame.DEFAULT_MAX_STACK_SIZE),
         newMaxCodeSize.isPresent() ? Optional.of(newMaxCodeSize.getAsInt()) : Optional.empty(),
         newMaxInitcodeSize.isPresent()
