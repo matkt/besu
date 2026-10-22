@@ -80,6 +80,13 @@ final class ProgramRun {
           EvmConfiguration.DEFAULT.worldUpdaterMode(),
           EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
           true);
+  static final EvmConfiguration V2_BLOCK_GAS =
+      new EvmConfiguration(
+          EvmConfiguration.DEFAULT.jumpDestCacheWeightKB(),
+          EvmConfiguration.DEFAULT.worldUpdaterMode(),
+          EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
+          true,
+          true);
 
   record Fork(String name, Function<EvmConfiguration, EVM> factory) {
     @Override

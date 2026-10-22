@@ -35,6 +35,9 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
   /** The constant EVM_V2. */
   public static final String EVM_V2 = "--Xevm-v2";
 
+  /** The constant BLOCK_GAS. */
+  public static final String BLOCK_GAS = "--Xevm-v2-block-gas";
+
   /** Default constructor. */
   EvmOptions() {}
 
@@ -83,10 +86,23 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
       arity = "1")
   private boolean enableEvmV2 = false;
 
+  @CommandLine.Option(
+      names = {BLOCK_GAS},
+      description =
+          "Charge the fixed gas of a block of operations at once, on EVM v2 (default: false)",
+      fallbackValue = "false",
+      hidden = true,
+      arity = "1")
+  private boolean enableBlockGas = false;
+
   @Override
   public EvmConfiguration toDomainObject() {
     return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+        jumpDestCacheWeightKilobytes,
+        worldstateUpdateMode,
+        enableOptimizedOpcodes,
+        enableEvmV2,
+        enableBlockGas);
   }
 
   @Override

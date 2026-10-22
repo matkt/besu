@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.code.OpcodeInfo;
 import org.hyperledger.besu.evm.operation.JumpDestOperation;
 import org.hyperledger.besu.evm.operation.PushOperation;
+import org.hyperledger.besu.evm.v2.GasBlocks;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -88,6 +89,9 @@ public class Code {
    * thread could see the array before its contents and reject a valid jump destination.
    */
   private volatile long[] jumpDestBitMask = null;
+
+  /** The gas blocks of the code, volatile like the jump destination bitmask. */
+  private volatile GasBlocks gasBlocks = null;
 
   /**
    * Public constructor.
@@ -242,6 +246,24 @@ public class Code {
    */
   public void setJumpDestBitMask(final long[] jumpDestBitMask) {
     this.jumpDestBitMask = jumpDestBitMask;
+  }
+
+  /**
+   * Returns the gas blocks of this code, computed by {@link GasBlocks#of}.
+   *
+   * @return the gas blocks, or null if not computed yet
+   */
+  public GasBlocks getGasBlocks() {
+    return gasBlocks;
+  }
+
+  /**
+   * Sets the gas blocks of this code.
+   *
+   * @param gasBlocks the gas blocks
+   */
+  public void setGasBlocks(final GasBlocks gasBlocks) {
+    this.gasBlocks = gasBlocks;
   }
 
   /**
