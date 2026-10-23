@@ -30,6 +30,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import com.google.common.io.CountingInputStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
@@ -109,6 +110,7 @@ public final class Eip8347SnapshotReader implements Closeable {
     }
   }
 
+  private final CountingInputStream file;
   private final InputStream in;
 
   /** The storage account the next storage groups belong to, and whether one has been read yet. */
@@ -120,9 +122,13 @@ public final class Eip8347SnapshotReader implements Closeable {
   private Bytes32 claimedRoot;
 
   public Eip8347SnapshotReader(final Path path) throws IOException {
-    this.in =
-        new BufferedInputStream(
-            Files.newInputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
+    this.file = new CountingInputStream(Files.newInputStream(path));
+    this.in = new BufferedInputStream(file, Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
+  }
+
+  /** Bytes read from the file so far, one buffer ahead of the units handed out at most. */
+  public long bytesRead() {
+    return file.getCount();
   }
 
   /**

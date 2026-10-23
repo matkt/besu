@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -187,7 +188,15 @@ public final class Eip8347DualCheckVerifier {
       try (final Eip8347SnapshotReader snapshot = new Eip8347SnapshotReader(snapshotPath)) {
         // A unit is one whole stem, hashed in parallel; only its top node is attached in order.
         Eip8347Pipelines.run(
-            Eip8347Pipelines.fromLists("eip8347-verify-snapshot", snapshot.units(), Unit::leafCount)
+            Eip8347Pipelines.fromLists(
+                    "eip8347-verify-snapshot",
+                    Eip8347Progress.logging(
+                        LOG,
+                        "step 2/3 checking the PBT root",
+                        snapshot.units(),
+                        snapshot::bytesRead,
+                        Files.size(snapshotPath)),
+                    Unit::leafCount)
                 .thenProcessAsyncOrdered(
                     "eip8347-verify-hash-stems",
                     Eip8347Pipelines.async(

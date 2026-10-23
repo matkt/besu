@@ -86,6 +86,23 @@ class Eip8347PreimageFileTest {
   }
 
   @Test
+  void countsTheBytesReadFromTheFile() throws Exception {
+    final Path path = tmp.resolve("count.pre");
+    Eip8347PreimageFile.write(
+        path,
+        List.of(
+            new AccountPreimages(A, List.of(Bytes32.leftPad(Bytes.of(1)))),
+            new AccountPreimages(B, List.of())));
+
+    try (final Eip8347PreimageFile reader = new Eip8347PreimageFile(path)) {
+      assertThat(reader.bytesRead()).isZero();
+      reader.batches(1).forEachRemaining(batch -> {});
+      reader.ensureExhausted();
+      assertThat(reader.bytesRead()).isEqualTo(Files.size(path));
+    }
+  }
+
+  @Test
   void rejectsTruncatedRecord() throws Exception {
     final Path path = tmp.resolve("truncated.pre");
     Files.write(path, new byte[] {1, 2, 3});

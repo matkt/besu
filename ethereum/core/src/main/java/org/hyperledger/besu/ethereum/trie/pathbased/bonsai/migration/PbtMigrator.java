@@ -33,6 +33,7 @@ import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.BinaryTrieForkSupport;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
@@ -119,6 +120,13 @@ public class PbtMigrator {
 
   /** Last waiting state logged, so that a wait is logged once and not on every tick. */
   private String lastWait = "";
+
+  /**
+   * Progress of a catch-up toward the head, and the block it started from; null while following.
+   */
+  private Eip8347Progress catchUp;
+
+  private long catchUpFrom;
 
   private final LongSupplier clock;
 
@@ -273,9 +281,11 @@ public class PbtMigrator {
           stop();
           return;
         }
+        final BlockHeader before = cursor;
         final long stepStart = clock.getAsLong();
         progressed = step();
         if (progressed) {
+          logCatchUp(before, stepStart);
           // block import has the cores and the disk to itself meanwhile
           final Duration pause =
               tuning
@@ -604,6 +614,37 @@ public class PbtMigrator {
     } else {
       LOG.debug("{} ({} failures in a row)", message, failedRolls, e);
     }
+  }
+
+  // a catch-up longer than a progress interval logs its share done, then when it reaches the head
+  private void logCatchUp(final BlockHeader before, final long now) {
+    if (before == null) {
+      return; // bootstrapped by this step
+    }
+    final long head = blockchain.getChainHeadHeader().getNumber();
+    if (catchUp == null) {
+      catchUp = new Eip8347Progress(now);
+      catchUpFrom = before.getNumber();
+    }
+    if (cursor.getNumber() >= head) {
+      if (catchUp.hasLogged()) {
+        LOG.info(
+            "PBT migrator caught up with the head at block {}, {} blocks rolled",
+            cursor.getNumber(),
+            cursor.getNumber() - catchUpFrom);
+      }
+      catchUp = null;
+      return;
+    }
+    catchUp
+        .line(cursor.getNumber() - catchUpFrom, head - catchUpFrom, now)
+        .ifPresent(
+            line ->
+                LOG.info(
+                    "PBT migrator catch-up in progress: {}, block {} of {}",
+                    line,
+                    cursor.getNumber(),
+                    head));
   }
 
   // a wait is logged once, then at debug while it lasts

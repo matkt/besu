@@ -66,6 +66,7 @@ class Eip8347SnapshotFormatTest {
       assertThat(reader.claimedRoot()).isEqualTo(fixture.pbtRoot());
       assertThat(reader.leafCount()).isEqualTo(fixture.leaves().size());
       assertThat(read).isEqualTo(fixture.leaves());
+      assertThat(reader.bytesRead()).isEqualTo(Files.size(snapshot));
     }
   }
 

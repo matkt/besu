@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.stream.Stream;
 
+import com.google.common.io.CountingInputStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
@@ -65,6 +66,7 @@ public final class Eip8347PreimageFile implements Closeable {
     }
   }
 
+  private final CountingInputStream file;
   private final InputStream in;
   private final boolean checkOrder;
   private Bytes previousAddressHash;
@@ -120,10 +122,14 @@ public final class Eip8347PreimageFile implements Closeable {
   }
 
   private Eip8347PreimageFile(final Path path, final boolean checkOrder) throws IOException {
-    this.in =
-        new BufferedInputStream(
-            Files.newInputStream(path), Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
+    this.file = new CountingInputStream(Files.newInputStream(path));
+    this.in = new BufferedInputStream(file, Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
     this.checkOrder = checkOrder;
+  }
+
+  /** Bytes read from the file so far, one buffer ahead of the records handed out at most. */
+  public long bytesRead() {
+    return file.getCount();
   }
 
   /** Reads the file without computing keccak hashes, so without checking the keccak order. */

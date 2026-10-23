@@ -27,10 +27,12 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter.Entry;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,6 +45,8 @@ import com.google.common.collect.PeekingIterator;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Consensus-anchoring join: each preimage account and slot becomes a request keyed by its PBT key,
@@ -51,6 +55,8 @@ import org.apache.tuweni.units.bigints.UInt256;
  * file (MPT order, an account's slots before it) for {@link Eip8347MptRebuild}.
  */
 final class Eip8347AnchorJoin {
+
+  private static final Logger LOG = LoggerFactory.getLogger(Eip8347AnchorJoin.class);
 
   /** An account's MPT fields as sorted: {@code nonce[8] | codeHash[32] | balance (trimmed)}. */
   record AccountFields(long nonce, Hash codeHash, Wei balance) {
@@ -111,7 +117,12 @@ final class Eip8347AnchorJoin {
       Eip8347Pipelines.run(
           Eip8347Pipelines.fromLists(
                   "eip8347-verify-preimages",
-                  numbered(preimages.batches(Eip8347Pipelines.LIST_WEIGHT)),
+                  Eip8347Progress.logging(
+                      LOG,
+                      "step 1/3 reading the preimages",
+                      numbered(preimages.batches(Eip8347Pipelines.LIST_WEIGHT)),
+                      preimages::bytesRead,
+                      Files.size(preimagesPath)),
                   numbered -> 1 + numbered.batch().slots().size())
               .thenProcessAsync(
                   "eip8347-verify-preimage-requests",

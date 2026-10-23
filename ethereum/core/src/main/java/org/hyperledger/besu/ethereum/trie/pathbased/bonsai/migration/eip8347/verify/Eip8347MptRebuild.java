@@ -22,11 +22,13 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter.Entry;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 import org.hyperledger.besu.ethereum.trie.patricia.AscendingCollapsePatriciaTrie;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -40,12 +42,16 @@ import java.util.function.Supplier;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Check 2: rebuilds the MPT root from the preimages and the matched values sorted by ordinal,
  * building storage tries and ranges of keys on workers (see the EIP-8347 README, step 4).
  */
 final class Eip8347MptRebuild {
+
+  private static final Logger LOG = LoggerFactory.getLogger(Eip8347MptRebuild.class);
 
   /** Most slots an account can have to be built as one unit. */
   static final int UNIT_SLOTS = 4096;
@@ -167,7 +173,14 @@ final class Eip8347MptRebuild {
         Eip8347PreimageFile.withoutOrderCheck(preimagesPath)) {
       Eip8347Pipelines.run(
           Eip8347Pipelines.fromLists(
-                  "eip8347-verify-mpt-read", new Reader(preimages, values), Read::weight)
+                  "eip8347-verify-mpt-read",
+                  Eip8347Progress.logging(
+                      LOG,
+                      "step 3/3 checking the MPT stateRoot",
+                      new Reader(preimages, values),
+                      preimages::bytesRead,
+                      Files.size(preimagesPath)),
+                  Read::weight)
               .thenProcessAsyncOrdered(
                   "eip8347-verify-mpt-hash",
                   Eip8347Pipelines.async(

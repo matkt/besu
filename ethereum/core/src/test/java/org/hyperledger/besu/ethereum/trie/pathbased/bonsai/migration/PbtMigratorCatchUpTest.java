@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.B
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.code.BonsaiCodeCache;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
@@ -57,12 +58,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -215,6 +223,52 @@ class PbtMigratorCatchUpTest {
     // Genesis only: the chain claims the column during the pause after it.
     assertThat(pausedAt).containsExactly(0L);
     assertThat(cursor()).isZero();
+  }
+
+  @Test
+  void logsTheCatchUpShareOnceAMinuteThenWhenItReachesTheHead() {
+    final List<String> lines =
+        catchUpLines(() -> tick(2, Optional.of(Duration.ZERO), Eip8347Progress.INTERVAL));
+
+    // Rolls to 2, 4 and 5 after genesis, a minute apart: the roll to 4 is the first line due.
+    assertThat(lines)
+        .containsExactly(
+            "PBT migrator catch-up in progress: 80.00%, block 4 of 5",
+            "PBT migrator caught up with the head at block 5, 5 blocks rolled");
+  }
+
+  @Test
+  void aCatchUpShorterThanAMinuteLogsNothing() {
+    assertThat(catchUpLines(() -> tick(2, Optional.of(Duration.ZERO)))).isEmpty();
+  }
+
+  /** The catch-up lines the migrator logs while {@code action} runs. */
+  @SuppressWarnings("BannedMethod")
+  private static List<String> catchUpLines(final Runnable action) {
+    final Logger logger = (Logger) LogManager.getLogger(PbtMigrator.class);
+    final Level level = logger.getLevel();
+    final List<String> lines = new CopyOnWriteArrayList<>();
+    final AbstractAppender appender =
+        new AbstractAppender("catch-up-lines", null, null, false, Property.EMPTY_ARRAY) {
+          @Override
+          public void append(final LogEvent event) {
+            final String line = event.getMessage().getFormattedMessage();
+            if (line.startsWith("PBT migrator catch") || line.startsWith("PBT migrator caught")) {
+              lines.add(line);
+            }
+          }
+        };
+    appender.start();
+    logger.addAppender(appender);
+    logger.setLevel(Level.INFO);
+    try {
+      action.run();
+    } finally {
+      logger.setLevel(level);
+      logger.removeAppender(appender);
+      appender.stop();
+    }
+    return lines;
   }
 
   private void tick(final int blocksPerRoll, final Optional<Duration> rollPause) {
