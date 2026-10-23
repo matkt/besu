@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 /** Keeps what is submitted, to run it in turn on the test thread when the test says. */
 final class QueuedExecutor extends AbstractExecutorService {
   private final List<Runnable> tasks = new ArrayList<>();
+  private boolean shutdown;
 
   void runAll() {
     for (final Runnable task : tasks) {
@@ -37,16 +38,19 @@ final class QueuedExecutor extends AbstractExecutorService {
   }
 
   @Override
-  public void shutdown() {}
+  public void shutdown() {
+    shutdown = true;
+  }
 
   @Override
   public List<Runnable> shutdownNow() {
+    shutdown = true;
     return List.of();
   }
 
   @Override
   public boolean isShutdown() {
-    return false;
+    return shutdown;
   }
 
   @Override
