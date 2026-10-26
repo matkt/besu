@@ -66,13 +66,16 @@ public final class HeaderBackfill {
   private final HeaderFetcher fetcher;
   private final BlockHeader floor;
   private final BlockHeader top;
+  // the blocks whose headers are downloaded, from the highest down
+  private final long highestToStore;
+  private final long lowestToStore;
   private final int headersPerRequest;
   private final int parallelism;
   private final MetricsSystem metricsSystem;
-  // the requests in flight, which a stop cancels as the scheduler retries them until then
+  // the requests by number in flight, which a stop cancels as the scheduler retries them until then
   private final Set<CompletableFuture<?>> requests = ConcurrentHashMap.newKeySet();
-  private volatile Hash expected;
-  private volatile long lowestStored;
+  // the top, then the lowest header stored
+  private volatile BlockHeader lowestTrusted;
   private volatile boolean stopped;
   private volatile Instant started = Instant.now();
   // guarded by this
@@ -105,21 +108,22 @@ public final class HeaderBackfill {
     this.fetcher = fetcher;
     this.floor = floor;
     this.top = top;
+    this.highestToStore = top.getNumber() - 1;
+    this.lowestToStore = floor.getNumber() + 1;
     this.headersPerRequest = headersPerRequest;
     this.parallelism = parallelism;
     this.metricsSystem = metricsSystem;
-    this.expected = top.getParentHash();
-    this.lowestStored = top.getNumber();
+    this.lowestTrusted = top;
   }
 
-  /** Returns the lowest header stored so far. */
+  /** Returns the number of the lowest header stored so far, the top before any. */
   public long lowestStored() {
-    return lowestStored;
+    return lowestTrusted.getNumber();
   }
 
   /** Returns the number of headers stored so far. */
   public long done() {
-    return top.getNumber() - lowestStored;
+    return top.getNumber() - lowestStored();
   }
 
   /** Returns the time since the download started. */
@@ -129,7 +133,7 @@ public final class HeaderBackfill {
 
   /** Returns the number of headers to store, from below the top down to above the floor. */
   public long total() {
-    return Math.max(0, top.getNumber() - floor.getNumber() - 1);
+    return Math.max(0, highestToStore - lowestToStore + 1);
   }
 
   /** Downloads every header in between and checks the chain reaches the floor; runs once. */
@@ -148,15 +152,16 @@ public final class HeaderBackfill {
               LOG.info(
                   "SNAP2 headers complete in {} | down to {}",
                   ProgressFormat.duration(elapsed()),
-                  ProgressFormat.block(floor.getNumber() + 1));
+                  ProgressFormat.block(lowestToStore));
             });
   }
 
-  // the floor is the top itself, or the parent of the lowest trusted header
+  // the lowest trusted header is the floor itself, or its child
   private boolean reachesFloor() {
-    return top.getNumber() == floor.getNumber()
-        ? top.getHash().equals(floor.getHash())
-        : expected.equals(floor.getHash());
+    if (lowestTrusted.getNumber() == floor.getNumber()) {
+      return lowestTrusted.getHash().equals(floor.getHash());
+    }
+    return lowestTrusted.getParentHash().equals(floor.getHash());
   }
 
   // under the lock, so that a stop comes first or finds the pipeline started
@@ -173,19 +178,19 @@ public final class HeaderBackfill {
     LOG.info(
         "SNAP2 headers started | {} headers, {} down to {}",
         ProgressFormat.compact(total()),
-        ProgressFormat.block(top.getNumber() - 1),
-        ProgressFormat.block(floor.getNumber() + 1));
-    final Pipeline<Segment> headers = createPipeline();
-    final CompletableFuture<Void> finished = headers.start(executor);
+        ProgressFormat.block(highestToStore),
+        ProgressFormat.block(lowestToStore));
+    final Pipeline<Segment> created = createPipeline();
+    final CompletableFuture<Void> finished = created.start(executor);
     // kept once started, as a pipeline that failed to start cannot be aborted
-    pipeline = headers;
+    pipeline = created;
     return finished;
   }
 
   private Pipeline<Segment> createPipeline() {
     return PipelineBuilder.createPipelineFrom(
             "headerSegments",
-            new Segments(top.getNumber() - 1, floor.getNumber() + 1, headersPerRequest),
+            new Segments(highestToStore, lowestToStore, headersPerRequest),
             parallelism,
             metricsSystem.createLabelledCounter(
                 BesuMetricCategory.SYNCHRONIZER,
@@ -226,62 +231,75 @@ public final class HeaderBackfill {
                   segment.high(),
                   segment.low(),
                   error.getMessage());
-              return new Fetched(segment, List.of());
+              return Fetched.failed(segment);
             });
   }
 
-  // the headers of the segment by number, a request that a stop cancels
+  // the headers of the segment by number
   private CompletableFuture<List<BlockHeader>> byNumber(final Segment segment) {
-    final CompletableFuture<RequestSender.Response<List<BlockHeader>>> request =
-        sender.submitWithRetries(
-            new PeerTaskRequest<>(
-                () ->
-                    new GetHeadersFromPeerTask(
-                        segment.high(), segment.size(), 0, Direction.REVERSE, 0, protocolSchedule),
-                Priority.HEADERS,
-                "headers",
-                segment.high()));
+    return track(
+            sender.submitWithRetries(
+                new PeerTaskRequest<>(
+                    () ->
+                        new GetHeadersFromPeerTask(
+                            segment.high(),
+                            segment.size(),
+                            0,
+                            Direction.REVERSE,
+                            0,
+                            protocolSchedule),
+                    Priority.HEADERS,
+                    "headers",
+                    segment.high())))
+        .thenApply(RequestSender.Response::value);
+  }
+
+  // added before the check, so that a concurrent stop either cancels it or is seen here
+  private <T> CompletableFuture<T> track(final CompletableFuture<T> request) {
     requests.add(request);
-    request.whenComplete((response, error) -> requests.remove(request));
-    // sent while a stop cancelled the others
+    request.whenComplete((result, error) -> requests.remove(request));
     if (stopped) {
       request.cancel(false);
     }
-    return request.thenApply(RequestSender.Response::value);
+    return request;
   }
 
-  // a short answer goes on down to low by hash from its lowest header, which keeps it linked
+  // a short answer goes on down to low by hash from its last header, which keeps it linked
   private CompletableFuture<List<BlockHeader>> completeByHash(
       final List<BlockHeader> headers, final long low) {
-    final BlockHeader lowest = headers.getLast();
-    if (lowest.getNumber() == low) {
+    final BlockHeader last = headers.getLast();
+    if (last.getNumber() == low) {
       return CompletableFuture.completedFuture(headers);
     }
-    // the chain down starts with the lowest header, already in the answer
-    return fetcher
-        .chainDown(lowest, low, Priority.HEADERS)
-        .thenApply(
-            below -> Stream.concat(headers.stream(), below.reversed().stream().skip(1)).toList());
+    // the chain down starts with the last header, already in the answer
+    return descendingFrom(last, low)
+        .thenApply(below -> Stream.concat(headers.stream(), below.stream().skip(1)).toList());
+  }
+
+  // the chain from this header down to low, highest first
+  private CompletableFuture<List<BlockHeader>> descendingFrom(
+      final BlockHeader header, final long low) {
+    return fetcher.chainDown(header, low, Priority.HEADERS).thenApply(List::reversed);
   }
 
   // the lock only keeps a stopped download from storing, the refetch runs outside it
   private void verifyAndStore(final Fetched fetched) {
-    throwIfStopped();
     final List<BlockHeader> headers = trusted(fetched);
     synchronized (this) {
       throwIfStopped();
       store.accept(headers);
     }
-    expected = headers.getLast().getParentHash();
-    lowestStored = headers.getLast().getNumber();
+    lowestTrusted = headers.getLast();
   }
 
   // the fetched headers when they continue the trusted chain, else that chain fetched by hash
   private List<BlockHeader> trusted(final Fetched fetched) {
-    final List<BlockHeader> headers = fetched.headers();
-    if (!headers.isEmpty() && headers.getFirst().getHash().equals(expected)) {
-      return headers;
+    final Hash expected = lowestTrusted.getParentHash();
+    if (fetched.startsWith(expected)) {
+      return fetched.headers();
     }
+    // no refetch once stopped
+    throwIfStopped();
     LOG.debug(
         "Header segment {} to {} is missing or on another chain, fetching it by hash",
         fetched.segment().high(),
@@ -302,12 +320,10 @@ public final class HeaderBackfill {
   // the trusted chain from the header with this hash down to low, highest first
   private List<BlockHeader> chainByHash(final Hash hash, final long low) {
     final CompletableFuture<List<BlockHeader>> chain =
-        fetcher
-            .byHash(hash, Priority.HEADERS)
-            .thenCompose(header -> fetcher.chainDown(header, low, Priority.HEADERS));
+        fetcher.byHash(hash, Priority.HEADERS).thenCompose(header -> descendingFrom(header, low));
     // get rather than join, which the interrupt of a stop does not end
     try {
-      return chain.get().reversed();
+      return chain.get();
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
       throw cancellation();
@@ -322,7 +338,18 @@ public final class HeaderBackfill {
    * @param segment the segment
    * @param headers the headers, highest first, each the parent of the one before, or none
    */
-  private record Fetched(Segment segment, List<BlockHeader> headers) {}
+  private record Fetched(Segment segment, List<BlockHeader> headers) {
+
+    // none, as the download of the segment failed
+    private static Fetched failed(final Segment segment) {
+      return new Fetched(segment, List.of());
+    }
+
+    // the highest header has this hash
+    private boolean startsWith(final Hash hash) {
+      return !headers.isEmpty() && headers.getFirst().getHash().equals(hash);
+    }
+  }
 
   /**
    * A segment of block numbers, both included.

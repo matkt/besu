@@ -37,17 +37,17 @@ class ProgressFormatTest {
     assertThat(ProgressFormat.compact(1_312_471)).isEqualTo("1.31M");
     assertThat(ProgressFormat.compact(82_933_000)).isEqualTo("82.9M");
     assertThat(ProgressFormat.compact(1_200_000_000)).isEqualTo("1.20B");
-    assertThat(ProgressFormat.compact(Long.MAX_VALUE)).endsWith("B");
+    assertThat(ProgressFormat.compact(Long.MAX_VALUE)).isEqualTo("9223372036.85B");
   }
 
   @Test
   void picksTheUnitAfterRounding() {
     assertThat(ProgressFormat.compact(999_949)).isEqualTo("999.9K");
-    assertThat(ProgressFormat.compact(999_960)).isEqualTo("1.00M");
+    assertThat(ProgressFormat.compact(999_950)).isEqualTo("1.00M");
     assertThat(ProgressFormat.compact(9_994_999)).isEqualTo("9.99M");
-    assertThat(ProgressFormat.compact(9_999_000)).isEqualTo("10.0M");
+    assertThat(ProgressFormat.compact(9_995_000)).isEqualTo("10.0M");
     assertThat(ProgressFormat.compact(999_949_999)).isEqualTo("999.9M");
-    assertThat(ProgressFormat.compact(999_960_000)).isEqualTo("1.00B");
+    assertThat(ProgressFormat.compact(999_950_000)).isEqualTo("1.00B");
   }
 
   @Test

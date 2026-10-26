@@ -35,20 +35,24 @@ public final class ProgressFormat {
   /** Returns a compact count, as in 2,140, 82.9K, 1.31M, 82.9M or 1.20B. */
   public static String compact(final long value) {
     final long magnitude = Math.abs(value);
-    // each unit stops half a shown digit short of the next one, where rounding would reach it
     if (magnitude < 10_000) {
       return count(value);
     }
-    if (magnitude < 1_000_000 - 50) {
+    if (magnitude < roundsUpAt(1_000_000, 100)) {
       return String.format(Locale.ROOT, "%.1fK", value / 1e3);
     }
-    if (magnitude < 10_000_000 - 5_000) {
+    if (magnitude < roundsUpAt(10_000_000, 10_000)) {
       return String.format(Locale.ROOT, "%.2fM", value / 1e6);
     }
-    if (magnitude < 1_000_000_000 - 50_000) {
+    if (magnitude < roundsUpAt(1_000_000_000, 100_000)) {
       return String.format(Locale.ROOT, "%.1fM", value / 1e6);
     }
     return String.format(Locale.ROOT, "%.2fB", value / 1e9);
+  }
+
+  // the first value that rounds up to the next unit, half a shown step below it
+  private static long roundsUpAt(final long nextUnit, final long shownStep) {
+    return nextUnit - shownStep / 2;
   }
 
   /** Returns a duration in two units at most, as in 45s, 3m 10s, 2h 31m or 1d 2h. */
@@ -59,14 +63,20 @@ public final class ProgressFormat {
     final long minutes = seconds % 3_600 / 60;
     final long rest = seconds % 60;
     if (days > 0) {
-      return days + "d" + (hours > 0 ? " " + hours + "h" : "");
+      return twoUnits(days, "d", hours, "h");
     }
     if (hours > 0) {
-      return hours + "h" + (minutes > 0 ? " " + minutes + "m" : "");
+      return twoUnits(hours, "h", minutes, "m");
     }
     if (minutes > 0) {
-      return minutes + "m" + (rest > 0 ? " " + rest + "s" : "");
+      return twoUnits(minutes, "m", rest, "s");
     }
     return rest + "s";
+  }
+
+  // the second unit only when it is not zero
+  private static String twoUnits(
+      final long first, final String firstUnit, final long second, final String secondUnit) {
+    return second > 0 ? first + firstUnit + " " + second + secondUnit : first + firstUnit;
   }
 }
