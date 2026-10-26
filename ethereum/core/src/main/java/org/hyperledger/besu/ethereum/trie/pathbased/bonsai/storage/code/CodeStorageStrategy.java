@@ -41,6 +41,16 @@ public interface CodeStorageStrategy {
     return getFlatCode(codeHash, accountHash, storage).map(Code::getBytes);
   }
 
+  /**
+   * The code in a value of the code column family.
+   *
+   * @param value a value of the code column family
+   * @return the bytes of the code
+   */
+  default Bytes codeBytes(final byte[] value) {
+    return Bytes.wrap(value);
+  }
+
   void putFlatCode(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,

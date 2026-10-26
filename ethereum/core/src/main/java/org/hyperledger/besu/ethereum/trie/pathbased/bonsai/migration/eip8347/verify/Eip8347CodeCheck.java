@@ -18,13 +18,13 @@ import static org.hyperledger.besu.ethereum.partitionedbinarytrie.params.Embeddi
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeRefCountEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.TrieNodeCodec;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
 import org.hyperledger.besu.ethereum.trie.NodeUpdater;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347SnapshotReader.CodeUnit;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347Leaves;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter.Entry;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Pipelines;
@@ -196,8 +196,7 @@ final class Eip8347CodeCheck {
     nodes.store(
         TrieNodeCodec.codeRefCountKey(code.codeHash()),
         null,
-        CodeRefCountEncoder.encode(
-            code.references(), (code.codeSize() + CHUNK_BYTES - 1) / CHUNK_BYTES));
+        Eip8347Leaves.referenceCount(code.references(), code.codeSize()));
   }
 
   private PeekingIterator<Entry> sortedRequests() throws IOException {

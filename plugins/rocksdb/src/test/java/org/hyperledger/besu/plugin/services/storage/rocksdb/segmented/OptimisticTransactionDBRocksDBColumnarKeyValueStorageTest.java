@@ -29,10 +29,15 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.FlushOptions;
+import org.rocksdb.RocksDBException;
 
 @ExtendWith(MockitoExtension.class)
 public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
@@ -106,6 +111,51 @@ public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
       snapshot.close();
       store.close();
     }
+  }
+
+  @Test
+  public void uncachedSnapshotReadsSeeTheSnapshotAndLeaveTheBlockCacheAsItWas() throws Exception {
+    final OptimisticRocksDBColumnarKeyValueStorage store =
+        (OptimisticRocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final ColumnFamilyHandle handle = store.safeColumnHandle(TestSegment.FOO);
+    // Two values in blocks of their own, on disk.
+    final byte[] large = new byte[64 << 10];
+    final SegmentedKeyValueStorageTransaction initialTx = store.startTransaction();
+    initialTx.put(TestSegment.FOO, bytesOf(1), large);
+    initialTx.put(TestSegment.FOO, bytesOf(2), large);
+    initialTx.commit();
+    try (final FlushOptions flush = new FlushOptions().setWaitForFlush(true)) {
+      store.getDB().flush(flush, handle);
+    }
+
+    final RocksDBColumnarKeyValueSnapshot snapshot = store.takeSnapshot();
+    try {
+      final SegmentedKeyValueStorageTransaction updateTx = store.startTransaction();
+      updateTx.put(TestSegment.FOO, bytesOf(2), bytesOf(20));
+      updateTx.commit();
+      // Opens the file and caches the block of the first value.
+      snapshot.get(TestSegment.FOO, bytesOf(1));
+      final long cached = blockCacheUsage(store, handle);
+
+      assertThat(snapshot.getUncached(TestSegment.FOO, bytesOf(2))).get().isEqualTo(large);
+      try (final Stream<Pair<byte[], byte[]>> entries =
+          snapshot.streamFromKeyUncached(TestSegment.FOO, bytesOf(2))) {
+        assertThat(entries.map(Pair::getValue)).containsExactly(large);
+      }
+      assertThat(blockCacheUsage(store, handle)).isEqualTo(cached);
+
+      snapshot.get(TestSegment.FOO, bytesOf(2));
+      assertThat(blockCacheUsage(store, handle)).isGreaterThan(cached);
+    } finally {
+      snapshot.close();
+      store.close();
+    }
+  }
+
+  private static long blockCacheUsage(
+      final OptimisticRocksDBColumnarKeyValueStorage store, final ColumnFamilyHandle handle)
+      throws RocksDBException {
+    return store.getDB().getLongProperty(handle, "rocksdb.block-cache-usage");
   }
 
   @Test

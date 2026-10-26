@@ -15,6 +15,11 @@
 package org.hyperledger.besu.ethereum.trie.common;
 
 import org.hyperledger.besu.datatypes.AccountValue;
+import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.rlp.RLPInput;
+
+import org.apache.tuweni.bytes.Bytes32;
 
 /**
  * An {@link AccountValue} that knows the {@link StorageRootStrategy} reproducing its own RLP shape.
@@ -31,4 +36,31 @@ public interface TrieAccountValue extends AccountValue {
    * @return a strategy preserving this value's RLP shape.
    */
   StorageRootStrategy storageRootStrategy();
+
+  /**
+   * Reads an account of either trie: 3 fields for a binary trie account, 4 for a Patricia one.
+   *
+   * @param input the RLP of the value
+   * @return the value
+   */
+  static TrieAccountValue readFrom(final RLPInput input) {
+    final int fieldCount = input.enterList();
+    final long nonce = input.readLongScalar();
+    final Wei balance = Wei.of(input.readUInt256Scalar());
+    final Hash storageRoot =
+        fieldCount == 4 ? Hash.wrap(orEmpty(input, Hash.EMPTY_TRIE_HASH)) : null;
+    final Hash codeHash = Hash.wrap(orEmpty(input, Hash.EMPTY));
+    input.leaveList();
+    return storageRoot == null
+        ? new BinaryTrieAccountValue(nonce, balance, codeHash)
+        : new PatriciaTrieAccountValue(nonce, balance, storageRoot, codeHash);
+  }
+
+  private static Bytes32 orEmpty(final RLPInput input, final Hash empty) {
+    if (input.nextIsNull()) {
+      input.skipNext();
+      return Bytes32.wrap(empty.getBytes());
+    }
+    return input.readBytes32();
+  }
 }

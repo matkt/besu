@@ -103,6 +103,32 @@ class Eip8347PreimageFileTest {
   }
 
   @Test
+  void aSectionReadsTheRecordsBetweenTwoOffsets() throws Exception {
+    final Path path = tmp.resolve("section.pre");
+    Eip8347PreimageFile.write(
+        path,
+        List.of(
+            new AccountPreimages(
+                A, List.of(Bytes32.leftPad(Bytes.of(1)), Bytes32.leftPad(Bytes.of(2)))),
+            new AccountPreimages(B, List.of()),
+            new AccountPreimages(
+                Address.fromHexString("0x00000000000000000000000000000000000000cc"),
+                List.of(Bytes32.leftPad(Bytes.of(3))))));
+    final List<AccountPreimages> records = readAll(path);
+    final long second = Address.SIZE + Integer.BYTES + 32L * records.getFirst().slotKeys().size();
+
+    try (final Eip8347PreimageFile section = Eip8347PreimageFile.section(path, 0, second)) {
+      assertThat(read(section)).isEqualTo(records.subList(0, 1));
+    }
+    try (final Eip8347PreimageFile section =
+        Eip8347PreimageFile.section(path, second, Files.size(path))) {
+      assertThat(section.position()).isEqualTo(second);
+      assertThat(read(section)).isEqualTo(records.subList(1, 3));
+      assertThat(section.position()).isEqualTo(Files.size(path));
+    }
+  }
+
+  @Test
   void rejectsTruncatedRecord() throws Exception {
     final Path path = tmp.resolve("truncated.pre");
     Files.write(path, new byte[] {1, 2, 3});
@@ -113,17 +139,22 @@ class Eip8347PreimageFileTest {
   }
 
   private static List<AccountPreimages> readAll(final Path path) throws Exception {
-    final List<AccountPreimages> records = new ArrayList<>();
     try (final Eip8347PreimageFile reader = new Eip8347PreimageFile(path)) {
-      Eip8347PreimageFile.Account account;
-      while ((account = reader.nextAccount()) != null) {
-        final List<Bytes32> slots = new ArrayList<>();
-        for (int i = 0; i < account.slotCount(); i++) {
-          slots.add(reader.nextSlot().key());
-        }
-        records.add(new AccountPreimages(account.address(), slots));
-      }
+      final List<AccountPreimages> records = read(reader);
       reader.ensureExhausted();
+      return records;
+    }
+  }
+
+  private static List<AccountPreimages> read(final Eip8347PreimageFile reader) throws Exception {
+    final List<AccountPreimages> records = new ArrayList<>();
+    Eip8347PreimageFile.Account account;
+    while ((account = reader.nextAccount()) != null) {
+      final List<Bytes32> slots = new ArrayList<>();
+      for (int i = 0; i < account.slotCount(); i++) {
+        slots.add(reader.nextSlot().key());
+      }
+      records.add(new AccountPreimages(account.address(), slots));
     }
     return records;
   }

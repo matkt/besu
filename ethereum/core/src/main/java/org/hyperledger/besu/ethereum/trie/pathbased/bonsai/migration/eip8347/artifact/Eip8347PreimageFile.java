@@ -22,6 +22,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.stream.Stream;
 
+import com.google.common.io.ByteStreams;
 import com.google.common.io.CountingInputStream;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -69,6 +71,7 @@ public final class Eip8347PreimageFile implements Closeable {
   private final CountingInputStream file;
   private final InputStream in;
   private final boolean checkOrder;
+  private long position;
   private Bytes previousAddressHash;
   private Bytes previousSlotHash;
   private int slotsLeft;
@@ -118,13 +121,28 @@ public final class Eip8347PreimageFile implements Closeable {
   }
 
   public Eip8347PreimageFile(final Path path) throws IOException {
-    this(path, true);
+    this(Files.newInputStream(path), 0, true);
   }
 
-  private Eip8347PreimageFile(final Path path, final boolean checkOrder) throws IOException {
-    this.file = new CountingInputStream(Files.newInputStream(path));
+  private Eip8347PreimageFile(
+      final InputStream records, final long start, final boolean checkOrder) {
+    this.file = new CountingInputStream(records);
     this.in = new BufferedInputStream(file, Eip8347TypedSnapshotCodec.IO_BUFFER_BYTES);
     this.checkOrder = checkOrder;
+    this.position = start;
+  }
+
+  /** Reads the records between offsets {@code start} and {@code end}, both record boundaries. */
+  public static Eip8347PreimageFile section(final Path path, final long start, final long end)
+      throws IOException {
+    final InputStream records = Files.newInputStream(path);
+    try {
+      records.skipNBytes(start);
+    } catch (final IOException e) {
+      records.close();
+      throw e;
+    }
+    return new Eip8347PreimageFile(ByteStreams.limit(records, end - start), start, true);
   }
 
   /** Bytes read from the file so far, one buffer ahead of the records handed out at most. */
@@ -134,7 +152,12 @@ public final class Eip8347PreimageFile implements Closeable {
 
   /** Reads the file without computing keccak hashes, so without checking the keccak order. */
   public static Eip8347PreimageFile withoutOrderCheck(final Path path) throws IOException {
-    return new Eip8347PreimageFile(path, false);
+    return new Eip8347PreimageFile(Files.newInputStream(path), 0, false);
+  }
+
+  /** Offset in the file of the next record or slot to read. */
+  public long position() {
+    return position;
   }
 
   /** Next record header, or {@code null} at a clean end of file. */
@@ -157,6 +180,7 @@ public final class Eip8347PreimageFile implements Closeable {
     }
     final Address address = Address.wrap(Bytes.wrap(addressBytes));
     slotsLeft = (int) slotCount;
+    position += Address.SIZE + Integer.BYTES;
     accountsRead++;
     if (!checkOrder) {
       return new Account(address, null, slotsLeft);
@@ -181,6 +205,7 @@ public final class Eip8347PreimageFile implements Closeable {
     }
     final Bytes32 key = Bytes32.wrap(keyBytes);
     slotsLeft--;
+    position += Bytes32.SIZE;
     if (!checkOrder) {
       return new Slot(key, null);
     }
@@ -188,6 +213,23 @@ public final class Eip8347PreimageFile implements Closeable {
     checkSlotOrder(previousSlotHash, keyHash.getBytes());
     previousSlotHash = keyHash.getBytes();
     return new Slot(key, keyHash);
+  }
+
+  /** Whether the current account has a slot left to read. */
+  public boolean hasNextSlot() {
+    return slotsLeft > 0;
+  }
+
+  /** Skips the current account's remaining slots. */
+  public void skipSlots() throws IOException {
+    final long bytes = (long) slotsLeft * Bytes32.SIZE;
+    try {
+      in.skipNBytes(bytes);
+    } catch (final EOFException e) {
+      throw new Eip8347ArtifactVerificationException("truncated preimage slot keys");
+    }
+    position += bytes;
+    slotsLeft = 0;
   }
 
   /** Rejects an account whose keccak path is not after {@code previous} (null for the first). */

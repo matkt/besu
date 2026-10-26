@@ -38,63 +38,62 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier;
-import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347Fixture;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.Eip8347Fixture.Artifacts;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
-import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
-import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
-import org.hyperledger.besu.plugin.services.storage.rocksdb.RocksDBMetricsFactory;
-import org.hyperledger.besu.plugin.services.storage.rocksdb.configuration.RocksDBConfigurationBuilder;
-import org.hyperledger.besu.plugin.services.storage.rocksdb.segmented.OptimisticRocksDBColumnarKeyValueStorage;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
-import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
-/** The snapshot load into RocksDB through sorted files, alone and through the migrator. */
+/** Loading the PBT column into RocksDB: the snapshot load and the self-conversion. */
 class PbtSnapshotLoadTest {
 
   private static final Bytes CODE = Bytes.fromHexString("0x" + "60016001".repeat(40));
 
+  /** The time of the head, the anchor, in epoch millis. */
+  private static final long HEAD_TIME = 1000L;
+
   @TempDir Path tmp;
 
-  private final List<SegmentedKeyValueStorage> opened = new ArrayList<>();
+  private RocksDbWorldStates databases;
+
+  @BeforeEach
+  void openDatabases() {
+    databases = new RocksDbWorldStates(tmp);
+  }
 
   @AfterEach
   void closeDatabases() throws Exception {
-    for (final SegmentedKeyValueStorage storage : opened) {
-      storage.close();
-    }
+    databases.close();
   }
 
   // ---- The column writer ----
@@ -181,14 +180,14 @@ class PbtSnapshotLoadTest {
     migrator(storage, artifacts, fixture.mptRoot()).tick();
 
     assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY)).isPresent();
-    // The nodes written last and the cursor: RocksDB throttles them before block import's writes.
-    assertThat(lowPriority).hasSize(1);
-    verify(lowPriority.getFirst()).commit();
+    // The import marker, the last nodes and the cursor: throttled behind block import's writes.
+    assertThat(lowPriority).hasSize(2);
+    lowPriority.forEach(transaction -> verify(transaction).commit());
     normal.forEach(transaction -> verify(transaction, never()).commit());
   }
 
   @Test
-  void rejectedSnapshotLeavesTheDatabaseUntouched() throws Exception {
+  void rejectedSnapshotLeavesNoNodeOnlyItsRefusal() throws Exception {
     final Eip8347Fixture fixture = fixture();
     final Artifacts artifacts = fixture.write(tmp, "state");
     final SegmentedKeyValueStorage database = spy(rocksDb("db"));
@@ -201,9 +200,7 @@ class PbtSnapshotLoadTest {
 
     verify(migrator.scheduler()).shutdown();
     verify(database, never()).ingestSortedFiles(any(), any());
-    verify(database, never()).startTransaction();
-    verify(database, never()).startLowPriorityTransaction();
-    assertThat(column(database)).isEmpty();
+    assertRefused(storage, "MPT stateRoot mismatch");
     assertNoFileLeft();
   }
 
@@ -359,6 +356,95 @@ class PbtSnapshotLoadTest {
     assertNoFileLeft();
   }
 
+  // ---- The self-conversion ----
+
+  @Test
+  void selfConversionWritesTheColumnTheSnapshotLoads() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final BonsaiWorldStateKeyValueStorage storage = flatDatabase(fixture);
+
+    selfConvertingMigrator(storage, artifacts.preimages(), fixture.mptRoot(), () -> HEAD_TIME)
+        .tick();
+
+    assertThat(column(storage.getComposedWorldStateStorage()))
+        .isEqualTo(transactionalLoad(fixture, artifacts));
+    assertNoFileLeft();
+  }
+
+  @Test
+  void selfConversionWaitsUntilTheNodeFollowsTheHead() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final BonsaiWorldStateKeyValueStorage storage = flatDatabase(fixture);
+    final AtomicLong now = new AtomicLong(HEAD_TIME + PbtMigrator.MAX_HEAD_AGE.toMillis() + 1);
+    final Migrator migrator =
+        selfConvertingMigrator(storage, artifacts.preimages(), fixture.mptRoot(), now::get);
+
+    migrator.tick();
+    assertThat(column(storage.getComposedWorldStateStorage())).isEmpty();
+
+    now.set(HEAD_TIME);
+    migrator.tick();
+    assertThat(storage.getWorldStateBlockHash(TrieBranchType.BINARY))
+        .contains(migrator.anchor().getBlockHash());
+  }
+
+  @Test
+  void selfConversionWaitsForTheFinalizedBlockToBeCloseToTheHead() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final Artifacts artifacts = fixture.write(tmp, "state");
+    final BonsaiWorldStateKeyValueStorage storage = flatDatabase(fixture);
+    final BlockHeader head =
+        new BlockHeaderTestFixture()
+            .number(1 + PbtMigrator.MAX_FINALITY_LAG + 1)
+            .timestamp(HEAD_TIME / 1000)
+            .buildHeader();
+
+    final Migrator migrator =
+        started(
+            storage,
+            PbtMigrator.SnapshotBootstrap.selfConversion(
+                artifacts.preimages(), migratorAnchor(fixture.mptRoot()), workDir()),
+            anchorHeader(fixture.mptRoot()),
+            head,
+            Duration.ZERO,
+            () -> HEAD_TIME);
+    migrator.tick();
+
+    verify(migrator.scheduler(), never()).shutdown();
+    assertThat(column(storage.getComposedWorldStateStorage())).isEmpty();
+  }
+
+  @Test
+  void selfConversionStopsOnAKeyWithoutPreimage() throws Exception {
+    final Eip8347Fixture fixture = fixture();
+    final BonsaiWorldStateKeyValueStorage storage = flatDatabase(fixture);
+    final Path preimages = tmp.resolve("partial.pre");
+    Eip8347PreimageFile.write(
+        preimages, fixture.preimages().subList(1, fixture.preimages().size()));
+
+    final Migrator migrator =
+        selfConvertingMigrator(storage, preimages, fixture.mptRoot(), () -> HEAD_TIME);
+    migrator.tick();
+
+    verify(migrator.scheduler()).shutdown();
+    assertRefused(storage, "no preimage for flat key");
+    assertNoFileLeft();
+  }
+
+  /** Only the import marker and the refusal reason are left, for the progress report. */
+  private static void assertRefused(
+      final BonsaiWorldStateKeyValueStorage storage, final String reason) {
+    assertThat(column(storage.getComposedWorldStateStorage()))
+        .extracting(Map.Entry::getKey)
+        .containsExactlyInAnyOrder(
+            Bytes.wrap(BonsaiWorldStateKeyValueStorage.PBT_IMPORTING_KEY),
+            Bytes.wrap(BonsaiWorldStateKeyValueStorage.PBT_IMPORT_FAILED_KEY));
+    assertThat(storage.getPbtImportFailure())
+        .hasValueSatisfying(r -> assertThat(r).contains(reason));
+  }
+
   // ---- Without a snapshot ----
 
   @Test
@@ -461,7 +547,7 @@ class PbtSnapshotLoadTest {
   /** The column as the transactional load wrote it: every node, then the cursor, in a commit. */
   private List<Map.Entry<Bytes, Bytes>> transactionalLoad(
       final Eip8347Fixture fixture, final Artifacts artifacts) throws Exception {
-    final SegmentedKeyValueStorage database = rocksDb("transactional-" + opened.size());
+    final SegmentedKeyValueStorage database = rocksDb("transactional");
     final BonsaiWorldStateKeyValueStorage.Updater updater =
         new MigrationScopedWorldStateKeyValueStorage(worldStateStorage(database)).updater();
     final Eip8347DualCheckVerifier.Loaded loaded =
@@ -506,26 +592,12 @@ class PbtSnapshotLoadTest {
   }
 
   private SegmentedKeyValueStorage rocksDb(final String name) {
-    final SegmentedKeyValueStorage database =
-        new OptimisticRocksDBColumnarKeyValueStorage(
-            new RocksDBConfigurationBuilder().databaseDir(tmp.resolve(name)).build(),
-            Arrays.stream(KeyValueSegmentIdentifier.values())
-                .filter(segment -> segment.includeInDatabaseFormat(DataStorageFormat.BONSAI))
-                .<SegmentIdentifier>map(segment -> segment)
-                .toList(),
-            List.of(),
-            new NoOpMetricsSystem(),
-            RocksDBMetricsFactory.PUBLIC_ROCKS_DB_METRICS);
-    opened.add(database);
-    return database;
+    return databases.database(name);
   }
 
   private static BonsaiWorldStateKeyValueStorage worldStateStorage(
       final SegmentedKeyValueStorage database) {
-    return (BonsaiWorldStateKeyValueStorage)
-        new KeyValueStorageProvider(
-                segments -> database, new InMemoryKeyValueStorage(), new NoOpMetricsSystem())
-            .createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
+    return RocksDbWorldStates.worldStateStorage(database);
   }
 
   /** A migrator with no cursor yet, its anchor canonical and finalized, and its first tick. */
@@ -551,46 +623,80 @@ class PbtSnapshotLoadTest {
       final Artifacts artifacts,
       final Bytes32 anchorStateRoot,
       final Duration retryDelay) {
-    final ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
-    final PbtMigrator migrator =
-        newMigrator(storage, artifacts, anchorStateRoot, scheduler, retryDelay);
-    migrator.start();
-    final ArgumentCaptor<Runnable> tick = ArgumentCaptor.forClass(Runnable.class);
-    verify(scheduler)
-        .scheduleWithFixedDelay(tick.capture(), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS));
-    return new Migrator(migrator, scheduler, tick.getValue(), anchorHeader(anchorStateRoot));
+    return started(
+        storage,
+        new PbtMigrator.SnapshotBootstrap(
+            artifacts.snapshot(),
+            artifacts.preimages(),
+            migratorAnchor(anchorStateRoot),
+            workDir()),
+        anchorHeader(anchorStateRoot),
+        anchorHeader(anchorStateRoot),
+        retryDelay,
+        System::currentTimeMillis);
   }
 
-  private PbtMigrator newMigrator(
+  /** A self-converting migrator at {@code clock}; the anchor is its finalized head. */
+  private Migrator selfConvertingMigrator(
       final BonsaiWorldStateKeyValueStorage storage,
-      final Artifacts artifacts,
+      final Path preimages,
       final Bytes32 anchorStateRoot,
-      final ScheduledExecutorService scheduler,
-      final Duration retryDelay) {
-    final BlockHeader anchor = anchorHeader(anchorStateRoot);
+      final LongSupplier clock) {
+    return started(
+        storage,
+        PbtMigrator.SnapshotBootstrap.selfConversion(
+            preimages, migratorAnchor(anchorStateRoot), workDir()),
+        anchorHeader(anchorStateRoot),
+        anchorHeader(anchorStateRoot),
+        Duration.ZERO,
+        clock);
+  }
+
+  /** A started migrator: {@code anchor} is canonical and finalized, {@code head} the head. */
+  private static Migrator started(
+      final BonsaiWorldStateKeyValueStorage storage,
+      final PbtMigrator.SnapshotBootstrap bootstrap,
+      final BlockHeader anchor,
+      final BlockHeader head,
+      final Duration retryDelay,
+      final LongSupplier clock) {
     final Blockchain blockchain = mock(Blockchain.class);
     when(blockchain.getBlockHeader(any(Hash.class))).thenReturn(Optional.of(anchor));
     when(blockchain.getBlockHashByNumber(anyLong())).thenReturn(Optional.of(anchor.getHash()));
     when(blockchain.getFinalized()).thenReturn(Optional.of(anchor.getHash()));
-    when(blockchain.getChainHeadHeader()).thenReturn(anchor);
+    when(blockchain.getChainHeadHeader()).thenReturn(head);
     final BonsaiWorldStateProvider provider = mock(BonsaiWorldStateProvider.class);
     when(provider.getWorldStateKeyValueStorage()).thenReturn(storage);
     when(provider.getBinaryColumnOwnership()).thenReturn(new PbtColumnOwnership(storage));
-    return new PbtMigrator(
-        provider,
-        blockchain,
-        Optional.of(Long.MAX_VALUE),
-        scheduler,
-        Stream::empty,
-        Optional.of(
-            new PbtMigrator.SnapshotBootstrap(
-                artifacts.snapshot(), artifacts.preimages(), anchor.getHash(), workDir())),
-        false,
-        headers -> Map.of(),
-        1,
-        // Two threads, and sorts that spill every few records.
-        new PbtMigrator.Tuning(2, 128, Optional.of(Duration.ZERO), 1 << 10),
-        retryDelay);
+    final ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+    final PbtMigrator migrator =
+        new PbtMigrator(
+            provider,
+            blockchain,
+            Optional.of(Long.MAX_VALUE),
+            scheduler,
+            Stream::empty,
+            Optional.of(bootstrap),
+            false,
+            headers -> Map.of(),
+            1,
+            // Two threads, and sorts that spill every few records.
+            new PbtMigrator.Tuning(2, 128, Optional.of(Duration.ZERO), 1 << 10),
+            retryDelay,
+            clock);
+    migrator.start();
+    final ArgumentCaptor<Runnable> tick = ArgumentCaptor.forClass(Runnable.class);
+    verify(scheduler)
+        .scheduleWithFixedDelay(tick.capture(), anyLong(), anyLong(), eq(TimeUnit.MILLISECONDS));
+    return new Migrator(migrator, scheduler, tick.getValue(), anchor);
+  }
+
+  /** A database whose full flat database holds {@code fixture} at the anchor. */
+  private BonsaiWorldStateKeyValueStorage flatDatabase(final Eip8347Fixture fixture) {
+    final BonsaiWorldStateKeyValueStorage storage = worldStateStorage(rocksDb("db"));
+    storage.upgradeToFullFlatDbMode();
+    fixture.writeFlatDatabase(storage, migratorAnchor(fixture.mptRoot()));
+    return storage;
   }
 
   /** Starts a migrator with no snapshot and no start from genesis; returns its scheduled tick. */

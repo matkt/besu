@@ -60,7 +60,13 @@ public final class PbtMigrationIntrospection {
 
     final Optional<Hash> cursorHash = storage.getWorldStateBlockHash(TrieBranchType.BINARY);
     if (cursorHash.isEmpty()) {
-      return MigrationProgressResult.running(DirectionProgressResult.idle());
+      final Optional<String> failure = storage.getPbtImportFailure();
+      if (failure.isPresent()) {
+        return MigrationProgressResult.importFailed(failure.get());
+      }
+      return storage.isPbtImporting()
+          ? MigrationProgressResult.importing()
+          : MigrationProgressResult.running(DirectionProgressResult.idle());
     }
 
     final Hash hash = cursorHash.get();

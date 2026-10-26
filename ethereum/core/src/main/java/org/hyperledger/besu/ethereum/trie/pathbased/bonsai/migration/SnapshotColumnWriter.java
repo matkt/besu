@@ -194,6 +194,9 @@ final class SnapshotColumnWriter implements NodeUpdater, AutoCloseable {
                 .getWorldStateTransaction()
                 .put(BINARY_TRIE_BRANCH_STORAGE, node.key(), node.value()));
     PbtMigrator.putCursor(updater, root, blockHash);
+    updater
+        .getWorldStateTransaction()
+        .remove(BINARY_TRIE_BRANCH_STORAGE, BonsaiWorldStateKeyValueStorage.PBT_IMPORTING_KEY);
     updater.commit();
     LOG.info(
         "PBT column loaded from {} file(s), {} node(s) written last", files.size(), late.size());

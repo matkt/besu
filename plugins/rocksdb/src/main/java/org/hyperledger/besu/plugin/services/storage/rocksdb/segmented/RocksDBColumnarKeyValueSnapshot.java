@@ -149,6 +149,37 @@ public class RocksDBColumnarKeyValueSnapshot
   }
 
   @Override
+  public Optional<byte[]> getUncached(final SegmentIdentifier segment, final byte[] key)
+      throws StorageException {
+    throwIfClosed();
+    try (final ReadOptions uncached = uncachedReadOptions();
+        final OperationTimer.TimingContext ignored = metrics.getReadLatency().startTimer()) {
+      return Optional.ofNullable(snapshot.get(columnFamilyMapper.apply(segment), uncached, key));
+    } catch (final RocksDBException e) {
+      throw new StorageException(e);
+    }
+  }
+
+  @Override
+  public Stream<Pair<byte[], byte[]>> streamFromKeyUncached(
+      final SegmentIdentifier segment, final byte[] startKey) {
+    throwIfClosed();
+    // Released with the stream, after its iterator.
+    final ReadOptions uncached = uncachedReadOptions();
+    final RocksIterator rocksIterator = db.newIterator(columnFamilyMapper.apply(segment), uncached);
+    rocksIterator.seek(startKey);
+    return RocksDbIterator.create(rocksIterator).toStream().onClose(uncached::close);
+  }
+
+  /** Read options on this snapshot that keep the blocks read out of the block cache. */
+  private ReadOptions uncachedReadOptions() {
+    return new ReadOptions()
+        .setVerifyChecksums(false)
+        .setSnapshot(snapshot.getSnapshot())
+        .setFillCache(false);
+  }
+
+  @Override
   public Stream<Pair<byte[], byte[]>> streamFromKey(
       final SegmentIdentifier segment, final byte[] startKey) {
     throwIfClosed();

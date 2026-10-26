@@ -19,8 +19,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.cli.CommandTestAbstract;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.PbtMigrator;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -32,6 +34,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 public class PbtMigrationOptionsTest extends CommandTestAbstract {
+
+  private static final String ANCHOR =
+      "0x0000000000000000000000000000000000000000000000000000000000000001";
 
   @Test
   public void defaultTuningTakesHalfTheCores() {
@@ -117,11 +122,65 @@ public class PbtMigrationOptionsTest extends CommandTestAbstract {
         "--Xpbt-preimages-file",
         "preimages.bin",
         "--Xpbt-snapshot-anchor-block-hash",
-        "0x0000000000000000000000000000000000000000000000000000000000000001");
+        ANCHOR);
 
     Mockito.verifyNoInteractions(mockRunnerBuilder);
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains("--Xpbt-migration-from-genesis cannot be used with --Xpbt-snapshot-file");
+  }
+
+  @Test
+  public void selfConversionReachesTheMigrator() {
+    parseCommand(
+        "--Xpbt-migration-self-convert",
+        "--Xpbt-preimages-file",
+        "preimages.bin",
+        "--Xpbt-snapshot-anchor-block-hash",
+        ANCHOR);
+
+    assertThat(bootstrap())
+        .hasValueSatisfying(
+            bootstrap -> {
+              assertThat(bootstrap.snapshotPath()).isEmpty();
+              assertThat(bootstrap.preimagesPath()).isEqualTo(Path.of("preimages.bin"));
+              assertThat(bootstrap.anchorBlockHash()).isEqualTo(Hash.fromHexString(ANCHOR));
+            });
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void selfConversionAndSnapshotCannotBeSetTogether() {
+    parseCommand(
+        "--Xpbt-migration-self-convert",
+        "--Xpbt-snapshot-file",
+        "snapshot.bin",
+        "--Xpbt-preimages-file",
+        "preimages.bin",
+        "--Xpbt-snapshot-anchor-block-hash",
+        ANCHOR);
+
+    Mockito.verifyNoInteractions(mockRunnerBuilder);
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("--Xpbt-migration-self-convert cannot be used with --Xpbt-snapshot-file");
+  }
+
+  @Test
+  public void selfConversionNeedsThePreimagesAndTheAnchor() {
+    parseCommand("--Xpbt-migration-self-convert", "--Xpbt-preimages-file", "preimages.bin");
+
+    Mockito.verifyNoInteractions(mockRunnerBuilder);
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains(
+            "--Xpbt-migration-self-convert, --Xpbt-preimages-file and "
+                + "--Xpbt-snapshot-anchor-block-hash must be set together");
+  }
+
+  private Optional<PbtMigrator.SnapshotBootstrap> bootstrap() {
+    @SuppressWarnings("unchecked")
+    final ArgumentCaptor<Optional<PbtMigrator.SnapshotBootstrap>> bootstrap =
+        ArgumentCaptor.forClass(Optional.class);
+    verify(mockControllerBuilder).pbtSnapshotBootstrap(bootstrap.capture());
+    return bootstrap.getValue();
   }
 
   private PbtMigrator.Tuning tuning() {

@@ -65,6 +65,11 @@ public class JumpDestCodeStorageStrategy extends CodeHashCodeStorageStrategy {
   }
 
   @Override
+  public Bytes codeBytes(final byte[] value) {
+    return decodeCode(value);
+  }
+
+  @Override
   public void putFlatCode(
       final SegmentedKeyValueStorage storage,
       final SegmentedKeyValueStorageTransaction transaction,

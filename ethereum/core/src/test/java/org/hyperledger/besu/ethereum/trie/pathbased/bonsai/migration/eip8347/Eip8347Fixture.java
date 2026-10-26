@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347TypedSnapshotCodec.Leaf;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.convert.Eip8347SnapshotGenerator.StateSource;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.evm.worldstate.CodeDelegationHelper;
 
@@ -117,6 +118,35 @@ public record Eip8347Fixture(
             : account.storage().getOrDefault(UInt256.fromBytes(slotKey), UInt256.ZERO);
       }
     };
+  }
+
+  /** Writes the state to a Bonsai flat database at {@code block}; storage roots are left empty. */
+  public void writeFlatDatabase(final BonsaiWorldStateKeyValueStorage storage, final Hash block) {
+    final BonsaiWorldStateKeyValueStorage.Updater updater = storage.updater();
+    accounts.forEach(
+        (address, account) -> {
+          final Hash codeHash = Hash.hash(account.code());
+          updater.putAccountInfoState(
+              address.addressHash(),
+              RLP.encode(
+                  new PatriciaTrieAccountValue(
+                          account.nonce(), account.balance(), Hash.EMPTY_TRIE_HASH, codeHash)
+                      ::writeTo));
+          if (!account.code().isEmpty()) {
+            updater.putCode(address.addressHash(), codeHash, account.code());
+          }
+          account
+              .storage()
+              .forEach(
+                  (slot, value) -> {
+                    if (!value.isZero()) {
+                      updater.putStorageValueBySlotHash(
+                          address.addressHash(), Hash.hash(Bytes32.leftPad(slot)), value);
+                    }
+                  });
+        });
+    updater.putFlatDbBlockHash(block);
+    updater.commit();
   }
 
   /** {@code leaves} with the value at {@code key} replaced. */

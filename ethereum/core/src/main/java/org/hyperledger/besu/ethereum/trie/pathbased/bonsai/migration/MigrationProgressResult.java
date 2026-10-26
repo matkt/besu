@@ -48,6 +48,17 @@ public class MigrationProgressResult {
     return new MigrationProgressResult("running", binary, null);
   }
 
+  /** A bootstrap writing the binary column, beside the chain. */
+  public static MigrationProgressResult importing() {
+    return new MigrationProgressResult("importing", DirectionProgressResult.idle(), null);
+  }
+
+  /** A refused bootstrap, and why. */
+  public static MigrationProgressResult importFailed(final String reason) {
+    return new MigrationProgressResult(
+        "importFailed", new DirectionProgressResult("stalled", 0L, "", "", reason), null);
+  }
+
   @JsonProperty("Phase")
   public String getPhase() {
     return phase;

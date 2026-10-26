@@ -17,11 +17,7 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.co
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.BasicDataEncoder;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.CodeChunkifier;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.codec.DelegationEncoder;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.keys.TrieKeyDerivation;
-import org.hyperledger.besu.ethereum.partitionedbinarytrie.params.EmbeddingParameters;
 import org.hyperledger.besu.ethereum.partitionedbinarytrie.trie.AscendingCollapseBinaryTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347ArtifactVerificationException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.artifact.Eip8347PreimageFile;
@@ -43,7 +39,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ForkJoinPool;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
@@ -213,7 +209,7 @@ public final class Eip8347SnapshotGenerator {
                   derived -> {
                     try {
                       for (final Leaf leaf : derived.leaves()) {
-                        addLeaf(leaves, leaf);
+                        Eip8347SortedLeaves.add(leaves, leaf);
                       }
                       for (final CodeRef code : derived.codes()) {
                         codeRefs.add(
@@ -236,12 +232,6 @@ public final class Eip8347SnapshotGenerator {
     } finally {
       Eip8347ExternalSorter.deleteRecursively(spillDir);
     }
-  }
-
-  /** Sorts a leaf by key; its value is stored without leading zeros. */
-  private static void addLeaf(final Eip8347ExternalSorter leaves, final Leaf leaf)
-      throws IOException {
-    leaves.add(leaf.key().toArrayUnsafe(), leaf.value().trimLeadingZeros().toArrayUnsafe());
   }
 
   /**
@@ -275,14 +265,14 @@ public final class Eip8347SnapshotGenerator {
             .thenProcess("eip8347-convert-read-code", code -> readCode(stateSource, code))
             .thenProcessInParallel(
                 "eip8347-convert-chunk-code",
-                Eip8347SnapshotGenerator::codeLeaves,
+                code -> Eip8347Leaves.code(code.codeHash(), code.bytes()),
                 Eip8347Pipelines.PARALLELISM)
             .andFinishWith(
                 "eip8347-convert-sort-code",
                 codeLeaves -> {
                   try {
                     for (final Leaf leaf : codeLeaves) {
-                      addLeaf(leaves, leaf);
+                      Eip8347SortedLeaves.add(leaves, leaf);
                     }
                   } catch (final IOException e) {
                     throw new UncheckedIOException(e);
@@ -299,22 +289,6 @@ public final class Eip8347SnapshotGenerator {
     return new Code(code.codeHash(), account.code());
   }
 
-  /** CODE_ZONE leaves of one code: its non-zero chunks. CPU-only, thread-safe. */
-  private static List<Leaf> codeLeaves(final Code code) {
-    final List<Bytes32> chunks = CodeChunkifier.chunkifyCode(code.bytes());
-    final List<Leaf> leaves = new ArrayList<>(chunks.size());
-    for (int i = 0; i < chunks.size(); i++) {
-      if (!chunks.get(i).isZero()) {
-        leaves.add(
-            new Leaf(TrieKeyDerivation.getTreeKeyForCodeChunk(code.codeHash(), i), chunks.get(i)));
-      }
-    }
-    return leaves;
-  }
-
-  /** The leaves of one stem, with their subtree hashed for the PBT. */
-  private record HashedStem(List<Leaf> leaves, AscendingCollapseBinaryTrie.Subtree subtree) {}
-
   /**
    * Writes the sorted leaves and hashes the PBT root in the same pass. Each stem's subtree is
    * hashed in parallel; stems are attached to the PBT and written in order on one thread.
@@ -323,67 +297,18 @@ public final class Eip8347SnapshotGenerator {
       final Iterator<Eip8347ExternalSorter.Entry> sorted, final Path snapshotPath)
       throws IOException {
     final AscendingCollapseBinaryTrie pbt = new AscendingCollapseBinaryTrie();
-    final AtomicLong leafCount = new AtomicLong();
     try (final Eip8347SnapshotWriter snapshot = Eip8347SnapshotWriter.open(snapshotPath)) {
-      Eip8347Pipelines.run(
-          Eip8347Pipelines.fromLists("eip8347-convert-stems", stems(sorted), List::size)
-              .thenProcessAsyncOrdered(
-                  "eip8347-convert-hash-stems",
-                  Eip8347Pipelines.async(
-                      stems -> stems.stream().map(stem -> hashStem(pbt, stem)).toList()),
-                  Eip8347Pipelines.PARALLELISM)
-              .andFinishWith(
-                  "eip8347-convert-write",
-                  stems -> {
-                    try {
-                      for (final HashedStem stem : stems) {
-                        pbt.insert(stem.subtree());
-                        for (final Leaf leaf : stem.leaves()) {
-                          snapshot.accept(leaf);
-                        }
-                        leafCount.addAndGet(stem.leaves().size());
-                      }
-                    } catch (final IOException e) {
-                      throw new UncheckedIOException(e);
-                    }
-                  }));
+      final long leafCount =
+          Eip8347SortedLeaves.build(
+              sorted,
+              pbt,
+              snapshot::accept,
+              ForkJoinPool.commonPool(),
+              Eip8347Pipelines.PARALLELISM);
       final Bytes32 pbtRoot = pbt.rootHash();
       snapshot.finish(pbtRoot);
-      return new Result(pbtRoot, leafCount.get());
+      return new Result(pbtRoot, leafCount);
     }
-  }
-
-  private static HashedStem hashStem(final AscendingCollapseBinaryTrie pbt, final List<Leaf> stem) {
-    return new HashedStem(
-        stem,
-        pbt.prepare(
-            stem.stream().map(Leaf::key).toList(), stem.stream().<Bytes>map(Leaf::value).toList()));
-  }
-
-  /** Groups sorted leaves by stem (every key but its last byte). */
-  private static Iterator<List<Leaf>> stems(final Iterator<Eip8347ExternalSorter.Entry> sorted) {
-    final PeekingIterator<Eip8347ExternalSorter.Entry> leaves = Iterators.peekingIterator(sorted);
-    return new Iterator<>() {
-      @Override
-      public boolean hasNext() {
-        return leaves.hasNext();
-      }
-
-      @Override
-      public List<Leaf> next() {
-        final List<Leaf> stem = new ArrayList<>();
-        final byte[] first = leaves.peek().key();
-        while (leaves.hasNext() && sameStem(first, leaves.peek().key())) {
-          final Eip8347ExternalSorter.Entry entry = leaves.next();
-          stem.add(new Leaf(Bytes.wrap(entry.key()), Bytes32.leftPad(Bytes.wrap(entry.value()))));
-        }
-        return stem;
-      }
-    };
-  }
-
-  private static boolean sameStem(final byte[] a, final byte[] b) {
-    return a.length == b.length && Arrays.equals(a, 0, a.length - 1, b, 0, b.length - 1);
   }
 
   private static StateBatch readState(
@@ -424,49 +349,24 @@ public final class Eip8347SnapshotGenerator {
     for (final StateBatch batch : batches) {
       final Bytes32 address32 = TrieKeyDerivation.address20ToAddress32(batch.address().getBytes());
       final Bytes32 addressKeyHash = TrieKeyDerivation.keyHash(address32);
-      if (batch.account() != null) {
-        addHeaderLeaves(leaves, address32, batch.account());
-        if (!batch.account().code().isEmpty()
-            && !CodeDelegationHelper.hasCodeDelegation(batch.account().code())) {
-          codes.add(
-              new CodeRef(Bytes32.wrap(batch.account().codeHash().getBytes()), batch.address()));
+      final StateSource.AccountView account = batch.account();
+      if (account != null) {
+        leaves.addAll(
+            Eip8347Leaves.header(
+                address32, account.nonce(), account.balance(), account.codeHash(), account.code()));
+        if (!account.code().isEmpty() && !CodeDelegationHelper.hasCodeDelegation(account.code())) {
+          codes.add(new CodeRef(Bytes32.wrap(account.codeHash().getBytes()), batch.address()));
         }
       }
       for (int i = 0; i < batch.slotKeys().size(); i++) {
         leaves.add(
-            new Leaf(
-                TrieKeyDerivation.getTreeKeyForStorageSlot(
-                    address32, addressKeyHash, UInt256.fromBytes(batch.slotKeys().get(i))),
-                Bytes32.leftPad(batch.values().get(i))));
+            Eip8347Leaves.storage(
+                address32,
+                addressKeyHash,
+                UInt256.fromBytes(batch.slotKeys().get(i)),
+                batch.values().get(i)));
       }
     }
     return new Derived(leaves, codes);
-  }
-
-  private static void addHeaderLeaves(
-      final List<Leaf> leaves, final Bytes32 address32, final StateSource.AccountView account) {
-    final Bytes code = account.code();
-    final UInt256 balance = account.balance().toUInt256();
-    if (CodeDelegationHelper.hasCodeDelegation(code)) {
-      leaves.add(
-          new Leaf(
-              TrieKeyDerivation.getTreeKeyForBasicData(address32),
-              BasicDataEncoder.encodeBasicData(
-                  EmbeddingParameters.DELEGATION_CODE_SIZE, account.nonce(), balance)));
-      leaves.add(
-          new Leaf(
-              TrieKeyDerivation.getTreeKeyForDelegation(address32),
-              DelegationEncoder.encodeDelegation(
-                  CodeDelegationHelper.getTargetAddress(code).getBytes())));
-      return;
-    }
-    leaves.add(
-        new Leaf(
-            TrieKeyDerivation.getTreeKeyForBasicData(address32),
-            BasicDataEncoder.encodeBasicData(code.size(), account.nonce(), balance)));
-    leaves.add(
-        new Leaf(
-            TrieKeyDerivation.getTreeKeyForCodeHash(address32),
-            Bytes32.wrap(account.codeHash().getBytes())));
   }
 }

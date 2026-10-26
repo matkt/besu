@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.BINARY_TRIE_BRANCH_STORAGE;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.PBT_IMPORTING_KEY;
+import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.PBT_IMPORT_FAILED_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_HASH_KEY;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_ROOT_HASH_KEY;
 
@@ -35,6 +37,7 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.art
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347ExternalSorter;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.pipeline.Eip8347Progress;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.eip8347.verify.Eip8347DualCheckVerifier;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.migration.selfconvert.SelfConversion;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.MigrationScopedWorldStateKeyValueStorage;
@@ -42,12 +45,14 @@ import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.trielog.TrieLogLayer;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.MissingCodeException;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiWorldStateUpdateAccumulator;
+import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.evm.Code;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
 import org.hyperledger.besu.plugin.services.worldstate.StateRootComputation;
 import org.hyperledger.besu.plugin.services.worldstate.TrieBranchType;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -76,8 +81,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Builds the binary trie column in the background until the PBT fork: from a verified EIP-8347
- * snapshot, or genesis when enabled, then along the canonical chain through trie logs, or BALs
- * where the node has none. The chain claims the column at the fork ({@link PbtColumnOwnership}).
+ * snapshot, the node's flat database ({@link SelfConversion}) or genesis when enabled, then along
+ * the canonical chain through trie logs, or BALs where the node has none. The chain claims the
+ * column at the fork ({@link PbtColumnOwnership}).
  */
 public class PbtMigrator {
   private static final Logger LOG = LoggerFactory.getLogger(PbtMigrator.class);
@@ -87,6 +93,12 @@ public class PbtMigrator {
 
   /** Wait after a failed snapshot load (e.g. a full disk) before trying again. */
   static final Duration SNAPSHOT_RETRY_DELAY = Duration.ofMinutes(5);
+
+  /** Max age of the head for a self-conversion to start: the node must follow the chain. */
+  static final Duration MAX_HEAD_AGE = Duration.ofMinutes(2);
+
+  /** Max blocks between the head and the finalized block for a self-conversion to start. */
+  static final long MAX_FINALITY_LAG = 128;
 
   /** Longest wait between two rolls when the pause follows the last roll's duration. */
   private static final long MAX_ROLL_PAUSE_MS = 10_000L;
@@ -340,13 +352,19 @@ public class PbtMigrator {
     // No cursor: the column was never completed. Anything it holds (nodes, code reference counts)
     // is an attempt interrupted by a restart, and each bootstrap below empties it before writing.
     if (snapshotBootstrap.isPresent()) {
-      bootstrapFromSnapshot(snapshotBootstrap.get());
+      final SnapshotBootstrap bootstrap = snapshotBootstrap.get();
+      bootstrap
+          .snapshotPath()
+          .ifPresentOrElse(
+              snapshot -> bootstrapFromSnapshot(bootstrap, snapshot),
+              () -> bootstrapBySelfConversion(bootstrap));
       return;
     }
     // A replay from genesis needs a trie log or a BAL for every block: only when asked for.
     if (!fromGenesis) {
       LOG.info(
-          "PBT migrator stopped: no snapshot (--Xpbt-snapshot-file) and no start from genesis"
+          "PBT migrator stopped: no snapshot (--Xpbt-snapshot-file), no self-conversion"
+              + " (--Xpbt-migration-self-convert) and no start from genesis"
               + " (--Xpbt-migration-from-genesis)");
       stop();
       return;
@@ -374,22 +392,122 @@ public class PbtMigrator {
    * retrying would re-read the same bad artifact; on any other failure the column is emptied and
    * the load retried.
    */
-  private void bootstrapFromSnapshot(final SnapshotBootstrap bootstrap) {
+  private void bootstrapFromSnapshot(final SnapshotBootstrap bootstrap, final Path snapshotPath) {
     if (clock.getAsLong() < nextSnapshotLoadMillis) {
       return;
     }
+    final Optional<BlockHeader> maybeAnchor = readyAnchor(bootstrap);
+    if (maybeAnchor.isEmpty()) {
+      return;
+    }
+    final BlockHeader anchor = maybeAnchor.get();
+    if (!Files.isReadable(snapshotPath) || !Files.isReadable(bootstrap.preimagesPath())) {
+      LOG.error(
+          "PBT snapshot {} or preimages {} unreadable, migrator stopped",
+          snapshotPath,
+          bootstrap.preimagesPath());
+      stop();
+      return;
+    }
+    // a failed load, whatever failed, waits before the next one
+    nextSnapshotLoadMillis = clock.getAsLong() + snapshotRetryDelay.toMillis();
+    // the load needs about 4 times the snapshot in its work dir, at its peak
+    if (!hasRoom(bootstrap.workDir(), snapshotPath)) {
+      return;
+    }
+    loadColumn(
+        "snapshot",
+        bootstrap.workDir(),
+        anchor,
+        writer -> {
+          LOG.info(
+              "PBT migrator verifying and loading snapshot {} against anchor {} ({}, stateRoot={})",
+              snapshotPath,
+              anchor.getNumber(),
+              anchor.getBlockHash(),
+              anchor.getStateRoot());
+          final Eip8347DualCheckVerifier.Loaded loaded =
+              Eip8347DualCheckVerifier.verifyAndLoad(
+                  snapshotPath,
+                  bootstrap.preimagesPath(),
+                  Bytes32.wrap(anchor.getStateRoot().getBytes()),
+                  bootstrap.workDir(),
+                  writer,
+                  tuning.sortBufferBytes(),
+                  pool);
+          return new LoadedColumn(loaded.pbtRoot(), loaded.leafCount(), loaded.codeHashes());
+        });
+  }
+
+  /**
+   * Builds the column from the flat database at the latest finalized block ({@link
+   * SelfConversion}), once the anchor is finalized and the node follows the head.
+   */
+  private void bootstrapBySelfConversion(final SnapshotBootstrap bootstrap) {
+    if (clock.getAsLong() < nextSnapshotLoadMillis) {
+      return;
+    }
+    final Optional<BlockHeader> maybeAnchor = readyAnchor(bootstrap);
+    if (maybeAnchor.isEmpty()) {
+      return;
+    }
+    final BlockHeader anchor = maybeAnchor.get();
+    final Optional<BlockHeader> maybeTarget = selfConversionTarget();
+    if (maybeTarget.isEmpty()) {
+      return;
+    }
+    final BlockHeader target = maybeTarget.get();
+    final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
+    if (storage.getFlatDbMode() != FlatDbMode.FULL
+        || !storage.getFlatDbStrategy().isCodeByCodeHash()) {
+      LOG.error(
+          "PBT self-conversion needs a full flat database with code stored by hash,"
+              + " migrator stopped");
+      stop();
+      return;
+    }
+    if (!Files.isReadable(bootstrap.preimagesPath())) {
+      LOG.error("PBT preimages {} unreadable, migrator stopped", bootstrap.preimagesPath());
+      stop();
+      return;
+    }
+    nextSnapshotLoadMillis = clock.getAsLong() + snapshotRetryDelay.toMillis();
+    // the load needs about 4 times the preimages in its work dir, at its peak
+    if (!hasRoom(bootstrap.workDir(), bootstrap.preimagesPath())) {
+      return;
+    }
+    loadColumn(
+        "self-conversion",
+        bootstrap.workDir(),
+        target,
+        writer -> {
+          LOG.info(
+              "PBT migrator converting its flat database at block {} ({}), preimages of block {}",
+              target.getNumber(),
+              target.getBlockHash(),
+              anchor.getNumber());
+          final SelfConversion.Result result =
+              new SelfConversion(
+                      storage, chain(), bootstrap.workDir(), tuning.sortBufferBytes(), pool)
+                  .convert(bootstrap.preimagesPath(), anchor, target, writer);
+          return new LoadedColumn(result.pbtRoot(), result.leafCount(), result.codes());
+        });
+  }
+
+  /** The anchor once canonical and finalized; stops the migrator if it is past the fork. */
+  private Optional<BlockHeader> readyAnchor(final SnapshotBootstrap bootstrap) {
     final Optional<BlockHeader> maybeAnchor =
         blockchain.getBlockHeader(bootstrap.anchorBlockHash());
     if (maybeAnchor.isEmpty()) {
       logWait("PBT migrator waiting for snapshot anchor " + bootstrap.anchorBlockHash());
-      return;
+      return Optional.empty();
     }
     final BlockHeader anchor = maybeAnchor.get();
     if (BinaryTrieForkSupport.isBinaryTrieActive(anchor.getTimestamp(), binaryTrieMilestone)) {
       LOG.error(
           "PBT snapshot anchor {} is past the PBT fork; migrator stopped", anchor.getNumber());
       stop();
-      return;
+      return Optional.empty();
     }
     final boolean canonical =
         blockchain
@@ -407,77 +525,141 @@ public class PbtMigrator {
           "PBT migrator waiting for snapshot anchor "
               + anchor.getNumber()
               + " to be canonical and finalized");
-      return;
+      return Optional.empty();
     }
-    if (!Files.isReadable(bootstrap.snapshotPath())
-        || !Files.isReadable(bootstrap.preimagesPath())) {
-      LOG.error(
-          "PBT snapshot {} or preimages {} unreadable, migrator stopped",
-          bootstrap.snapshotPath(),
-          bootstrap.preimagesPath());
-      stop();
-      return;
-    }
-    // a failed load, whatever failed, waits before the next one
-    nextSnapshotLoadMillis = clock.getAsLong() + snapshotRetryDelay.toMillis();
-    if (!hasRoomForLoad(bootstrap)) {
-      return;
-    }
+    return maybeAnchor;
+  }
 
+  /**
+   * The latest finalized block, once the head is recent and close to it. Stops the migrator if it
+   * is past the fork.
+   */
+  private Optional<BlockHeader> selfConversionTarget() {
+    final BlockHeader head = blockchain.getChainHeadHeader();
+    final Optional<BlockHeader> finalized =
+        blockchain.getFinalized().flatMap(blockchain::getBlockHeader);
+    final long headAgeMillis = clock.getAsLong() - head.getTimestamp() * 1000;
+    if (finalized.isEmpty()
+        || headAgeMillis > MAX_HEAD_AGE.toMillis()
+        || head.getNumber() - finalized.get().getNumber() > MAX_FINALITY_LAG) {
+      logWait("PBT migrator waiting to follow the head before its self-conversion");
+      return Optional.empty();
+    }
+    if (BinaryTrieForkSupport.isBinaryTrieActive(
+        finalized.get().getTimestamp(), binaryTrieMilestone)) {
+      LOG.error(
+          "PBT self-conversion target {} is past the PBT fork; migrator stopped",
+          finalized.get().getNumber());
+      stop();
+      return Optional.empty();
+    }
+    return finalized;
+  }
+
+  /** What the conversion reads from the chain. */
+  private SelfConversion.Chain chain() {
+    return new SelfConversion.Chain() {
+      @Override
+      public Optional<BlockHeader> header(final Hash blockHash) {
+        return blockchain.getBlockHeader(blockHash);
+      }
+
+      @Override
+      public BlockHeader canonicalHeader(final long number) {
+        return blockchain
+            .getBlockHeader(number)
+            .orElseThrow(() -> new IllegalStateException("no header for block " + number));
+      }
+
+      @Override
+      public Optional<TrieLog> trieLog(final Hash blockHash) {
+        return provider.getTrieLogManager().getTrieLogLayer(blockHash);
+      }
+
+      @Override
+      public List<BlockAccessList> bals(final List<BlockHeader> blocks) {
+        final List<BlockAccessList> bals = storedOrFetchedBals(blocks);
+        if (bals.size() < blocks.size()) {
+          throw new IllegalStateException(
+              "no BAL for block " + blocks.get(bals.size()).getNumber());
+        }
+        return bals;
+      }
+    };
+  }
+
+  /**
+   * Writes a PBT to the empty column, then the cursor at {@code block}. A rejection stops the
+   * migrator; any other failure empties the column for a later retry.
+   */
+  private void loadColumn(
+      final String source, final Path workDir, final BlockHeader block, final ColumnLoad load) {
     final BonsaiWorldStateKeyValueStorage storage = provider.getWorldStateKeyValueStorage();
     // No cursor yet: whatever the column and the work dir hold is a previous, interrupted attempt.
-    if (!writeColumn(storage::clearBinaryTrie)) {
+    if (!writeColumn(storage::clearBinaryTrie)
+        || !writeColumn(() -> putColumnKey(PBT_IMPORTING_KEY, new byte[] {1}))) {
       return;
     }
-    Eip8347ExternalSorter.deleteRecursively(bootstrap.workDir());
+    Eip8347ExternalSorter.deleteRecursively(workDir);
     // The writer is closed, and its files deleted, before a catch below runs.
-    try (final SnapshotColumnWriter writer =
-        new SnapshotColumnWriter(storage, bootstrap.workDir())) {
-      LOG.info(
-          "PBT migrator verifying and loading snapshot {} against anchor {} ({}, stateRoot={})",
-          bootstrap.snapshotPath(),
-          anchor.getNumber(),
-          anchor.getBlockHash(),
-          anchor.getStateRoot());
-      final Eip8347DualCheckVerifier.Loaded loaded =
-          Eip8347DualCheckVerifier.verifyAndLoad(
-              bootstrap.snapshotPath(),
-              bootstrap.preimagesPath(),
-              Bytes32.wrap(anchor.getStateRoot().getBytes()),
-              bootstrap.workDir(),
-              writer,
-              tuning.sortBufferBytes(),
-              pool);
-      if (!writeColumn(() -> writer.finish(loaded.pbtRoot(), anchor.getBlockHash()))) {
+    try (final SnapshotColumnWriter writer = new SnapshotColumnWriter(storage, workDir)) {
+      final LoadedColumn loaded = load.writeTo(writer);
+      if (!writeColumn(() -> writer.finish(loaded.root(), block.getBlockHash()))) {
         return;
       }
-      cursor = anchor;
+      cursor = block;
       LOG.info(
-          "PBT migrator bootstrapped from snapshot at block {} (leaves={}, codes={}, root={})",
-          anchor.getNumber(),
+          "PBT migrator bootstrapped from {} at block {} (leaves={}, codes={}, root={})",
+          source,
+          block.getNumber(),
           loaded.leafCount(),
-          loaded.codeHashes(),
-          loaded.pbtRoot());
+          loaded.codes(),
+          loaded.root());
     } catch (final Eip8347ArtifactVerificationException e) {
-      // Nothing reached the column: its files are only added once the snapshot is accepted.
-      LOG.error("PBT snapshot rejected, migrator stopped: {}", e.getMessage());
+      // Nothing reached the column: its files are only added once the PBT is complete.
+      LOG.error("PBT {} rejected, migrator stopped: {}", source, e.getMessage());
+      writeColumn(() -> putColumnKey(PBT_IMPORT_FAILED_KEY, reason(e)));
       stop();
     } catch (final UnsupportedOperationException e) {
-      LOG.error("PBT snapshot cannot be loaded into this storage, migrator stopped", e);
+      LOG.error("PBT {} cannot be loaded into this storage, migrator stopped", source, e);
+      writeColumn(() -> putColumnKey(PBT_IMPORT_FAILED_KEY, reason(e)));
       stop();
     } catch (final IOException | RuntimeException e) {
       writeColumn(storage::clearBinaryTrie);
       if (!started.get()) {
-        LOG.info("PBT snapshot load stopped with the node");
+        LOG.info("PBT {} stopped with the node", source);
         return;
       }
       LOG.error(
-          "PBT snapshot bootstrap failed (will retry in {} min): {}",
+          "PBT {} failed (will retry in {} min): {}",
+          source,
           snapshotRetryDelay.toMinutes(),
           e.getMessage(),
           e);
     }
   }
+
+  /** Writes {@code key} to the binary column, at low priority like every migrator write. */
+  private void putColumnKey(final byte[] key, final byte[] value) {
+    final BonsaiWorldStateKeyValueStorage.Updater updater =
+        new MigrationScopedWorldStateKeyValueStorage(provider.getWorldStateKeyValueStorage())
+            .updater();
+    updater.getWorldStateTransaction().put(BINARY_TRIE_BRANCH_STORAGE, key, value);
+    updater.commit();
+  }
+
+  private static byte[] reason(final Exception e) {
+    return String.valueOf(e.getMessage()).getBytes(StandardCharsets.UTF_8);
+  }
+
+  /** Writes a PBT to the column's files, but no cursor. */
+  @FunctionalInterface
+  private interface ColumnLoad {
+    LoadedColumn writeTo(SnapshotColumnWriter writer) throws IOException;
+  }
+
+  /** A PBT written to the column's files: its root, leaf count and number of codes. */
+  private record LoadedColumn(Bytes32 root, long leafCount, long codes) {}
 
   /** One migration step; {@code true} when it moved the column, so another step may follow. */
   private boolean step() {
@@ -669,22 +851,22 @@ public class PbtMigrator {
     return current;
   }
 
-  // the load needs about 4 times the snapshot in its work dir, at its peak
-  private boolean hasRoomForLoad(final SnapshotBootstrap bootstrap) {
+  /** Whether the disk of {@code workDir} has 4 times {@code input} free, the peak of a load. */
+  private boolean hasRoom(final Path workDir, final Path input) {
     try {
-      final Path dir = bootstrap.workDir().toAbsolutePath().getParent();
-      final long needed = 4 * Files.size(bootstrap.snapshotPath());
+      final Path dir = workDir.toAbsolutePath().getParent();
+      final long needed = 4 * Files.size(input);
       final long usable = Files.getFileStore(dir).getUsableSpace();
       if (usable < needed) {
         LOG.error(
-            "PBT snapshot load needs {} bytes free under {}, {} left; retrying later",
+            "PBT migration needs {} bytes free under {}, {} left; retrying later",
             needed,
             dir,
             usable);
         return false;
       }
     } catch (final IOException e) {
-      LOG.debug("Free space for the PBT snapshot load unknown", e);
+      LOG.debug("Free space for the PBT migration unknown", e);
     }
     return true;
   }
@@ -748,6 +930,16 @@ public class PbtMigrator {
       }
       blocks.add(header);
     }
+    final List<BlockAccessList> bals = storedOrFetchedBals(blocks);
+    if (bals.isEmpty()) {
+      throw new MissingRollData(
+          "neither trie log nor BAL to roll forward block " + forward.getFirst().getNumber());
+    }
+    return bals;
+  }
+
+  /** The BALs of {@code blocks} up to the first missing one, stored or fetched from peers. */
+  private List<BlockAccessList> storedOrFetchedBals(final List<BlockHeader> blocks) {
     final List<BlockAccessList> bals = knownBals(blocks);
     if (bals.size() < blocks.size()) {
       final List<BlockHeader> rest = blocks.subList(bals.size(), blocks.size());
@@ -756,10 +948,6 @@ public class PbtMigrator {
       LOG.info(
           "PBT migrator fetched {} of {} BAL(s) from peers", prefetchedBals.size(), rest.size());
       bals.addAll(knownBals(rest));
-    }
-    if (bals.isEmpty()) {
-      throw new MissingRollData(
-          "neither trie log nor BAL to roll forward block " + forward.getFirst().getNumber());
     }
     return bals;
   }
@@ -906,22 +1094,37 @@ public class PbtMigrator {
 
   /**
    * EIP-8347 artifacts the PBT migrator starts from instead of genesis: a PBT snapshot and its
-   * preimages, anchored at a finalized pre-fork block.
+   * preimages, or the preimages alone for a {@link SelfConversion}.
    *
-   * @param snapshotPath typed PBT snapshot
-   * @param preimagesPath preimage file of the same anchor
+   * @param snapshotPath typed PBT snapshot; empty for a self-conversion
+   * @param preimagesPath preimage file of the anchor
    * @param anchorBlockHash block whose {@code stateRoot} the artifacts are anchored to
    * @param workDir where verification spills its external sorts, next to the database (see {@link
    *     #workDir(Path)}); emptied before each attempt
    */
   @SuppressWarnings("MethodInputParametersMustBeFinal") // compact record constructor
   public record SnapshotBootstrap(
-      Path snapshotPath, Path preimagesPath, Hash anchorBlockHash, Path workDir) {
+      Optional<Path> snapshotPath, Path preimagesPath, Hash anchorBlockHash, Path workDir) {
     public SnapshotBootstrap {
       Objects.requireNonNull(snapshotPath, "snapshotPath");
       Objects.requireNonNull(preimagesPath, "preimagesPath");
       Objects.requireNonNull(anchorBlockHash, "anchorBlockHash");
       Objects.requireNonNull(workDir, "workDir");
+    }
+
+    /** A snapshot and its preimages. */
+    public SnapshotBootstrap(
+        final Path snapshotPath,
+        final Path preimagesPath,
+        final Hash anchorBlockHash,
+        final Path workDir) {
+      this(Optional.of(snapshotPath), preimagesPath, anchorBlockHash, workDir);
+    }
+
+    /** The preimages alone, for a self-conversion. */
+    public static SnapshotBootstrap selfConversion(
+        final Path preimagesPath, final Hash anchorBlockHash, final Path workDir) {
+      return new SnapshotBootstrap(Optional.empty(), preimagesPath, anchorBlockHash, workDir);
     }
 
     /**

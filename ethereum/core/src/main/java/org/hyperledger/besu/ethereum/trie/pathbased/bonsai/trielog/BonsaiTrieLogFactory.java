@@ -18,13 +18,12 @@ import org.hyperledger.besu.datatypes.AccountValue;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
-import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.rlp.RLPInput;
 import org.hyperledger.besu.ethereum.rlp.RLPOutput;
-import org.hyperledger.besu.ethereum.trie.common.BinaryTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
+import org.hyperledger.besu.ethereum.trie.common.TrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.accumulator.BonsaiValue;
 import org.hyperledger.besu.plugin.data.BlockHeader;
 import org.hyperledger.besu.plugin.services.trielogs.TrieLog;
@@ -198,7 +197,7 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
         input.enterList();
         final Function<RLPInput, AccountValue> accountReader =
             wireVersion >= WIRE_VERSION_EXTENDED
-                ? BonsaiTrieLogFactory::readAccountValue
+                ? TrieAccountValue::readFrom
                 : PatriciaTrieAccountValue::readFrom;
         final AccountValue oldValue = nullOrValue(input, accountReader);
         final AccountValue newValue = nullOrValue(input, accountReader);
@@ -263,28 +262,6 @@ public class BonsaiTrieLogFactory implements TrieLogFactory {
         .getSlotKey()
         .orElseThrow(
             () -> new IllegalStateException("Extended trie log storage entry without a slot key"));
-  }
-
-  // 3 fields for a binary trie account, 4 for a Patricia one, read as PatriciaTrieAccountValue does
-  private static AccountValue readAccountValue(final RLPInput input) {
-    final int fieldCount = input.enterList();
-    final long nonce = input.readLongScalar();
-    final Wei balance = Wei.of(input.readUInt256Scalar());
-    final Hash storageRoot =
-        fieldCount == 4 ? Hash.wrap(orEmpty(input, Hash.EMPTY_TRIE_HASH)) : null;
-    final Hash codeHash = Hash.wrap(orEmpty(input, Hash.EMPTY));
-    input.leaveList();
-    return storageRoot == null
-        ? new BinaryTrieAccountValue(nonce, balance, codeHash)
-        : new PatriciaTrieAccountValue(nonce, balance, storageRoot, codeHash);
-  }
-
-  private static Bytes32 orEmpty(final RLPInput input, final Hash empty) {
-    if (input.nextIsNull()) {
-      input.skipNext();
-      return Bytes32.wrap(empty.getBytes());
-    }
-    return input.readBytes32();
   }
 
   protected static <T> T nullOrValue(final RLPInput input, final Function<RLPInput, T> reader) {

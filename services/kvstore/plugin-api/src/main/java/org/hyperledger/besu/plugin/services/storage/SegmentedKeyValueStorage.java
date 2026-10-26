@@ -46,6 +46,20 @@ public interface SegmentedKeyValueStorage extends Closeable {
   Optional<byte[]> get(SegmentIdentifier segment, byte[] key) throws StorageException;
 
   /**
+   * Same as {@link #get(SegmentIdentifier, byte[])}, without filling the block cache.
+   *
+   * @param segment the segment
+   * @param key the key
+   * @return the value at the key, if any
+   * @throws StorageException the storage exception
+   */
+  @Unstable
+  default Optional<byte[]> getUncached(final SegmentIdentifier segment, final byte[] key)
+      throws StorageException {
+    return get(segment, key);
+  }
+
+  /**
    * Get the values from the associated segment and keys.
    *
    * <p>Default implementation loops {@link #get(SegmentIdentifier, byte[])}. Storage backends that
@@ -155,6 +169,19 @@ public interface SegmentedKeyValueStorage extends Closeable {
    * @return A stream of all keys in the specified segment.
    */
   Stream<Pair<byte[], byte[]>> stream(final SegmentIdentifier segmentIdentifier);
+
+  /**
+   * Same as {@link #streamFromKey(SegmentIdentifier, byte[])}, without filling the block cache.
+   *
+   * @param segmentIdentifier the segment to read
+   * @param startKey where the entries start: the first key at or after it
+   * @return the entries from {@code startKey}, in key order; close it when done
+   */
+  @Unstable
+  default Stream<Pair<byte[], byte[]>> streamFromKeyUncached(
+      final SegmentIdentifier segmentIdentifier, final byte[] startKey) {
+    return streamFromKey(segmentIdentifier, startKey);
+  }
 
   /**
    * Returns a stream of key-value pairs starting from the specified key. This method is used to

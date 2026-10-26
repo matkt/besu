@@ -26,6 +26,8 @@ import java.util.Random;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -93,6 +95,57 @@ class Eip8347ExternalSorterTest {
         }
       }
       assertThat(it.hasNext()).isFalse();
+    }
+  }
+
+  @Test
+  void distinctKeysKeepOneRecordPerKey() throws Exception {
+    // In memory, then in runs of three records: equal keys in a run, then across runs.
+    for (final long bufferBytes : new long[] {Eip8347ExternalSorter.DEFAULT_BUFFER_BYTES, 198}) {
+      try (final Eip8347ExternalSorter sorter =
+          Eip8347ExternalSorter.distinctKeys(
+              tmp, "distinct-" + bufferBytes, bufferBytes, ForkJoinPool.commonPool())) {
+        for (int i = 9; i >= 0; i--) {
+          for (int copy = 0; copy < 3; copy++) {
+            sorter.add(new byte[] {(byte) i}, new byte[] {(byte) copy});
+          }
+        }
+        for (int i = 0; i < 10; i++) {
+          sorter.add(new byte[] {(byte) i}, new byte[0]);
+        }
+        final List<Integer> keys = new ArrayList<>();
+        sorter.sorted().forEachRemaining(entry -> keys.add((int) entry.key()[0]));
+        assertThat(keys).containsExactly(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+      }
+    }
+  }
+
+  @Test
+  void aPartitionsRunsAreDeletedOnceItIsRead() throws Exception {
+    // One record per run, over four partitions of 64 first bytes each.
+    try (final Eip8347ExternalSorter sorter =
+        Eip8347ExternalSorter.partitioned(tmp, "p", 1, ForkJoinPool.commonPool(), 4)) {
+      for (int key = 255; key >= 0; key -= 5) {
+        sorter.add(new byte[] {(byte) key}, new byte[0]);
+      }
+      final Iterator<Eip8347ExternalSorter.Entry> it = sorter.sorted();
+      final List<Integer> keys = new ArrayList<>();
+      while (it.hasNext()) {
+        keys.add(it.next().key()[0] & 0xFF);
+        // the first record of the second partition
+        if (keys.getLast() == 65) {
+          assertThat(runFiles("-000.run")).isZero();
+          assertThat(runFiles("-003.run")).isPositive();
+        }
+      }
+      assertThat(keys)
+          .isEqualTo(IntStream.iterate(0, key -> key <= 255, key -> key + 5).boxed().toList());
+    }
+  }
+
+  private long runFiles(final String suffix) throws Exception {
+    try (final Stream<Path> files = Files.list(tmp)) {
+      return files.filter(file -> file.getFileName().toString().endsWith(suffix)).count();
     }
   }
 

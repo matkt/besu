@@ -92,6 +92,51 @@ through trie logs when the node has them, otherwise through the blocks' BALs (EI
 locally or fetched from peers, merged into one trie log per roll. At the fork, the chain claims the
 column and the migrator retires.
 
+## Converting the node's own state
+
+With `--Xpbt-migration-self-convert`, the node builds the PBT from its own flat database instead of
+loading a snapshot. It needs only the preimage file of an earlier block, the **anchor**, and the
+BALs of the blocks since (`selfconvert.SelfConversion`).
+
+1. **Waiting.** Besides the anchor checks above, the migrator waits until the head is less than 2
+   minutes old and at most 128 blocks past the finalized block, so after the backward sync. The
+   finalized block is the **target**: the state converted.
+2. **BAL preimages.** The BALs of the blocks after the anchor, up to the target, give the
+   preimages of the keys created since: the address of each account changed, the key of each slot
+   set. They go to an external sort that keeps one record per key. A missing BAL fails here,
+   before the long read. Meanwhile, one pass over the preimage file finds where each of the 256 key
+   ranges starts (`RangeScan.starts`): it reads every account header, skips the slots, and hashes one
+   account in 1024.
+3. **Reading the flat database.** The ranges are read in parallel, a batch of 10,000 entries at a
+   time (`FlatState.Batches`). Each batch comes from its own RocksDB snapshot, held a few
+   milliseconds; every read leaves the block cache as it was (`getUncached`,
+   `streamFromKeyUncached`) and none goes through Besu's caches. Block import goes on meanwhile.
+4. **Back to the target.** The flat database is past the target, and each batch at its own block.
+   `TargetPriors` puts it back: the trie log of each block since the target is read once, and the
+   value of each key before its first change is kept. That is the key's value at the target, on
+   whatever branch the block lies, since the target is finalized. A batch takes the kept values of
+   its keys; a key the table has and the batch has not was deleted since and comes back. Only the
+   keys a range has not read yet are kept, at most 2 million.
+5. **Join.** Each range is joined with its records of the preimage file, both in key order. A key
+   the file lacks was created after the anchor: it goes to a sort, joined after the read with the
+   BAL preimages. A key neither has stops the migrator (`Eip8347ArtifactVerificationException`).
+   Slots of an account that does not exist are left out.
+6. **Codes.** Contracts are sorted by code hash; each code is read once, by hash, and gives the
+   header leaves of the accounts holding it, its chunks and its reference count. The code column is
+   not streamed: it also holds codes no account holds at the target, since Bonsai never deletes a
+   code stored by hash and later blocks add new ones.
+7. **Build.** The leaves, sorted by PBT key, build the PBT into the binary column's files, then the
+   reference counts, then the cursor at the target. The catch-up then rolls to the head as after a
+   snapshot import, through trie logs or BALs, reorgs included.
+
+Failures are handled as for a snapshot: a missing preimage stops the migrator, anything else empties
+the column and retries 5 minutes later.
+
+Each step logs a line as it starts (`PBT self-conversion: ...`). The flat database read, the codes
+and the build also log their share done every minute, and the last line gives the total time and
+each step's. Meanwhile `debug_migrationProgress` reports `importing`, or `importFailed` with the
+reason after a refusal.
+
 ## How verify works
 
 `run` creates a temporary sub-directory of the work directory and four external sorts:
@@ -224,11 +269,14 @@ runs verify on the result.
 | Column writer | about 90 MiB of heap: the 32 MiB window and two 16 MiB halves of it being written, up to three batches of at most 8 MiB or 100,000 nodes, and the nodes written last (a few MB; the load fails past 64 MiB) |
 | Check 2 | one account per unit, or a range of keys (a few thousand) |
 | Code check | one code per thread, ≤ 1 MiB |
+| Self-conversion | the values at the target of the keys still to read, at most 2 million (about 400 MB); 2 × threads lists between stages, a list holding 32 codes at most |
 
 Disk: the sorts write temporary files under `<data-path>/pbt-migration`, on the same disk as the
 database. They are deleted at the end, and the migrator empties the directory before each
 bootstrap attempt. Loading also needs room for the column: its files wait in the work directory,
-then are linked into the database, not copied. Sorted records carry a rank, never a 32-byte keccak;
+then are linked into the database, not copied. The self-conversion splits its sorted leaves in 16
+partitions by first byte and deletes each partition's runs once read: while the PBT is built, the
+runs shrink as the column's files grow, so the disk holds about the larger of the two, not both. Sorted records carry a rank, never a 32-byte keccak;
 run files store each key as the part that differs from the previous one; convert sorts each
 distinct code's chunks once.
 
@@ -252,6 +300,13 @@ loading, sorting the window and writing the files run on two background threads.
 | | `Eip8347MptRebuild` | Check 2: rebuilds the MPT, storage tries and account ranges in parallel |
 | | `Eip8347AnchorJoin` | Steps 1–2: requests, and the join against headers and storage |
 | | `Eip8347CodeCheck` | Code: requests against code groups, then each code's reassembly |
+| `convert` | `Eip8347Leaves` / `Eip8347SortedLeaves` | The leaves of accounts, slots and codes; the PBT built from sorted leaves (convert and self-conversion) |
+| `selfconvert` | `SelfConversion` | The self-conversion: runs the steps above |
+| | `FlatState` | The flat database's keys, and short-lived snapshot batches of one range |
+| | `TargetPriors` | The values at the target of what the batches read after it |
+| | `RangeScan` | One range joined with its records in the preimage file, and where each range starts |
+| | `BalPreimages` | The preimages of the keys created after the anchor, and their join with the keys the file lacks |
+| | `StateLeaves` / `CodeLeaves` | Leaves of accounts and slots; the code phase, and the contracts waiting for it |
 
 In the parent package: `PbtMigrator` (bootstrap and chain following), `SnapshotColumnWriter` (the
 bulk load into the binary column through sorted files), `PbtColumnOwnership` (migrator / chain
@@ -273,7 +328,9 @@ To bootstrap a node from a snapshot: `--Xpbt-snapshot-file`, `--Xpbt-preimages-f
 `--Xpbt-snapshot-anchor-block-hash`, set together. Without a snapshot, the migrator stops and
 writes nothing, so a snapshot given at a later restart is still used. `--Xpbt-migration-from-genesis`
 makes it replay the chain from genesis instead: only where every block has a trie log or a BAL,
-e.g. a devnet with BALs from genesis.
+e.g. a devnet with BALs from genesis. `--Xpbt-migration-self-convert`, with `--Xpbt-preimages-file`
+and `--Xpbt-snapshot-anchor-block-hash` but no snapshot, converts the node's own flat database
+(full flat database and code stored by hash only).
 
 How much of the node the migrator takes, so that block import keeps up:
 

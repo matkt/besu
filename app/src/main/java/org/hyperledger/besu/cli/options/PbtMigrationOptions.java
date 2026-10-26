@@ -23,7 +23,7 @@ import java.util.Optional;
 
 import picocli.CommandLine;
 
-/** Command-line options for the EIP-8347 PBT migration: snapshot bootstrap and tuning. */
+/** Command-line options for the EIP-8347 PBT migration: snapshot load, self-conversion, tuning. */
 public class PbtMigrationOptions {
   /** Default constructor. */
   public PbtMigrationOptions() {}
@@ -38,17 +38,28 @@ public class PbtMigrationOptions {
   Path snapshotFile = null;
 
   @CommandLine.Option(
+      names = {"--Xpbt-migration-self-convert"},
+      hidden = true,
+      description =
+          "Build the PBT from the node's own flat database at the latest finalized block, with "
+              + "--Xpbt-preimages-file and the BALs since its anchor, instead of a snapshot. "
+              + "Requires --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash.")
+  boolean selfConvert = false;
+
+  @CommandLine.Option(
       names = {"--Xpbt-preimages-file"},
       hidden = true,
       paramLabel = "<PATH>",
-      description = "EIP-8347 preimage file matching --Xpbt-snapshot-file.")
+      description =
+          "EIP-8347 preimage file matching --Xpbt-snapshot-file, or for "
+              + "--Xpbt-migration-self-convert.")
   Path preimagesFile = null;
 
   @CommandLine.Option(
       names = {"--Xpbt-snapshot-anchor-block-hash"},
       hidden = true,
       paramLabel = "<HASH>",
-      description = "Finalized pre-fork block the snapshot and preimages are anchored to.")
+      description = "Finalized pre-fork block the snapshot or the preimages are anchored to.")
   String anchorBlockHash = null;
 
   @CommandLine.Option(
@@ -102,22 +113,22 @@ public class PbtMigrationOptions {
   }
 
   /**
-   * The snapshot bootstrap, if configured.
+   * The snapshot bootstrap or self-conversion, if configured.
    *
-   * @param dataDir the node's data directory, under which verification spills
+   * @param dataDir the node's data directory, under which the migration spills
    * @return the bootstrap, empty when none of the options is set
    * @throws IllegalArgumentException when only some of the options are set
    */
   public Optional<PbtMigrator.SnapshotBootstrap> toDomainObject(final Path dataDir) {
-    if (!isSnapshotSet()) {
+    if (!isBootstrapSet()) {
       return Optional.empty();
     }
+    final Hash anchor = Hash.fromHexString(anchorBlockHash);
+    final Path workDir = PbtMigrator.SnapshotBootstrap.workDir(dataDir);
     return Optional.of(
-        new PbtMigrator.SnapshotBootstrap(
-            snapshotFile,
-            preimagesFile,
-            Hash.fromHexString(anchorBlockHash),
-            PbtMigrator.SnapshotBootstrap.workDir(dataDir)));
+        selfConvert
+            ? PbtMigrator.SnapshotBootstrap.selfConversion(preimagesFile, anchor, workDir)
+            : new PbtMigrator.SnapshotBootstrap(snapshotFile, preimagesFile, anchor, workDir));
   }
 
   /**
@@ -141,26 +152,32 @@ public class PbtMigrationOptions {
    */
   public void validate(final CommandLine commandLine) {
     try {
-      isSnapshotSet();
+      isBootstrapSet();
       toTuning();
     } catch (final IllegalArgumentException e) {
       throw new CommandLine.ParameterException(commandLine, e.getMessage());
     }
   }
 
-  private boolean isSnapshotSet() {
+  private boolean isBootstrapSet() {
+    if (selfConvert && snapshotFile != null) {
+      throw new IllegalArgumentException(
+          "--Xpbt-migration-self-convert cannot be used with --Xpbt-snapshot-file");
+    }
+    final String source = selfConvert ? "--Xpbt-migration-self-convert" : "--Xpbt-snapshot-file";
     final int set =
-        (snapshotFile != null ? 1 : 0)
+        (selfConvert || snapshotFile != null ? 1 : 0)
             + (preimagesFile != null ? 1 : 0)
             + (anchorBlockHash != null ? 1 : 0);
     if (set != 0 && set != 3) {
       throw new IllegalArgumentException(
-          "--Xpbt-snapshot-file, --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash "
+          source
+              + ", --Xpbt-preimages-file and --Xpbt-snapshot-anchor-block-hash "
               + "must be set together");
     }
     if (set == 3 && fromGenesis) {
       throw new IllegalArgumentException(
-          "--Xpbt-migration-from-genesis cannot be used with --Xpbt-snapshot-file");
+          "--Xpbt-migration-from-genesis cannot be used with " + source);
     }
     return set == 3;
   }

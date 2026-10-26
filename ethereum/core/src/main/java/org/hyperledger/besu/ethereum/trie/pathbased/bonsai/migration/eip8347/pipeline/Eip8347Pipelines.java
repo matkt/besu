@@ -88,7 +88,16 @@ public final class Eip8347Pipelines {
    */
   public static <T> PipelineBuilder<List<T>, List<T>> fromLists(
       final String name, final Iterator<T> source, final ToIntFunction<T> weight) {
-    return from(name, inLists(source, weight), LIST_BUFFER_SIZE);
+    return fromLists(name, source, weight, LIST_BUFFER_SIZE);
+  }
+
+  /** Same, with {@code bufferSize} lists between stages. */
+  public static <T> PipelineBuilder<List<T>, List<T>> fromLists(
+      final String name,
+      final Iterator<T> source,
+      final ToIntFunction<T> weight,
+      final int bufferSize) {
+    return from(name, inLists(source, weight), bufferSize);
   }
 
   private static <T> Iterator<List<T>> inLists(

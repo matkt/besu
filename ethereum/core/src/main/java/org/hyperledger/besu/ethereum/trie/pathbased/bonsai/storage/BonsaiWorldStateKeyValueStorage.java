@@ -92,6 +92,13 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
   /** Set once the PMT has been deleted, after a block past the PBT fork was finalized. */
   public static final byte[] PMT_PRUNED_KEY = "pmtPruned".getBytes(StandardCharsets.UTF_8);
 
+  /** Set when the PBT migrator starts writing the binary column from a snapshot or the flat DB. */
+  public static final byte[] PBT_IMPORTING_KEY = "pbtImporting".getBytes(StandardCharsets.UTF_8);
+
+  /** Why the PBT migrator refused its bootstrap, kept until an attempt empties the column. */
+  public static final byte[] PBT_IMPORT_FAILED_KEY =
+      "pbtImportFailed".getBytes(StandardCharsets.UTF_8);
+
   /** Prefix of the shadow root recorded for each block the binary trie migration reached. */
   public static final byte[] SHADOW_STATE_ROOT_KEY_PREFIX =
       "shadowStateRoot".getBytes(StandardCharsets.UTF_8);
@@ -283,6 +290,18 @@ public class BonsaiWorldStateKeyValueStorage implements WorldStateKeyValueStorag
         .get(BINARY_TRIE_BRANCH_STORAGE, shadowStateRootKey(blockHash))
         .map(Bytes32::wrap)
         .map(Hash::wrap);
+  }
+
+  /** Whether a bootstrap started writing the binary column. */
+  public boolean isPbtImporting() {
+    return composedWorldStateStorage.get(BINARY_TRIE_BRANCH_STORAGE, PBT_IMPORTING_KEY).isPresent();
+  }
+
+  /** Why the bootstrap was refused, if it was. */
+  public Optional<String> getPbtImportFailure() {
+    return composedWorldStateStorage
+        .get(BINARY_TRIE_BRANCH_STORAGE, PBT_IMPORT_FAILED_KEY)
+        .map(reason -> new String(reason, StandardCharsets.UTF_8));
   }
 
   /** {@code true} once the PMT has been deleted, after the PBT fork was finalized. */
