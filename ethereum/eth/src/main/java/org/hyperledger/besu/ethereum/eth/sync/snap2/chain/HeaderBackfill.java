@@ -37,9 +37,11 @@ import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
@@ -67,6 +69,8 @@ public final class HeaderBackfill {
   private final int headersPerRequest;
   private final int parallelism;
   private final MetricsSystem metricsSystem;
+  // the requests in flight, which a stop cancels as the scheduler retries them until then
+  private final Set<CompletableFuture<?>> requests = ConcurrentHashMap.newKeySet();
   private volatile Hash expected;
   private volatile long lowestStored;
   private volatile boolean stopped;
@@ -93,6 +97,7 @@ public final class HeaderBackfill {
       final int parallelism,
       final MetricsSystem metricsSystem) {
     checkArgument(headersPerRequest > 0, "headersPerRequest must be positive");
+    checkArgument(parallelism > 0, "parallelism must be positive");
     checkArgument(top.getNumber() >= floor.getNumber(), "the top is below the floor");
     this.sender = sender;
     this.protocolSchedule = protocolSchedule;
@@ -205,20 +210,14 @@ public final class HeaderBackfill {
     if (running != null) {
       running.abort();
     }
+    // the pipeline cancels the downloads, not the requests they wait on
+    requests.forEach(request -> request.cancel(false));
   }
 
   // best effort: the headers of the segment, highest first and linked, or none if a request fails
   private CompletableFuture<Fetched> download(final Segment segment) {
-    return sender
-        .submitWithRetries(
-            new PeerTaskRequest<>(
-                () ->
-                    new GetHeadersFromPeerTask(
-                        segment.high(), segment.size(), 0, Direction.REVERSE, 0, protocolSchedule),
-                Priority.HEADERS,
-                "headers",
-                segment.high()))
-        .thenCompose(response -> completeByHash(response.value(), segment.low()))
+    return byNumber(segment)
+        .thenCompose(headers -> completeByHash(headers, segment.low()))
         .thenApply(headers -> new Fetched(segment, headers))
         .exceptionally(
             error -> {
@@ -229,6 +228,26 @@ public final class HeaderBackfill {
                   error.getMessage());
               return new Fetched(segment, List.of());
             });
+  }
+
+  // the headers of the segment by number, a request that a stop cancels
+  private CompletableFuture<List<BlockHeader>> byNumber(final Segment segment) {
+    final CompletableFuture<RequestSender.Response<List<BlockHeader>>> request =
+        sender.submitWithRetries(
+            new PeerTaskRequest<>(
+                () ->
+                    new GetHeadersFromPeerTask(
+                        segment.high(), segment.size(), 0, Direction.REVERSE, 0, protocolSchedule),
+                Priority.HEADERS,
+                "headers",
+                segment.high()));
+    requests.add(request);
+    request.whenComplete((response, error) -> requests.remove(request));
+    // sent while a stop cancelled the others
+    if (stopped) {
+      request.cancel(false);
+    }
+    return request.thenApply(RequestSender.Response::value);
   }
 
   // a short answer goes on down to low by hash from its lowest header, which keeps it linked

@@ -191,6 +191,26 @@ class HeaderBackfillTest {
   }
 
   @Test
+  void cancelsItsRequestsInFlightOnStop() {
+    sender.serve(chain);
+    sender.unanswered = new ArrayList<>();
+    final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(100));
+    // stopped while it sends its third request, the first two in flight
+    sender.beforeAnswer =
+        message -> {
+          if (sender.unanswered.size() == 2) {
+            backfill.stop();
+          }
+        };
+
+    backfill.run(executor);
+    executor.runAll();
+
+    // or the scheduler would retry them for nobody
+    assertThat(sender.unanswered).hasSize(3).allMatch(CompletableFuture::isCancelled);
+  }
+
+  @Test
   void stopsWithoutItsLockWhileThePipelineRunsItsCallbacks() {
     sender.serve(chain);
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(100));
@@ -261,6 +281,8 @@ class HeaderBackfillTest {
     private int maxAnswer = Integer.MAX_VALUE;
     // called with each request before it is answered
     private Consumer<GetBlockHeadersMessage> beforeAnswer = message -> {};
+    // set, the requests are left unanswered, kept here
+    private List<CompletableFuture<?>> unanswered;
 
     private FakeSender() {
       when(peer.getAgreedCapabilities()).thenReturn(Set.of(EthProtocol.LATEST));
@@ -289,6 +311,11 @@ class HeaderBackfillTest {
         final SyncRequest<T> request, final Set<EthPeer> excluded) {
       final GetBlockHeadersMessage message = GetBlockHeadersMessage.readFrom(request.message(peer));
       beforeAnswer.accept(message);
+      if (unanswered != null) {
+        final CompletableFuture<Response<T>> pending = new CompletableFuture<>();
+        unanswered.add(pending);
+        return pending;
+      }
       // a reverse request, from the header asked for down its own chain
       BlockHeader header =
           message
