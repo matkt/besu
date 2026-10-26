@@ -56,7 +56,6 @@ class HeaderBackfillTest {
   private final List<BlockHeader> chain = chain(101);
   private final FakeSender sender = new FakeSender();
   private final QueuedExecutor executor = new QueuedExecutor();
-  private final List<BlockHeader> stored = new ArrayList<>();
   // each list the back-fill handed to its store
   private final List<List<BlockHeader>> batches = new ArrayList<>();
 
@@ -65,13 +64,13 @@ class HeaderBackfillTest {
     sender.serve(chain);
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(100));
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThat(done).isCompleted();
     assertThat(backfill.lowestStored()).isEqualTo(1);
+    assertThat(backfill.done()).isEqualTo(backfill.total()).isEqualTo(99);
     // top down, each segment highest first
-    assertThat(stored).containsExactlyElementsOf(chain.subList(1, 100).reversed());
+    assertThat(stored()).containsExactlyElementsOf(chain.subList(1, 100).reversed());
   }
 
   @Test
@@ -85,15 +84,14 @@ class HeaderBackfillTest {
   @Test
   void followsTheTrustedHeaderWhenPeersServeAnotherChain() {
     // the peers serve by number a fork from block 31, the top stays on the trusted chain
-    sender.serve(fork(chain.subList(0, 31), 60));
+    sender.serve(extend(chain.subList(0, 31), 60, 1));
     sender.know(chain);
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(60));
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThat(done).isCompleted();
-    assertThat(stored).containsExactlyElementsOf(chain.subList(1, 60).reversed());
+    assertThat(stored()).containsExactlyElementsOf(chain.subList(1, 60).reversed());
   }
 
   @Test
@@ -103,11 +101,10 @@ class HeaderBackfillTest {
     sender.serve(chain);
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(60));
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThat(done).isCompleted();
-    assertThat(stored).containsExactlyElementsOf(chain.subList(1, 60).reversed());
+    assertThat(stored()).containsExactlyElementsOf(chain.subList(1, 60).reversed());
     // each segment stored whole, not completed by the next one
     assertThat(batches).extracting(List::size).containsExactly(10, 10, 10, 10, 10, 9);
   }
@@ -120,11 +117,10 @@ class HeaderBackfillTest {
     sender.know(chain);
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(60));
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThat(done).isCompleted();
-    assertThat(stored).containsExactlyElementsOf(chain.subList(1, 60).reversed());
+    assertThat(stored()).containsExactlyElementsOf(chain.subList(1, 60).reversed());
   }
 
   @Test
@@ -133,8 +129,7 @@ class HeaderBackfillTest {
     final BlockHeader otherFloor = new BlockHeaderTestFixture().number(5).buildHeader();
     final HeaderBackfill backfill = backfill(otherFloor, chain.get(20));
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThatThrownBy(done::join)
         .hasCauseInstanceOf(WrongChainException.class)
@@ -149,19 +144,18 @@ class HeaderBackfillTest {
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(100));
     backfill.stop();
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThatThrownBy(done::join).hasCauseInstanceOf(CancellationException.class);
     assertThat(asked).isEmpty();
-    assertThat(stored).isEmpty();
+    assertThat(batches).isEmpty();
   }
 
   @Test
   void storesNothingOnceStoppedWhileASegmentIsFetchedAgain() {
     sender.serve(chain);
     // a peer serves another block 29 by number, so the segment from 29 down is fetched by hash
-    sender.serve(List.of(child(chain.get(28), 29, 1)));
+    sender.serve(List.of(child(chain.get(28), 1)));
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(60));
     sender.beforeAnswer =
         message -> {
@@ -170,28 +164,27 @@ class HeaderBackfillTest {
           }
         };
 
-    final CompletableFuture<Void> done = backfill.run(executor);
-    executor.runAll();
+    final CompletableFuture<Void> done = runToEnd(backfill);
 
     assertThatThrownBy(done::join).hasCauseInstanceOf(CancellationException.class);
     // the segments above the one fetched again
-    assertThat(stored).containsExactlyElementsOf(chain.subList(30, 60).reversed());
+    assertThat(stored()).containsExactlyElementsOf(chain.subList(30, 60).reversed());
   }
 
   @Test
   void checksTheTopItselfWhenItIsTheFloor() {
     final CompletableFuture<Void> same = backfill(chain.get(10), chain.get(10)).run(executor);
     final CompletableFuture<Void> other =
-        backfill(chain.get(10), child(chain.get(9), 10, 1)).run(executor);
+        backfill(chain.get(10), child(chain.get(9), 1)).run(executor);
 
     assertThat(same).isCompleted();
     assertThatThrownBy(other::join).hasCauseInstanceOf(WrongChainException.class);
   }
 
   @Test
-  void cancelsItsRequestsInFlightOnStop() {
+  void cancelsItsRequestsByNumberOnStop() {
     sender.serve(chain);
-    sender.unanswered = new ArrayList<>();
+    sender.leaveUnanswered();
     final HeaderBackfill backfill = backfill(chain.getFirst(), chain.get(100));
     // stopped while it sends its third request, the first two in flight
     sender.beforeAnswer =
@@ -201,8 +194,7 @@ class HeaderBackfillTest {
           }
         };
 
-    backfill.run(executor);
-    executor.runAll();
+    runToEnd(backfill);
 
     // or the scheduler would retry them for nobody
     assertThat(sender.unanswered).hasSize(3).allMatch(CompletableFuture::isCancelled);
@@ -227,10 +219,7 @@ class HeaderBackfillTest {
     return new HeaderBackfill(
         sender,
         ProtocolScheduleFixture.MAINNET,
-        batch -> {
-          batches.add(batch);
-          stored.addAll(batch);
-        },
+        batches::add,
         new HeaderFetcher(
             sender, ProtocolScheduleFixture.MAINNET, Optional::empty, HEADERS_PER_REQUEST),
         floor,
@@ -240,32 +229,41 @@ class HeaderBackfillTest {
         new NoOpMetricsSystem());
   }
 
+  // runs the back-fill to its end, its pipeline stages in turn on the test thread
+  private CompletableFuture<Void> runToEnd(final HeaderBackfill backfill) {
+    final CompletableFuture<Void> done = backfill.run(executor);
+    executor.runAll();
+    return done;
+  }
+
+  // every header stored, in the order stored
+  private List<BlockHeader> stored() {
+    return batches.stream().flatMap(List::stream).toList();
+  }
+
   // headers 0 to count - 1, each the parent of the next
   private static List<BlockHeader> chain(final int count) {
-    final List<BlockHeader> headers = new ArrayList<>();
-    headers.add(child(null, 0, 0));
-    while (headers.size() < count) {
-      headers.add(child(headers.getLast(), headers.size(), 0));
-    }
-    return headers;
+    return extend(List.of(new BlockHeaderTestFixture().number(0).buildHeader()), count - 1, 0);
   }
 
-  // the base, then a chain of its own up to the highest block, its headers stamped apart
-  private static List<BlockHeader> fork(final List<BlockHeader> base, final long highest) {
+  // the base, then a chain of its own up to the highest block
+  private static List<BlockHeader> extend(
+      final List<BlockHeader> base, final long highest, final int fork) {
     final List<BlockHeader> headers = new ArrayList<>(base);
     while (headers.getLast().getNumber() < highest) {
-      headers.add(child(headers.getLast(), headers.getLast().getNumber() + 1, 1));
+      headers.add(child(headers.getLast(), fork));
     }
     return headers;
   }
 
-  private static BlockHeader child(final BlockHeader parent, final long number, final int fork) {
-    final BlockHeaderTestFixture fixture =
-        new BlockHeaderTestFixture().number(number).timestamp(1_000L * fork + number);
-    if (parent != null) {
-      fixture.parentHash(parent.getHash());
-    }
-    return fixture.buildHeader();
+  // the next header, stamped apart for each fork
+  private static BlockHeader child(final BlockHeader parent, final int fork) {
+    final long number = parent.getNumber() + 1;
+    return new BlockHeaderTestFixture()
+        .number(number)
+        .parentHash(parent.getHash())
+        .timestamp(1_000L * fork + number)
+        .buildHeader();
   }
 
   /**
@@ -279,8 +277,9 @@ class HeaderBackfillTest {
     private int maxAnswer = Integer.MAX_VALUE;
     // called with each request before it is answered
     private Consumer<GetBlockHeadersMessage> beforeAnswer = message -> {};
-    // set, the requests are left unanswered, kept here
-    private List<CompletableFuture<?>> unanswered;
+    // the requests left unanswered, once it stops answering
+    private final List<CompletableFuture<?>> unanswered = new ArrayList<>();
+    private boolean answers = true;
 
     private FakeSender() {
       when(peer.getAgreedCapabilities()).thenReturn(Set.of(EthProtocol.LATEST));
@@ -304,12 +303,16 @@ class HeaderBackfillTest {
       maxAnswer = headers;
     }
 
+    private void leaveUnanswered() {
+      answers = false;
+    }
+
     @Override
     public <T> CompletableFuture<Response<T>> submit(
         final SyncRequest<T> request, final Set<EthPeer> excluded) {
       final GetBlockHeadersMessage message = GetBlockHeadersMessage.readFrom(request.message(peer));
       beforeAnswer.accept(message);
-      if (unanswered != null) {
+      if (!answers) {
         final CompletableFuture<Response<T>> pending = new CompletableFuture<>();
         unanswered.add(pending);
         return pending;
@@ -320,8 +323,9 @@ class HeaderBackfillTest {
               .hash()
               .map(known::get)
               .orElseGet(() -> served.get(message.blockNumber().getAsLong()));
+      final int limit = Math.min(message.maxHeaders(), maxAnswer);
       final List<BlockHeader> headers = new ArrayList<>();
-      while (header != null && headers.size() < Math.min(message.maxHeaders(), maxAnswer)) {
+      while (header != null && headers.size() < limit) {
         headers.add(header);
         header = known.get(header.getParentHash());
       }
