@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.core.SyncBlock;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.SyncTransactionReceipt;
 import org.hyperledger.besu.ethereum.core.encoding.receipt.SyncTransactionReceiptEncoder;
+import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncBlockBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncReceiptsFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BlockRanges.Gap;
@@ -57,6 +58,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongUnaryOperator;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -78,31 +80,35 @@ public final class BodyBackfill {
   private static final double RESPONSE_BYTES = 2 * 1024 * 1024;
   private static final int MIN_RANGE_BLOCKS = 8;
   private static final int MAX_RANGE_BLOCKS = 128;
-  private static final double INITIAL_BLOCK_BYTES = 64 * 1024;
+  private static final double INITIAL_BODY_BYTES = 64 * 1024;
 
   /** What the back-fill is doing. */
   private enum State {
     RUNNING,
     PAUSED,
     DONE,
-    STOPPED
+    STOPPED;
+
+    private String label() {
+      return name().toLowerCase(Locale.ROOT);
+    }
   }
 
   /**
    * Tuning of the back-fill.
    *
    * @param label what the settings are for, in the logs
-   * @param requests ranges downloaded at once, with one request in flight each
+   * @param parallelism ranges downloaded at once, with one request in flight each
    * @param recordBytes bytes stored between two records of the lowest block
    * @param pollInterval how long a paused back-fill, or one waiting for its last ranges, waits
    * @param retryDelay how long a range whose download failed waits before it is asked again
-   * @param maxRangeBlocks most blocks per request
+   * @param maxRangeBlocks most blocks per request, at least eight
    * @param indexTransactions whether the transactions of the stored blocks are indexed
    * @param background whether it runs after the sync, logging its progress and with metrics
    */
   public record Settings(
       String label,
-      int requests,
+      int parallelism,
       long recordBytes,
       Duration pollInterval,
       Duration retryDelay,
@@ -111,29 +117,29 @@ public final class BodyBackfill {
       boolean background) {
 
     /** Returns the settings of the back-fill that runs once the node follows the chain head. */
-    public static Settings background(final boolean indexTransactions) {
-      return new Settings(
-          "back-fill",
-          8,
-          RECORD_BYTES,
-          POLL_INTERVAL,
-          RETRY_DELAY,
-          MAX_RANGE_BLOCKS,
-          indexTransactions,
-          true);
+    public static Settings forBackground(final boolean indexTransactions) {
+      return of("back-fill", 8, indexTransactions, true);
     }
 
     /** Returns the settings of the window the sync downloads before it sets the chain head. */
-    public static Settings window(final boolean indexTransactions) {
+    public static Settings forWindow(final boolean indexTransactions) {
+      return of("window", 4, indexTransactions, false);
+    }
+
+    private static Settings of(
+        final String label,
+        final int parallelism,
+        final boolean indexTransactions,
+        final boolean background) {
       return new Settings(
-          "window",
-          4,
+          label,
+          parallelism,
           RECORD_BYTES,
           POLL_INTERVAL,
           RETRY_DELAY,
           MAX_RANGE_BLOCKS,
           indexTransactions,
-          false);
+          background);
     }
   }
 
@@ -153,21 +159,22 @@ public final class BodyBackfill {
   private final AtomicLong lastLogNanos = new AtomicLong();
   // the lowest block at the start, which the share done counts from
   private final long initialLowest;
-  private final Object sizes = new Object();
+  private final Object averages = new Object();
 
   // guarded by this
   private final BackfillRanges ranges;
   // the lowest block stored with every block above it, as last recorded
-  private long persisted;
+  private long recordedLowest;
   private long bytesSinceRecord;
-  // guarded by sizes: the averages of the downloaded blocks, of their bodies and their receipts
-  private double bodyBytes = INITIAL_BLOCK_BYTES;
-  private double receiptBytes;
+  // guarded by averages: the sizes of the downloaded blocks, the receipts' 0 until known
+  private double averageBodyBytes = INITIAL_BODY_BYTES;
+  private double averageReceiptBytes;
 
   // set under the lock
   private volatile ExecutorService workers;
-  private volatile boolean stopped;
+  private volatile boolean ended;
   private volatile State state = State.PAUSED;
+
   private volatile Instant started = Instant.now();
   private volatile long loggedBytes;
 
@@ -191,15 +198,18 @@ public final class BodyBackfill {
       final LongUnaryOperator lowestNeeded,
       final Settings settings,
       final MetricsSystem metricsSystem) {
-    checkArgument(settings.requests() > 0, "requests must be positive");
-    checkArgument(settings.maxRangeBlocks() > 0, "maxRangeBlocks must be positive");
+    checkArgument(settings.parallelism() > 0, "parallelism must be positive");
+    checkArgument(
+        settings.maxRangeBlocks() >= MIN_RANGE_BLOCKS,
+        "maxRangeBlocks must be at least %s",
+        MIN_RANGE_BLOCKS);
     this.blockchain = blockchain;
     this.protocolSchedule = protocolSchedule;
     this.sender = sender;
     this.inSync = inSync;
     this.ranges = new BackfillRanges(lowest);
     this.initialLowest = lowest;
-    this.persisted = lowest;
+    this.recordedLowest = lowest;
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
     // the window shows in the progress of the sync
@@ -218,7 +228,7 @@ public final class BodyBackfill {
     // under the lock, so that a stop comes first or finds the workers started
     synchronized (this) {
       this.workers = workers;
-      if (stopped) {
+      if (ended) {
         workers.shutdown();
         return;
       }
@@ -235,16 +245,17 @@ public final class BodyBackfill {
   }
 
   private void launch(final ExecutorService workers) {
+    final long lowest = lowestStored();
     final long floor = floor();
     started = Instant.now();
     LOG.info(
         "SNAP2 {} started | {} blocks, {} down to {}",
         settings.label(),
-        compact(lowestStored() - floor),
-        block(lowestStored() - 1),
+        compact(lowest - floor),
+        block(lowest - 1),
         block(floor));
     lastLogNanos.set(System.nanoTime());
-    for (int i = 0; i < settings.requests(); i++) {
+    for (int i = 0; i < settings.parallelism(); i++) {
       workers.execute(this::run);
     }
   }
@@ -254,7 +265,7 @@ public final class BodyBackfill {
    * interrupted, not awaited: the caller awaits them before it closes the storage they read.
    */
   public void stop() {
-    end(new CancellationException("body download stopped"));
+    end(cancellation());
     final ExecutorService running = workers;
     // interrupts the workers that wait on a request or a delay
     if (running != null) {
@@ -263,8 +274,8 @@ public final class BodyBackfill {
   }
 
   /**
-   * Completes once every needed body is stored and recorded; fails once stopped, on a missing
-   * header, or when what was stored cannot be recorded.
+   * Completes once every needed body is stored and recorded; fails once stopped or interrupted, on
+   * a missing header, or when what was stored cannot be recorded.
    */
   public CompletableFuture<Void> done() {
     return done;
@@ -289,7 +300,7 @@ public final class BodyBackfill {
 
   private void run() {
     try {
-      while (!stopped) {
+      while (!ended) {
         try {
           step();
         } catch (final RuntimeException e) {
@@ -323,17 +334,17 @@ public final class BodyBackfill {
     }
     final Optional<Gap> claimed = claimRange();
     if (claimed.isEmpty()) {
-      // the last ranges are in flight
+      // the last ranges are in flight, or the back-fill ended
       Thread.sleep(settings.pollInterval().toMillis());
       return;
     }
     final Gap range = claimed.get();
     try {
       final List<SyncBlockWithReceipts> blocks = receipts(bodies(headers(range)));
-      recordSizes(blocks);
+      updateAverages(blocks);
       store(range, blocks);
     } catch (final RuntimeException e) {
-      if (!stopped) {
+      if (!ended) {
         LOG.debug(
             "Blocks {} to {} failed, asked again later: {}",
             range.from(),
@@ -352,19 +363,19 @@ public final class BodyBackfill {
   }
 
   // the lowest block only moves down over stored blocks
-  private synchronized boolean reachedFloor() {
-    return ranges.lowest() <= floor();
+  private boolean reachedFloor() {
+    return blocksRemaining() == 0;
   }
 
   private synchronized void pause() {
-    if (!stopped) {
+    if (!ended) {
       state = State.PAUSED;
     }
   }
 
   // the highest run of blocks below the lowest stored one that no other worker has claimed
   private synchronized Optional<Gap> claimRange() {
-    if (stopped) {
+    if (ended) {
       return Optional.empty();
     }
     final Optional<Gap> range = ranges.claim(floor(), rangeBlocks());
@@ -376,47 +387,50 @@ public final class BodyBackfill {
     ranges.release(range);
   }
 
-  // records the average sizes of the downloaded blocks, which size the next requests
-  private void recordSizes(final List<SyncBlockWithReceipts> blocks) {
-    final long bodies =
-        blocks.stream().mapToLong(block -> block.getBlock().getBody().getRlp().size()).sum();
-    final long receipts = bytes(blocks) - bodies;
-    synchronized (sizes) {
-      bodyBytes = 0.8 * bodyBytes + 0.2 * bodies / blocks.size();
-      receiptBytes = 0.8 * receiptBytes + 0.2 * receipts / blocks.size();
+  // the sizes of the downloaded blocks, which size the next requests
+  private void updateAverages(final List<SyncBlockWithReceipts> blocks) {
+    final double bodies = (double) bodyBytes(blocks) / blocks.size();
+    final double receipts = (double) receiptBytes(blocks) / blocks.size();
+    synchronized (averages) {
+      averageBodyBytes = 0.8 * averageBodyBytes + 0.2 * bodies;
+      averageReceiptBytes = 0.8 * averageReceiptBytes + 0.2 * receipts;
     }
   }
 
-  private static long bytes(final List<SyncBlockWithReceipts> blocks) {
-    long bytes = 0;
-    for (final SyncBlockWithReceipts block : blocks) {
-      bytes += block.getBlock().getBody().getRlp().size();
-      for (final SyncTransactionReceipt receipt : block.getReceipts()) {
-        bytes += receipt.getRlpBytes() == null ? 0 : receipt.getRlpBytes().size();
-      }
-    }
-    return bytes;
+  private static long bodyBytes(final List<SyncBlockWithReceipts> blocks) {
+    return blocks.stream().mapToLong(block -> block.getBlock().getBody().getRlp().size()).sum();
+  }
+
+  private static long receiptBytes(final List<SyncBlockWithReceipts> blocks) {
+    return blocks.stream()
+        .flatMap(block -> block.getReceipts().stream())
+        .mapToLong(receipt -> receipt.getRlpBytes().size())
+        .sum();
   }
 
   // blocks whose bodies fill about one response, so many when they are small
   private int rangeBlocks() {
-    final int max = settings.maxRangeBlocks();
-    synchronized (sizes) {
-      return (int) Math.clamp(RESPONSE_BYTES / bodyBytes, Math.min(MIN_RANGE_BLOCKS, max), max);
+    synchronized (averages) {
+      return (int)
+          Math.clamp(
+              RESPONSE_BYTES / averageBodyBytes, MIN_RANGE_BLOCKS, settings.maxRangeBlocks());
     }
   }
 
-  // blocks whose receipts fill about one response, all of them while their size is unknown
+  // blocks whose receipts fill about one response
   private int receiptBlocks() {
-    final int max = settings.maxRangeBlocks();
-    synchronized (sizes) {
-      return receiptBytes > 0 ? (int) Math.clamp(RESPONSE_BYTES / receiptBytes, 1, max) : max;
+    synchronized (averages) {
+      // all of them while their size is unknown
+      if (averageReceiptBytes == 0) {
+        return settings.maxRangeBlocks();
+      }
+      return (int) Math.clamp(RESPONSE_BYTES / averageReceiptBytes, 1, settings.maxRangeBlocks());
     }
   }
 
   // drops a range a reorg replaced, and the blocks a pruner would remove
   private synchronized void store(final Gap range, final List<SyncBlockWithReceipts> blocks) {
-    if (stopped) {
+    if (ended) {
       return;
     }
     final long floor = floor();
@@ -427,21 +441,21 @@ public final class BodyBackfill {
     }
     blockchain.unsafeStoreSyncBodiesAndReceipts(kept, settings.indexTransactions());
     ranges.store(kept.getFirst().getNumber(), range.to());
-    final long bytes = bytes(kept);
+    final long bytes = bodyBytes(kept) + receiptBytes(kept);
     blocksStored.addAndGet(kept.size());
     bytesStored.addAndGet(bytes);
     bytesSinceRecord += bytes;
     if (bytesSinceRecord >= settings.recordBytes()) {
-      persist();
+      recordLowest();
     }
   }
 
   // records the lowest block stored with every block above it, once it moved
-  private synchronized void persist() {
+  private synchronized void recordLowest() {
     final long lowest = ranges.lowest();
-    if (lowest < persisted) {
+    if (lowest < recordedLowest) {
       blockchain.unsafeSetBodiesFrom(lowest);
-      persisted = lowest;
+      recordedLowest = lowest;
       bytesSinceRecord = 0;
     }
   }
@@ -456,18 +470,20 @@ public final class BodyBackfill {
     final ExecutorService running;
     Exception failure = error;
     synchronized (this) {
-      if (stopped) {
+      if (ended) {
         return;
       }
-      stopped = true;
+      ended = true;
       running = workers;
       // under the lock, so that a stop finds it recorded
       try {
-        persist();
+        recordLowest();
       } catch (final RuntimeException e) {
         LOG.debug("Could not record the back-filled blocks: {}", e.getMessage());
         // a back-fill that could not record what it stored did not complete
-        failure = failure != null ? failure : e;
+        if (failure == null) {
+          failure = e;
+        }
       }
       state = failure == null ? State.DONE : State.STOPPED;
     }
@@ -510,11 +526,9 @@ public final class BodyBackfill {
           List.copyOf(headers.subList(blocks.size(), headers.size()));
       blocks.addAll(
           send(
-              new PeerTaskRequest<>(
-                  () -> new GetSyncBlockBodiesFromPeerTask(remaining, protocolSchedule),
-                  Priority.BODIES,
-                  "bodies",
-                  remaining.getLast().getNumber())));
+              "bodies",
+              remaining.getLast().getNumber(),
+              () -> new GetSyncBlockBodiesFromPeerTask(remaining, protocolSchedule)));
     }
     return blocks;
   }
@@ -539,15 +553,10 @@ public final class BodyBackfill {
             new GetSyncReceiptsFromPeerTask.Request(List.copyOf(remaining), partial);
         final GetSyncReceiptsFromPeerTask.Response response =
             send(
-                new PeerTaskRequest<>(
-                    () ->
-                        new GetSyncReceiptsFromPeerTask(request, protocolSchedule, receiptEncoder),
-                    Priority.BODIES,
-                    "receipts",
-                    remaining.getLast().getHeader().getNumber()));
-        // asked again at once, an answer that completes nothing would loop on the same peer
-        if (response.completeReceiptsByBlock().isEmpty()
-            && response.lastBlockPartialReceipts().size() <= partial.size()) {
+                "receipts",
+                remaining.getLast().getHeader().getNumber(),
+                () -> new GetSyncReceiptsFromPeerTask(request, protocolSchedule, receiptEncoder));
+        if (completesNothing(response, partial)) {
           throw new IllegalStateException(
               "receipts from block "
                   + remaining.getFirst().getHeader().getNumber()
@@ -556,8 +565,8 @@ public final class BodyBackfill {
         response
             .completeReceiptsByBlock()
             .forEach((block, blockReceipts) -> receipts.put(block.getHash(), blockReceipts));
-        remaining =
-            remaining.stream().filter(block -> !receipts.containsKey(block.getHash())).toList();
+        // a peer completes the first blocks asked
+        remaining = remaining.subList(response.completeCount(), remaining.size());
         partial = response.lastBlockPartialReceipts();
       }
     }
@@ -566,12 +575,22 @@ public final class BodyBackfill {
         .toList();
   }
 
+  // no block completed and no more receipts of the one cut: asked again, it would loop
+  private static boolean completesNothing(
+      final GetSyncReceiptsFromPeerTask.Response response,
+      final List<SyncTransactionReceipt> partial) {
+    return response.completeCount() == 0
+        && response.lastBlockPartialReceipts().size() <= partial.size();
+  }
+
   // the answer of the scheduler, which retries the request on other peers
-  private <T> T send(final PeerTaskRequest<T> request) throws InterruptedException {
-    if (stopped) {
-      throw new CancellationException("body download stopped");
+  private <T> T send(final String name, final long highestBlock, final Supplier<PeerTask<T>> task)
+      throws InterruptedException {
+    if (ended) {
+      throw cancellation();
     }
-    final CompletableFuture<RequestSender.Response<T>> answer = sender.submitWithRetries(request);
+    final CompletableFuture<RequestSender.Response<T>> answer =
+        sender.submitWithRetries(new PeerTaskRequest<>(task, Priority.BODIES, name, highestBlock));
     try {
       return answer.get().value();
     } catch (final InterruptedException e) {
@@ -581,6 +600,10 @@ public final class BodyBackfill {
     } catch (final ExecutionException e) {
       throw new CompletionException(e.getCause());
     }
+  }
+
+  private static CancellationException cancellation() {
+    return new CancellationException("body download stopped");
   }
 
   // linked end to end and still on the canonical chain
@@ -603,25 +626,29 @@ public final class BodyBackfill {
   private void maybeLog() {
     final long now = System.nanoTime();
     final long last = lastLogNanos.get();
-    if (now - last < LOG_INTERVAL.toNanos() || !lastLogNanos.compareAndSet(last, now)) {
+    if (now - last < LOG_INTERVAL.toNanos()) {
+      return;
+    }
+    // one worker logs each interval
+    if (!lastLogNanos.compareAndSet(last, now)) {
       return;
     }
     final double seconds = (now - last) / 1e9;
     final long bytes = bytesStored.get();
-    final long downloaded = initialLowest - lowestStored();
+    final long lowest = lowestStored();
+    final long floor = floor();
+    final long downloaded = initialLowest - lowest;
+    final String doing = state == State.PAUSED ? "paused, node behind the head" : state.label();
     final StringBuilder line =
-        new StringBuilder("SNAP2 bodies ").append(percent(downloaded, initialLowest - floor()));
-    eta((double) downloaded, (double) blocksRemaining(), Duration.between(started, Instant.now()))
+        new StringBuilder("SNAP2 bodies ").append(percent(downloaded, initialLowest - floor));
+    eta(downloaded, lowest - floor, Duration.between(started, Instant.now()))
         .ifPresent(left -> line.append(" | ETA ").append(left));
     line.append(" | ")
         .append(settings.label())
         .append(' ')
         .append(mibPerSecond((bytes - loggedBytes) / seconds))
         .append(" | ")
-        .append(
-            state == State.PAUSED
-                ? "paused, node behind the head"
-                : state.name().toLowerCase(Locale.ROOT));
+        .append(doing);
     LOG.info("{}", line);
     loggedBytes = bytes;
   }
@@ -650,7 +677,7 @@ public final class BodyBackfill {
             "State of the SNAP2 back-fill, 1 for the current one",
             "state");
     for (final State value : State.values()) {
-      states.labels(() -> state == value ? 1 : 0, value.name().toLowerCase(Locale.ROOT));
+      states.labels(() -> state == value ? 1 : 0, value.label());
     }
   }
 

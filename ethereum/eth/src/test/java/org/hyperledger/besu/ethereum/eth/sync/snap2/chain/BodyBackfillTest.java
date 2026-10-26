@@ -75,12 +75,12 @@ import org.junit.jupiter.api.Test;
 class BodyBackfillTest {
 
   private static final int HEAD = 60;
-  private static final int RANGE_BLOCKS = 5;
+  private static final int RANGE_BLOCKS = 8;
   // far more steps or requests than a back-fill of these tests takes
-  private static final int MAX_STEPS = 10_000;
+  private static final int BUDGET = 10_000;
 
   private final BlockDataGenerator gen = new BlockDataGenerator(5);
-  private final List<Block> chain = new ArrayList<>();
+  private final List<Block> blocks = new ArrayList<>();
   private final Map<Hash, Block> blocksByHash = new HashMap<>();
   private final Map<Hash, List<TransactionReceipt>> receiptsByHash = new HashMap<>();
   private final FakeSender sender = new FakeSender();
@@ -89,9 +89,9 @@ class BodyBackfillTest {
   @Test
   void storesTheMissingBodiesAndReceiptsHighestFirst() {
     blockchain = chain(51);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done()).isCompleted();
     assertBodiesStored(1, HEAD);
@@ -99,8 +99,8 @@ class BodyBackfillTest {
     assertThat(backfill.lowestStored()).isEqualTo(1);
     assertThat(backfill.blocksRemaining()).isZero();
     assertThat(backfill.blocksStored()).isEqualTo(50);
-    // ranges of five blocks, from the highest missing one down
-    assertThat(sender.askedRanges).containsExactly(46L, 41L, 36L, 31L, 26L, 21L, 16L, 11L, 6L, 1L);
+    // ranges of eight blocks, from the highest missing one down
+    assertThat(sender.askedRanges).containsExactly(43L, 35L, 27L, 19L, 11L, 3L, 1L);
   }
 
   @Test
@@ -118,7 +118,7 @@ class BodyBackfillTest {
         };
     final BodyBackfill backfill = backfill(Long.MAX_VALUE, inSync, head -> 1);
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(requestsWhileBehind).containsExactly(0, 0, 0);
     assertThat(backfill.done()).isCompleted();
@@ -128,35 +128,35 @@ class BodyBackfillTest {
   @Test
   void resumesFromTheBlockRecordedOnStop() {
     blockchain = chain(51);
-    final BodyBackfill stopped = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill stopped = backfill();
     // stopped once the bodies of its third range arrived, while their receipts download
     sender.beforeReceipts =
         first -> {
-          if (first == 36) {
+          if (first == 27) {
             stopped.stop();
           }
         };
 
-    run(stopped);
+    runToEnd(stopped);
 
     assertThat(stopped.done()).isCompletedExceptionally();
-    assertThat(blockchain.getBodiesFrom()).contains(41L);
-    assertNoBodies(36, 40);
+    assertThat(blockchain.getBodiesFrom()).contains(35L);
+    assertNoBodies(27, 34);
 
     sender.beforeReceipts = first -> {};
     sender.askedRanges.clear();
-    final BodyBackfill resumed = backfill(Long.MAX_VALUE, () -> true, head -> 1);
-    run(resumed);
+    final BodyBackfill resumed = backfill();
+    runToEnd(resumed);
 
     assertThat(resumed.done()).isCompleted();
-    assertThat(sender.askedRanges).startsWith(36L);
+    assertThat(sender.askedRanges).startsWith(27L);
     assertBodiesStored(1, HEAD);
   }
 
   @Test
   void shutsTheWorkersDownWhenStartedAfterAStop() {
     blockchain = chain(51);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
     final QueuedExecutor workers = new QueuedExecutor();
 
     backfill.stop();
@@ -167,11 +167,25 @@ class BodyBackfillTest {
   }
 
   @Test
+  void asksNothingOnceStopped() {
+    blockchain = chain(51);
+    final BodyBackfill backfill = backfill();
+    final List<Long> receiptsAsked = new ArrayList<>();
+    // stopped while the bodies of its first range download
+    sender.beforeBodies = first -> backfill.stop();
+    sender.beforeReceipts = receiptsAsked::add;
+
+    runToEnd(backfill);
+
+    assertThat(receiptsAsked).isEmpty();
+  }
+
+  @Test
   void stopsAtTheLowestBlockNeeded() {
     blockchain = chain(51);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> head - 29);
+    final BodyBackfill backfill = backfill(head -> head - 29);
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done()).isCompleted();
     assertBodiesStored(31, HEAD);
@@ -182,7 +196,7 @@ class BodyBackfillTest {
   @Test
   void hasNothingToDoWhenEveryNeededBodyIsStored() {
     blockchain = chain(1);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
     final QueuedExecutor workers = new QueuedExecutor();
 
     backfill.start(workers);
@@ -196,11 +210,11 @@ class BodyBackfillTest {
     blockchain = chain(51);
     // the first answer holds no body
     sender.failNextBodies = true;
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
 
-    run(backfill);
+    runToEnd(backfill);
 
-    assertThat(sender.askedRanges).startsWith(46L, 46L, 41L);
+    assertThat(sender.askedRanges).startsWith(43L, 43L, 35L);
     assertThat(backfill.done()).isCompleted();
     assertBodiesStored(1, HEAD);
   }
@@ -209,21 +223,21 @@ class BodyBackfillTest {
   void dropsTheBlocksThatFallBelowTheFloorWhileTheyDownload() {
     blockchain = chain(51);
     final AtomicLong floor = new AtomicLong(1);
-    // a pruner raises the floor to 44 while the second range, 41 to 45, downloads
+    // a pruner raises the floor to 38 while the second range, 35 to 42, downloads
     sender.beforeBodies =
         first -> {
-          if (first == 41) {
-            floor.set(44);
+          if (first == 35) {
+            floor.set(38);
           }
         };
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> floor.get());
+    final BodyBackfill backfill = backfill(head -> floor.get());
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done()).isCompleted();
-    assertBodiesStored(44, HEAD);
-    assertNoBodies(41, 43);
-    assertThat(blockchain.getBodiesFrom()).contains(44L);
+    assertBodiesStored(38, HEAD);
+    assertNoBodies(35, 37);
+    assertThat(blockchain.getBodiesFrom()).contains(38L);
   }
 
   @Test
@@ -233,10 +247,10 @@ class BodyBackfillTest {
     sender.beforeBodies = first -> recorded.add(blockchain.getBodiesFrom().orElseThrow());
     final BodyBackfill backfill = backfill(0, () -> true, head -> 1);
 
-    run(backfill);
+    runToEnd(backfill);
 
     // a node that stops at any time downloads one range again at most
-    assertThat(recorded).containsExactly(51L, 46L, 41L, 36L, 31L, 26L, 21L, 16L, 11L, 6L);
+    assertThat(recorded).containsExactly(51L, 43L, 35L, 27L, 19L, 11L, 3L);
   }
 
   @Test
@@ -246,7 +260,7 @@ class BodyBackfillTest {
         gen.block(
             new BlockOptions()
                 .setBlockNumber(50)
-                .setParentHash(chain.get(49).getHash())
+                .setParentHash(blocks.get(49).getHash())
                 .setDifficulty(Difficulty.ZERO)
                 .hasOmmers(false)
                 .hasTransactions(false)
@@ -256,17 +270,17 @@ class BodyBackfillTest {
     // block 50 leaves the canonical chain while the range that ends with it downloads
     sender.beforeBodies =
         first -> {
-          if (first == 46 && reorged.compareAndSet(false, true)) {
+          if (first == 43 && reorged.compareAndSet(false, true)) {
             blockchain.storeBlockHeaders(List.of(fork.getHeader()), Difficulty.ONE);
           }
         };
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
 
-    run(backfill);
+    runToEnd(backfill);
 
-    assertThat(sender.askedRanges).startsWith(46L, 46L, 41L);
+    assertThat(sender.askedRanges).startsWith(43L, 43L, 35L);
     assertThat(blockchain.getBlockBody(fork.getHash())).contains(fork.getBody());
-    assertThat(blockchain.getBlockBody(chain.get(50).getHash())).isEmpty();
+    assertThat(blockchain.getBlockBody(blocks.get(50).getHash())).isEmpty();
     assertBodiesStored(1, 49);
   }
 
@@ -274,25 +288,25 @@ class BodyBackfillTest {
   void failsOnAMissingHeader() {
     // the headers from block 21 only, as left by a sync that stopped early
     blockchain = chain(51, 21);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done())
         .failsWithin(Duration.ZERO)
         .withThrowableThat()
-        .withMessageContaining("no header stored for block 16");
-    assertBodiesStored(21, HEAD);
-    assertThat(blockchain.getBodiesFrom()).contains(21L);
+        .withMessageContaining("no header stored for block 19");
+    assertBodiesStored(27, HEAD);
+    assertThat(blockchain.getBodiesFrom()).contains(27L);
   }
 
   @Test
   void failsWhenItCannotRecordWhatItStored() {
     blockchain = spy(chain(51));
     doThrow(new IllegalStateException("disk full")).when(blockchain).unsafeSetBodiesFrom(anyLong());
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
+    final BodyBackfill backfill = backfill();
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done())
         .failsWithin(Duration.ZERO)
@@ -301,13 +315,26 @@ class BodyBackfillTest {
   }
 
   @Test
+  void endsWhenItsWorkerIsInterrupted() {
+    blockchain = chain(51);
+    sender.leaveNextUnanswered = true;
+    final BodyBackfill backfill = backfill();
+
+    runToEnd(backfill);
+
+    assertThat(backfill.done()).isCompletedExceptionally();
+    // nobody waits for the request anymore, so the scheduler may drop it
+    assertThat(sender.unanswered).isCancelled();
+  }
+
+  @Test
   void completesTheReceiptsOfABlockCutAcrossPages() {
     blockchain = chain(51);
     // an eth/70 peer answers two receipts at most, of blocks that have three
     sender.speakEth70(2);
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 46);
+    final BodyBackfill backfill = backfill(head -> 46);
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(backfill.done()).isCompleted();
     assertBodiesStored(46, HEAD);
@@ -318,29 +345,25 @@ class BodyBackfillTest {
     blockchain = chain(51);
     sender.speakEth70(2);
     sender.stallNextPage = true;
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 46);
+    final BodyBackfill backfill = backfill(head -> 46);
 
-    run(backfill);
+    runToEnd(backfill);
 
     assertThat(sender.askedRanges).containsExactly(46L, 46L);
     assertThat(backfill.done()).isCompleted();
     assertBodiesStored(46, HEAD);
   }
 
-  @Test
-  void endsWhenItsWorkerIsInterrupted() {
-    blockchain = chain(51);
-    sender.unanswered = new CompletableFuture<>();
-    final BodyBackfill backfill = backfill(Long.MAX_VALUE, () -> true, head -> 1);
-
-    run(backfill);
-
-    assertThat(backfill.done()).isCompletedExceptionally();
-    // nobody waits for the request anymore, so the scheduler may drop it
-    assertThat(sender.unanswered).isCancelled();
+  // down to block 1, in sync, and the lowest block recorded once the back-fill ends
+  private BodyBackfill backfill() {
+    return backfill(head -> 1);
   }
 
-  // one worker, ranges of five blocks, no wait, and the lowest block recorded every so many bytes
+  private BodyBackfill backfill(final LongUnaryOperator lowestNeeded) {
+    return backfill(Long.MAX_VALUE, () -> true, lowestNeeded);
+  }
+
+  // one worker, ranges of eight blocks, no wait, and the lowest block recorded every so many bytes
   private BodyBackfill backfill(
       final long recordBytes, final BooleanSupplier inSync, final LongUnaryOperator lowestNeeded) {
     return new BodyBackfill(
@@ -359,7 +382,7 @@ class BodyBackfillTest {
   private static BooleanSupplier bounded(final BooleanSupplier inSync) {
     final AtomicInteger steps = new AtomicInteger();
     return () -> {
-      if (steps.incrementAndGet() > MAX_STEPS) {
+      if (steps.incrementAndGet() > BUDGET) {
         throw new AssertionError("the back-fill never ends");
       }
       return inSync.getAsBoolean();
@@ -367,7 +390,7 @@ class BodyBackfillTest {
   }
 
   // runs the back-fill to its end, its worker on the test thread
-  private static void run(final BodyBackfill backfill) {
+  private static void runToEnd(final BodyBackfill backfill) {
     final QueuedExecutor workers = new QueuedExecutor();
     backfill.start(workers);
     workers.runAll();
@@ -380,7 +403,7 @@ class BodyBackfillTest {
   // headers headersFrom to HEAD stored, the head set, and the bodies and receipts from bodiesFrom
   private MutableBlockchain chain(final long bodiesFrom, final long headersFrom) {
     final Block genesis = gen.genesisBlock();
-    chain.add(genesis);
+    blocks.add(genesis);
     final MutableBlockchain stored =
         InMemoryKeyValueStorageProvider.createInMemoryBlockchain(genesis);
     Block parent = genesis;
@@ -398,97 +421,20 @@ class BodyBackfillTest {
                   .hasOmmers(false)
                   .addTransaction(transactions)
                   .setReceiptsRoot(BodyValidation.receiptsRoot(receipts)));
-      chain.add(parent);
+      blocks.add(parent);
       blocksByHash.put(parent.getHash(), parent);
       receiptsByHash.put(parent.getHash(), receipts);
     }
     stored.storeBlockHeaders(
-        chain.subList((int) headersFrom, chain.size()).stream().map(Block::getHeader).toList(),
+        blocks.subList((int) headersFrom, blocks.size()).stream().map(Block::getHeader).toList(),
         Difficulty.ONE);
     for (long number = bodiesFrom; number <= HEAD; number++) {
-      final Block block = chain.get((int) number);
+      final Block block = blocks.get((int) number);
       stored.unsafeImportBlock(block, receiptsByHash.get(block.getHash()), Optional.empty());
     }
-    stored.unsafeSetChainHead(chain.get(HEAD).getHeader(), Difficulty.ONE);
+    stored.unsafeSetChainHead(blocks.get(HEAD).getHeader(), Difficulty.ONE);
     stored.unsafeSetBodiesFrom(bodiesFrom);
     return stored;
-  }
-
-  // the answer of a peer that has the whole chain
-  private MessageData answer(final MessageData message) {
-    return switch (message.getCode()) {
-      case EthProtocolMessages.GET_BLOCK_BODIES -> {
-        final List<Hash> hashes =
-            ImmutableList.copyOf(GetBlockBodiesMessage.readFrom(message).hashes());
-        final long first = number(hashes.getFirst());
-        sender.askedRanges.add(first);
-        sender.beforeBodies.accept(first);
-        if (sender.failNextBodies) {
-          sender.failNextBodies = false;
-          yield BlockBodiesMessage.create(List.of());
-        }
-        yield BlockBodiesMessage.create(
-            hashes.stream().map(hash -> blocksByHash.get(hash).getBody()).toList());
-      }
-      case EthProtocolMessages.GET_RECEIPTS ->
-          sender.pageSize > 0 ? page(message) : receipts(message);
-      default -> throw new IllegalArgumentException("unexpected eth message " + message.getCode());
-    };
-  }
-
-  // the receipts of every block asked, as an eth/68 peer sends them
-  private MessageData receipts(final MessageData message) {
-    final List<Hash> hashes =
-        ImmutableList.copyOf(GetReceiptsMessage.readFrom(message).blockHashes());
-    sender.beforeReceipts.accept(number(hashes.getFirst()));
-    return ReceiptsMessage.createUnsafe(encoded(hashes.stream().map(receiptsByHash::get).toList()));
-  }
-
-  // the receipts from the first one asked, cut after a page, as an eth/70 peer sends them
-  private MessageData page(final MessageData message) {
-    final GetPaginatedReceiptsMessage request = GetPaginatedReceiptsMessage.readFrom(message);
-    final List<Hash> hashes = ImmutableList.copyOf(request.blockHashes());
-    sender.beforeReceipts.accept(number(hashes.getFirst()));
-    final List<List<TransactionReceipt>> page = new ArrayList<>();
-    boolean cut = false;
-    if (sender.stallNextPage && request.firstBlockReceiptIndex() > 0) {
-      // the rest of a cut block is asked, and none of it comes
-      sender.stallNextPage = false;
-      page.add(List.of());
-      cut = true;
-    }
-    int left = sender.pageSize;
-    for (int i = 0; i < hashes.size() && left > 0 && !cut; i++) {
-      final List<TransactionReceipt> all = receiptsByHash.get(hashes.get(i));
-      final List<TransactionReceipt> rest =
-          i == 0 ? all.subList(request.firstBlockReceiptIndex(), all.size()) : all;
-      final int taken = Math.min(left, rest.size());
-      page.add(rest.subList(0, taken));
-      left -= taken;
-      cut = taken < rest.size();
-    }
-    final BytesValueRLPOutput lastBlockIncomplete = new BytesValueRLPOutput();
-    lastBlockIncomplete.writeLongScalar(cut ? 1 : 0);
-    return new RawMessage(
-        EthProtocolMessages.RECEIPTS,
-        Bytes.concatenate(lastBlockIncomplete.encoded(), encoded(page)));
-  }
-
-  private static Bytes encoded(final List<List<TransactionReceipt>> receiptsByBlock) {
-    final BytesValueRLPOutput out = new BytesValueRLPOutput();
-    out.startList();
-    for (final List<TransactionReceipt> receipts : receiptsByBlock) {
-      out.startList();
-      receipts.forEach(
-          receipt ->
-              TransactionReceiptEncoder.writeTo(
-                  receipt,
-                  out,
-                  TransactionReceiptEncodingConfiguration.DEFAULT_NETWORK_CONFIGURATION));
-      out.endList();
-    }
-    out.endList();
-    return out.encoded();
   }
 
   private long number(final Hash hash) {
@@ -497,7 +443,7 @@ class BodyBackfillTest {
 
   private void assertBodiesStored(final long from, final long to) {
     for (long number = from; number <= to; number++) {
-      final Block block = chain.get((int) number);
+      final Block block = blocks.get((int) number);
       assertThat(blockchain.getBlockBody(block.getHash())).contains(block.getBody());
       assertThat(blockchain.getTxReceipts(block.getHash()))
           .contains(receiptsByHash.get(block.getHash()));
@@ -506,7 +452,7 @@ class BodyBackfillTest {
 
   private void assertNoBodies(final long from, final long to) {
     for (long number = from; number <= to; number++) {
-      assertThat(blockchain.getBlockBody(chain.get((int) number).getHash())).isEmpty();
+      assertThat(blockchain.getBlockBody(blocks.get((int) number).getHash())).isEmpty();
     }
   }
 
@@ -519,15 +465,17 @@ class BodyBackfillTest {
 
   /** Answers the requests on the calling thread from the chain, through a single peer. */
   private final class FakeSender implements RequestSender {
-    private EthPeer peer = peer(EthProtocolVersion.V68);
+    private EthProtocolVersion version = EthProtocolVersion.V68;
+    private EthPeer peer = peer(version);
     // the first block of each range whose bodies were asked, in request order
     private final List<Long> askedRanges = new ArrayList<>();
     private int requests;
     private boolean failNextBodies;
-    // the receipts an eth/70 peer answers at most, none for an eth/68 one
+    // the receipts an eth/70 peer answers at most
     private int pageSize;
     private boolean stallNextPage;
-    // set, the next request is left unanswered and its worker interrupted, as by its owner
+    // the next request is left unanswered and its worker interrupted, as by its owner
+    private boolean leaveNextUnanswered;
     private CompletableFuture<?> unanswered;
     // called with the first block of each request, before it is answered
     private Consumer<Long> beforeBodies = first -> {};
@@ -535,17 +483,19 @@ class BodyBackfillTest {
 
     // an eth/70 peer, which pages the receipts it answers
     private void speakEth70(final int receiptsPerPage) {
-      peer = peer(EthProtocolVersion.V70);
+      version = EthProtocolVersion.V70;
+      peer = peer(version);
       pageSize = receiptsPerPage;
     }
 
     @Override
     public <T> CompletableFuture<Response<T>> submit(
         final SyncRequest<T> request, final Set<EthPeer> excluded) {
-      if (++requests > MAX_STEPS) {
+      if (++requests > BUDGET) {
         throw new AssertionError("the back-fill asks without end");
       }
-      if (unanswered != null) {
+      if (leaveNextUnanswered) {
+        leaveNextUnanswered = false;
         Thread.currentThread().interrupt();
         final CompletableFuture<Response<T>> pending = new CompletableFuture<>();
         unanswered = pending;
@@ -558,6 +508,92 @@ class BodyBackfillTest {
       } catch (final RuntimeException e) {
         return CompletableFuture.failedFuture(e);
       }
+    }
+
+    // the answer of a peer that has the whole chain
+    private MessageData answer(final MessageData message) {
+      return switch (message.getCode()) {
+        case EthProtocolMessages.GET_BLOCK_BODIES -> bodies(message);
+        case EthProtocolMessages.GET_RECEIPTS ->
+            version == EthProtocolVersion.V70 ? page(message) : receipts(message);
+        default ->
+            throw new IllegalArgumentException("unexpected eth message " + message.getCode());
+      };
+    }
+
+    private MessageData bodies(final MessageData message) {
+      final List<Hash> hashes =
+          ImmutableList.copyOf(GetBlockBodiesMessage.readFrom(message).hashes());
+      final long first = number(hashes.getFirst());
+      askedRanges.add(first);
+      beforeBodies.accept(first);
+      if (failNextBodies) {
+        failNextBodies = false;
+        return BlockBodiesMessage.create(List.of());
+      }
+      return BlockBodiesMessage.create(
+          hashes.stream().map(hash -> blocksByHash.get(hash).getBody()).toList());
+    }
+
+    // every receipt of the blocks asked, as an eth/68 peer sends them
+    private MessageData receipts(final MessageData message) {
+      final List<Hash> hashes =
+          ImmutableList.copyOf(GetReceiptsMessage.readFrom(message).blockHashes());
+      beforeReceipts.accept(number(hashes.getFirst()));
+      return ReceiptsMessage.createUnsafe(
+          encoded(hashes.stream().map(receiptsByHash::get).toList()));
+    }
+
+    // the receipts from the first one asked, cut after a page, as an eth/70 peer sends them
+    private MessageData page(final MessageData message) {
+      final GetPaginatedReceiptsMessage request = GetPaginatedReceiptsMessage.readFrom(message);
+      final List<Hash> hashes = ImmutableList.copyOf(request.blockHashes());
+      beforeReceipts.accept(number(hashes.getFirst()));
+      final boolean restOfCutBlock = request.firstBlockReceiptIndex() > 0;
+      if (stallNextPage && restOfCutBlock) {
+        // none of the rest comes
+        stallNextPage = false;
+        return pageMessage(List.of(List.of()), true);
+      }
+      final List<List<TransactionReceipt>> page = new ArrayList<>();
+      int left = pageSize;
+      for (int i = 0; i < hashes.size() && left > 0; i++) {
+        final List<TransactionReceipt> all = receiptsByHash.get(hashes.get(i));
+        final List<TransactionReceipt> rest =
+            i == 0 ? all.subList(request.firstBlockReceiptIndex(), all.size()) : all;
+        final int taken = Math.min(left, rest.size());
+        page.add(rest.subList(0, taken));
+        if (taken < rest.size()) {
+          return pageMessage(page, true);
+        }
+        left -= taken;
+      }
+      return pageMessage(page, false);
+    }
+
+    private static MessageData pageMessage(
+        final List<List<TransactionReceipt>> page, final boolean lastBlockIncomplete) {
+      final BytesValueRLPOutput flag = new BytesValueRLPOutput();
+      flag.writeLongScalar(lastBlockIncomplete ? 1 : 0);
+      return new RawMessage(
+          EthProtocolMessages.RECEIPTS, Bytes.concatenate(flag.encoded(), encoded(page)));
+    }
+
+    private static Bytes encoded(final List<List<TransactionReceipt>> receiptsByBlock) {
+      final BytesValueRLPOutput out = new BytesValueRLPOutput();
+      out.startList();
+      for (final List<TransactionReceipt> receipts : receiptsByBlock) {
+        out.startList();
+        receipts.forEach(
+            receipt ->
+                TransactionReceiptEncoder.writeTo(
+                    receipt,
+                    out,
+                    TransactionReceiptEncodingConfiguration.DEFAULT_NETWORK_CONFIGURATION));
+        out.endList();
+      }
+      out.endList();
+      return out.encoded();
     }
 
     @Override

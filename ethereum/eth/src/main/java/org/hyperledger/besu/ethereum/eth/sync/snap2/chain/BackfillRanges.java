@@ -48,13 +48,16 @@ final class BackfillRanges {
     claimed.remove(range.from(), range.to());
   }
 
-  /** Records stored blocks: the lowest block moves down over the runs stored right below it. */
+  /** Records stored blocks: the lowest block moves down over the run stored right below it. */
   void store(final long from, final long to) {
     stored.add(from, to);
-    final long start = stored.startOf(lowest - 1);
-    if (start >= 0) {
-      stored.remove(start, lowest - 1);
-      lowest = start;
+    final long below = lowest - 1;
+    final long runStart = stored.startOf(below);
+    if (runStart < 0) {
+      // the block right below the lowest one is still missing
+      return;
     }
+    stored.remove(runStart, below);
+    lowest = runStart;
   }
 }

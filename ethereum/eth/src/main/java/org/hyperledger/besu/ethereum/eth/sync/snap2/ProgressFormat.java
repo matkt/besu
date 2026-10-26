@@ -85,7 +85,7 @@ public final class ProgressFormat {
 
   /** Returns the share of a total as a percentage, as in 37.4%, 0.0% without a total. */
   public static String percent(final long done, final long total) {
-    final double share = total <= 0 ? 0 : Math.max(0, Math.min(1, (double) done / total));
+    final double share = total > 0 ? Math.clamp((double) done / total, 0, 1) : 0;
     return String.format(Locale.ROOT, "%.1f%%", 100 * share);
   }
 
@@ -96,15 +96,15 @@ public final class ProgressFormat {
 
   /**
    * Returns the time left to do what remains at the average rate since the start, as in ~45m or ~2h
-   * 31m, or empty without a rate, with nothing left, or beyond a year.
+   * 31m, or empty with nothing done, nothing left, no time elapsed, or beyond a year.
    */
   public static Optional<String> eta(
-      final double done, final double remaining, final Duration elapsed) {
-    final double perSecond = done / (elapsed.toMillis() / 1000.0);
-    if (remaining <= 0 || perSecond <= 0 || !Double.isFinite(perSecond)) {
+      final long done, final long remaining, final Duration elapsed) {
+    if (done <= 0 || remaining <= 0 || elapsed.toMillis() <= 0) {
       return Optional.empty();
     }
-    final double seconds = Math.ceil(remaining / perSecond);
+    final double elapsedSeconds = elapsed.toMillis() / 1000.0;
+    final double seconds = Math.ceil(remaining * elapsedSeconds / done);
     if (seconds > LONGEST_ETA.toSeconds()) {
       return Optional.empty();
     }

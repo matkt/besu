@@ -25,9 +25,9 @@ final class QueuedExecutor extends AbstractExecutorService {
   private boolean shutdown;
 
   void runAll() {
-    for (final Runnable task : tasks) {
-      task.run();
-      // a pipeline stage interrupts its thread, the test thread here, once done or aborted
+    while (!tasks.isEmpty()) {
+      tasks.removeFirst().run();
+      // a pipeline stage, or an interrupted back-fill, leaves the test thread interrupted
       Thread.interrupted();
     }
   }
@@ -55,11 +55,11 @@ final class QueuedExecutor extends AbstractExecutorService {
 
   @Override
   public boolean isTerminated() {
-    return false;
+    return shutdown && tasks.isEmpty();
   }
 
   @Override
   public boolean awaitTermination(final long timeout, final TimeUnit unit) {
-    return true;
+    return isTerminated();
   }
 }

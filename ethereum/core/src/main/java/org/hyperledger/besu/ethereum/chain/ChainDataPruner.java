@@ -93,13 +93,14 @@ public class ChainDataPruner implements BlockAddedObserver {
 
   // the lowest block whose body and receipts stay in place at this chain head
   private long lowestRetained(final long chainHead) {
-    return switch (pruningMode) {
-      case CHAIN_PRUNING ->
-          config.isBlockPruningEnabled()
-              ? Math.max(1, chainHead - config.chainPruningBlocksRetained() + 1)
-              : 0;
-      case PRE_MERGE_PRUNING -> mergeBlock;
-    };
+    if (pruningMode == PruningMode.PRE_MERGE_PRUNING) {
+      return mergeBlock;
+    }
+    // pruning only the block access lists keeps every body
+    if (!config.isBlockPruningEnabled()) {
+      return 0;
+    }
+    return Math.max(0, chainHead - config.chainPruningBlocksRetained() + 1);
   }
 
   private void chainPrunerAction(final BlockAddedEvent event) {

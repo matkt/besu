@@ -1647,22 +1647,21 @@ public class ChainDataPrunerTest {
   @Test
   public void leavesNoMarginWhenTheLowestRetainedBlockDoesNotMove() {
     final BlockchainStorage blockchainStorage = Mockito.mock(BlockchainStorage.class);
+    final ChainDataPruner preMergePruner =
+        backfillPruner(
+            blockchainStorage,
+            ChainDataPruner.PruningMode.PRE_MERGE_PRUNING,
+            ChainDataPruner.ChainPruningStrategy.ALL);
+    final ChainDataPruner balPruner =
+        backfillPruner(
+            blockchainStorage,
+            ChainDataPruner.PruningMode.CHAIN_PRUNING,
+            ChainDataPruner.ChainPruningStrategy.BAL);
+
     // pre-merge pruning keeps every block from the merge block
-    assertThat(
-            backfillPruner(
-                    blockchainStorage,
-                    ChainDataPruner.PruningMode.PRE_MERGE_PRUNING,
-                    ChainDataPruner.ChainPruningStrategy.ALL)
-                .lowestToBackfill(1_000))
-        .isEqualTo(11);
+    assertThat(preMergePruner.lowestToBackfill(1_000)).isEqualTo(11);
     // pruning the block access lists only keeps every body
-    assertThat(
-            backfillPruner(
-                    blockchainStorage,
-                    ChainDataPruner.PruningMode.CHAIN_PRUNING,
-                    ChainDataPruner.ChainPruningStrategy.BAL)
-                .lowestToBackfill(1_000))
-        .isZero();
+    assertThat(balPruner.lowestToBackfill(1_000)).isZero();
   }
 
   // keeps 10 blocks, runs every 4 blocks, the merge at block 11
