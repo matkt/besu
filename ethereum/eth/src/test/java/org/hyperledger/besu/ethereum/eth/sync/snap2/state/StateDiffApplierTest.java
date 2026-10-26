@@ -17,6 +17,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld.hash;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld.slotHash;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -263,13 +265,5 @@ class StateDiffApplierTest {
   private static SlotChanges slot(final UInt256 key, final long value) {
     return new SlotChanges(
         new StorageSlotKey(key), List.of(new StorageChange(1, UInt256.valueOf(value))));
-  }
-
-  private static Bytes32 hash(final Address address) {
-    return Bytes32.wrap(address.addressHash().getBytes());
-  }
-
-  private static Bytes32 slotHash(final UInt256 key) {
-    return Bytes32.wrap(new StorageSlotKey(key).getSlotHash().getBytes());
   }
 }
