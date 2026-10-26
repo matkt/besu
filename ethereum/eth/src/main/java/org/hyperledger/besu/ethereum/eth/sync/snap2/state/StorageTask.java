@@ -40,6 +40,9 @@ final class StorageTask {
   // its download, which only the loop of the state download touches
   final List<RangeTask> chunks = new ArrayList<>();
   boolean queued;
+  boolean refreshQueued;
+  int inFlight;
+  boolean refreshing;
 
   StorageTask(final Bytes32 accountHash, final Bytes32 storageRoot) {
     // copies, as hashes decoded from a response slice the whole message

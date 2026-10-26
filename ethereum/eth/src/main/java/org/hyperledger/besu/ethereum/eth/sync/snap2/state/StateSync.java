@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTrieUpdater;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 
 import java.time.Duration;
@@ -45,9 +46,11 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -58,11 +61,13 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Downloads the flat state at the pivot: accounts, storages and bytecodes in parallel, each
- * response checked against its root before it is written.
+ * response checked against its root and persisted only if the pivot did not move meanwhile.
  */
 public final class StateSync {
 
   private static final Logger LOG = LoggerFactory.getLogger(StateSync.class);
+  // response size of a request for one account
+  private static final int SINGLE_ACCOUNT_BYTES = 4096;
   // pending storages or bytecodes above which no account range is asked
   private static final int STORAGE_BACKLOG = 50_000;
   private static final int NO_EPOCH = -1;
@@ -86,11 +91,14 @@ public final class StateSync {
       int maxStorageChunks,
       int codeBatchSize) {}
 
+  private final SyncStateStorage storage;
   private final RequestSender scheduler;
   private final Settings settings;
   private final StateCoverage coverage = new StateCoverage();
   private final StateWriter writer;
-  // the writes hold it shared, a stop exclusively: once the stop returns, nothing is written
+  // applies the pivot moves to the storage tries written while downloading
+  private final StorageTrieUpdater trieUpdater;
+  // the writes hold it shared, a pivot move or a stop exclusively
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
@@ -99,16 +107,20 @@ public final class StateSync {
   private final CompletableFuture<Void> completion = new CompletableFuture<>();
   private volatile Pivot pivot;
   private volatile Instant started = Instant.now();
+  private volatile boolean pivotStale;
   private volatile boolean stopped;
+  private volatile boolean paused;
 
   // bookkeeping, loop thread only
   private final List<RangeTask> accountTasks = new ArrayList<>();
   // the lowest account range not done yet
   private int firstAccountTask;
   private final ArrayDeque<StorageTask> storageQueue = new ArrayDeque<>();
+  private final ArrayDeque<StorageTask> refreshQueue = new ArrayDeque<>();
   private final Set<StorageTask> chunked = new LinkedHashSet<>();
   private final CodeQueue codeQueue;
   private final StateServers servers = new StateServers();
+  private final EmptyAnswers emptyAnswers = new EmptyAnswers();
   // peers left out of state requests, refreshed on each dispatch
   private Set<EthPeer> excluded = Set.of();
   private volatile int excludedCount;
@@ -117,17 +129,21 @@ public final class StateSync {
   private int accountsInFlight;
   private int storageInFlight;
   private int codesRequestsInFlight;
+  private int refreshesInFlight;
 
   /**
    * Creates a download.
    *
    * @param workerThreads the threads that verify the responses; as many write them, two at least
+   * @param trieBuildThreads the threads of the final trie build; a quarter of them, one to four,
+   *     apply the pivot moves to the storage tries written
    */
   public StateSync(
       final SyncStateStorage storage,
       final RequestSender scheduler,
       final Settings settings,
-      final int workerThreads) {
+      final int workerThreads,
+      final int trieBuildThreads) {
     this(
         storage,
         scheduler,
@@ -137,10 +153,16 @@ public final class StateSync {
         Executors.newFixedThreadPool(
             Math.max(2, workerThreads),
             Thread.ofPlatform().name("snap2-persist-", 0).daemon().factory()),
-        System::nanoTime);
+        System::nanoTime,
+        (withoutMoves, trieLeft) ->
+            new StorageTrieUpdater(
+                storage, withoutMoves, trieLeft, Math.max(1, Math.min(4, trieBuildThreads / 4))));
   }
 
-  /** Creates a download whose bookkeeping runs on {@code loop}. */
+  /**
+   * Creates a download whose bookkeeping runs on {@code loop}, and whose storage trie updater
+   * {@code newTrieUpdater} makes from the guard of the writes and the tries left.
+   */
   @VisibleForTesting
   StateSync(
       final SyncStateStorage storage,
@@ -148,13 +170,16 @@ public final class StateSync {
       final Settings settings,
       final ScheduledExecutorService loop,
       final ExecutorService persister,
-      final LongSupplier nanoTime) {
+      final LongSupplier nanoTime,
+      final BiFunction<Predicate<Runnable>, Predicate<Bytes32>, StorageTrieUpdater>
+          newTrieUpdater) {
     // a zero would leave nothing to ask, or a queue that never drains
     checkArgument(settings.accountChunks() > 0, "accountChunks must be positive");
     checkArgument(settings.responseBytes() > 0, "responseBytes must be positive");
     checkArgument(settings.storageBatchSize() > 0, "storageBatchSize must be positive");
     checkArgument(settings.maxStorageChunks() > 0, "maxStorageChunks must be positive");
     checkArgument(settings.codeBatchSize() > 0, "codeBatchSize must be positive");
+    this.storage = storage;
     this.scheduler = scheduler;
     this.settings = settings;
     this.loop = loop;
@@ -162,6 +187,7 @@ public final class StateSync {
     this.nanoTime = nanoTime;
     this.writer = new StateWriter(storage, coverage);
     this.codeQueue = new CodeQueue(storage);
+    this.trieUpdater = newTrieUpdater.apply(this::withoutMoves, writer::isTrieLeft);
   }
 
   /** Starts downloading the state of the given pivot, nothing once stopped. */
@@ -193,25 +219,64 @@ public final class StateSync {
   }
 
   /**
+   * Moves the download to a newer pivot, applying the state changes of the blocks in between to
+   * what is already persisted. A diff that fails to apply stops the download and fails it.
+   */
+  public CompletableFuture<StateDiffApplier.Outcome> moveTo(
+      final BlockHeader newPivot, final StateDiff diff) {
+    return CompletableFuture.supplyAsync(
+        () -> {
+          try {
+            return exclusively(
+                () -> {
+                  final StateDiffApplier.Outcome outcome =
+                      StateDiffApplier.apply(diff, storage, coverage, trieUpdater::changed);
+                  switchPivot(newPivot);
+                  return outcome;
+                });
+          } catch (final RuntimeException e) {
+            // the diff is partly applied, the download cannot go on from it
+            stop(e);
+            throw e;
+          } finally {
+            execute(this::dispatch);
+          }
+        },
+        scheduler.workers());
+  }
+
+  /** Stops sending new requests, while several pivot moves are applied in a row. */
+  public void pause() {
+    paused = true;
+  }
+
+  /** Resumes sending requests. */
+  public void resume() {
+    paused = false;
+    execute(this::dispatch);
+  }
+
+  /** Applies the storage changes of the last moves to the tries written. */
+  public void finishStorageTries() {
+    trieUpdater.finish();
+  }
+
+  /**
    * Stops downloading; once it returns, nothing more is written. It also releases the threads of a
    * download that completed.
    */
   public void stop() {
-    // waits for writes in progress
-    lock.writeLock().lock();
-    try {
-      stopped = true;
-    } finally {
-      lock.writeLock().unlock();
-    }
-    loop.shutdownNow();
-    persister.shutdownNow();
-    completion.completeExceptionally(new CancellationException("state download stopped"));
+    stop(new CancellationException("state download stopped"));
   }
 
   /** Returns the current pivot. */
   public Pivot pivot() {
     return pivot;
+  }
+
+  /** Returns whether peers stopped serving the state of the pivot. */
+  public boolean isPivotStale() {
+    return pivotStale;
   }
 
   /** Returns the time since the download started. */
@@ -269,15 +334,79 @@ public final class StateSync {
     return writer.isTrieLeft(accountHash);
   }
 
-  // the result of a write, or null once the download stopped
-  private <T> T unlessStopped(final Supplier<T> write) {
+  /** Returns the number of storage tries written while downloading that pivot moves changed. */
+  public long storageTriesUpdated() {
+    return trieUpdater.updated();
+  }
+
+  /** Returns the number of storage tries whose changes from pivot moves wait to be applied. */
+  public int storageTrieUpdatesPending() {
+    return trieUpdater.pendingStorages();
+  }
+
+  /** Returns the number of changed slots waiting to be applied to storage tries. */
+  public long storageTrieUpdateSlotsPending() {
+    return trieUpdater.pendingSlots();
+  }
+
+  // the result of a write at a known pivot, or null if the pivot moved
+  private <T> T atPivot(final int epoch, final Supplier<T> write) {
     lock.readLock().lock();
     try {
       // a stopped download must not touch a storage that may already be wiped for a new sync
-      return stopped ? null : write.get();
+      return stopped || pivot.epoch() != epoch ? null : write.get();
     } finally {
       lock.readLock().unlock();
     }
+  }
+
+  // runs an action exclusive with pivot moves, unless the download stopped
+  private boolean withoutMoves(final Runnable action) {
+    lock.readLock().lock();
+    try {
+      if (stopped) {
+        return false;
+      }
+      action.run();
+      return true;
+    } finally {
+      lock.readLock().unlock();
+    }
+  }
+
+  // runs a write on the flat state exclusive with every download write
+  private <T> T exclusively(final Supplier<T> write) {
+    lock.writeLock().lock();
+    try {
+      if (stopped) {
+        throw new IllegalStateException("state download stopped");
+      }
+      return write.get();
+    } finally {
+      lock.writeLock().unlock();
+    }
+  }
+
+  // callers hold the exclusive lock
+  private void switchPivot(final BlockHeader newPivot) {
+    pivot = new Pivot(pivot.epoch() + 1, newPivot);
+    pivotStale = false;
+    execute(emptyAnswers::clear);
+  }
+
+  // fails the download with the cause, unless it ended before; the caller must not hold the lock
+  private void stop(final Throwable cause) {
+    // waits for writes in progress
+    lock.writeLock().lock();
+    try {
+      stopped = true;
+    } finally {
+      lock.writeLock().unlock();
+    }
+    loop.shutdownNow();
+    persister.shutdownNow();
+    trieUpdater.stop();
+    completion.completeExceptionally(cause);
   }
 
   // nothing runs once the loop is stopped
@@ -308,7 +437,7 @@ public final class StateSync {
   }
 
   private int inFlight() {
-    return accountsInFlight + storageInFlight + codesRequestsInFlight;
+    return accountsInFlight + storageInFlight + codesRequestsInFlight + refreshesInFlight;
   }
 
   private void dispatch() {
@@ -319,7 +448,7 @@ public final class StateSync {
       complete();
       return;
     }
-    if (waitingForPeers) {
+    if (pivotStale || paused || waitingForPeers) {
       return;
     }
     excluded = servers.excluded(nanoTime.getAsLong());
@@ -329,13 +458,26 @@ public final class StateSync {
     // more than the peers take now, so that a peer gets its next request at once
     final int target = capacity + capacity / 4;
 
+    sendRefreshes(current, target);
     sendAccountRanges(current, target);
     // bytecodes flow alongside the state
     sendCodes(target, Math.max(1, target / 8));
     sendChunks(current, target);
     sendStorageBatches(current, target);
+    // the refreshes these storages asked for, rather than at the next dispatch
+    sendRefreshes(current, target);
     // idle capacity goes to bytecodes
     sendCodes(target, target);
+  }
+
+  private void sendRefreshes(final Pivot current, final int target) {
+    while (inFlight() < target && !refreshQueue.isEmpty()) {
+      final StorageTask task = refreshQueue.poll();
+      task.refreshQueued = false;
+      if (coverage.isPending(task) && !task.refreshing) {
+        sendRefresh(task, current);
+      }
+    }
   }
 
   // lowest ranges first: the state written in key order is not rewritten at each database level
@@ -374,7 +516,12 @@ public final class StateSync {
       final StorageTask task = tasks.next();
       if (!coverage.isPending(task)) {
         tasks.remove();
-      } else {
+      } else if (task.isRootStale()) {
+        // refreshed once the requests at its old root are back
+        if (task.inFlight == 0) {
+          requestRefresh(task);
+        }
+      } else if (!task.refreshing) {
         for (int i = 0; i < task.chunks.size() && inFlight() < target; i++) {
           final RangeTask chunk = task.chunks.get(i);
           if (!chunk.done && !chunk.inFlight) {
@@ -394,14 +541,18 @@ public final class StateSync {
     }
   }
 
-  // the next storages to ask together
+  // the next storages to ask together, those whose root is stale going to the refresh queue
   private List<StorageTask> takeStorageBatch() {
     final List<StorageTask> batch = new ArrayList<>();
     while (batch.size() < settings.storageBatchSize() && !storageQueue.isEmpty()) {
       final StorageTask task = storageQueue.poll();
       task.queued = false;
       if (coverage.isPending(task)) {
-        batch.add(task);
+        if (task.isRootStale()) {
+          requestRefresh(task);
+        } else {
+          batch.add(task);
+        }
       }
     }
     return batch;
@@ -414,6 +565,13 @@ public final class StateSync {
     }
   }
 
+  private void requestRefresh(final StorageTask task) {
+    if (!task.refreshing && !task.refreshQueued) {
+      task.refreshQueued = true;
+      refreshQueue.add(task);
+    }
+  }
+
   private void sendAccounts(final RangeTask task, final Pivot current) {
     task.inFlight = true;
     accountsInFlight++;
@@ -423,7 +581,7 @@ public final class StateSync {
     send(
         request,
         current.epoch(),
-        result -> unlessStopped(() -> writer.accounts(request, result)),
+        result -> atPivot(current.epoch(), () -> writer.accounts(request, result)),
         written -> {
           task.inFlight = false;
           accountsInFlight--;
@@ -440,6 +598,7 @@ public final class StateSync {
   }
 
   private void sendStorageBatch(final List<StorageTask> batch, final Pivot current) {
+    batch.forEach(task -> task.inFlight++);
     final StorageRangesRequest request =
         new StorageRangesRequest(
             current,
@@ -453,6 +612,7 @@ public final class StateSync {
 
   private void sendStorageChunk(
       final StorageTask task, final RangeTask chunk, final Pivot current) {
+    task.inFlight++;
     chunk.inFlight = true;
     final StorageRangesRequest request =
         new StorageRangesRequest(
@@ -471,9 +631,10 @@ public final class StateSync {
     send(
         request,
         request.pivot.epoch(),
-        result -> unlessStopped(() -> writer.storages(request, result)),
+        result -> atPivot(request.pivot.epoch(), () -> writer.storages(request, result)),
         written -> {
           storageInFlight--;
+          request.tasks.forEach(task -> task.inFlight--);
           after.accept(written);
         });
   }
@@ -522,6 +683,29 @@ public final class StateSync {
     chunked.add(task);
   }
 
+  private void sendRefresh(final StorageTask task, final Pivot current) {
+    task.refreshing = true;
+    refreshesInFlight++;
+    final AccountRangeRequest request =
+        new AccountRangeRequest(
+            current,
+            task.accountHash(),
+            task.accountHash(),
+            SINGLE_ACCOUNT_BYTES,
+            "account_refresh");
+    send(
+        request,
+        current.epoch(),
+        result -> atPivot(current.epoch(), () -> writer.refresh(task, result)),
+        unused -> {
+          task.refreshing = false;
+          refreshesInFlight--;
+          if (coverage.isPending(task) && task.chunks.isEmpty()) {
+            queueStorage(task);
+          }
+        });
+  }
+
   private void sendCodeBatch(final List<Bytes32> batch) {
     codesRequestsInFlight++;
     send(
@@ -535,11 +719,7 @@ public final class StateSync {
   }
 
   private Set<Bytes32> writeCodes(final Map<Bytes32, Bytes> received) {
-    return unlessStopped(
-        () -> {
-          writer.codes(received);
-          return received.keySet();
-        });
+    return withoutMoves(() -> writer.codes(received)) ? received.keySet() : Set.of();
   }
 
   /**
@@ -564,7 +744,7 @@ public final class StateSync {
                     if (error != null) {
                       onFailure(error, epoch);
                     } else if (epoch != NO_EPOCH) {
-                      servers.served(response.peer(), epoch);
+                      onServed(response.peer(), epoch);
                     }
                     bookkeeping.accept(written);
                     dispatch();
@@ -583,6 +763,13 @@ public final class StateSync {
     }
   }
 
+  private void onServed(final EthPeer peer, final int epoch) {
+    servers.served(peer, epoch);
+    if (epoch == pivot.epoch()) {
+      emptyAnswers.clear();
+    }
+  }
+
   private void onFailure(final Throwable error, final int epoch) {
     final Optional<RequestFailedException> failure = RequestFailedException.from(error);
     if (failure.isEmpty()) {
@@ -594,18 +781,30 @@ public final class StateSync {
     if (reason == RequestFailedException.Reason.NO_PEER) {
       // the next requests would fail too: they wait for the periodic dispatch
       waitingForPeers = true;
-    } else if (reason == RequestFailedException.Reason.EMPTY && failure.get().peer().isPresent()) {
+    } else if (reason == RequestFailedException.Reason.EMPTY
+        && epoch == pivot.epoch()
+        && failure.get().peer().isPresent()) {
       onEmpty(failure.get().peer().get(), epoch);
     }
   }
 
-  // a peer that answers nothing for a pivot others serve is left out of state requests a while
+  // empty answers of peers that serve the state tell that the pivot is too old
   private void onEmpty(final EthPeer peer, final int epoch) {
     if (servers.empty(peer, epoch, nanoTime.getAsLong())) {
       LOG.debug(
           "{} does not serve the state of block {}, leaving it out for a while",
           peer.getLoggableId(),
           pivot.header().getNumber());
+      emptyAnswers.forget(peer);
+      return;
+    }
+    final int candidates = Math.max(1, scheduler.peerCount(Protocol.SNAP) - excluded.size());
+    // a peer that never served state says nothing about the age of the pivot
+    if (servers.hasServed(peer) && emptyAnswers.add(peer, candidates) && !pivotStale) {
+      LOG.info(
+          "Peers stopped serving the state of block {}, the pivot must move",
+          pivot.header().getNumber());
+      pivotStale = true;
     }
   }
 
