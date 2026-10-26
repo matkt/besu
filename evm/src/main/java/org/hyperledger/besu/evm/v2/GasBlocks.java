@@ -21,6 +21,8 @@ import org.hyperledger.besu.evm.operation.Operation;
 import org.hyperledger.besu.evm.operation.PushOperation;
 import org.hyperledger.besu.evm.v2.operation.EqOperationV2;
 
+import java.util.Arrays;
+
 /**
  * The blocks of a code that EVM v2 runs with the gas of the whole block charged at once: runs of
  * operations of fixed cost that can only fail on the stack, starting at a JUMPDEST or after any
@@ -40,11 +42,21 @@ public final class GasBlocks {
 
   private static final int EQ = 0x14;
 
+  /** The costs the blocks were computed with, which tell forks apart. */
   private final int[] costs;
+
+  /**
+   * One long per 32 bytes of code: the number of blocks starting before them in the high 32 bits,
+   * and one bit per byte, set where a block starts, in the low 32 bits.
+   */
+  private final long[] chunks;
+
+  /** The entry of each block, in code order. */
   private final int[] entries;
 
-  private GasBlocks(final int[] costs, final int[] entries) {
+  private GasBlocks(final int[] costs, final long[] chunks, final int[] entries) {
     this.costs = costs;
+    this.chunks = chunks;
     this.entries = entries;
   }
 
@@ -77,26 +89,36 @@ public final class GasBlocks {
    *
    * @param code the code
    * @param costs the costs of the fork, from {@link #costs}
-   * @return for each pc, the gas of the block starting there in the high 16 bits and its length in
-   *     the low 16 bits, 0 where no block starts
+   * @return the blocks
    */
-  public static int[] of(final Code code, final int[] costs) {
-    final GasBlocks blocks = code.getGasBlocks();
-    if (blocks != null && blocks.costs == costs) {
-      return blocks.entries;
+  public static GasBlocks of(final Code code, final int[] costs) {
+    GasBlocks blocks = code.getGasBlocks();
+    if (blocks == null || blocks.costs != costs) {
+      blocks = analyse(code.getBytes().toArrayUnsafe(), costs);
+      code.setGasBlocks(blocks);
     }
-    final int[] entries = analyse(code.getBytes().toArrayUnsafe(), costs);
-    code.setGasBlocks(new GasBlocks(costs, entries));
-    return entries;
+    return blocks;
   }
 
   /**
-   * The size of an operation, with its immediate data.
+   * The block starting at a pc.
    *
-   * @param opcode the opcode
-   * @return the number of bytes of code it takes
+   * @param pc the pc, inside the code
+   * @return the gas of the block in the high 16 bits and its length in the low 16 bits, 0 where no
+   *     block starts
    */
-  public static int size(final int opcode) {
+  public int entry(final int pc) {
+    final long chunk = chunks[pc >>> 5];
+    // an int shift uses only the low five bits of pc, its offset in the chunk
+    final int bit = 1 << pc;
+    if (((int) chunk & bit) == 0) {
+      return 0;
+    }
+    return entries[(int) (chunk >>> 32) + Integer.bitCount((int) chunk & (bit - 1))];
+  }
+
+  /** The size of an operation, with its immediate data. */
+  private static int size(final int opcode) {
     if (opcode > PushOperation.PUSH_BASE && opcode <= PushOperation.PUSH_MAX) {
       return opcode - PushOperation.PUSH_BASE + 1;
     }
@@ -104,15 +126,29 @@ public final class GasBlocks {
     return opcode >= 0xe6 && opcode <= 0xe8 ? 2 : 1;
   }
 
-  static int[] analyse(final byte[] code, final int[] costs) {
+  static GasBlocks analyse(final byte[] code, final int[] costs) {
+    final long[] chunks = new long[(code.length >>> 5) + 1];
+    // every block takes at least one byte of code
     final int[] entries = new int[code.length];
+    int count = 0;
     int pc = 0;
     while (pc < code.length) {
       final int entry = block(code, pc, costs);
-      entries[pc] = entry;
-      pc += entry == 0 ? size(code[pc] & 0xff) : entry & MAX_LENGTH;
+      if (entry == 0) {
+        pc += size(code[pc] & 0xff);
+      } else {
+        chunks[pc >>> 5] |= 1L << (pc & 31);
+        entries[count++] = entry;
+        pc += entry & MAX_LENGTH;
+      }
     }
-    return entries;
+    long blocksBefore = 0;
+    for (int chunk = 0; chunk < chunks.length; chunk++) {
+      final long starts = chunks[chunk];
+      chunks[chunk] = blocksBefore << 32 | starts;
+      blocksBefore += Long.bitCount(starts);
+    }
+    return new GasBlocks(costs, chunks, Arrays.copyOf(entries, count));
   }
 
   /** The entry of the block starting at {@code start}, 0 if its operation is not in blocks. */

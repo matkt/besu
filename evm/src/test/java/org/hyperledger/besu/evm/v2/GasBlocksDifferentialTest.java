@@ -55,7 +55,8 @@ class GasBlocksDifferentialTest {
           // jumps to a JUMPDEST in the middle of fixed cost operations
           Bytes.fromHexString("0x600756600160025b600360040100"),
           // a block that a SLOAD ends, then one that a JUMPDEST starts
-          Bytes.fromHexString("0x600160025460035b60040100"));
+          Bytes.fromHexString("0x600160025460035b60040100"),
+          everyBlockOperation());
 
   @ParameterizedTest(name = "{0}")
   @FieldSource("FORKS")
@@ -145,6 +146,31 @@ class GasBlocksDifferentialTest {
       }
     }
     assertThat(differences).isEmpty();
+  }
+
+  /** Every operation that runs in blocks, on constant operands, with its result popped. */
+  private static Bytes everyBlockOperation() {
+    final StringBuilder code = new StringBuilder("0x");
+    for (final String opcode :
+        List.of(
+            "01", "02", "03", "04", "05", "06", "07", "0b", "10", "11", "12", "13", "14", "16",
+            "17", "18", "1a", "1b", "1c", "1d")) {
+      // PUSH1 7, PUSH1 5, the operation, POP
+      code.append("60076005").append(opcode).append("50");
+    }
+    for (final String opcode : List.of("08", "09")) {
+      code.append("600760056003").append(opcode).append("50");
+    }
+    for (final String opcode : List.of("15", "19", "1e")) {
+      code.append("6007").append(opcode).append("50");
+    }
+    // PUSH0, PUSH4, PUSH20 and PUSH32, each popped
+    code.append("5f50").append("630102030450");
+    code.append("73").append("11".repeat(20)).append("50");
+    code.append("7f").append("22".repeat(32)).append("50");
+    // DUP16 and SWAP16 on 16 items
+    code.append("6001".repeat(16)).append("8f9f00");
+    return Bytes.fromHexString(code.toString());
   }
 
   private static Outcome run(final EVM evm, final Bytes program, final long gas) {
