@@ -37,6 +37,11 @@ final class StateCoverage {
     return storage.get(accountHash);
   }
 
+  /** Returns whether a task is the pending storage of its account. */
+  public boolean isPending(final StorageTask task) {
+    return storage.get(task.accountHash()) == task;
+  }
+
   public void addStorageTask(final StorageTask task) {
     storage.put(task.accountHash(), task);
   }

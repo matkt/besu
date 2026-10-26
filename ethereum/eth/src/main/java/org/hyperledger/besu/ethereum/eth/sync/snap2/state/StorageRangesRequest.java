@@ -40,15 +40,24 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
    * @param root the storage root they were verified against
    * @param hashes the slot hashes
    * @param values the RLP encoded slot values
-   * @param proof the proof of their edges, empty for a whole storage
+   * @param nodes the storage trie nodes their verification rebuilt, the root last if rebuilt
    * @param complete whether no slot exists after the last one
    */
   record Slots(
       Bytes32 root,
       List<Bytes32> hashes,
       List<Bytes> values,
-      List<Bytes> proof,
+      List<TrieNode> nodes,
       boolean complete) {}
+
+  /**
+   * A node of a storage trie.
+   *
+   * @param location its path from the root, empty for the root
+   * @param hash its hash
+   * @param rlp its encoding
+   */
+  record TrieNode(Bytes location, Bytes32 hash, Bytes rlp) {}
 
   /**
    * Verified slots of the served accounts, in request order.
@@ -143,10 +152,19 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
       final List<Bytes> values,
       final List<Bytes> proof) {
     final Bytes32 root = storageRoots.get(index);
-    final RangeProof.Result verified = RangeProof.verify(root, origin, hashes, values, proof);
+    // the nodes are kept for the trie the download writes, so that a range is hashed once
+    final List<TrieNode> nodes = new ArrayList<>();
+    final RangeProof.Result verified =
+        RangeProof.verify(
+            root,
+            origin,
+            hashes,
+            values,
+            proof,
+            (location, hash, rlp) -> nodes.add(new TrieNode(location, hash, rlp)));
     if (!verified.valid()) {
       throw new InvalidResponseException("invalid storage range", true);
     }
-    return new Slots(root, hashes, values, proof, !verified.hasMore());
+    return new Slots(root, hashes, values, nodes, !verified.hasMore());
   }
 }

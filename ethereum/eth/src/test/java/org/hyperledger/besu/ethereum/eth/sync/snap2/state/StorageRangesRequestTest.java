@@ -27,12 +27,17 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.RangeProofs;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.rlp.RLP;
+import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
+import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 
 import java.math.BigInteger;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Function;
 
@@ -133,10 +138,14 @@ class StorageRangesRequestTest {
 
     assertThat(result.accounts()).hasSize(2);
     assertThat(result.accounts().get(0).complete()).isTrue();
-    assertThat(result.accounts().get(0).proof()).isEmpty();
     assertThat(result.accounts().get(1).hashes()).containsExactlyElementsOf(firstTwo.keySet());
     assertThat(result.accounts().get(1).complete()).isFalse();
-    assertThat(result.accounts().get(1).proof()).isEqualTo(proof);
+    // each range comes with the trie nodes its verification rebuilt, the root last
+    assertThat(trie(result.accounts().get(0)).entriesFrom(RangeManager.MIN_RANGE, 3))
+        .isEqualTo(slots(storage, 3));
+    final StorageRangesRequest.TrieNode root = result.accounts().get(1).nodes().getLast();
+    assertThat(root.location()).isEqualTo(Bytes.EMPTY);
+    assertThat(root.hash()).isEqualTo(other.getRootHash());
   }
 
   // the root of a task can move on while its request is in flight
@@ -185,6 +194,17 @@ class StorageRangesRequestTest {
   private static NavigableMap<Bytes32, Bytes> slots(
       final SimpleMerklePatriciaTrie<Bytes32, Bytes> trie, final int count) {
     return new TreeMap<>(trie.entriesFrom(RangeManager.MIN_RANGE, count));
+  }
+
+  // the trie of a range, read from the nodes its verification rebuilt
+  private static MerkleTrie<Bytes32, Bytes> trie(final StorageRangesRequest.Slots slots) {
+    final Map<Bytes32, Bytes> nodes = new HashMap<>();
+    slots.nodes().forEach(node -> nodes.put(node.hash(), node.rlp()));
+    return new StoredMerklePatriciaTrie<>(
+        (location, hash) -> Optional.ofNullable(nodes.get(hash)),
+        slots.root(),
+        Function.identity(),
+        Function.identity());
   }
 
   private static MessageData response(
