@@ -91,6 +91,11 @@ public final class FakeSnapNetwork implements RequestSender {
     codes.putAll(world.codes());
   }
 
+  /** Stops serving the state with this root, as peers do once it is too old. */
+  public void forget(final Bytes32 root) {
+    states.remove(root);
+  }
+
   /** Caps every response, to force many requests and split storages. */
   public void maxResponseBytes(final int bytes) {
     this.maxResponseBytes = bytes;
@@ -138,6 +143,17 @@ public final class FakeSnapNetwork implements RequestSender {
   public void answerAll() {
     final List<Sent<?>> answering = List.copyOf(unanswered);
     unanswered.clear();
+    answering.forEach(this::answer);
+  }
+
+  /** Answers the first requests of a type that wait for an answer, in the order they were sent. */
+  public void answer(final String name, final int count) {
+    final List<Sent<?>> answering =
+        unanswered.stream()
+            .filter(sent -> sent.request().name().equals(name))
+            .limit(count)
+            .toList();
+    unanswered.removeAll(answering);
     answering.forEach(this::answer);
   }
 
