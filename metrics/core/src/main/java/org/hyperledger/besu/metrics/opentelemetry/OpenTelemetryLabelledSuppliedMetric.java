@@ -16,7 +16,6 @@ package org.hyperledger.besu.metrics.opentelemetry;
 
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,11 +39,8 @@ abstract class OpenTelemetryLabelledSuppliedMetric implements LabelledSuppliedMe
     Preconditions.checkArgument(
         labelValues.length == labelNames.size(),
         "label values and label names need the same number of elements");
-    final Attributes labels = getLabels(labelValues);
-    if (observationsMap.putIfAbsent(labels, valueSupplier) != null) {
-      throw new IllegalStateException(
-          "Already registered a collector with label values " + Arrays.toString(labelValues));
-    }
+    // a component created again replaces the supplier, as on Prometheus
+    observationsMap.put(getLabels(labelValues), valueSupplier);
   }
 
   private Attributes getLabels(final String... labelValues) {

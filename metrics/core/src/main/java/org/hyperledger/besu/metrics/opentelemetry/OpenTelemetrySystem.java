@@ -95,7 +95,8 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
       new ConcurrentHashMap<>();
   private final Map<String, LabelledSuppliedMetric> cachedSuppliedCounters =
       new ConcurrentHashMap<>();
-  private final Set<String> registeredGaugeNames = ConcurrentHashMap.newKeySet();
+  // the latest supplier of each gauge, which its single callback reads
+  private final Map<String, DoubleSupplier> gaugeSuppliers = new ConcurrentHashMap<>();
   private final SdkMeterProvider sdkMeterProvider;
   private final DebugMetricReader debugMetricReader;
   private final SdkTracerProvider sdkTracerProvider;
@@ -271,12 +272,14 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
       final String help,
       final DoubleSupplier valueSupplier) {
     LOG.trace("Creating a gauge {}", name);
-    if (isCategoryEnabled(category) && registeredGaugeNames.add(name)) {
+    // a component created again replaces the supplier, as on Prometheus
+    if (isCategoryEnabled(category) && gaugeSuppliers.put(name, valueSupplier) == null) {
       final Meter meter = sdkMeterProvider.get(category.getName());
       meter
           .gaugeBuilder(name)
           .setDescription(help)
-          .buildWithCallback(res -> res.record(valueSupplier.getAsDouble(), Attributes.empty()));
+          .buildWithCallback(
+              res -> res.record(gaugeSuppliers.get(name).getAsDouble(), Attributes.empty()));
     }
   }
 

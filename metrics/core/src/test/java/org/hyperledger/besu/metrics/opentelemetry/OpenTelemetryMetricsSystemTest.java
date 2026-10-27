@@ -17,6 +17,7 @@ package org.hyperledger.besu.metrics.opentelemetry;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.DEFAULT_METRIC_CATEGORIES;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.NETWORK;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.PEERS;
@@ -225,6 +226,36 @@ public class OpenTelemetryMetricsSystemTest {
 
     // Both calls must return the exact same cached instance — only one OTel callback registered.
     assertThat(counter1).isSameAs(counter2);
+  }
+
+  @Test
+  public void reportsTheNewSupplierOfAGaugeRegisteredAgain() {
+    metricsSystem.createGauge(RPC, "myGauge", "help", () -> 1.0);
+    metricsSystem.createGauge(RPC, "myGauge", "help", () -> 2.0);
+
+    assertThat(metricsSystem.streamObservations())
+        .containsExactly(new Observation(RPC, "myGauge", 2.0, emptyList()));
+  }
+
+  @Test
+  public void reportsTheNewSupplierOfALabelledGaugeRegisteredAgain() {
+    metricsSystem
+        .createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label")
+        .labels(() -> 1.0, "value1");
+    metricsSystem
+        .createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label")
+        .labels(() -> 2.0, "value1");
+
+    assertThat(metricsSystem.streamObservations())
+        .containsExactly(new Observation(RPC, "gaugeName", 2.0, singletonList("value1")));
+  }
+
+  @Test
+  public void acceptsASuppliedCounterRegisteredAgain() {
+    metricsSystem.createCounter(RPC, "myCounter", "help", () -> 1.0);
+
+    assertThatCode(() -> metricsSystem.createCounter(RPC, "myCounter", "help", () -> 2.0))
+        .doesNotThrowAnyException();
   }
 
   @Test
