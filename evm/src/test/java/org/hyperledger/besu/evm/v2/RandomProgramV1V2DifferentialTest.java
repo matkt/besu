@@ -97,6 +97,7 @@ class RandomProgramV1V2DifferentialTest {
   void randomProgramsEndInTheSameStateOnV1AndV2(final Fork fork) {
     final EVM v1 = fork.factory().apply(ProgramRun.V1);
     final EVM v2 = fork.factory().apply(ProgramRun.V2);
+    final EVM v2Groups = fork.factory().apply(ProgramRun.V2_GROUPS);
     final Operation[] operations = v1.getOperationsUnsafe();
     final List<Integer> opcodes = new ArrayList<>();
     for (int opcode = 0; opcode < 0x100; opcode++) {
@@ -115,6 +116,8 @@ class RandomProgramV1V2DifferentialTest {
       final boolean isStatic = random.nextInt(8) == 0;
       final Outcome onV1 = ProgramRun.run(v1, contract, callee, secondCallee, GAS, isStatic, SLOTS);
       final Outcome onV2 = ProgramRun.run(v2, contract, callee, secondCallee, GAS, isStatic, SLOTS);
+      final Outcome onV2Groups =
+          ProgramRun.run(v2Groups, contract, callee, secondCallee, GAS, isStatic, SLOTS);
       final Outcome tracedOnV1 =
           ProgramRun.runTraced(v1, contract, callee, secondCallee, GAS, isStatic, SLOTS);
       final Outcome tracedOnV2 =
@@ -130,6 +133,19 @@ class RandomProgramV1V2DifferentialTest {
                 secondCallee.toHexString(),
                 tracedOnV1,
                 tracedOnV2));
+      }
+      if (!onV2Groups.equals(onV1)) {
+        differences.add(
+            String.format(
+                "program %d%s with groups%n  contract %s%n  callee %s%n  second callee %s%n"
+                    + "  v1 %s%n  v2 %s",
+                i,
+                isStatic ? " in a static frame" : "",
+                contract.toHexString(),
+                callee.toHexString(),
+                secondCallee.toHexString(),
+                onV1,
+                onV2Groups));
       }
     }
     assertThat(differences).isEmpty();

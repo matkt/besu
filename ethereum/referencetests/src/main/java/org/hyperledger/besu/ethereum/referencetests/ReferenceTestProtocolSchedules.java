@@ -84,7 +84,8 @@ public class ReferenceTestProtocolSchedules {
 
   /**
    * The EVM configuration the reference tests run with: EVM v2 when the system property test.evm.v2
-   * is set to true, the default configuration otherwise.
+   * is set to true, with the operation group threshold of test.evm.v2.operation.group.threshold,
+   * the default configuration otherwise.
    *
    * @return the EVM configuration
    */
@@ -94,7 +95,8 @@ public class ReferenceTestProtocolSchedules {
             EvmConfiguration.DEFAULT.jumpDestCacheWeightKB(),
             EvmConfiguration.DEFAULT.worldUpdaterMode(),
             EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
-            true)
+            true,
+            Integer.getInteger("test.evm.v2.operation.group.threshold", 0))
         : EvmConfiguration.DEFAULT;
   }
 

@@ -81,6 +81,15 @@ final class ProgramRun {
           EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
           true);
 
+  /** EVM v2 with the group of a run of operations generated the first time it runs. */
+  static final EvmConfiguration V2_GROUPS =
+      new EvmConfiguration(
+          EvmConfiguration.DEFAULT.jumpDestCacheWeightKB(),
+          EvmConfiguration.DEFAULT.worldUpdaterMode(),
+          EvmConfiguration.DEFAULT.enableOptimizedOpcodes(),
+          true,
+          1);
+
   record Fork(String name, Function<EvmConfiguration, EVM> factory) {
     @Override
     public String toString() {

@@ -35,6 +35,9 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
   /** The constant EVM_V2. */
   public static final String EVM_V2 = "--Xevm-v2";
 
+  /** The constant OPERATION_GROUP_THRESHOLD. */
+  public static final String OPERATION_GROUP_THRESHOLD = "--Xevm-v2-operation-group-threshold";
+
   /** Default constructor. */
   EvmOptions() {}
 
@@ -83,10 +86,23 @@ public class EvmOptions implements CLIOptions<EvmConfiguration> {
       arity = "1")
   private boolean enableEvmV2 = false;
 
+  @CommandLine.Option(
+      names = {OPERATION_GROUP_THRESHOLD},
+      description =
+          "Run a sequence of operations as one generated group once it has run this many times, on"
+              + " EVM v2, 0 to run every operation on its own (default: 0)",
+      hidden = true,
+      arity = "1")
+  private int operationGroupThreshold = 0;
+
   @Override
   public EvmConfiguration toDomainObject() {
     return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+        jumpDestCacheWeightKilobytes,
+        worldstateUpdateMode,
+        enableOptimizedOpcodes,
+        enableEvmV2,
+        operationGroupThreshold);
   }
 
   @Override

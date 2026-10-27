@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.evm.code.OpcodeInfo;
 import org.hyperledger.besu.evm.operation.JumpDestOperation;
 import org.hyperledger.besu.evm.operation.PushOperation;
+import org.hyperledger.besu.evm.v2.OperationGroupLinks;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -88,6 +89,9 @@ public class Code {
    * thread could see the array before its contents and reject a valid jump destination.
    */
   private volatile long[] jumpDestBitMask = null;
+
+  /** The links to the operation groups of this code, volatile like the jump destination bitmask. */
+  private volatile OperationGroupLinks operationGroupLinks = null;
 
   /**
    * Public constructor.
@@ -242,6 +246,25 @@ public class Code {
    */
   public void setJumpDestBitMask(final long[] jumpDestBitMask) {
     this.jumpDestBitMask = jumpDestBitMask;
+  }
+
+  /**
+   * Returns the links to the operation groups of this code, kept by {@link
+   * org.hyperledger.besu.evm.v2.OperationGroups#linksOf}.
+   *
+   * @return the links, or null if not set
+   */
+  public OperationGroupLinks getOperationGroupLinks() {
+    return operationGroupLinks;
+  }
+
+  /**
+   * Sets the links to the operation groups of this code.
+   *
+   * @param operationGroupLinks the links
+   */
+  public void setOperationGroupLinks(final OperationGroupLinks operationGroupLinks) {
+    this.operationGroupLinks = operationGroupLinks;
   }
 
   /**

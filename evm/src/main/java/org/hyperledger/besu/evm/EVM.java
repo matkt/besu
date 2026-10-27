@@ -86,6 +86,9 @@ import org.hyperledger.besu.evm.operation.VirtualOperation;
 import org.hyperledger.besu.evm.operation.XorOperation;
 import org.hyperledger.besu.evm.operation.XorOperationOptimized;
 import org.hyperledger.besu.evm.tracing.OperationTracer;
+import org.hyperledger.besu.evm.v2.OperationGroup;
+import org.hyperledger.besu.evm.v2.OperationGroupLinks;
+import org.hyperledger.besu.evm.v2.OperationGroups;
 import org.hyperledger.besu.evm.v2.operation.AddModOperationV2;
 import org.hyperledger.besu.evm.v2.operation.AddOperationV2;
 import org.hyperledger.besu.evm.v2.operation.AndOperationV2;
@@ -161,6 +164,9 @@ public class EVM {
 
   private final Operation[] operationsV2;
 
+  /** The operation groups of EVM v2, null when every operation runs on its own. */
+  private final OperationGroups operationGroups;
+
   /**
    * Instantiates a new Evm.
    *
@@ -189,6 +195,13 @@ public class EVM {
     operationsV2 =
         evmConfiguration.enableEvmV2()
             ? OperationsV2.of(operations.getOperations(), gasCalculator, evmSpecVersion)
+            : null;
+    operationGroups =
+        operationsV2 != null && evmConfiguration.operationGroupThreshold() > 0
+            ? new OperationGroups(
+                evmConfiguration.operationGroupThreshold(),
+                operations.getOperations(),
+                operationsV2)
             : null;
   }
 
@@ -505,7 +518,8 @@ public class EVM {
 
   /**
    * EVM v2 execution loop using long[] stack representation. The opcodes listed in the switch are
-   * executed directly; all others by the v2 versions of the fork's registered operations.
+   * executed directly; all others by the v2 versions of the fork's registered operations. Without a
+   * tracer, a run of operations whose group is generated runs as one; see {@link OperationGroups}.
    */
   // Note: like runToHalt, this is performance-critical code. Benchmark before refactoring.
   private void runToHaltV2(final MessageFrame frame, final OperationTracer operationTracer) {
@@ -515,9 +529,24 @@ public class EVM {
     final boolean tracing = operationTracer.tracesOperations();
     frame.setRecordsUpdatesForTracerV2(tracing);
     final Operation[] operationArray = tracing ? operations.getOperations() : null;
+    // a tracer sees the gas of every operation, so it runs them one at a time
+    final OperationGroupLinks groupLinks =
+        operationGroups != null && !tracing ? operationGroups.linksOf(frame.getCode()) : null;
+    // whether a run of operations can start at the pc, looked up only there
+    boolean runStart = true;
     while (frame.getState() == MessageFrame.State.CODE_EXECUTING) {
       int pc = frame.getPC();
+      if (groupLinks != null
+          && pc < code.length
+          && (runStart || code[pc] == JumpDestOperation.OPCODE)
+          && runGroup(frame, code, pc, groupLinks.at(code, pc))) {
+        runStart = true;
+        continue;
+      }
       final int opcode = pc < code.length ? code[pc] & 0xff : 0;
+      if (groupLinks != null) {
+        runStart = !operationGroups.inGroups(opcode);
+      }
       if (tracing) {
         frame.setCurrentOperation(pc < code.length ? operationArray[opcode] : endOfScriptStop);
         operationTracer.tracePreExecution(frame);
@@ -681,6 +710,36 @@ public class EVM {
         operationTracer.tracePostExecution(frame, result);
       }
     }
+  }
+
+  /**
+   * Runs the group of a link, charging its gas first.
+   *
+   * @return false, with the frame unchanged, if the group isn't generated yet or the frame lacks
+   *     its gas, so that the operations run one at a time and halt where the gas runs out
+   */
+  private boolean runGroup(
+      final MessageFrame frame, final byte[] code, final int pc, final OperationGroups.Link link) {
+    final OperationGroup group = operationGroups.group(link);
+    if (group == null || frame.getRemainingGas() < link.gas()) {
+      return false;
+    }
+    frame.decrementRemainingGas(link.gas());
+    OperationResult halt;
+    try {
+      halt = group.run(frame, code, pc);
+    } catch (final OverflowException oe) {
+      halt = OVERFLOW_RESPONSE;
+    } catch (final UnderflowException ue) {
+      halt = UNDERFLOW_RESPONSE;
+    }
+    if (halt != null) {
+      // the frame loses all its gas, as it would have with the gas charged per operation
+      LOG.trace("MessageFrame evaluation halted because of {}", halt.getHaltReason());
+      frame.setExceptionalHaltReason(Optional.of(halt.getHaltReason()));
+      frame.setState(MessageFrame.State.EXCEPTIONAL_HALT);
+    }
+    return true;
   }
 
   /**

@@ -513,11 +513,17 @@ tasks.withType(Test).configureEach {
   maxHeapSize = '2g'
 }
 
-// -Dtest.evm.v2=true runs the reference tests on EVM v2 (--Xevm-v2).
+// -Dtest.evm.v2=true runs the reference tests on EVM v2 (--Xevm-v2), and
+// -Dtest.evm.v2.operation.group.threshold=N with operation groups
+// (--Xevm-v2-operation-group-threshold).
 tasks.withType(Test).configureEach {
   def evmV2 = System.getProperty('test.evm.v2')
   if (evmV2 != null) {
     systemProperty 'test.evm.v2', evmV2
+  }
+  def operationGroupThreshold = System.getProperty('test.evm.v2.operation.group.threshold')
+  if (operationGroupThreshold != null) {
+    systemProperty 'test.evm.v2.operation.group.threshold', operationGroupThreshold
   }
 }
 

@@ -137,6 +137,7 @@ class EveryOpcodeV1V2DifferentialTest {
   void everyOpcodeEndsInTheSameStateOnV1AndV2(final Fork fork) {
     final EVM v1 = fork.factory().apply(ProgramRun.V1);
     final EVM v2 = fork.factory().apply(ProgramRun.V2);
+    final EVM v2Groups = fork.factory().apply(ProgramRun.V2_GROUPS);
     final Bytes prelude = prelude(v1);
     final List<String> differences = new ArrayList<>();
     for (int opcode = 0; opcode < 0x100; opcode++) {
@@ -160,7 +161,7 @@ class EveryOpcodeV1V2DifferentialTest {
                       stack.getKey(),
                       start.isEmpty() ? "" : " after the prelude",
                       isStatic ? " in a static frame" : "");
-              compare(v1, v2, code, isStatic, isDefined, program, differences);
+              compare(v1, v2, v2Groups, code, isStatic, isDefined, program, differences);
             }
           }
         }
@@ -172,6 +173,7 @@ class EveryOpcodeV1V2DifferentialTest {
   private static void compare(
       final EVM v1,
       final EVM v2,
+      final EVM v2Groups,
       final Bytes code,
       final boolean isStatic,
       final boolean isDefined,
@@ -188,6 +190,7 @@ class EveryOpcodeV1V2DifferentialTest {
       differences.add(
           String.format("%s untraced:%n  v1 %s%n  v2 %s", program, untracedOnV1, untracedOnV2));
     }
+    compareGroups(v1, v2Groups, code, 1_000_000L, isStatic, program, differences);
     if (!isDefined) {
       // an opcode the fork does not define halts whatever the gas
       return;
@@ -206,6 +209,26 @@ class EveryOpcodeV1V2DifferentialTest {
     }
     for (final long gas : gasLimits) {
       compare(v2, code, gas, isStatic, run(v1, code, gas, isStatic), program, differences);
+      compareGroups(v1, v2Groups, code, gas, isStatic, program, differences);
+    }
+  }
+
+  /** Compares untraced runs, as groups run only without a tracer. */
+  private static void compareGroups(
+      final EVM v1,
+      final EVM v2Groups,
+      final Bytes code,
+      final long gas,
+      final boolean isStatic,
+      final String program,
+      final List<String> differences) {
+    final Outcome onV1 = ProgramRun.run(v1, code, CALLEE_CODE, Bytes.EMPTY, gas, isStatic, SLOTS);
+    final Outcome onV2Groups =
+        ProgramRun.run(v2Groups, code, CALLEE_CODE, Bytes.EMPTY, gas, isStatic, SLOTS);
+    if (!onV2Groups.equals(onV1)) {
+      differences.add(
+          String.format(
+              "%s with groups and %d gas:%n  v1 %s%n  v2 %s", program, gas, onV1, onV2Groups));
     }
   }
 

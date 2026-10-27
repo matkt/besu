@@ -27,6 +27,8 @@ import org.hyperledger.besu.evm.gascalculator.GasCalculator;
  */
 public final class EqOperationV2 extends AbstractFixedCostOperationV2 {
 
+  private static final OperationResult EQ_SUCCESS = new OperationResult(3, null);
+
   /**
    * Instantiates a new Eq operation.
    *
@@ -48,7 +50,22 @@ public final class EqOperationV2 extends AbstractFixedCostOperationV2 {
   public OperationResult executeFixedCostOperation(final MessageFrame frame) {
     // v1 charges the cost on a stack underflow of EQ, unlike the shared UNDERFLOW_RESPONSE, and
     // traces show it
-    if (!frame.stackHasItemsV2(2)) return haltPoppingAll(frame, underflowResponse);
+    return staticOperation(frame, successResponse, underflowResponse);
+  }
+
+  /**
+   * Performs EQ with the shared results, for callers that charge the gas themselves.
+   *
+   * @param frame the message frame
+   * @return the operation result
+   */
+  public static OperationResult staticOperation(final MessageFrame frame) {
+    return staticOperation(frame, EQ_SUCCESS, UNDERFLOW_RESPONSE);
+  }
+
+  private static OperationResult staticOperation(
+      final MessageFrame frame, final OperationResult success, final OperationResult underflow) {
+    if (!frame.stackHasItemsV2(2)) return haltPoppingAll(frame, underflow);
     final long[] stack = frame.stackDataV2();
     final int top = frame.stackTopV2();
     final int aOffset = (top - 1) << 2;
@@ -60,6 +77,6 @@ public final class EqOperationV2 extends AbstractFixedCostOperationV2 {
             && stack[aOffset + 3] == stack[bOffset + 3];
     setLong(equal ? 1L : 0L, stack, top - 2);
     frame.setTopV2(top - 1);
-    return successResponse;
+    return success;
   }
 }

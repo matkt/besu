@@ -152,11 +152,25 @@ public class EvmToolCommandOptionsModule {
       arity = "1")
   private boolean enableEvmV2 = false;
 
+  @CommandLine.Option(
+      names = {"--Xevm-v2-operation-group-threshold"},
+      description =
+          "Run a sequence of operations as one generated group once it has run this many times, on"
+              + " EVM v2, 0 to run every operation on its own (default: 0)",
+      defaultValue = "0",
+      hidden = true,
+      arity = "1")
+  private int operationGroupThreshold = 0;
+
   @Provides
   @Singleton
   EvmConfiguration provideEvmConfiguration() {
     return new EvmConfiguration(
-        jumpDestCacheWeightKilobytes, worldstateUpdateMode, enableOptimizedOpcodes, enableEvmV2);
+        jumpDestCacheWeightKilobytes,
+        worldstateUpdateMode,
+        enableOptimizedOpcodes,
+        enableEvmV2,
+        operationGroupThreshold);
   }
 
   /**
