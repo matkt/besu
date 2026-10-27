@@ -281,6 +281,11 @@ public final class BodyBackfill {
     return done;
   }
 
+  /** Returns whether the back-fill ended, which it records before {@link #done} completes. */
+  boolean hasEnded() {
+    return ended;
+  }
+
   /**
    * Returns the lowest block whose body and receipts are stored, with those of every block above.
    */
@@ -479,8 +484,7 @@ public final class BodyBackfill {
       try {
         recordLowest();
       } catch (final RuntimeException e) {
-        LOG.warn(
-            "SNAP2 {} could not record the blocks it stored: {}", settings.label(), e.getMessage());
+        LOG.warn("SNAP2 {} could not record the blocks it stored", settings.label(), e);
         // a back-fill that could not record what it stored did not complete
         if (failure == null) {
           failure = e;

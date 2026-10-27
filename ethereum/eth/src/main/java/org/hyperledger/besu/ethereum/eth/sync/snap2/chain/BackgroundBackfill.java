@@ -33,6 +33,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
@@ -137,14 +138,14 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
    */
   @Override
   public synchronized void onInitialSyncCompleted() {
-    if (closed || (current != null && !current.done().isDone())) {
+    if (closed || isRunning()) {
       return;
     }
     try {
       maybeStart();
     } catch (final RuntimeException e) {
       // the sync and the other listeners of the event go on without the back-fill
-      LOG.warn("SNAP2 back-fill not started: {}", e.getMessage());
+      LOG.warn("SNAP2 back-fill not started", e);
     }
   }
 
@@ -173,19 +174,30 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
       stop();
       pools = List.copyOf(startedPools);
     }
+    // one deadline for every pool, so that the wait stays bounded
+    final long deadline = System.nanoTime() + WORKERS_TIMEOUT.toNanos();
+    boolean terminated = true;
     for (final ExecutorService pool : pools) {
-      if (!pool.awaitTermination(WORKERS_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-        LOG.warn("SNAP2 back-fill workers still running after {}", WORKERS_TIMEOUT);
-      }
+      terminated &= pool.awaitTermination(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
     }
+    if (!terminated) {
+      LOG.warn("SNAP2 back-fill workers still running after {}", WORKERS_TIMEOUT);
+    }
+  }
+
+  // ended rather than done, which completes later: a completion in between would be lost
+  private boolean isRunning() {
+    return current != null && !current.hasEnded();
   }
 
   private void maybeStart() {
     // recorded by a sync that stored the bodies of the latest blocks only
     final Optional<Long> bodiesFrom = blockchain.getBodiesFrom();
     final LongUnaryOperator lowestNeeded = lowestNeeded();
-    if (bodiesFrom.isEmpty()
-        || bodiesFrom.get() <= lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber())) {
+    final boolean bodiesMissing =
+        bodiesFrom.isPresent()
+            && bodiesFrom.get() > lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
+    if (!bodiesMissing) {
       return;
     }
     if (!enabled) {
@@ -194,24 +206,48 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
           bodiesFrom.get());
       return;
     }
+    final BodyBackfill backfill = build(bodiesFrom.get(), lowestNeeded);
+    try {
+      final ExecutorService workers = workerPools.get();
+      startedPools.removeIf(ExecutorService::isTerminated);
+      startedPools.add(workers);
+      current = backfill;
+      backfill.start(workers);
+    } catch (final RuntimeException e) {
+      // ended, it stops its scheduler and lets the next initial sync start another
+      backfill.stop();
+      throw e;
+    }
+  }
+
+  // a back-fill on a scheduler of its own, which runs until the back-fill ends, however it ends
+  private BodyBackfill build(final long lowest, final LongUnaryOperator lowestNeeded) {
     final RequestSender sender = senders.get();
-    final BodyBackfill backfill =
-        new BodyBackfill(
-            blockchain,
-            protocolSchedule,
-            sender,
-            syncState::isInSync,
-            bodiesFrom.get(),
-            lowestNeeded,
-            settings,
-            metricsSystem);
-    // the scheduler runs until the back-fill ends, however it ends
+    final BodyBackfill backfill;
+    try {
+      backfill =
+          new BodyBackfill(
+              blockchain,
+              protocolSchedule,
+              sender,
+              followsTheHead(syncState),
+              lowest,
+              lowestNeeded,
+              settings,
+              metricsSystem);
+    } catch (final RuntimeException e) {
+      // no back-fill is there to stop the scheduler
+      sender.stop();
+      throw e;
+    }
     backfill.done().whenComplete((unused, error) -> sender.stop());
-    final ExecutorService workers = workerPools.get();
-    startedPools.removeIf(ExecutorService::isTerminated);
-    startedPools.add(workers);
-    current = backfill;
-    backfill.start(workers);
+    return backfill;
+  }
+
+  // in sync once a peer told its head: with no peer known, the node counts as in sync
+  @VisibleForTesting
+  static BooleanSupplier followsTheHead(final SyncState syncState) {
+    return () -> syncState.getBestPeerChainHead().isPresent() && syncState.isInSync();
   }
 
   // above the floor of the sync, and a pruning run away from the blocks a pruner removes

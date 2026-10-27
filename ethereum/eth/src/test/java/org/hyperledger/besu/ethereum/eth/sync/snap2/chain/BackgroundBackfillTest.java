@@ -17,11 +17,15 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +34,7 @@ import org.hyperledger.besu.ethereum.chain.ChainDataPruner;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
+import org.hyperledger.besu.ethereum.eth.manager.ChainHeadEstimate;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
@@ -39,10 +44,13 @@ import org.hyperledger.besu.metrics.StubMetricsSystem;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +91,7 @@ class BackgroundBackfillTest {
                     .totalDifficulty(Difficulty.ONE)
                     .build()));
     when(syncState.isInSync()).thenReturn(true);
+    when(syncState.getBestPeerChainHead()).thenReturn(Optional.of(mock(ChainHeadEstimate.class)));
   }
 
   @Test
@@ -106,7 +115,7 @@ class BackgroundBackfillTest {
     final ChainDataPruner pruner = mock(ChainDataPruner.class);
     when(pruner.lowestToBackfill(HEAD)).thenReturn(30L);
 
-    backfill(Optional.of(pruner), true, this::queuedWorkers).onInitialSyncCompleted();
+    backfill(Optional.of(pruner), true, SETTINGS, this::queuedWorkers).onInitialSyncCompleted();
 
     assertThat(metricsSystem.getGaugeValue(BLOCKS_REMAINING)).isEqualTo(BODIES_FROM - 30);
   }
@@ -132,7 +141,7 @@ class BackgroundBackfillTest {
 
   @Test
   void startsNothingWhenTurnedOff() {
-    backfill(Optional.empty(), false, this::queuedWorkers).onInitialSyncCompleted();
+    backfill(Optional.empty(), false, SETTINGS, this::queuedWorkers).onInitialSyncCompleted();
 
     assertThat(senders).isEmpty();
     assertThat(workerPools).isEmpty();
@@ -169,7 +178,73 @@ class BackgroundBackfillTest {
 
     verify(senders.getFirst()).stop();
     backfill.onInitialSyncCompleted();
-    assertThat(senders).hasSize(2);
+    // built and started, its workers on a pool of their own
+    assertThat(workerPools).hasSize(2);
+  }
+
+  // a completion as the back-fill ends, before its done completes, starts the next one
+  @Test
+  void startsAgainWhenTheSyncCompletesAsTheBackfillEnds() {
+    final AtomicReference<BackgroundBackfill> backfill = new AtomicReference<>();
+    backfill.set(
+        backfill(
+            () -> {
+              final QueuedExecutor pool = spy(new QueuedExecutor());
+              // the first back-fill shuts its pool down once it ended, before done completes
+              if (workerPools.isEmpty()) {
+                doAnswer(
+                        invocation -> {
+                          backfill.get().onInitialSyncCompleted();
+                          return invocation.callRealMethod();
+                        })
+                    .when(pool)
+                    .shutdown();
+              }
+              workerPools.add(pool);
+              return pool;
+            }));
+    backfill.get().onInitialSyncCompleted();
+
+    // no header is stored, so the back-fill ends at its first range
+    workerPools.getFirst().runAll();
+
+    assertThat(workerPools).hasSize(2);
+  }
+
+  @Test
+  void stopsTheSchedulerOfABackfillThatFailsToBuild() {
+    // without a worker, the back-fill refuses its settings
+    final BodyBackfill.Settings noWorker =
+        new BodyBackfill.Settings(
+            "test", 0, Long.MAX_VALUE, Duration.ZERO, Duration.ZERO, 8, false, true);
+
+    backfill(Optional.empty(), true, noWorker, this::queuedWorkers).onInitialSyncCompleted();
+
+    verify(senders.getFirst()).stop();
+  }
+
+  @Test
+  void startsAgainAfterABackfillThatFailedToStart() {
+    final ExecutorService rejecting = mock(ExecutorService.class);
+    doThrow(new RejectedExecutionException("shut down")).when(rejecting).execute(any());
+    // the first pool refuses the workers, the next ones queue them
+    final Iterator<ExecutorService> firstPool = List.of(rejecting).iterator();
+    final BackgroundBackfill backfill =
+        backfill(() -> firstPool.hasNext() ? firstPool.next() : queuedWorkers());
+    backfill.onInitialSyncCompleted();
+    verify(senders.getFirst()).stop();
+
+    backfill.onInitialSyncCompleted();
+
+    assertThat(workerPools).hasSize(1);
+  }
+
+  // the node counts as in sync while it knows no peer
+  @Test
+  void waitsForAPeerHeadBeforeItDownloads() {
+    when(syncState.getBestPeerChainHead()).thenReturn(Optional.empty());
+
+    assertThat(BackgroundBackfill.followsTheHead(syncState).getAsBoolean()).isFalse();
   }
 
   @Test
@@ -177,8 +252,6 @@ class BackgroundBackfillTest {
     final List<ExecutorService> pools = new ArrayList<>();
     final BackgroundBackfill backfill =
         backfill(
-            Optional.empty(),
-            true,
             () -> {
               final ExecutorService pool = mock(ExecutorService.class);
               pools.add(pool);
@@ -196,7 +269,7 @@ class BackgroundBackfillTest {
       // interrupted, then awaited before the storage they read closes
       final InOrder order = inOrder(pool);
       order.verify(pool).shutdownNow();
-      order.verify(pool).awaitTermination(anyLong(), eq(TimeUnit.MILLISECONDS));
+      order.verify(pool).awaitTermination(anyLong(), eq(TimeUnit.NANOSECONDS));
     }
   }
 
@@ -241,12 +314,17 @@ class BackgroundBackfillTest {
   }
 
   private BackgroundBackfill backfill() {
-    return backfill(Optional.empty(), true, this::queuedWorkers);
+    return backfill(this::queuedWorkers);
+  }
+
+  private BackgroundBackfill backfill(final Supplier<ExecutorService> workers) {
+    return backfill(Optional.empty(), true, SETTINGS, workers);
   }
 
   private BackgroundBackfill backfill(
       final Optional<ChainDataPruner> pruner,
       final boolean enabled,
+      final BodyBackfill.Settings settings,
       final Supplier<ExecutorService> workers) {
     return new BackgroundBackfill(
         blockchain,
@@ -254,7 +332,7 @@ class BackgroundBackfillTest {
         syncState,
         pruner,
         enabled,
-        SETTINGS,
+        settings,
         metricsSystem,
         () -> {
           final RequestSender sender = mock(RequestSender.class);
