@@ -14,7 +14,11 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageTask.CoverResult.ALREADY_COVERED;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageTask.CoverResult.COMPLETED;
+
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StorageTask.CoverResult;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.rlp.RLP;
@@ -46,10 +50,10 @@ final class StateWriter {
 
   private final SyncStateStorage storage;
   private final StateCoverage coverage;
-  private final AtomicLong accounts = new AtomicLong();
-  private final AtomicLong slots = new AtomicLong();
-  private final AtomicLong codes = new AtomicLong();
-  private final AtomicLong storageTries = new AtomicLong();
+  private final AtomicLong accountsWritten = new AtomicLong();
+  private final AtomicLong slotsWritten = new AtomicLong();
+  private final AtomicLong codesWritten = new AtomicLong();
+  private final AtomicLong storageTriesWritten = new AtomicLong();
   private final AtomicLong storageTrieSlots = new AtomicLong();
   // storages complete without their trie, which the final build makes
   private final Set<Bytes32> storageTriesLeft = ConcurrentHashMap.newKeySet();
@@ -99,7 +103,7 @@ final class StateWriter {
     final Bytes32 end = done ? request.limit : last;
     storageTasks.forEach(coverage::addStorageTask);
     coverage.accounts().add(request.origin, end);
-    accounts.addAndGet(count);
+    accountsWritten.addAndGet(count);
     return new AccountsWritten(end, done, storageTasks, codeHashes);
   }
 
@@ -122,10 +126,7 @@ final class StateWriter {
     final SyncStateStorage.TrieWriter writer = storage.trieWriter();
     try {
       final List<Covered> covered = storeRanges(request, result, writer);
-      // every range is stored before the one completing a storage writes its root node
-      writer.commit();
       cover(request.origin, covered, writer);
-      slots.addAndGet(covered.stream().mapToLong(Covered::slots).sum());
     } catch (final RuntimeException e) {
       writer.abort();
       throw e;
@@ -150,14 +151,14 @@ final class StateWriter {
     if (!result.startsWith(hash)) {
       LOG.debug("Account {} no longer exists at the pivot, dropping it", hash);
       write(batch -> batch.removeAccount(hash));
-      dropStorage(hash);
+      dropStorage(task);
       return true;
     }
     final Bytes account = result.accounts().getFirst();
     write(batch -> batch.putAccount(hash, account));
     final Hash storageRoot = Accounts.decode(account).getStorageRoot();
     if (storageRoot.equals(Hash.EMPTY_TRIE_HASH)) {
-      dropStorage(hash);
+      dropStorage(task);
     } else {
       task.refreshRoot(Bytes32.wrap(storageRoot.getBytes()));
     }
@@ -167,27 +168,27 @@ final class StateWriter {
   /** Writes bytecodes. */
   void codes(final Map<Bytes32, Bytes> received) {
     write(batch -> received.forEach(batch::putCode));
-    codes.addAndGet(received.size());
+    codesWritten.addAndGet(received.size());
   }
 
   /** Returns the number of accounts written. */
   long accountsWritten() {
-    return accounts.get();
+    return accountsWritten.get();
   }
 
   /** Returns the number of slots written. */
   long slotsWritten() {
-    return slots.get();
+    return slotsWritten.get();
   }
 
   /** Returns the number of bytecodes written. */
   long codesWritten() {
-    return codes.get();
+    return codesWritten.get();
   }
 
   /** Returns the number of storage tries written. */
   long storageTriesWritten() {
-    return storageTries.get();
+    return storageTriesWritten.get();
   }
 
   /** Returns the number of slots in the storage tries written. */
@@ -238,6 +239,8 @@ final class StateWriter {
               covered.add(new Covered(task, end, stored));
             }
           }
+          // the nodes first: if their commit fails, the slots are dropped too
+          writer.commit();
         });
     return covered;
   }
@@ -287,16 +290,36 @@ final class StateWriter {
     task.trieWritten(rootNode);
   }
 
-  // a storage the ranges complete gets the root node of its trie, or is left to the final build
+  // covers the stored ranges, then writes the root nodes of the storages they complete
   private void cover(
       final Bytes32 origin, final List<Covered> covered, final SyncStateStorage.TrieWriter writer) {
     final List<StorageTask> completed = new ArrayList<>();
+    for (final Covered range : covered) {
+      final StorageTask task = range.task();
+      final CoverResult outcome = task.cover(origin, range.end(), range.slots());
+      if (outcome != ALREADY_COVERED) {
+        slotsWritten.addAndGet(range.slots());
+      }
+      if (outcome == COMPLETED) {
+        coverage.removeStorageTask(task);
+        completed.add(task);
+      }
+    }
+    writeRootNodes(completed, writer);
+  }
+
+  // a completed storage gets the root node of its trie, or is left to the final build
+  private void writeRootNodes(
+      final List<StorageTask> completed, final SyncStateStorage.TrieWriter writer) {
+    final List<StorageTask> withTrie = new ArrayList<>();
     try {
-      for (final Covered range : covered) {
-        if (range.task().cover(origin, range.end(), range.slots())) {
-          coverage.removeStorageTask(range.task().accountHash());
-          completed.add(range.task());
-          writeRootNode(range.task(), writer);
+      for (final StorageTask task : completed) {
+        final Optional<Bytes> rootNode = task.trieRootNode();
+        if (rootNode.isPresent()) {
+          writer.storageNode(task.accountHash(), Bytes.EMPTY, task.storageRoot(), rootNode.get());
+          withTrie.add(task);
+        } else {
+          storageTriesLeft.add(task.accountHash());
         }
       }
       writer.commit();
@@ -305,21 +328,12 @@ final class StateWriter {
       completed.forEach(task -> storageTriesLeft.add(task.accountHash()));
       throw e;
     }
+    storageTriesWritten.addAndGet(withTrie.size());
+    storageTrieSlots.addAndGet(withTrie.stream().mapToLong(StorageTask::slots).sum());
   }
 
-  private void writeRootNode(final StorageTask task, final SyncStateStorage.TrieWriter writer) {
-    final Optional<Bytes> rootNode = task.trieRootNode();
-    if (rootNode.isPresent()) {
-      writer.storageNode(task.accountHash(), Bytes.EMPTY, task.storageRoot(), rootNode.get());
-      storageTries.incrementAndGet();
-      storageTrieSlots.addAndGet(task.slots());
-    } else {
-      storageTriesLeft.add(task.accountHash());
-    }
-  }
-
-  private void dropStorage(final Bytes32 accountHash) {
-    storage.deleteStorage(accountHash);
-    coverage.removeStorageTask(accountHash);
+  private void dropStorage(final StorageTask task) {
+    storage.deleteStorage(task.accountHash());
+    coverage.removeStorageTask(task);
   }
 }

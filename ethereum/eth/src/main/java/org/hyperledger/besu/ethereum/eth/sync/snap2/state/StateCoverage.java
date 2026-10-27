@@ -46,8 +46,14 @@ final class StateCoverage {
     storage.put(task.accountHash(), task);
   }
 
+  /** Removes the pending storage of an account, whichever task it is. */
   public void removeStorageTask(final Bytes32 accountHash) {
     storage.remove(accountHash);
+  }
+
+  /** Removes a task while it is the pending storage of its account, never a newer task. */
+  public void removeStorageTask(final StorageTask task) {
+    storage.remove(task.accountHash(), task);
   }
 
   public int pendingStorageCount() {

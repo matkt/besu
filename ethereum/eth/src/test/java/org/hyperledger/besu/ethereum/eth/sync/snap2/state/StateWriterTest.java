@@ -50,6 +50,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import kotlin.collections.ArrayDeque;
 import org.apache.tuweni.bytes.Bytes;
@@ -169,14 +170,8 @@ class StateWriterTest {
   // the slots, and the trie nodes of the storage it did not complete, are committed first
   @Test
   void leavesToTheFinalBuildAStorageWhoseRootNodeWasLost() {
-    final SyncStateStorage failing = spy(storages.sync());
-    final AtomicBoolean failed = new AtomicBoolean();
-    doAnswer(
-            invocation ->
-                failingOnce((SyncStateStorage.TrieWriter) invocation.callRealMethod(), failed))
-        .when(failing)
-        .trieWriter();
-    final StateWriter failingWriter = new StateWriter(failing, coverage);
+    // the commit of the root nodes fails
+    final StateWriter failingWriter = writerFailingOnce(Bytes::isEmpty);
     final StorageTask whole = pending(FIRST, changed);
     final StorageTask cut = pending(SECOND, storage);
     final NavigableMap<Bytes32, Bytes> firstFour = firstSlots(storage, 4);
@@ -186,6 +181,7 @@ class StateWriterTest {
 
     assertThat(coverage.storageTask(FIRST)).isNull();
     assertThat(failingWriter.isTrieLeft(FIRST)).isTrue();
+    assertThat(failingWriter.storageTriesWritten()).isZero();
     assertThat(storages.sync().hasStorageTrie(FIRST, root(changed))).isFalse();
     assertThat(slots(storages.sync(), FIRST)).hasSize(6);
     // the storage cut short completes, its trie whole
@@ -193,6 +189,68 @@ class StateWriterTest {
     failingWriter.storages(chunk(cut, rest), served(storage, rest));
     assertThat(failingWriter.isTrieLeft(SECOND)).isFalse();
     assertThat(storages.storageTrie(SECOND, root(storage)).entriesFrom(Bytes32.ZERO, 10))
+        .isEqualTo(leaves(storage));
+  }
+
+  // the trie nodes are committed before the slots, so that no slot lies outside a covered range
+  @Test
+  void storesNoSlotWhenTheNodesOfItsRangeFailToCommit() {
+    // the first commit fails, that of the nodes of the range
+    final StateWriter failingWriter = writerFailingOnce(location -> true);
+    final StorageTask task = pending(FIRST, storage);
+
+    assertThatThrownBy(
+            () -> failingWriter.storages(chunk(task, RangeManager.MIN_RANGE), served(storage, 3)))
+        .isInstanceOf(StorageException.class);
+
+    assertThat(slots(storages.sync(), FIRST)).isEmpty();
+    assertThat(task.covers(RangeManager.MIN_RANGE)).isFalse();
+  }
+
+  // a retried request stores its range again
+  @Test
+  void countsTheSlotsOfARetriedRangeOnce() {
+    final StorageTask task = pending(FIRST, storage);
+
+    writer.storages(chunk(task, RangeManager.MIN_RANGE), served(storage, 3));
+    writer.storages(chunk(task, RangeManager.MIN_RANGE), served(storage, 3));
+
+    assertThat(writer.slotsWritten()).isEqualTo(3);
+  }
+
+  // the last slot of a chunk's answer may lie past its limit, as the proof reaches it
+  @Test
+  void storesAChunkUpToItsLimit() {
+    final StorageTask task = pending(FIRST, storage);
+    // between the third slot and the fourth
+    final Bytes32 limit = key(0x70);
+
+    final StateWriter.StorageWritten written =
+        writer.storages(chunk(task, RangeManager.MIN_RANGE, limit), served(storage, 4));
+
+    assertThat(written).isEqualTo(new StateWriter.StorageWritten(1, key(0x80), true, 4));
+    assertThat(slots(storages.sync(), FIRST)).hasSize(3);
+    assertThat(task.covers(limit)).isTrue();
+    assertThat(task.covers(next(limit))).isFalse();
+    // the next chunk completes the storage, its trie whole
+    writer.storages(chunk(task, next(limit)), served(storage, next(limit)));
+    assertThat(storages.storageTrie(FIRST, root(storage)).entriesFrom(Bytes32.ZERO, 10))
+        .isEqualTo(leaves(storage));
+  }
+
+  // a peer may answer a range without slots with the proof of its origin alone
+  @Test
+  void completesAStorageWhoseLastRangeIsAProofAlone() {
+    final StorageTask task = pending(FIRST, storage);
+    final Bytes32 lastSlot = leaves(storage).lastKey();
+    writer.storages(chunk(task, RangeManager.MIN_RANGE, lastSlot), served(storage, 6));
+
+    final StateWriter.StorageWritten written =
+        writer.storages(chunk(task, next(lastSlot)), provenEmpty(storage, next(lastSlot)));
+
+    assertThat(written).isEqualTo(new StateWriter.StorageWritten(1, null, true, 0));
+    assertThat(coverage.storageTask(FIRST)).isNull();
+    assertThat(storages.storageTrie(FIRST, root(storage)).entriesFrom(Bytes32.ZERO, 10))
         .isEqualTo(leaves(storage));
   }
 
@@ -351,26 +409,38 @@ class StateWriterTest {
       final NavigableMap<Bytes32, Bytes> served) {
     final boolean whole = origin.isZero() && served.size() == leaves(trie).size();
     final List<Bytes> proof = whole ? List.of() : RangeProofs.proof(trie, origin, served.lastKey());
-    final StorageRangesRequest request =
-        new StorageRangesRequest(
-            pivot(),
-            List.of(new StorageTask(Bytes32.ZERO, root(trie))),
-            origin,
-            RangeManager.MAX_RANGE,
-            4096,
-            "storage_chunk");
-    return request
+    return verified(trie, origin, new ArrayDeque<>(List.of(served)), proof);
+  }
+
+  // no slot from an origin on, as a peer proves it with the proof of the origin alone
+  private static StorageRangesRequest.Result provenEmpty(
+      final SimpleMerklePatriciaTrie<Bytes32, Bytes> trie, final Bytes32 origin) {
+    return new StorageRangesRequest.Result(
+        List.of(
+            verified(trie, origin, new ArrayDeque<>(), RangeProofs.proof(trie, origin, origin))));
+  }
+
+  // an answer verified as the download verifies it
+  private static StorageRangesRequest.Slots verified(
+      final SimpleMerklePatriciaTrie<Bytes32, Bytes> trie,
+      final Bytes32 origin,
+      final ArrayDeque<NavigableMap<Bytes32, Bytes>> slots,
+      final List<Bytes> proof) {
+    return chunk(new StorageTask(Bytes32.ZERO, root(trie)), origin)
         .decode(
-            StorageRangeMessage.create(new ArrayDeque<>(List.of(served)), proof)
-                .wrapMessageData(BigInteger.ONE),
+            StorageRangeMessage.create(slots, proof).wrapMessageData(BigInteger.ONE),
             mock(EthPeer.class))
         .accounts()
         .getFirst();
   }
 
   private static StorageRangesRequest chunk(final StorageTask task, final Bytes32 origin) {
-    return new StorageRangesRequest(
-        pivot(), List.of(task), origin, RangeManager.MAX_RANGE, 4096, "storage_chunk");
+    return chunk(task, origin, RangeManager.MAX_RANGE);
+  }
+
+  private static StorageRangesRequest chunk(
+      final StorageTask task, final Bytes32 origin, final Bytes32 limit) {
+    return new StorageRangesRequest(pivot(), List.of(task), origin, limit, 4096, "storage_chunk");
   }
 
   private static StorageRangesRequest batch(final StorageTask... tasks) {
@@ -421,11 +491,27 @@ class StateWriterTest {
     return Bytes32.wrap(Bytes.concatenate(Bytes.of(firstByte), Bytes.wrap(new byte[31])));
   }
 
-  // a writer whose first commit after a root node fails, dropping what it holds
+  // a writer whose first commit holding a node at such a location fails, dropping what it holds
+  private StateWriter writerFailingOnce(final Predicate<Bytes> nodeLocation) {
+    final SyncStateStorage failing = spy(storages.sync());
+    final AtomicBoolean failed = new AtomicBoolean();
+    doAnswer(
+            invocation ->
+                failingOnce(
+                    (SyncStateStorage.TrieWriter) invocation.callRealMethod(),
+                    nodeLocation,
+                    failed))
+        .when(failing)
+        .trieWriter();
+    return new StateWriter(failing, coverage);
+  }
+
   private static SyncStateStorage.TrieWriter failingOnce(
-      final SyncStateStorage.TrieWriter writer, final AtomicBoolean failed) {
+      final SyncStateStorage.TrieWriter writer,
+      final Predicate<Bytes> nodeLocation,
+      final AtomicBoolean failed) {
     return new SyncStateStorage.TrieWriter() {
-      private boolean rootNode;
+      private boolean holdsFailingNode;
 
       @Override
       public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
@@ -435,17 +521,17 @@ class StateWriterTest {
       @Override
       public void storageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        rootNode |= location.isEmpty();
+        holdsFailingNode |= nodeLocation.test(location);
         writer.storageNode(accountHash, location, hash, rlp);
       }
 
       @Override
       public void commit() {
-        if (rootNode && failed.compareAndSet(false, true)) {
+        if (holdsFailingNode && failed.compareAndSet(false, true)) {
           writer.abort();
           throw new StorageException("disk failure");
         }
-        rootNode = false;
+        holdsFailingNode = false;
         writer.commit();
       }
 
