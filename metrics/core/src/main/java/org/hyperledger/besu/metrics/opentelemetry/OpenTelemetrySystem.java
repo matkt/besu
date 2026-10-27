@@ -41,7 +41,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import javax.inject.Singleton;
 
@@ -91,12 +91,10 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
   private final Map<String, LabelledMetric<Counter>> cachedCounters = new ConcurrentHashMap<>();
   private final Map<String, LabelledMetric<OperationTimer>> cachedTimers =
       new ConcurrentHashMap<>();
-  private final Map<String, LabelledSuppliedMetric> cachedSuppliedGauges =
+  private final Map<MetricKey, OpenTelemetryLabelledSuppliedMetric> cachedSuppliedGauges =
       new ConcurrentHashMap<>();
-  private final Map<String, LabelledSuppliedMetric> cachedSuppliedCounters =
+  private final Map<MetricKey, OpenTelemetryLabelledSuppliedMetric> cachedSuppliedCounters =
       new ConcurrentHashMap<>();
-  // the latest supplier of each gauge, which its single callback reads
-  private final Map<String, DoubleSupplier> gaugeSuppliers = new ConcurrentHashMap<>();
   private final SdkMeterProvider sdkMeterProvider;
   private final DebugMetricReader debugMetricReader;
   private final SdkTracerProvider sdkTracerProvider;
@@ -199,7 +197,7 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
   private Object extractValue(final MetricDataType type, final PointData point) {
     return switch (type) {
       case LONG_GAUGE, LONG_SUM -> ((LongPointData) point).getValue();
-      case DOUBLE_GAUGE -> ((DoublePointData) point).getValue();
+      case DOUBLE_GAUGE, DOUBLE_SUM -> ((DoublePointData) point).getValue();
       case SUMMARY -> ((SummaryPointData) point).getValues();
       case HISTOGRAM -> ((HistogramPointData) point).getCounts();
       default -> throw new UnsupportedOperationException("Unsupported type " + type);
@@ -266,24 +264,6 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
   }
 
   @Override
-  public void createGauge(
-      final MetricCategory category,
-      final String name,
-      final String help,
-      final DoubleSupplier valueSupplier) {
-    LOG.trace("Creating a gauge {}", name);
-    // a component created again replaces the supplier, as on Prometheus
-    if (isCategoryEnabled(category) && gaugeSuppliers.put(name, valueSupplier) == null) {
-      final Meter meter = sdkMeterProvider.get(category.getName());
-      meter
-          .gaugeBuilder(name)
-          .setDescription(help)
-          .buildWithCallback(
-              res -> res.record(gaugeSuppliers.get(name).getAsDouble(), Attributes.empty()));
-    }
-  }
-
-  @Override
   public LabelledMetric<Histogram> createLabelledHistogram(
       final MetricCategory category,
       final String name,
@@ -306,9 +286,10 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
       final String... labelNames) {
     LOG.trace("Creating a labelled supplied counter {}", name);
     if (isCategoryEnabled(category)) {
-      return cachedSuppliedCounters.computeIfAbsent(
-          name,
-          k ->
+      return replace(
+          cachedSuppliedCounters,
+          new MetricKey(category, name),
+          () ->
               new OpenTelemetrySuppliedCounter(
                   name, help, sdkMeterProvider.get(category.getName()), List.of(labelNames)));
     }
@@ -323,14 +304,32 @@ public class OpenTelemetrySystem implements ObservableMetricsSystem {
       final String... labelNames) {
     LOG.trace("Creating a labelled gauge {}", name);
     if (isCategoryEnabled(category)) {
-      return cachedSuppliedGauges.computeIfAbsent(
-          name,
-          k ->
+      return replace(
+          cachedSuppliedGauges,
+          new MetricKey(category, name),
+          () ->
               new OpenTelemetryGauge(
                   name, help, sdkMeterProvider.get(category.getName()), List.of(labelNames)));
     }
     return NoOpMetricsSystem.getLabelledSuppliedMetric(labelNames.length);
   }
+
+  // a metric created again replaces the old one, which stops reporting, as on Prometheus
+  private static OpenTelemetryLabelledSuppliedMetric replace(
+      final Map<MetricKey, OpenTelemetryLabelledSuppliedMetric> metrics,
+      final MetricKey key,
+      final Supplier<OpenTelemetryLabelledSuppliedMetric> created) {
+    return metrics.compute(
+        key,
+        (k, old) -> {
+          if (old != null) {
+            old.close();
+          }
+          return created.get();
+        });
+  }
+
+  private record MetricKey(MetricCategory category, String name) {}
 
   @Override
   public Set<MetricCategory> getEnabledCategories() {

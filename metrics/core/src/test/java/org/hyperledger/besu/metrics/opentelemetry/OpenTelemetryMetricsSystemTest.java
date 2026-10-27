@@ -17,7 +17,6 @@ package org.hyperledger.besu.metrics.opentelemetry;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.DEFAULT_METRIC_CATEGORIES;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.NETWORK;
 import static org.hyperledger.besu.metrics.BesuMetricCategory.PEERS;
@@ -201,35 +200,7 @@ public class OpenTelemetryMetricsSystemTest {
   }
 
   @Test
-  public void shouldHandleDuplicateSuppliedGaugeCreation() {
-    final LabelledSuppliedMetric gauge1 =
-        metricsSystem.createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label");
-    final LabelledSuppliedMetric gauge2 =
-        metricsSystem.createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label");
-
-    // Both calls must return the exact same cached instance.
-    assertThat(gauge1).isSameAs(gauge2);
-
-    gauge1.labels(() -> 7.0, "value1");
-
-    // Exactly one observation, not two.
-    assertThat(metricsSystem.streamObservations())
-        .containsExactly(new Observation(RPC, "gaugeName", 7.0, singletonList("value1")));
-  }
-
-  @Test
-  public void shouldHandleDuplicateSuppliedCounterCreation() {
-    final LabelledSuppliedMetric counter1 =
-        metricsSystem.createLabelledSuppliedCounter(RPC, "myCounter", "help");
-    final LabelledSuppliedMetric counter2 =
-        metricsSystem.createLabelledSuppliedCounter(RPC, "myCounter", "help");
-
-    // Both calls must return the exact same cached instance — only one OTel callback registered.
-    assertThat(counter1).isSameAs(counter2);
-  }
-
-  @Test
-  public void reportsTheNewSupplierOfAGaugeRegisteredAgain() {
+  public void reportsTheNewSupplierOfAGaugeCreatedAgain() {
     metricsSystem.createGauge(RPC, "myGauge", "help", () -> 1.0);
     metricsSystem.createGauge(RPC, "myGauge", "help", () -> 2.0);
 
@@ -237,11 +208,14 @@ public class OpenTelemetryMetricsSystemTest {
         .containsExactly(new Observation(RPC, "myGauge", 2.0, emptyList()));
   }
 
+  // as on Prometheus, the labels of the old gauge go with it
   @Test
-  public void reportsTheNewSupplierOfALabelledGaugeRegisteredAgain() {
-    metricsSystem
-        .createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label")
-        .labels(() -> 1.0, "value1");
+  public void reportsOnlyTheNewLabelledGaugeCreatedAgain() {
+    final LabelledSuppliedMetric old =
+        metricsSystem.createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label");
+    old.labels(() -> 1.0, "value1");
+    old.labels(() -> 1.0, "value2");
+
     metricsSystem
         .createLabelledSuppliedGauge(RPC, "gaugeName", "help", "label")
         .labels(() -> 2.0, "value1");
@@ -251,11 +225,23 @@ public class OpenTelemetryMetricsSystemTest {
   }
 
   @Test
-  public void acceptsASuppliedCounterRegisteredAgain() {
+  public void reportsTheNewSupplierOfASuppliedCounterCreatedAgain() {
     metricsSystem.createCounter(RPC, "myCounter", "help", () -> 1.0);
+    metricsSystem.createCounter(RPC, "myCounter", "help", () -> 2.0);
 
-    assertThatCode(() -> metricsSystem.createCounter(RPC, "myCounter", "help", () -> 2.0))
-        .doesNotThrowAnyException();
+    assertThat(metricsSystem.streamObservations())
+        .containsExactly(new Observation(RPC, "myCounter", 2.0, emptyList()));
+  }
+
+  @Test
+  public void keepsAGaugeOfTheSameNameInAnotherCategory() {
+    metricsSystem.createGauge(RPC, "myGauge", "help", () -> 1.0);
+    metricsSystem.createGauge(NETWORK, "myGauge", "help", () -> 2.0);
+
+    assertThat(metricsSystem.streamObservations())
+        .containsExactlyInAnyOrder(
+            new Observation(RPC, "myGauge", 1.0, emptyList()),
+            new Observation(NETWORK, "myGauge", 2.0, emptyList()));
   }
 
   @Test
