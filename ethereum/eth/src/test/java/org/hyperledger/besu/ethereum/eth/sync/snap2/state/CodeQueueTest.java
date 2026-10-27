@@ -84,6 +84,17 @@ class CodeQueueTest {
     assertThat(queue.take(2)).containsExactly(hash(2));
   }
 
+  @Test
+  void ignoresASecondAnswerOfTheSameBatch() {
+    queue.add(hash(1));
+    final List<Bytes32> asked = queue.take(1);
+    queue.answered(asked, Set.of(hash(1)));
+
+    queue.answered(asked, Set.of());
+
+    assertThat(queue.isEmpty()).isTrue();
+  }
+
   // a bytecode shared by many accounts is asked once
   @Test
   void ignoresABytecodeQueuedLately() {

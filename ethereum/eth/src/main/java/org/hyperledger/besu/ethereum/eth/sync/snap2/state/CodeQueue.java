@@ -85,8 +85,13 @@ final class CodeQueue {
 
   /** Ends the request of a batch: the codes it did not store wait in the queue again. */
   void answered(final List<Bytes32> batch, final Set<Bytes32> stored) {
-    inFlight.removeAll(batch);
-    batch.stream().filter(codeHash -> !stored.contains(codeHash)).forEach(queued::add);
+    for (final Bytes32 codeHash : batch) {
+      // a code answered already is no longer in flight
+      final boolean wasInFlight = inFlight.remove(codeHash);
+      if (wasInFlight && !stored.contains(codeHash)) {
+        queued.add(codeHash);
+      }
+    }
   }
 
   // a failed lookup only costs a download
