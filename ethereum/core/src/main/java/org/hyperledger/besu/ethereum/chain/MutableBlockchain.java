@@ -115,6 +115,17 @@ public interface MutableBlockchain extends Blockchain {
       List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
 
   /**
+   * Makes a canonical block the chain head of a sync that stored the headers down to {@code from}.
+   * Headers stored with the total difficulty of {@code from}, as a sync does when every block above
+   * it is proof of stake, are not read again; otherwise every one is read to check its parent link
+   * and write its total difficulty.
+   *
+   * @param from a canonical block with its total difficulty stored
+   * @param to the new chain head, which must be canonical
+   */
+  void unsafeSetSyncChainHead(BlockHeader from, BlockHeader to);
+
+  /**
    * Records that every block from {@code blockNumber} up to the chain head has its body and
    * receipts stored.
    *
