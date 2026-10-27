@@ -479,7 +479,8 @@ public final class BodyBackfill {
       try {
         recordLowest();
       } catch (final RuntimeException e) {
-        LOG.debug("Could not record the back-filled blocks: {}", e.getMessage());
+        LOG.warn(
+            "SNAP2 {} could not record the blocks it stored: {}", settings.label(), e.getMessage());
         // a back-fill that could not record what it stored did not complete
         if (failure == null) {
           failure = e;
