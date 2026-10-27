@@ -21,6 +21,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SnapMessages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.RangeProof;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
+import org.hyperledger.besu.ethereum.trie.RangeManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -82,8 +83,10 @@ final class StorageRangesRequest implements SyncRequest<StorageRangesRequest.Res
       final Bytes32 limit,
       final long bytes,
       final String name) {
-    // servers apply an origin differently to several storages, so only one may have it
+    // several storages get no origin or limit, which servers apply differently or ignore
     checkArgument(tasks.size() == 1 || origin.isZero(), "an origin for several storages");
+    checkArgument(
+        tasks.size() == 1 || limit.equals(RangeManager.MAX_RANGE), "a limit for several storages");
     this.pivot = pivot;
     this.tasks = List.copyOf(tasks);
     this.accountHashes = tasks.stream().map(StorageTask::accountHash).toList();

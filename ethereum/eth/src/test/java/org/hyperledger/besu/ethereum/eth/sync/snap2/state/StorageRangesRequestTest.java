@@ -122,8 +122,14 @@ class StorageRangesRequestTest {
   }
 
   @Test
-  void rejectsAnOriginForSeveralStorages() {
-    assertThatThrownBy(() -> twoStorages(slot(0x40))).isInstanceOf(IllegalArgumentException.class);
+  void rejectsAnOriginOrALimitForSeveralStorages() {
+    assertThatThrownBy(() -> twoStorages(slot(0x40)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("an origin for several storages");
+    // servers ignore it, so the slots past it would be asked again
+    assertThatThrownBy(() -> twoStorages(RangeManager.MIN_RANGE, slot(0x40)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("a limit for several storages");
   }
 
   // the proof covers only the last storage, which the response cuts short
@@ -179,13 +185,17 @@ class StorageRangesRequestTest {
 
   // the storages of two accounts from an origin, as a batch asks them from the first key
   private StorageRangesRequest twoStorages(final Bytes32 origin) {
+    return twoStorages(origin, RangeManager.MAX_RANGE);
+  }
+
+  private StorageRangesRequest twoStorages(final Bytes32 origin, final Bytes32 limit) {
     return new StorageRangesRequest(
         pivot(),
         List.of(
             new StorageTask(ACCOUNT, storage.getRootHash()),
             new StorageTask(OTHER_ACCOUNT, other.getRootHash())),
         origin,
-        RangeManager.MAX_RANGE,
+        limit,
         4096,
         "storage_ranges");
   }

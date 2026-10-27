@@ -98,9 +98,8 @@ final class StateWriter {
             }
           }
         });
-    final Bytes32 last = hashes.isEmpty() ? null : hashes.getLast();
-    final boolean done = last == null || !result.hasMore() || last.compareTo(request.limit) >= 0;
-    final Bytes32 end = done ? request.limit : last;
+    final boolean done = reachesLimit(hashes, result.hasMore(), request.limit);
+    final Bytes32 end = coveredEnd(hashes, result.hasMore(), request.limit);
     storageTasks.forEach(coverage::addStorageTask);
     coverage.accounts().add(request.origin, end);
     accountsWritten.addAndGet(count);
@@ -134,8 +133,8 @@ final class StateWriter {
     final StorageRangesRequest.Slots last = result.accounts().getLast();
     return new StorageWritten(
         result.accounts().size(),
-        last.hashes().isEmpty() ? null : lastSlot(last),
-        reachesLimit(last, request.limit),
+        last.hashes().isEmpty() ? null : last.hashes().getLast(),
+        reachesLimit(last.hashes(), !last.complete(), request.limit),
         last.hashes().size());
   }
 
@@ -234,8 +233,7 @@ final class StateWriter {
             if (coverage.isPending(task)) {
               final int stored = storeSlots(task, slots, request.limit, batch);
               writeTrie(task, slots, writer);
-              final Bytes32 end =
-                  reachesLimit(slots, request.limit) ? request.limit : lastSlot(slots);
+              final Bytes32 end = coveredEnd(slots.hashes(), !slots.complete(), request.limit);
               covered.add(new Covered(task, end, stored));
             }
           }
@@ -262,13 +260,16 @@ final class StateWriter {
     return stored;
   }
 
-  // whether no slot is left up to the limit; the last slot returned may lie past it
-  private static boolean reachesLimit(final StorageRangesRequest.Slots slots, final Bytes32 limit) {
-    return slots.complete() || slots.hashes().isEmpty() || lastSlot(slots).compareTo(limit) >= 0;
+  // whether no key is left up to the limit; the last key returned may lie past it
+  private static boolean reachesLimit(
+      final List<Bytes32> keys, final boolean hasMore, final Bytes32 limit) {
+    return keys.isEmpty() || !hasMore || keys.getLast().compareTo(limit) >= 0;
   }
 
-  private static Bytes32 lastSlot(final StorageRangesRequest.Slots slots) {
-    return slots.hashes().getLast();
+  // the end of the range a response covers: the limit once reached, else the last key returned
+  private static Bytes32 coveredEnd(
+      final List<Bytes32> keys, final boolean hasMore, final Bytes32 limit) {
+    return reachesLimit(keys, hasMore, limit) ? limit : keys.getLast();
   }
 
   // the nodes of a range at the root of its trie, the root node kept until every range is in

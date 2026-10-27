@@ -113,6 +113,20 @@ class StateWriterTest {
     assertThat(coverage.accounts().contains(THIRD)).isFalse();
   }
 
+  // the peer has more accounts, none of them up to the limit
+  @Test
+  void endsARangeWhoseLastAccountIsItsLimit() {
+    final Bytes plain = account(Hash.EMPTY_TRIE_HASH, Hash.EMPTY);
+
+    final StateWriter.AccountsWritten written =
+        writer.accounts(
+            accountRange(FIRST, THIRD),
+            new AccountRangeRequest.Result(List.of(FIRST, THIRD), List.of(plain, plain), true));
+
+    assertThat(written.done()).isTrue();
+    assertThat(written.end()).isEqualTo(THIRD);
+  }
+
   // the proof shows no account after the last one
   @Test
   void endsARangeWithoutAccountsAfterTheLastOneAtItsLimit() {
