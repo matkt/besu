@@ -153,7 +153,8 @@ public final class Snap2SyncFactory {
                 Thread.ofPlatform().name("snap2-control").daemon().factory()),
             delay ->
                 CompletableFuture.delayedExecutor(
-                    delay.toMillis(), TimeUnit.MILLISECONDS, executor)));
+                    delay.toMillis(), TimeUnit.MILLISECONDS, executor),
+            metricsSystem));
   }
 
   // a resync, a sync left unfinished, or a chain head not above the floor yet

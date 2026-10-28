@@ -16,19 +16,24 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.block;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.compact;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.count;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.duration;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.eta;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat.percent;
 
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.ChainHeadSource;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.state.Pivot;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -87,6 +92,8 @@ final class SyncAttempt {
   private final CompletableFuture<BlockHeader> aborted = new CompletableFuture<>();
   private final CompletableFuture<Void> buildEnded = new CompletableFuture<>();
   private volatile boolean cancelled;
+  private volatile boolean triesBuilt;
+  private volatile boolean done;
   // guarded by this: the final build, once started
   private WorldStateTrieBuilder trieBuilder;
 
@@ -125,6 +132,7 @@ final class SyncAttempt {
             .thenApply(
                 pivot -> {
                   chain.setChainHead();
+                  done = true;
                   return pivot;
                 });
     return synced.applyToEither(aborted, Function.identity());
@@ -170,6 +178,108 @@ final class SyncAttempt {
     return moves.moves();
   }
 
+  /**
+   * What the attempt did of each phase, from 0 to 1.
+   *
+   * @param state the share of the account key space downloaded
+   * @param tries the share of the accounts the final build added
+   * @param headers the share of the headers stored
+   * @param bodies the share of the bodies of the window stored
+   */
+  record Progress(double state, double tries, double headers, double bodies) {}
+
+  /** Returns what the attempt did of each phase. */
+  Progress progress() {
+    final Optional<WorldStateTrieBuilder> builder = trieBuilder();
+    final double tries =
+        triesBuilt
+            ? 1
+            : builder
+                .map(
+                    build ->
+                        share(build.accountsProcessed(), stateSync.downloadedAccounts(), false))
+                .orElse(0.0);
+    final SyncChain.HeaderProgress headers = chain.headerProgress();
+    return new Progress(
+        builder.isPresent() ? 1 : stateSync.accountCoverage(),
+        tries,
+        share(headers.stored(), headers.stored() + headers.left(), chain.headersDone().isDone()),
+        done ? 1 : chain.windowProgress());
+  }
+
+  /** Returns the line of a progress log: the share done of each phase. */
+  String progressLine() {
+    final Progress progress = progress();
+    final SyncChain.HeaderProgress headers = chain.headerProgress();
+    final StringBuilder line =
+        new StringBuilder("SNAP2 sync | state ")
+            .append(percent(progress.state()))
+            .append(" | tries ")
+            .append(percent(progress.tries()))
+            .append(" | headers ")
+            .append(percent(progress.headers()));
+    eta(headers.stored(), headers.left(), headers.elapsed())
+        .ifPresent(left -> line.append(", ETA ").append(left));
+    return line.append(" | bodies ").append(percent(progress.bodies())).toString();
+  }
+
+  /** Returns the figures behind the progress, for debugging. */
+  String details() {
+    return "SNAP2 details | pivot "
+        + block(pivotNumber())
+        + " | accounts "
+        + count(stateSync.downloadedAccounts())
+        + " | slots "
+        + compact(stateSync.downloadedSlots())
+        + " | bytecodes "
+        + compact(stateSync.downloadedCodes())
+        + " | storages pending "
+        + count(stateSync.pendingStorageCount())
+        + " | storage tries "
+        + compact(stateSync.storageTriesBuilt())
+        + " built, "
+        + compact(stateSync.storageTriesUpdated())
+        + " updated, "
+        + compact(stateSync.storageTriesLeft())
+        + " left | peers left out "
+        + stateSync.peersWithoutState();
+  }
+
+  /** Returns the phase the attempt is busy with: the state, the tries, the chain, or done. */
+  String stage() {
+    if (done) {
+      return "done";
+    }
+    if (triesBuilt) {
+      return "chain";
+    }
+    return trieBuilder().isPresent() ? "tries" : "state";
+  }
+
+  /** Returns the current pivot, 0 before the state download starts. */
+  long pivotNumber() {
+    final Pivot pivot = stateSync.pivot();
+    return pivot == null ? 0 : pivot.header().getNumber();
+  }
+
+  /** Returns the state download, for its counters. */
+  StateSync stateSync() {
+    return stateSync;
+  }
+
+  /** Returns the final build, once started. */
+  synchronized Optional<WorldStateTrieBuilder> trieBuilder() {
+    return Optional.ofNullable(trieBuilder);
+  }
+
+  // complete once over, none when there is nothing to do
+  private static double share(final long done, final long total, final boolean over) {
+    if (total <= 0) {
+      return over ? 1 : 0;
+    }
+    return Math.min(1, (double) done / total);
+  }
+
   // a download that failed, with a diff partly applied for one, cannot go on from its state
   private CompletableFuture<Void> stateFailed(final Throwable error) {
     return cancelled
@@ -212,6 +322,7 @@ final class SyncAttempt {
       }
       context.storage().saveWorldState(pivot, built.rootNode());
       context.storage().completeSync();
+      triesBuilt = true;
       LOG.info(
           "SNAP2 trie build complete in {} | root verified | accounts {} | storage tries kept {}"
               + " | slots read {}",

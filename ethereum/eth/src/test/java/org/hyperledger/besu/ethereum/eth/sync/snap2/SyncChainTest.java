@@ -288,6 +288,34 @@ class SyncChainTest {
   }
 
   @Test
+  void countsTheHeadersOfAResumedDownloadFromTheFirstPivot() {
+    final SyncChain chain = chain(Optional.empty(), false);
+    sender.fail(message -> startOf(message).orElse(0) < 12);
+    chain.start(header(PIVOT));
+    executor.runAll();
+    // from 19 down to 12, 11 down to 1 left
+    assertThat(chain.headerProgress().stored()).isEqualTo(PIVOT - 12);
+    assertThat(chain.headerProgress().left()).isEqualTo(11);
+
+    sender.fail(message -> false);
+    resumes.runAll();
+    executor.runAll();
+
+    assertThat(chain.headerProgress().stored()).isEqualTo(PIVOT - 1);
+    assertThat(chain.headerProgress().left()).isZero();
+  }
+
+  @Test
+  void countsTheBodiesOfTheWindow() {
+    final SyncChain chain = chain(Optional.empty(), false);
+    assertThat(chain.windowProgress()).isZero();
+
+    synced(chain);
+
+    assertThat(chain.windowProgress()).isOne();
+  }
+
+  @Test
   void removesTheCanonicalEntriesAboveTheFirstPivotOnceTheHeadIsOnTheFloor() {
     // left by an earlier run of the node, its chain head on one of them
     blockchain.storeBlockHeaders(headers(PIVOT + 1, PIVOT + 5));
