@@ -17,6 +17,10 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 /** An attempt of the SNAP2 sync cannot go on, and the sync starts over. */
 final class RestartException extends RuntimeException {
 
+  RestartException(final String message) {
+    super(message);
+  }
+
   RestartException(final String message, final Throwable cause) {
     super(message, cause);
   }

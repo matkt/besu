@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.BlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.LogWithMetadata;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockBody;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.Transaction;
@@ -793,6 +794,13 @@ public class DefaultBlockchain implements MutableBlockchain {
       indexTransactionHashesForBlock(
           updater, blockHash, body.getEncodedTransactions().stream().map(Hash::hash).toList());
     }
+  }
+
+  @Override
+  public void unsafeStoreSyncBlockAccessLists(final Map<Hash, SyncBlockAccessList> accessLists) {
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
+    accessLists.forEach(updater::putSyncBlockAccessList);
+    updater.commit();
   }
 
   @Override

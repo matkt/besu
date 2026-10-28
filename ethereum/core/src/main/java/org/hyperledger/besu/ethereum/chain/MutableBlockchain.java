@@ -18,11 +18,13 @@ import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface MutableBlockchain extends Blockchain {
@@ -113,6 +115,14 @@ public interface MutableBlockchain extends Blockchain {
    */
   void unsafeStoreSyncBodiesAndReceipts(
       List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
+
+  /**
+   * Stores in one batch the block access lists of blocks whose headers a sync stored, without
+   * updating the chain state.
+   *
+   * @param accessLists the access lists, by block hash
+   */
+  void unsafeStoreSyncBlockAccessLists(Map<Hash, SyncBlockAccessList> accessLists);
 
   /**
    * Writes in one batch the total difficulties of the canonical headers above block {@code parent}
