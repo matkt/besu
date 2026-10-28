@@ -36,6 +36,7 @@ import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -107,6 +108,9 @@ final class SyncChain {
   // the headers above the floor then share its total difficulty
   private volatile boolean proofOfStakeAboveFloor;
   private volatile boolean cancelled;
+  // the first pivot, below which the headers are downloaded, and when they started
+  private volatile BlockHeader top;
+  private volatile Instant headersStarted;
   // guarded by this
   private CompletableFuture<BlockHeader> checkpointFetch;
   private HeaderBackfill headerDownload;
@@ -218,6 +222,8 @@ final class SyncChain {
       proofOfStakeAboveFloor =
           settings.terminalTotalDifficulty().map(floorTotal::greaterOrEqualThan).orElse(false);
       writeHeaders(List.of(firstPivot));
+      top = firstPivot;
+      headersStarted = Instant.now();
       downloadHeaders(firstPivot);
     }
   }
@@ -289,6 +295,46 @@ final class SyncChain {
     }
     windowWorkers.shutdownNow();
     headersDone.completeExceptionally(new CancellationException("attempt abandoned"));
+  }
+
+  /**
+   * The headers stored below the first pivot, and those left down to where they stop, however many
+   * times their download resumed.
+   *
+   * @param elapsed the time since the first download started
+   */
+  record HeaderProgress(long stored, long left, Duration elapsed) {}
+
+  /** Returns how far the headers are, nothing before the attempt starts. */
+  HeaderProgress headerProgress() {
+    final HeaderBackfill download;
+    synchronized (this) {
+      download = headerDownload;
+    }
+    if (download == null) {
+      return new HeaderProgress(0, 0, Duration.ZERO);
+    }
+    final long bottom = settings.headersToCheckpointOnly() ? floor.getNumber() : 0;
+    final long lowest = download.lowestStored();
+    return new HeaderProgress(
+        top.getNumber() - lowest,
+        Math.max(0, lowest - bottom - 1),
+        Duration.between(headersStarted, Instant.now()));
+  }
+
+  /** Returns the share of the window stored, from 0 to 1, 0 before it starts. */
+  double windowProgress() {
+    final BodyBackfill bodies;
+    final BlockHeader pivot;
+    synchronized (this) {
+      bodies = window;
+      pivot = windowPivot;
+    }
+    if (bodies == null) {
+      return 0;
+    }
+    final long size = pivot.getNumber() - windowStart(pivot.getNumber()) + 1;
+    return Math.min(1, (double) bodies.blocksStored() / size);
   }
 
   /** Waits for the workers of the window to end their reads, before the storage closes. */

@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
+import org.hyperledger.besu.metrics.StubMetricsSystem;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -49,6 +50,7 @@ class Snap2SyncControllerTest {
   private final QueuedExecutor control = new QueuedExecutor();
   private final List<Runnable> waiting = new ArrayList<>();
   private final List<RequestSender> handedOver = new ArrayList<>();
+  private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
   @Test
   void syncsTheChainAndTheStateWhileTheHeadMoves() {
@@ -66,6 +68,8 @@ class Snap2SyncControllerTest {
     assertThat(node.storages.bonsai().getWorldStateRootHash()).contains(chain.world(12).root());
     assertThat(controller.pivotMoves()).isOne();
     assertThat(controller.restarts()).isZero();
+    assertThat(metricsSystem.getGaugeValue("snap2_pivot_block")).isEqualTo(12);
+    assertThat(controller.current().orElseThrow().stage()).isEqualTo("done");
     // the back-fill goes on with the scheduler
     assertThat(handedOver).containsExactly(node.network);
     verify(node.network, never()).stop();
@@ -184,7 +188,8 @@ class Snap2SyncControllerTest {
         handedOver::add,
         node.executor,
         control,
-        delay -> waiting::add);
+        delay -> waiting::add,
+        metricsSystem);
   }
 
   // runs the waits due so far, not those they start

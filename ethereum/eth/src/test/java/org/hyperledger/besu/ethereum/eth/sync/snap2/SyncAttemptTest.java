@@ -51,6 +51,9 @@ class SyncAttemptTest {
     // four blocks behind the head, the bodies of the window up to it stored
     assertThat(synced).isCompletedWithValue(chain.header(12));
     assertThat(attempt.pivotMoves()).isOne();
+    assertThat(attempt.progress()).isEqualTo(new SyncAttempt.Progress(1, 1, 1, 1));
+    assertThat(attempt.progressLine())
+        .isEqualTo("SNAP2 sync | state 100.0% | tries 100.0% | headers 100.0% | bodies 100.0%");
     assertThat(node.blockchain.getChainHeadHeader()).isEqualTo(chain.header(12));
     assertThat(node.storages.bonsai().getWorldStateRootHash()).contains(chain.world(12).root());
     assertThat(node.storages.bonsai().getWorldStateBlockHash())
@@ -78,6 +81,8 @@ class SyncAttemptTest {
 
     assertThat(synced).isNotDone();
     assertThat(node.blockchain.getChainHeadBlockNumber()).isZero();
+    assertThat(attempt.stage()).isEqualTo("chain");
+    assertThat(attempt.progress().headers()).isZero();
     node.runUntil(synced::isDone);
     assertThat(synced).isCompletedWithValue(chain.header(6));
     assertThat(node.blockchain.getChainHeadHeader()).isEqualTo(chain.header(6));

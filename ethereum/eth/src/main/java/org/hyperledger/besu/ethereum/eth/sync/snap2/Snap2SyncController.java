@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
+import org.hyperledger.besu.plugin.services.MetricsSystem;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -63,6 +64,7 @@ final class Snap2SyncController implements SnapSyncController {
   private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
   // until the fork that adds block access lists, which is far
   private static final Duration FORK_DELAY = Duration.ofSeconds(30);
+  private static final Duration PROGRESS_PERIOD = Duration.ofSeconds(30);
 
   private final SyncAttempt.Context context;
   private final RequestSender scheduler;
@@ -75,6 +77,7 @@ final class Snap2SyncController implements SnapSyncController {
   private final ExecutorService executor;
   private final ScheduledExecutorService control;
   private final Function<Duration, Executor> delays;
+  private final MetricsSystem metricsSystem;
   private final CompletableFuture<SnapSyncProcessState> result = new CompletableFuture<>();
   private final AtomicInteger restarts = new AtomicInteger();
   // the moves of the attempts that started over
@@ -91,6 +94,7 @@ final class Snap2SyncController implements SnapSyncController {
    * @param executor runs the attempts, owned by the sync
    * @param control moves the pivot when due, owned by the sync
    * @param delays runs a task once a delay passed
+   * @param metricsSystem shows the progress of the sync
    */
   Snap2SyncController(
       final SyncAttempt.Context context,
@@ -101,7 +105,8 @@ final class Snap2SyncController implements SnapSyncController {
       final Consumer<RequestSender> handOver,
       final ExecutorService executor,
       final ScheduledExecutorService control,
-      final Function<Duration, Executor> delays) {
+      final Function<Duration, Executor> delays,
+      final MetricsSystem metricsSystem) {
     this.context = context;
     this.scheduler = scheduler;
     this.floor = floor;
@@ -111,6 +116,7 @@ final class Snap2SyncController implements SnapSyncController {
     this.executor = executor;
     this.control = control;
     this.delays = delays;
+    this.metricsSystem = metricsSystem;
   }
 
   /** Returns the file that marks a SNAP2 sync in progress. */
@@ -168,6 +174,11 @@ final class Snap2SyncController implements SnapSyncController {
     return Optional.empty();
   }
 
+  /** Returns the attempt in progress, or the last one. */
+  Optional<SyncAttempt> current() {
+    return Optional.ofNullable(current);
+  }
+
   /** Returns the number of attempts that started over. */
   int restarts() {
     return restarts.get();
@@ -188,8 +199,14 @@ final class Snap2SyncController implements SnapSyncController {
     } catch (final IOException e) {
       throw new UncheckedIOException("cannot create " + marker, e);
     }
+    Snap2Metrics.register(metricsSystem, this);
     control.scheduleWithFixedDelay(
         this::maybeMove, pollInterval.toMillis(), pollInterval.toMillis(), TimeUnit.MILLISECONDS);
+    control.scheduleWithFixedDelay(
+        this::logProgress,
+        PROGRESS_PERIOD.toMillis(),
+        PROGRESS_PERIOD.toMillis(),
+        TimeUnit.MILLISECONDS);
   }
 
   // an attempt from scratch, started over while the state cannot be recovered
@@ -314,6 +331,20 @@ final class Snap2SyncController implements SnapSyncController {
       }
     } catch (final RuntimeException e) {
       LOG.warn("SNAP2 pivot move check failed", e);
+    }
+  }
+
+  // one line a period, the figures behind it for debugging
+  private void logProgress() {
+    try {
+      current()
+          .ifPresent(
+              attempt -> {
+                LOG.info("{}", attempt.progressLine());
+                LOG.debug("{}", attempt.details());
+              });
+    } catch (final RuntimeException e) {
+      LOG.debug("SNAP2 progress not logged", e);
     }
   }
 
