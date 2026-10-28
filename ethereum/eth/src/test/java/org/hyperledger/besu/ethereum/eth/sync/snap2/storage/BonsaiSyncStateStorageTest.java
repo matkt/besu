@@ -224,6 +224,15 @@ class BonsaiSyncStateStorageTest {
   }
 
   @Test
+  void abortDoesNothingAfterAnAbort() {
+    final SyncStateStorage.Batch batch = storage.batch();
+    batch.putAccount(FIRST, ACCOUNT);
+    batch.abort();
+
+    assertThatCode(batch::abort).doesNotThrowAnyException();
+  }
+
+  @Test
   void storesTheCodeByItsHash() {
     final Bytes code = Bytes.fromHexString("0x6001600155");
     final Bytes32 codeHash = Bytes32.wrap(Hash.hash(code).getBytes());

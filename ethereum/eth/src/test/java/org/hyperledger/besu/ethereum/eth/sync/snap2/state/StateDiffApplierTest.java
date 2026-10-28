@@ -187,24 +187,22 @@ class StateDiffApplierTest {
     final SyncStateStorage storage = mock(SyncStateStorage.class);
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     when(storage.batch()).thenReturn(batch);
-    final StateCoverage coverage = new StateCoverage();
-    coverage.accounts().add(hash(N), hash(N));
-    final StateDiff diff = new StateDiff();
-    diff.add(
-        new BlockAccessList(
-            List.of(
-                changes(
-                    N,
-                    List.of(),
-                    List.of(new BalanceChange(1, Wei.of(1))),
-                    List.of(),
-                    List.of()))));
     doThrow(new IllegalStateException("write failed")).when(batch).putAccount(any(), any());
 
-    assertThatThrownBy(() -> StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {}))
-        .hasMessage("write failed");
+    assertThatThrownBy(() -> applyABalanceChange(storage)).hasMessage("write failed");
     verify(batch, never()).commit();
     verify(batch).abort();
+  }
+
+  // the batches are committed here, not through SyncStateStorage.write
+  @Test
+  void throwsTheErrorOfAFailedCommit() {
+    final SyncStateStorage storage = mock(SyncStateStorage.class);
+    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
+    when(storage.batch()).thenReturn(batch);
+    doThrow(new IllegalStateException("disk full")).when(batch).commit();
+
+    assertThatThrownBy(() -> applyABalanceChange(storage)).hasMessage("disk full");
   }
 
   @Test
@@ -230,6 +228,22 @@ class StateDiffApplierTest {
     // the account and its slots are one write more than a batch takes
     verify(storage, times(2)).batch();
     verify(batch, times(2)).commit();
+  }
+
+  private static void applyABalanceChange(final SyncStateStorage storage) {
+    final StateCoverage coverage = new StateCoverage();
+    coverage.accounts().add(hash(N), hash(N));
+    final StateDiff diff = new StateDiff();
+    diff.add(
+        new BlockAccessList(
+            List.of(
+                changes(
+                    N,
+                    List.of(),
+                    List.of(new BalanceChange(1, Wei.of(1))),
+                    List.of(),
+                    List.of()))));
+    StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {});
   }
 
   private static PatriciaTrieAccountValue read(final SyncStateStorage storage, final Address a) {

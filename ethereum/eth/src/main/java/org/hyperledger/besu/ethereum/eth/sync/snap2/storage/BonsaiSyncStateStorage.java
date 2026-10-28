@@ -75,7 +75,7 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
   public Batch batch() {
     final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
     return new Batch() {
-      private boolean commitStarted;
+      private boolean completed;
 
       @Override
       public void putAccount(final Bytes32 accountHash, final Bytes account) {
@@ -106,14 +106,15 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
 
       @Override
       public void commit() {
-        commitStarted = true;
+        completed = true;
         updater.commitComposedOnly();
       }
 
-      // a transaction whose commit has started refuses its rollback
+      // a completed transaction refuses its rollback, even one whose commit failed
       @Override
       public void abort() {
-        if (!commitStarted) {
+        if (!completed) {
+          completed = true;
           updater.rollback();
         }
       }

@@ -94,7 +94,7 @@ public interface SyncStateStorage {
 
     void commit();
 
-    /** Drops the writes, or does nothing once {@link #commit()} has started. */
+    /** Drops the writes, or does nothing once {@link #commit()} has started or after an abort. */
     void abort();
   }
 
