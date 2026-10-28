@@ -21,6 +21,7 @@ import org.hyperledger.besu.consensus.merge.UnverifiedForkchoiceListener;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.ChainDataPruner;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.Synchronizer;
 import org.hyperledger.besu.ethereum.eth.manager.ChainHeadEstimate;
 import org.hyperledger.besu.ethereum.eth.manager.EthContext;
@@ -28,6 +29,7 @@ import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTaskExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.common.NoSyncRequiredState;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.FullSyncDownloader;
 import org.hyperledger.besu.ethereum.eth.sync.fullsync.SyncTerminationCondition;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.Snap2SyncFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BackgroundBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapDownloaderFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
@@ -86,7 +88,8 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       final MetricsSystem metricsSystem,
       final SyncTerminationCondition terminationCondition,
       final PivotBlockSelector pivotBlockSelector,
-      final Optional<ChainDataPruner> chainDataPruner) {
+      final Optional<ChainDataPruner> chainDataPruner,
+      final Optional<Difficulty> terminalTotalDifficulty) {
     this.syncState = syncState;
     this.pivotBlockSelector = pivotBlockSelector;
     this.protocolContext = protocolContext;
@@ -162,6 +165,21 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
                       clock,
                       syncDurationMetrics,
                       chainDataPruner);
+          case SNAP2 ->
+              () ->
+                  Snap2SyncFactory.create(
+                      syncConfig,
+                      dataDirectory,
+                      protocolSchedule,
+                      protocolContext,
+                      metricsSystem,
+                      ethContext.getEthPeers(),
+                      worldStateStorageCoordinator,
+                      syncState,
+                      pivotBlockSelector,
+                      terminalTotalDifficulty,
+                      // the back-fill goes on with the scheduler of the sync
+                      backgroundBackfill::handOver);
           default -> () -> Optional.empty();
         };
 
@@ -239,6 +257,9 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
 
   @Override
   public void awaitStop() throws InterruptedException {
+    if (fastSyncDownloader.isPresent()) {
+      fastSyncDownloader.get().awaitStop();
+    }
     backgroundBackfill.awaitStop();
   }
 

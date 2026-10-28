@@ -1337,7 +1337,26 @@ public class BesuCommandTest extends CommandTestAbstract {
     assertThat(commandOutput.toString(UTF_8)).isEmpty();
     assertThat(commandErrorOutput.toString(UTF_8))
         .contains(
-            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP");
+            "Invalid value for option '--sync-mode': 'bogus' is not a valid sync mode. Valid values are: FULL, SNAP, SNAP2");
+  }
+
+  @Test
+  public void syncMode_snap2() {
+    parseCommand("--sync-mode", "SNAP2");
+    verify(mockControllerBuilder).synchronizerConfiguration(syncConfigurationCaptor.capture());
+
+    assertThat(syncConfigurationCaptor.getValue().getSyncMode()).isEqualTo(SyncMode.SNAP2);
+    assertThat(commandOutput.toString(UTF_8)).isEmpty();
+    assertThat(commandErrorOutput.toString(UTF_8)).isEmpty();
+  }
+
+  @Test
+  public void syncMode_snap2RefusesForest() {
+    parseCommand("--sync-mode", "SNAP2", "--data-storage-format", "FOREST");
+    verifyNoInteractions(mockRunnerBuilder);
+
+    assertThat(commandErrorOutput.toString(UTF_8))
+        .contains("--sync-mode=SNAP2 needs --data-storage-format=BONSAI, not FOREST");
   }
 
   @Test

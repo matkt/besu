@@ -211,6 +211,7 @@ public class DefaultSynchronizerTest {
         new NoOpMetricsSystem(),
         terminationCondition,
         mock(PivotBlockSelector.class),
+        Optional.empty(),
         Optional.empty());
   }
 }

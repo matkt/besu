@@ -171,6 +171,51 @@ class BackgroundBackfillTest {
   }
 
   @Test
+  void downloadsDownToTheBlockAboveTheFloorTheSyncRecorded() {
+    when(blockchain.getSyncFloor()).thenReturn(Optional.of(20L));
+
+    backfill().onInitialSyncCompleted();
+
+    assertThat(metricsSystem.getGaugeValue(BLOCKS_REMAINING)).isEqualTo(BODIES_FROM - 21);
+  }
+
+  @Test
+  void sendsThroughTheSchedulerOfTheSyncAndStopsIt() {
+    final BackgroundBackfill backfill = backfill();
+    final RequestSender scheduler = mock(RequestSender.class);
+    backfill.handOver(scheduler);
+
+    backfill.onInitialSyncCompleted();
+    workerPools.getFirst().runAll();
+
+    assertThat(senders).isEmpty();
+    verify(scheduler).stop();
+  }
+
+  @Test
+  void stopsTheSchedulerOfTheSyncWhenNoBackfillStarts() {
+    when(blockchain.getBodiesFrom()).thenReturn(Optional.empty());
+    final BackgroundBackfill backfill = backfill();
+    final RequestSender scheduler = mock(RequestSender.class);
+    backfill.handOver(scheduler);
+
+    backfill.onInitialSyncCompleted();
+
+    verify(scheduler).stop();
+  }
+
+  @Test
+  void stopsTheSchedulerOfTheSyncOnceClosed() throws InterruptedException {
+    final BackgroundBackfill backfill = backfill();
+    final RequestSender scheduler = mock(RequestSender.class);
+    backfill.handOver(scheduler);
+
+    backfill.awaitStop();
+
+    verify(scheduler).stop();
+  }
+
+  @Test
   void stopsWhenTheInitialSyncStartsAgainAndStartsOnceItCompletes() {
     final BackgroundBackfill backfill = backfill();
     backfill.onInitialSyncCompleted();

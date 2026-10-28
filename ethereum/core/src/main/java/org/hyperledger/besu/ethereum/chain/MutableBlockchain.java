@@ -144,6 +144,14 @@ public interface MutableBlockchain extends Blockchain {
    */
   void unsafeSetBodiesFrom(long blockNumber);
 
+  /**
+   * Records the floor of a sync: the block above which it needs every body, its checkpoint or
+   * genesis.
+   *
+   * @param blockNumber the floor
+   */
+  void unsafeSetSyncFloor(long blockNumber);
+
   void unsafeSetChainHead(final BlockHeader blockHeader, final Difficulty totalDifficulty);
 
   /**

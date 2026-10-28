@@ -417,6 +417,11 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
+  public Optional<Long> getSyncFloor() {
+    return blockchainStorage.getSyncFloor();
+  }
+
+  @Override
   public Hash getChainHeadHash() {
     return chainHeader.getHash();
   }
@@ -841,6 +846,13 @@ public class DefaultBlockchain implements MutableBlockchain {
   public void unsafeSetBodiesFrom(final long blockNumber) {
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
     updater.setBodiesFrom(blockNumber);
+    updater.commit();
+  }
+
+  @Override
+  public void unsafeSetSyncFloor(final long blockNumber) {
+    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    updater.setSyncFloor(blockNumber);
     updater.commit();
   }
 

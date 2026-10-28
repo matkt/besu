@@ -476,7 +476,10 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
             "Invalid value for option '--sync-mode': '"
                 + value
                 + "' is not a valid sync mode. "
-                + "Valid values are: FULL, SNAP");
+                + "Valid values are: "
+                + Arrays.stream(SyncMode.values())
+                    .map(Enum::name)
+                    .collect(Collectors.joining(", ")));
       }
     }
   }
@@ -1614,6 +1617,12 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
 
   private void validateDataStorageOptions() {
     dataStorageOptions.validate(commandLine);
+    // the SNAP2 sync storage is on Bonsai only, until it comes to Forest
+    final DataStorageFormat format = dataStorageOptions.toDomainObject().getDataStorageFormat();
+    if (getDefaultSyncModeIfNotSet() == SyncMode.SNAP2 && format != DataStorageFormat.BONSAI) {
+      throw new ParameterException(
+          commandLine, "--sync-mode=SNAP2 needs --data-storage-format=BONSAI, not " + format);
+    }
   }
 
   private void validateMiningParams() {

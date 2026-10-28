@@ -1280,6 +1280,19 @@ public class DefaultBlockchainTest {
   }
 
   @Test
+  public void recordsTheFloorOfASync() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), gen.genesisBlock());
+    assertThat(blockchain.getSyncFloor()).isEmpty();
+
+    blockchain.unsafeSetSyncFloor(6);
+
+    assertThat(blockchain.getSyncFloor()).contains(6L);
+  }
+
+  @Test
   public void findsTheEarliestBlockFromTheBlockTheBodiesAreStoredFrom() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();

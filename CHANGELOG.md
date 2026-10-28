@@ -22,6 +22,7 @@
 - Support Amsterdam hardfork at genesis on Ephemery, aligning with Ephemery iteration 165 and removing dynamic in-cycle BPO offsets. [#11728](https://github.com/besu-eth/besu/pull/11728)
 - `engine_newPayload` replies before it stores a valid block and its trie log. [#11682](https://github.com/besu-eth/besu/pull/11682)
 - Block import preloads and commits only the state a block changes, and builds trie keys without streams. [#11758](https://github.com/besu-eth/besu/pull/11758)
+- `--sync-mode=SNAP2` downloads the chain and the state together. The state is downloaded flat at a pivot that follows the chain head through the block access lists of the blocks it passes, and its tries are built once it is complete. The chain head is set once the bodies and receipts of the latest 128 blocks are stored; the older ones are downloaded in the background, which `--Xsnap2-backfill-enabled=false` turns off. It needs the Bonsai data storage format and a chain with block access lists. A node in this mode advertises snap/2, which replaces the hidden `--Xsnap2-enabled`. [#TODO](https://github.com/besu-eth/besu/pull/TODO)
 
 ## 26.10.2
 
