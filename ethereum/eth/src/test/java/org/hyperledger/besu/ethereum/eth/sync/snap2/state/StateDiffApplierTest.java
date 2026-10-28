@@ -185,7 +185,7 @@ class StateDiffApplierTest {
   }
 
   @Test
-  void abortsTheBatchOfAFailedWriteButNotOneWhoseCommitFailed() {
+  void abortsTheBatchOfAFailedWrite() {
     final SyncStateStorage storage = mock(SyncStateStorage.class);
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     when(storage.batch()).thenReturn(batch);
@@ -201,16 +201,11 @@ class StateDiffApplierTest {
                     List.of(new BalanceChange(1, Wei.of(1))),
                     List.of(),
                     List.of()))));
-
-    // the commit of the transaction has started, it cannot be rolled back
-    doThrow(new IllegalStateException("disk full")).when(batch).commit();
-    assertThatThrownBy(() -> StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {}))
-        .hasMessage("disk full");
-    verify(batch, never()).abort();
-
     doThrow(new IllegalStateException("write failed")).when(batch).putAccount(any(), any());
+
     assertThatThrownBy(() -> StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {}))
         .hasMessage("write failed");
+    verify(batch, never()).commit();
     verify(batch).abort();
   }
 

@@ -15,17 +15,20 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_LOG_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -37,8 +40,12 @@ import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableDataStorageConfiguration;
 import org.hyperledger.besu.ethereum.worldstate.ImmutableExtraStorageConfiguration;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
+import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
+import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -123,47 +130,13 @@ class BonsaiSyncStateStorageTest {
     }
     batch.putStorage(SECOND, key(0x01), value(1));
     batch.commit();
+    final SyncStateStorage spied = spy(storage);
 
-    storage.deleteStorage(FIRST);
+    spied.deleteStorage(FIRST);
 
     assertThat(slots(storage, FIRST)).isEmpty();
     assertThat(slots(storage, SECOND)).containsOnlyKeys(key(0x01));
-  }
-
-  @Test
-  void deleteStorageAbortsTheBatchOfAFailedWriteButNotOneWhoseCommitFailed() {
-    final SyncStateStorage.Batch slots = storage.batch();
-    slots.putStorage(FIRST, key(0x01), value(1));
-    slots.commit();
-    final SyncStateStorage failing = spy(storage);
-    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
-    doReturn(batch).when(failing).batch();
-
-    // the commit of the transaction has started, it cannot be rolled back
-    doThrow(new IllegalStateException("disk full")).when(batch).commit();
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("disk full");
-    verify(batch, never()).abort();
-
-    doThrow(new IllegalStateException("write failed")).when(batch).removeStorage(any(), any());
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("write failed");
-    verify(batch).abort();
-  }
-
-  // the next batch fails to start once the first one is committed
-  @Test
-  void deleteStorageAbortsNoBatchItCommitted() {
-    final SyncStateStorage.Batch slots = storage.batch();
-    for (int i = 0; i < 10_001; i++) {
-      slots.putStorage(FIRST, Bytes32.leftPad(Bytes.ofUnsignedInt(i)), value(1));
-    }
-    slots.commit();
-    final SyncStateStorage failing = spy(storage);
-    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
-    doReturn(batch).doThrow(new IllegalStateException("storage closed")).when(failing).batch();
-
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("storage closed");
-    verify(batch).commit();
-    verify(batch, never()).abort();
+    verify(spied, times(2)).batch();
   }
 
   @Test
@@ -173,6 +146,31 @@ class BonsaiSyncStateStorageTest {
     spied.deleteStorage(FIRST);
 
     verify(spied, never()).batch();
+  }
+
+  @Test
+  void writeAbortsTheBatchOfAFailedWrite() {
+    final SyncStateStorage spied = spy(storage);
+    final SyncStateStorage.Batch mocked = mock(SyncStateStorage.Batch.class);
+    doReturn(mocked).when(spied).batch();
+    doThrow(new IllegalStateException("write failed")).when(mocked).putAccount(any(), any());
+
+    assertThatThrownBy(() -> spied.write(batch -> batch.putAccount(FIRST, ACCOUNT)))
+        .hasMessage("write failed");
+    verify(mocked, never()).commit();
+    verify(mocked).abort();
+  }
+
+  @Test
+  void writeThrowsTheErrorOfAFailedCommit() {
+    final SyncStateStorage spied = spy(storage);
+    final SyncStateStorage.Batch mocked = mock(SyncStateStorage.Batch.class);
+    doReturn(mocked).when(spied).batch();
+    final StorageException diskFull = new StorageException("disk full");
+    doThrow(diskFull).when(mocked).commit();
+
+    assertThatThrownBy(() -> spied.write(batch -> batch.putAccount(FIRST, ACCOUNT)))
+        .isSameAs(diskFull);
   }
 
   @Test
@@ -193,13 +191,36 @@ class BonsaiSyncStateStorageTest {
 
   @Test
   void abortDropsTheWritesOfABatch() {
-    final SyncStateStorage.Batch batch = storage.batch();
+    final SegmentedKeyValueStorageTransaction transaction =
+        mock(SegmentedKeyValueStorageTransaction.class);
+    final SyncStateStorage.Batch batch = storageWritingTo(transaction).batch();
     batch.putAccount(FIRST, ACCOUNT);
-    batch.putStorage(FIRST, key(0x01), value(1));
+
     batch.abort();
 
-    assertThat(storage.getAccount(FIRST)).isEmpty();
-    assertThat(slots(storage, FIRST)).isEmpty();
+    verify(transaction).rollback();
+  }
+
+  @Test
+  void abortDoesNothingAfterACommit() {
+    final SyncStateStorage.Batch batch = storage.batch();
+    batch.putAccount(FIRST, ACCOUNT);
+    batch.commit();
+
+    assertThatCode(batch::abort).doesNotThrowAnyException();
+  }
+
+  @Test
+  void abortDoesNothingAfterAFailedCommit() {
+    final SegmentedKeyValueStorageTransaction transaction =
+        mock(SegmentedKeyValueStorageTransaction.class);
+    final StorageException diskFull = new StorageException("disk full");
+    doThrow(diskFull).when(transaction).commit();
+    final SyncStateStorage.Batch batch = storageWritingTo(transaction).batch();
+    batch.putAccount(FIRST, ACCOUNT);
+
+    assertThatThrownBy(batch::commit).isSameAs(diskFull);
+    assertThatCode(batch::abort).doesNotThrowAnyException();
   }
 
   @Test
@@ -333,6 +354,19 @@ class BonsaiSyncStateStorageTest {
     new BonsaiSyncStateStorage(archive).completeSync();
 
     assertThat(archive.getFlatDbMode()).isEqualTo(FlatDbMode.ARCHIVE);
+  }
+
+  // the same storage, whose batches write to this transaction behind the real validator
+  private SyncStateStorage storageWritingTo(final SegmentedKeyValueStorageTransaction transaction) {
+    final SegmentedKeyValueStorage flat = spy(bonsai.getComposedWorldStateStorage());
+    doAnswer(
+            invocation ->
+                new SegmentedKeyValueStorageTransactionValidatorDecorator(transaction, () -> false))
+        .when(flat)
+        .startBatchTransaction();
+    final BonsaiWorldStateKeyValueStorage spied = spy(bonsai);
+    doReturn(flat).when(spied).getComposedWorldStateStorage();
+    return new BonsaiSyncStateStorage(spied);
   }
 
   private static BonsaiWorldStateKeyValueStorage bonsai(final DataStorageConfiguration config) {
