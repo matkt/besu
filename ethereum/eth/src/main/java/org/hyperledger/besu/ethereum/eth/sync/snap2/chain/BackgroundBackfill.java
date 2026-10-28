@@ -42,8 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Stores in the background the bodies and receipts a sync left below the chain head, from the end
- * of the initial sync. The back-fill sends through a SNAP2 scheduler that runs until it ends.
+ * Stores in the background the bodies and receipts below the lowest block whose body a sync stored,
+ * from the end of the initial sync. The back-fill sends through a SNAP2 scheduler that runs until
+ * it ends.
  */
 public final class BackgroundBackfill implements InitialSyncCompletionListener {
 

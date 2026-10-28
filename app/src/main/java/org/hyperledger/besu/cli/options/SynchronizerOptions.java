@@ -429,7 +429,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
       arity = "0..1",
       fallbackValue = "true",
       description =
-          "Download in the background the bodies and receipts a SNAP2 sync left below the chain head, down to the block above the checkpoint, or above genesis without one, and never below the blocks the chain pruner keeps. Turned off, the node only stores those of the blocks the sync downloaded and of the blocks it imports. (default: ${DEFAULT-VALUE})")
+          "From the lowest block whose body a SNAP2 sync stored, download in the background the bodies and receipts of the blocks below it, down to the block above the checkpoint, or above genesis without one, and never below the blocks the chain pruner keeps. Turned off, the node only stores those of the blocks the sync downloaded and of the blocks it imports. (default: ${DEFAULT-VALUE})")
   private Boolean snap2BackfillEnabled = SnapSyncConfiguration.DEFAULT_SNAP2_BACKFILL_ENABLED;
 
   /**
