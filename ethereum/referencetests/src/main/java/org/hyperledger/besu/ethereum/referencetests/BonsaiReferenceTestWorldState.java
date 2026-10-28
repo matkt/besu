@@ -90,7 +90,7 @@ public class BonsaiReferenceTestWorldState extends BonsaiWorldState
                     getWorldStateStorage(), worldStateRootHash, addr),
             (addr, value) ->
                 bonsaiCachedMerkleTrieLoader.preLoadStorageSlot(
-                    getWorldStateStorage(), addr, value),
+                    getWorldStateStorage(), addr, null, value),
             preImageProxy,
             evmConfiguration));
   }
