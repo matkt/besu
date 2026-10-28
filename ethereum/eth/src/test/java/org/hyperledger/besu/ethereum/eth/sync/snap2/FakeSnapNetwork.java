@@ -197,7 +197,7 @@ public final class FakeSnapNetwork implements RequestSender {
     return peerCount(protocol) * PEER_CAPACITY;
   }
 
-  // a pivot move runs on the thread of the test
+  // the workers of the scheduler: the thread of the test
   @Override
   public Executor workers() {
     return Runnable::run;

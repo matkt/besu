@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -37,6 +38,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
@@ -277,6 +280,53 @@ class StateSyncTest {
     tasks.tick();
     runToEnd();
     assertThat(completion).isCompleted();
+  }
+
+  static Stream<StateSync.Settings> settingsWithAZero() {
+    return Stream.of(
+        new StateSync.Settings(0, 4096, 8, 8, 16),
+        new StateSync.Settings(16, 0, 8, 8, 16),
+        new StateSync.Settings(16, 4096, 0, 8, 16),
+        new StateSync.Settings(16, 4096, 8, 0, 16),
+        new StateSync.Settings(16, 4096, 8, 8, 0));
+  }
+
+  // a zero would leave nothing to ask, or a queue that never drains
+  @ParameterizedTest
+  @MethodSource("settingsWithAZero")
+  void refusesSettingsWithAZero(final StateSync.Settings settings) {
+    final SyncStateStorage storage = SyncStorageFixture.create(Format.BONSAI).sync();
+
+    assertThatThrownBy(() -> new StateSync(storage, network, settings, tasks, tasks, () -> 0L))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void startsOnce() {
+    final TestWorld world = TestWorld.random(new Random(73), 10, 0, 0);
+    network.serve(world);
+    start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+
+    assertThatThrownBy(() -> stateSync.start(header(1, world.root())))
+        .isInstanceOf(IllegalStateException.class);
+  }
+
+  // its loop shut down, as a real one refuses the periodic dispatch
+  @Test
+  void startsNothingOnceStopped() {
+    final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
+    stateSync =
+        new StateSync(
+            SyncStorageFixture.create(Format.BONSAI).sync(),
+            network,
+            SETTINGS,
+            loop,
+            tasks,
+            () -> 0L);
+    stateSync.stop();
+
+    assertThat(stateSync.start(header(1, Bytes32.ZERO))).isCompletedExceptionally();
+    assertThat(network.requestCount()).isZero();
   }
 
   // the settings, the account key space split into that many ranges

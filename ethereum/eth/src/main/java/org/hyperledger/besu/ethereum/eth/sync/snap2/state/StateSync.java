@@ -14,6 +14,9 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
@@ -63,6 +66,7 @@ public final class StateSync {
   // pending storages or bytecodes above which no account range is asked
   private static final int STORAGE_BACKLOG = 50_000;
   private static final int NO_EPOCH = -1;
+  // a slot in an answer, its hash and its value with their encoding
   private static final int BYTES_PER_SLOT = 64;
   private static final long DISPATCH_PERIOD_MILLIS = 500;
 
@@ -145,6 +149,12 @@ public final class StateSync {
       final ScheduledExecutorService loop,
       final ExecutorService persister,
       final LongSupplier nanoTime) {
+    // a zero would leave nothing to ask, or a queue that never drains
+    checkArgument(settings.accountChunks() > 0, "accountChunks must be positive");
+    checkArgument(settings.responseBytes() > 0, "responseBytes must be positive");
+    checkArgument(settings.storageBatchSize() > 0, "storageBatchSize must be positive");
+    checkArgument(settings.maxStorageChunks() > 0, "maxStorageChunks must be positive");
+    checkArgument(settings.codeBatchSize() > 0, "codeBatchSize must be positive");
     this.scheduler = scheduler;
     this.settings = settings;
     this.loop = loop;
@@ -154,8 +164,13 @@ public final class StateSync {
     this.codeQueue = new CodeQueue(storage);
   }
 
-  /** Starts downloading the state of the given pivot. */
+  /** Starts downloading the state of the given pivot, nothing once stopped. */
   public CompletableFuture<Void> start(final BlockHeader pivotHeader) {
+    checkState(pivot == null, "the state download starts once");
+    if (stopped) {
+      // its completion failed with the stop
+      return completion;
+    }
     pivot = new Pivot(0, pivotHeader);
     started = Instant.now();
     execute(
@@ -177,7 +192,10 @@ public final class StateSync {
     return completion;
   }
 
-  /** Stops downloading; once it returns, nothing more is written. */
+  /**
+   * Stops downloading; once it returns, nothing more is written. It also releases the threads of a
+   * download that completed.
+   */
   public void stop() {
     // waits for writes in progress
     lock.writeLock().lock();
@@ -466,12 +484,14 @@ public final class StateSync {
     final int served = written == null ? 0 : written.served();
     for (int i = 0; i < request.tasks.size(); i++) {
       final StorageTask task = request.tasks.get(i);
-      if (!coverage.isPending(task) || i < served - 1) {
+      if (!coverage.isPending(task)) {
         continue;
       }
       if (i >= served) {
+        // not served, asked again
         queueStorage(task);
-      } else if (!written.lastComplete()) {
+      } else if (i == served - 1 && !written.lastComplete()) {
+        // the last one served, cut short
         splitIntoChunks(task, written.lastSlot(), written.lastReturned());
       }
     }
@@ -496,8 +516,7 @@ public final class StateSync {
     final double remainingSlots = returned * (1 - covered) / covered;
     final double requests = remainingSlots * BYTES_PER_SLOT / settings.responseBytes();
     // a range for every four requests left
-    final int parts =
-        (int) Math.max(1, Math.min(settings.maxStorageChunks(), Math.ceil(requests / 4)));
+    final int parts = (int) Math.clamp(Math.ceil(requests / 4), 1, settings.maxStorageChunks());
     RangeManager.generateRanges(start, RangeManager.MAX_RANGE, parts)
         .forEach((from, to) -> task.chunks.add(new RangeTask(from, to)));
     chunked.add(task);
