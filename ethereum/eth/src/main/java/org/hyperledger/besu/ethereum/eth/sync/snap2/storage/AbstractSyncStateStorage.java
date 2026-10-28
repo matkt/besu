@@ -34,7 +34,7 @@ import org.apache.tuweni.bytes.Bytes32;
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   // bounds the write batch a writer keeps before committing
-  protected static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
+  private static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
   private static final int DELETES_PER_COMMIT = 10_000;
   private static final byte[] ZEROS = new byte[32];
   private static final byte[] ONES = RangeManager.MAX_RANGE.toArray();
@@ -137,6 +137,81 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
         batch.commit();
       }
     }
+  }
+
+  /** Trie nodes put through one updater of the format, until committed or aborted. */
+  protected interface NodeBatch {
+    /** Puts an account trie node and returns the bytes it adds. */
+    int putAccountNode(Bytes location, Bytes32 hash, Bytes rlp);
+
+    /** Puts a storage trie node and returns the bytes it adds. */
+    int putStorageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
+
+    void commit();
+
+    void abort();
+  }
+
+  /** Starts a batch of trie nodes. */
+  protected abstract NodeBatch nodeBatch();
+
+  @Override
+  public TrieWriter trieWriter() {
+    return new TrieWriter() {
+      private NodeBatch batch;
+      private long pendingBytes;
+
+      @Override
+      public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        commitWhenFull(batch().putAccountNode(location, hash, rlp));
+      }
+
+      @Override
+      public void storageNode(
+          final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        commitWhenFull(batch().putStorageNode(accountHash, location, hash, rlp));
+      }
+
+      // a failed commit leaves the writer empty
+      @Override
+      public void commit() {
+        final NodeBatch pending = batch;
+        batch = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.commit();
+        }
+      }
+
+      @Override
+      public void abort() {
+        final NodeBatch pending = batch;
+        batch = null;
+        pendingBytes = 0;
+        if (pending != null) {
+          pending.abort();
+        }
+      }
+
+      private NodeBatch batch() {
+        if (batch == null) {
+          batch = nodeBatch();
+        }
+        return batch;
+      }
+
+      private void commitWhenFull(final int addedBytes) {
+        pendingBytes += addedBytes;
+        if (pendingBytes >= BYTES_PER_COMMIT) {
+          commit();
+        }
+      }
+    };
+  }
+
+  /** Returns the key of a slot in the storage segment. */
+  protected static byte[] slotKey(final Bytes32 accountHash, final Bytes32 slotHash) {
+    return concat(accountHash.toArrayUnsafe(), slotHash.toArrayUnsafe());
   }
 
   // visits the slots of the accounts before the given one

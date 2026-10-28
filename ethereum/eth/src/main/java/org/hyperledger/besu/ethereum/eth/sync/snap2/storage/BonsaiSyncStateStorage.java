@@ -114,6 +114,7 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     };
   }
 
+  // at the account's location: only a root it still has, a failed update may leave the old one
   @Override
   public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
     return bonsai
@@ -128,52 +129,33 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
   }
 
   @Override
-  public TrieWriter trieWriter() {
-    return new TrieWriter() {
-      private BonsaiWorldStateKeyValueStorage.Updater updater;
-      private long pendingBytes;
-
+  protected NodeBatch nodeBatch() {
+    final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
+    return new NodeBatch() {
       @Override
-      public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        put(location, hash, rlp);
+      public int putAccountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        return put(location, hash, rlp);
       }
 
       @Override
-      public void storageNode(
+      public int putStorageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        put(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
+        return put(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
       }
 
-      // a failed commit leaves the writer empty
       @Override
       public void commit() {
-        final BonsaiWorldStateKeyValueStorage.Updater pending = updater;
-        updater = null;
-        pendingBytes = 0;
-        if (pending != null) {
-          pending.commitComposedOnly();
-        }
+        updater.commitComposedOnly();
       }
 
       @Override
       public void abort() {
-        final BonsaiWorldStateKeyValueStorage.Updater pending = updater;
-        updater = null;
-        pendingBytes = 0;
-        if (pending != null) {
-          pending.rollback();
-        }
+        updater.rollback();
       }
 
-      private void put(final Bytes key, final Bytes32 hash, final Bytes rlp) {
-        if (updater == null) {
-          updater = newUpdater();
-        }
+      private int put(final Bytes key, final Bytes32 hash, final Bytes rlp) {
         updater.putTrieNode(key, hash, rlp);
-        pendingBytes += key.size() + rlp.size();
-        if (pendingBytes >= BYTES_PER_COMMIT) {
-          commit();
-        }
+        return key.size() + rlp.size();
       }
     };
   }

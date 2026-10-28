@@ -53,16 +53,21 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /** Runs without workers: every update is applied on the test thread, by finish or applyNext. */
 class StorageTrieUpdaterTest {
 
   private static final int NO_BUDGET = Integer.MAX_VALUE;
 
-  private final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+  // Bonsai, unless a test runs on each format
+  private Storages storages = SyncStorageFixture.create(Format.BONSAI);
 
-  @Test
-  void appliesTheSlotsAMoveChangedToTheTrie() {
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void appliesTheSlotsAMoveChangedToTheTrie(final Format format) {
+    storages = SyncStorageFixture.create(format);
     final World world = SyncStorageFixture.randomWorld(new Random(8), 80);
     final Bytes32 account = largestStorage(world);
     final Bytes32 root = downloaded(world, account);

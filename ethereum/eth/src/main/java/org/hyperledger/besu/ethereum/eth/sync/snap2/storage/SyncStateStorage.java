@@ -44,7 +44,7 @@ public interface SyncStateStorage {
 
   /**
    * Returns whether the storage trie of an account with this root is completely written, by its
-   * root node: true only for a root the account still has, a failed update may leave the old one.
+   * root node, which is written last.
    */
   boolean hasStorageTrie(Bytes32 accountHash, Bytes32 storageRoot);
 
