@@ -84,13 +84,24 @@ public final class StateSync {
       int responseBytes,
       int storageBatchSize,
       int maxStorageChunks,
-      int codeBatchSize) {}
+      int codeBatchSize) {
+
+    /** Checks the sizes: a zero would leave nothing to ask, or a queue that never drains. */
+    @SuppressWarnings("MethodInputParametersMustBeFinal") // none is final in a compact constructor
+    public Settings {
+      checkArgument(accountChunks > 0, "accountChunks must be positive");
+      checkArgument(responseBytes > 0, "responseBytes must be positive");
+      checkArgument(storageBatchSize > 0, "storageBatchSize must be positive");
+      checkArgument(maxStorageChunks > 0, "maxStorageChunks must be positive");
+      checkArgument(codeBatchSize > 0, "codeBatchSize must be positive");
+    }
+  }
 
   private final RequestSender scheduler;
   private final Settings settings;
   private final StateCoverage coverage = new StateCoverage();
   private final StateWriter writer;
-  // the writes hold it shared, a stop exclusively: once the stop returns, nothing is written
+  // writes and sends hold it shared, a stop exclusively: after the stop, nothing is sent or written
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
@@ -112,8 +123,10 @@ public final class StateSync {
   // peers left out of state requests, refreshed on each dispatch
   private Set<EthPeer> excluded = Set.of();
   private volatile int excludedCount;
-  // no peer took a request: no request until the periodic dispatch
+  // no peer took a bytecode request, so none would take any: no request until the periodic dispatch
   private boolean waitingForPeers;
+  // no peer took a state request, as when only peers left out serve: only bytecodes until then
+  private boolean waitingForStatePeers;
   private int accountsInFlight;
   private int storageInFlight;
   private int codesRequestsInFlight;
@@ -149,12 +162,6 @@ public final class StateSync {
       final ScheduledExecutorService loop,
       final ExecutorService persister,
       final LongSupplier nanoTime) {
-    // a zero would leave nothing to ask, or a queue that never drains
-    checkArgument(settings.accountChunks() > 0, "accountChunks must be positive");
-    checkArgument(settings.responseBytes() > 0, "responseBytes must be positive");
-    checkArgument(settings.storageBatchSize() > 0, "storageBatchSize must be positive");
-    checkArgument(settings.maxStorageChunks() > 0, "maxStorageChunks must be positive");
-    checkArgument(settings.codeBatchSize() > 0, "codeBatchSize must be positive");
     this.scheduler = scheduler;
     this.settings = settings;
     this.loop = loop;
@@ -184,20 +191,25 @@ public final class StateSync {
               ProgressFormat.count(accountTasks.size()));
           dispatch();
         });
-    loop.scheduleWithFixedDelay(
-        this::dispatchPeriodically,
-        DISPATCH_PERIOD_MILLIS,
-        DISPATCH_PERIOD_MILLIS,
-        TimeUnit.MILLISECONDS);
+    try {
+      loop.scheduleWithFixedDelay(
+          this::dispatchPeriodically,
+          DISPATCH_PERIOD_MILLIS,
+          DISPATCH_PERIOD_MILLIS,
+          TimeUnit.MILLISECONDS);
+    } catch (final RejectedExecutionException e) {
+      // a stop on another thread failed the completion meanwhile
+      LOG.trace("State loop rejected the periodic dispatch", e);
+    }
     return completion;
   }
 
   /**
-   * Stops downloading; once it returns, nothing more is written. It also releases the threads of a
-   * download that completed.
+   * Stops downloading; once it returns, nothing more is sent or written. It also releases the
+   * threads of a download that completed.
    */
   public void stop() {
-    // waits for writes in progress
+    // waits for the writes and the sends under way
     lock.writeLock().lock();
     try {
       stopped = true;
@@ -294,6 +306,7 @@ public final class StateSync {
     runLogged(
         () -> {
           waitingForPeers = false;
+          waitingForStatePeers = false;
           dispatch();
         });
   }
@@ -316,12 +329,25 @@ public final class StateSync {
       return;
     }
     if (isDownloaded()) {
+      // outside the lock, as a completion callback may stop the download
       complete();
       return;
     }
     if (waitingForPeers) {
       return;
     }
+    // a stop waits for the sends under way, which read the storage too
+    lock.readLock().lock();
+    try {
+      if (!stopped) {
+        sendRequests();
+      }
+    } finally {
+      lock.readLock().unlock();
+    }
+  }
+
+  private void sendRequests() {
     excluded = servers.excluded(nanoTime.getAsLong());
     excludedCount = excluded.size();
     final Pivot current = pivot;
@@ -329,11 +355,13 @@ public final class StateSync {
     // more than the peers take now, so that a peer gets its next request at once
     final int target = capacity + capacity / 4;
 
-    sendAccountRanges(current, target);
-    // bytecodes flow alongside the state
-    sendCodes(target, Math.max(1, target / 8));
-    sendChunks(current, target);
-    sendStorageBatches(current, target);
+    if (!waitingForStatePeers) {
+      sendAccountRanges(current, target);
+      // bytecodes flow alongside the state
+      sendCodes(target, Math.max(1, target / 8));
+      sendChunks(current, target);
+      sendStorageBatches(current, target);
+    }
     // idle capacity goes to bytecodes
     sendCodes(target, target);
   }
@@ -557,18 +585,27 @@ public final class StateSync {
         .submit(request, epoch == NO_EPOCH ? Set.of() : excluded)
         .whenCompleteAsync(
             (response, error) -> {
-              final R written =
-                  error == null ? writeSafely(() -> write.apply(response.value()), request) : null;
-              execute(
-                  () -> {
-                    if (error != null) {
-                      onFailure(error, epoch);
-                    } else if (epoch != NO_EPOCH) {
-                      servers.served(response.peer(), epoch);
-                    }
-                    bookkeeping.accept(written);
-                    dispatch();
-                  });
+              // the peer alone, so that the loop does not keep the response
+              final EthPeer peer = error == null ? response.peer() : null;
+              R written = null;
+              try {
+                if (error == null) {
+                  written = writeSafely(() -> write.apply(response.value()), request);
+                }
+              } finally {
+                // also after an Error in the write, whose request is then asked again
+                final R result = written;
+                execute(
+                    () -> {
+                      if (error != null) {
+                        onFailure(error, epoch);
+                      } else if (epoch != NO_EPOCH) {
+                        servers.served(peer, epoch);
+                      }
+                      bookkeeping.accept(result);
+                      dispatch();
+                    });
+              }
             },
             persister);
   }
@@ -586,16 +623,25 @@ public final class StateSync {
   private void onFailure(final Throwable error, final int epoch) {
     final Optional<RequestFailedException> failure = RequestFailedException.from(error);
     if (failure.isEmpty()) {
-      LOG.debug("State request failed", error);
+      // the code of the request failed, it would on any peer
+      completion.completeExceptionally(error);
       return;
     }
     LOG.trace("State request failed: {}", failure.get().getMessage());
     final RequestFailedException.Reason reason = failure.get().reason();
-    if (reason == RequestFailedException.Reason.NO_PEER) {
+    if (reason == RequestFailedException.Reason.STOPPED) {
+      // no request goes out any more
+      completion.completeExceptionally(failure.get());
+    } else if (reason == RequestFailedException.Reason.NO_PEER) {
       // the next requests would fail too: they wait for the periodic dispatch
-      waitingForPeers = true;
-    } else if (reason == RequestFailedException.Reason.EMPTY && failure.get().peer().isPresent()) {
-      onEmpty(failure.get().peer().get(), epoch);
+      if (epoch == NO_EPOCH) {
+        waitingForPeers = true;
+      } else {
+        waitingForStatePeers = true;
+      }
+    } else if (reason == RequestFailedException.Reason.EMPTY && epoch != NO_EPOCH) {
+      // an empty bytecode answer says nothing about the state of the pivot
+      failure.get().peer().ifPresent(peer -> onEmpty(peer, epoch));
     }
   }
 

@@ -16,6 +16,11 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -24,6 +29,8 @@ import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.QueuedExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException.Reason;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
@@ -39,6 +46,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -50,6 +58,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -282,22 +291,90 @@ class StateSyncTest {
     assertThat(completion).isCompleted();
   }
 
-  static Stream<StateSync.Settings> settingsWithAZero() {
+  // bytecodes ignore the exclusions: they go on while only peers left out serve the state
+  @Test
+  void keepsAskingBytecodesWhileNoPeerTakesTheStateRequests() {
+    final TestWorld world = TestWorld.random(new Random(83), 600, 600, 0);
+    network.serve(world);
+    network.serveNoState(0);
+    network.serveNoState(1);
+    // answers with a few bytecodes, so that they still wait when the state requests stop
+    network.maxResponseBytes(1024);
+    start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+    runUntil(() -> stateSync.peersWithoutState() == 2);
+
+    // the one peer that serves the state leaves
+    network.disconnect(2);
+    runToEnd();
+    final int codeRequests = network.codeRequestCount();
+    tasks.tick();
+
+    // every bytecode known was asked without the periodic dispatch
+    assertThat(stateSync.downloadedCodes()).isPositive();
+    assertThat(network.codeRequestCount()).isEqualTo(codeRequests);
+  }
+
+  static Stream<Throwable> finalFailures() {
     return Stream.of(
-        new StateSync.Settings(0, 4096, 8, 8, 16),
-        new StateSync.Settings(16, 0, 8, 8, 16),
-        new StateSync.Settings(16, 4096, 0, 8, 16),
-        new StateSync.Settings(16, 4096, 8, 0, 16),
-        new StateSync.Settings(16, 4096, 8, 8, 0));
+        new RequestFailedException(Reason.STOPPED, null, "the scheduler stopped"),
+        new IllegalStateException("the request cannot be sent"));
+  }
+
+  // a stopped scheduler, or a request that fails on its own, would fail any request again
+  @ParameterizedTest
+  @MethodSource("finalFailures")
+  void failsWhenNoRequestCanSucceed(final Throwable failure) {
+    final TestWorld world = TestWorld.random(new Random(79), 300, 1, 100);
+    network.serve(world);
+    network.failEveryRequest(failure);
+
+    final CompletableFuture<Void> completion =
+        start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+
+    assertThatThrownBy(completion::join).hasCause(failure);
+    // the five account ranges of the first dispatch, none asked again
+    assertThat(network.requestCount()).isEqualTo(5);
+  }
+
+  // an Error in a write, as when memory runs out, leaves its request to be asked again
+  @Test
+  void completesAfterAnErrorInAWrite() {
+    final TestWorld world = TestWorld.random(new Random(89), 300, 1, 100);
+    network.serve(world);
+    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
+    final SyncStateStorage storage = spy(storages.sync());
+    doThrow(new OutOfMemoryError("a large response")).doCallRealMethod().when(storage).batch();
+    final CompletableFuture<Void> completion = start(storage, header(1, world.root()));
+
+    runToEnd();
+
+    assertThat(completion).isCompleted();
+    assertThat(build(storages).root()).isEqualTo(world.root());
   }
 
   // a zero would leave nothing to ask, or a queue that never drains
   @ParameterizedTest
-  @MethodSource("settingsWithAZero")
-  void refusesSettingsWithAZero(final StateSync.Settings settings) {
-    final SyncStateStorage storage = SyncStorageFixture.create(Format.BONSAI).sync();
-
-    assertThatThrownBy(() -> new StateSync(storage, network, settings, tasks, tasks, () -> 0L))
+  @CsvSource({
+    "0, 4096, 8, 8, 16",
+    "16, 0, 8, 8, 16",
+    "16, 4096, 0, 8, 16",
+    "16, 4096, 8, 0, 16",
+    "16, 4096, 8, 8, 0"
+  })
+  void refusesSettingsWithAZero(
+      final int accountChunks,
+      final int responseBytes,
+      final int storageBatchSize,
+      final int maxStorageChunks,
+      final int codeBatchSize) {
+    assertThatThrownBy(
+            () ->
+                new StateSync.Settings(
+                    accountChunks,
+                    responseBytes,
+                    storageBatchSize,
+                    maxStorageChunks,
+                    codeBatchSize))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -315,18 +392,27 @@ class StateSyncTest {
   @Test
   void startsNothingOnceStopped() {
     final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
-    stateSync =
-        new StateSync(
-            SyncStorageFixture.create(Format.BONSAI).sync(),
-            network,
-            SETTINGS,
-            loop,
-            tasks,
-            () -> 0L);
+    stateSync = stateSync(SyncStorageFixture.create(Format.BONSAI).sync(), SETTINGS, loop);
     stateSync.stop();
 
     assertThat(stateSync.start(header(1, Bytes32.ZERO))).isCompletedExceptionally();
     assertThat(network.requestCount()).isZero();
+  }
+
+  // a stop on another thread can land between the check of the start and its periodic dispatch
+  @Test
+  void returnsTheFailedCompletionOfAStopDuringTheStart() {
+    final QueuedExecutor loop = spy(new QueuedExecutor());
+    stateSync = stateSync(SyncStorageFixture.create(Format.BONSAI).sync(), SETTINGS, loop);
+    doAnswer(
+            invocation -> {
+              stateSync.stop();
+              throw new RejectedExecutionException("stopped");
+            })
+        .when(loop)
+        .scheduleWithFixedDelay(any(), anyLong(), anyLong(), any());
+
+    assertThat(stateSync.start(header(1, Bytes32.ZERO))).isCompletedExceptionally();
   }
 
   // the settings, the account key space split into that many ranges
@@ -346,11 +432,19 @@ class StateSyncTest {
 
   private CompletableFuture<Void> start(
       final SyncStateStorage storage, final StateSync.Settings settings, final BlockHeader pivot) {
-    // with a clock that stands still, a peer left out stays out
-    stateSync = new StateSync(storage, network, settings, tasks, tasks, () -> 0L);
+    stateSync = stateSync(storage, settings, tasks);
     final CompletableFuture<Void> completion = stateSync.start(pivot);
     tasks.runAll();
     return completion;
+  }
+
+  // a download whose writes run on the test thread
+  private StateSync stateSync(
+      final SyncStateStorage storage,
+      final StateSync.Settings settings,
+      final ScheduledExecutorService loop) {
+    // with a clock that stands still, a peer left out stays out
+    return new StateSync(storage, network, settings, loop, tasks, () -> 0L);
   }
 
   // answers the requests sent, then runs what the download queued

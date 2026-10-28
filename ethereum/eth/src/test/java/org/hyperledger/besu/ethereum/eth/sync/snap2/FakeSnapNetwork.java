@@ -72,7 +72,9 @@ public final class FakeSnapNetwork implements RequestSender {
   private final List<Bytes32> accountRangeOrigins = new ArrayList<>();
   private final Map<EthPeer, Integer> stateRequests = new HashMap<>();
   private final Map<EthPeer, Integer> codeRequests = new HashMap<>();
-  private boolean connected = true;
+  private final Set<EthPeer> disconnected = new HashSet<>();
+  // fails every request at once, if set
+  private Throwable failure;
   private int requests;
   private int nextPeer;
   private int maxResponseBytes = Integer.MAX_VALUE;
@@ -105,11 +107,21 @@ public final class FakeSnapNetwork implements RequestSender {
 
   /** Disconnects every peer, so that no peer takes a request. */
   public void disconnect() {
-    connected = false;
+    disconnected.addAll(peers);
+  }
+
+  /** Disconnects a peer, so that it takes no more requests. */
+  public void disconnect(final int peer) {
+    disconnected.add(peers.get(peer));
   }
 
   public void reconnect() {
-    connected = true;
+    disconnected.clear();
+  }
+
+  /** Fails every request at once with this error, as a stopped scheduler does. */
+  public void failEveryRequest(final Throwable error) {
+    failure = error;
   }
 
   /** Returns whether requests wait for an answer. */
@@ -163,6 +175,9 @@ public final class FakeSnapNetwork implements RequestSender {
   public <T> CompletableFuture<Response<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
     requests++;
+    if (failure != null) {
+      return CompletableFuture.failedFuture(failure);
+    }
     final Optional<EthPeer> peer = nextPeer(excluded);
     if (peer.isEmpty()) {
       return CompletableFuture.failedFuture(
@@ -189,7 +204,7 @@ public final class FakeSnapNetwork implements RequestSender {
 
   @Override
   public int peerCount(final Protocol protocol) {
-    return connected ? peers.size() : 0;
+    return peers.size() - disconnected.size();
   }
 
   @Override
@@ -203,12 +218,12 @@ public final class FakeSnapNetwork implements RequestSender {
     return Runnable::run;
   }
 
-  // the next peer in turn not left out
+  // the next connected peer in turn not left out
   private Optional<EthPeer> nextPeer(final Set<EthPeer> excluded) {
-    for (int i = 0; connected && i < peers.size(); i++) {
+    for (int i = 0; i < peers.size(); i++) {
       final EthPeer peer = peers.get(nextPeer);
       nextPeer = (nextPeer + 1) % peers.size();
-      if (!excluded.contains(peer)) {
+      if (!excluded.contains(peer) && !disconnected.contains(peer)) {
         return Optional.of(peer);
       }
     }
