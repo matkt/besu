@@ -494,12 +494,12 @@ public class EthProtocolManager implements ProtocolManager, MinedBlockObserver {
   }
 
   private StatusMessage.BlockRange createBlockRange() {
+    final long chainHead = blockchain.getChainHeadBlockNumber();
+    // a sync may move the chain head down while the earliest block is searched
     return blockchain
         .getEarliestBlockNumber()
-        .map(
-            earliestBlockNumber ->
-                new StatusMessage.BlockRange(
-                    earliestBlockNumber, blockchain.getChainHeadBlockNumber()))
+        .filter(earliestBlockNumber -> earliestBlockNumber <= chainHead)
+        .map(earliestBlockNumber -> new StatusMessage.BlockRange(earliestBlockNumber, chainHead))
         .orElseGet(() -> new StatusMessage.BlockRange(0, 0));
   }
 }
