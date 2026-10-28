@@ -40,8 +40,13 @@ public final class TestTries {
   /** Builds the tries of the flat state, its partitions one after the other. */
   public static WorldStateTrieBuilder.Result build(
       final SyncStateStorage storage, final Predicate<Bytes32> trieLeft) {
+    return builder(storage, trieLeft).build();
+  }
+
+  /** Returns a build whose partitions run one after the other, on the thread that builds. */
+  public static WorldStateTrieBuilder builder(
+      final SyncStateStorage storage, final Predicate<Bytes32> trieLeft) {
     return new WorldStateTrieBuilder(
-            storage, trieLeft, MoreExecutors::newDirectExecutorService, FIXES_PER_COMMIT)
-        .build();
+        storage, trieLeft, MoreExecutors::newDirectExecutorService, FIXES_PER_COMMIT);
   }
 }
