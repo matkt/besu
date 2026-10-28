@@ -44,7 +44,7 @@ public interface SyncStateStorage {
 
   /**
    * Returns whether the storage trie of an account with this root is completely written, by its
-   * root node, which is written last.
+   * root node: only for the root the account records, a failed update may leave an older one.
    */
   boolean hasStorageTrie(Bytes32 accountHash, Bytes32 storageRoot);
 
@@ -90,6 +90,7 @@ public interface SyncStateStorage {
     /** Visits an account and returns whether its slots are to be visited too. */
     boolean onAccount(Bytes32 accountHash, Bytes account);
 
+    /** Visits a slot, whose value may come without its leading zeros. */
     void onSlot(Bytes32 accountHash, Bytes32 slotHash, Bytes value);
   }
 

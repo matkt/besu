@@ -52,6 +52,8 @@ class SyncStateStorageTest {
   private static final Bytes32 CODE_HASH = hash(CODE);
   private static final Bytes NODE = Bytes.fromHexString("0xc28080");
   private static final Bytes32 NODE_HASH = hash(NODE);
+  private static final Bytes ACCOUNT_NODE = Bytes.fromHexString("0xc3808080");
+  private static final Bytes32 ACCOUNT_NODE_HASH = hash(ACCOUNT_NODE);
   private static final Bytes ABORTED_NODE = Bytes.fromHexString("0xc380c180");
 
   // slots of a missing account come after the previous account, an account may skip its slots
@@ -226,14 +228,15 @@ class SyncStateStorageTest {
     writer.abort();
 
     writer.storageNode(FIRST, Bytes.EMPTY, NODE_HASH, NODE);
-    writer.accountNode(Bytes.of(1), NODE_HASH, NODE);
+    writer.accountNode(Bytes.of(1), ACCOUNT_NODE_HASH, ACCOUNT_NODE);
     assertThat(storage.hasStorageTrie(FIRST, NODE_HASH)).isFalse();
     writer.commit();
 
     assertThat(storage.storageTrieNode(FIRST, Bytes.of(2), hash(ABORTED_NODE))).isEmpty();
     assertThat(storage.hasStorageTrie(FIRST, NODE_HASH)).isTrue();
     assertThat(storage.storageTrieNode(FIRST, Bytes.EMPTY, NODE_HASH)).contains(NODE);
-    assertThat(storages.accountNodes().getNode(Bytes.of(1), NODE_HASH)).contains(NODE);
+    assertThat(storages.worldState().getAccountStateTrieNode(Bytes.of(1), ACCOUNT_NODE_HASH))
+        .contains(ACCOUNT_NODE);
   }
 
   // 9 MB of nodes, past the 8 MB a batch holds

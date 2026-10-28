@@ -19,14 +19,13 @@ import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
-import org.hyperledger.besu.ethereum.trie.NodeLoader;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.trie.patricia.StoredMerklePatriciaTrie;
 import org.hyperledger.besu.ethereum.worldstate.DataStorageConfiguration;
+import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 
 import java.util.Map;
 import java.util.NavigableMap;
@@ -49,24 +48,23 @@ public final class SyncStorageFixture {
     FOREST
   }
 
-  /**
-   * A sync storage with the readers of the trie nodes its world state stores.
-   *
-   * @param storageNodes the reader of the storage trie of an account
-   */
-  public record Storages(
-      SyncStateStorage sync, NodeLoader accountNodes, Function<Bytes32, NodeLoader> storageNodes) {
+  /** A sync storage with direct access to its backing world state storage. */
+  public record Storages(SyncStateStorage sync, WorldStateStorageCoordinator worldState) {
 
     /** Opens the stored account trie. */
     public MerkleTrie<Bytes32, Bytes> accountTrie(final Bytes32 root) {
       return new StoredMerklePatriciaTrie<>(
-          accountNodes, root, Function.identity(), Function.identity());
+          worldState::getAccountStateTrieNode, root, Function.identity(), Function.identity());
     }
 
     /** Opens a stored storage trie. */
     public MerkleTrie<Bytes32, Bytes> storageTrie(final Bytes32 accountHash, final Bytes32 root) {
       return new StoredMerklePatriciaTrie<>(
-          storageNodes.apply(accountHash), root, Function.identity(), Function.identity());
+          (location, hash) ->
+              worldState.getAccountStorageTrieNode(Hash.wrap(accountHash), location, hash),
+          root,
+          Function.identity(),
+          Function.identity());
     }
   }
 
@@ -78,28 +76,19 @@ public final class SyncStorageFixture {
             (BonsaiWorldStateKeyValueStorage)
                 provider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
         yield new Storages(
-            new BonsaiSyncStateStorage(bonsai),
-            bonsai::getTrieNode,
-            accountHash ->
-                (location, hash) ->
-                    bonsai.getTrieNode(TrieNodeKey.of(Hash.wrap(accountHash), location), hash));
+            new BonsaiSyncStateStorage(bonsai), new WorldStateStorageCoordinator(bonsai));
       }
       case FOREST -> {
         final ForestWorldStateKeyValueStorage forest =
             (ForestWorldStateKeyValueStorage)
                 provider.createWorldStateStorage(DataStorageConfiguration.DEFAULT_FOREST_CONFIG);
         yield new Storages(
-            new ForestSyncStateStorage(forest, provider),
-            (location, hash) -> forest.getAccountStateTrieNode(hash),
-            accountHash -> (location, hash) -> forest.getAccountStorageTrieNode(hash));
+            new ForestSyncStateStorage(forest, provider), new WorldStateStorageCoordinator(forest));
       }
     };
   }
 
-  /**
-   * Returns the slots stored for an account, keyed by slot hash, by a scan of its key alone. The
-   * values are on 32 bytes, Forest stages them without their leading zeros.
-   */
+  /** Returns the slots stored for an account, keyed by slot hash, by a scan of its key alone. */
   public static NavigableMap<Bytes32, Bytes> slots(
       final SyncStateStorage storage, final Bytes32 accountHash) {
     final NavigableMap<Bytes32, Bytes> slots = new TreeMap<>();
@@ -114,6 +103,7 @@ public final class SyncStorageFixture {
 
           @Override
           public void onSlot(final Bytes32 hash, final Bytes32 slotHash, final Bytes value) {
+            // on 32 bytes: Forest stages the values without their leading zeros
             slots.put(slotHash, Bytes32.leftPad(value));
           }
         });

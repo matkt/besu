@@ -38,9 +38,6 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
@@ -68,23 +65,10 @@ class ForestSyncStateStorageTest {
     batch.putStorage(FIRST, SLOT, Bytes32.leftPad(Bytes.of(1, 2)));
     batch.commit();
 
-    final List<Bytes> values = new ArrayList<>();
-    storage.scan(
-        FIRST,
-        FIRST,
-        new SyncStateStorage.ScanVisitor() {
-          @Override
-          public boolean onAccount(final Bytes32 accountHash, final Bytes account) {
-            return true;
-          }
+    final SyncStateStorage.ScanVisitor visitor = mock(SyncStateStorage.ScanVisitor.class);
+    storage.scan(FIRST, FIRST, visitor);
 
-          @Override
-          public void onSlot(final Bytes32 accountHash, final Bytes32 slotHash, final Bytes value) {
-            values.add(value);
-          }
-        });
-
-    assertThat(values).containsExactly(Bytes.of(1, 2));
+    verify(visitor).onSlot(FIRST, SLOT, Bytes.of(1, 2));
   }
 
   @Test
@@ -95,13 +79,6 @@ class ForestSyncStateStorageTest {
 
     assertThat(storage.hasStorageTrie(SECOND, NODE_HASH)).isTrue();
     assertThat(storage.storageTrieNode(SECOND, Bytes.of(1), NODE_HASH)).contains(NODE);
-  }
-
-  @Test
-  void savesTheWorldStateByItsRootNode() {
-    storage.saveWorldState(header(NODE), NODE);
-
-    assertThat(forest.isWorldStateAvailable(NODE_HASH)).isTrue();
   }
 
   @Test

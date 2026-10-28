@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Iterators;
@@ -30,7 +31,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-/** Flat state kept in two segments: accounts keyed by hash and slots keyed by both hashes. */
+/** Flat state in two segments, accounts keyed by hash and slots by both, and the trie writer. */
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   // bounds the write batch a writer keeps before committing
@@ -139,13 +140,16 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
     }
   }
 
+  @Override
+  public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
+    return storageTrieNode(accountHash, Bytes.EMPTY, storageRoot).isPresent();
+  }
+
   /** Trie nodes put through one updater of the format, until committed or aborted. */
   protected interface NodeBatch {
-    /** Puts an account trie node and returns the bytes it adds. */
-    int putAccountNode(Bytes location, Bytes32 hash, Bytes rlp);
+    void putAccountNode(Bytes location, Bytes32 hash, Bytes rlp);
 
-    /** Puts a storage trie node and returns the bytes it adds. */
-    int putStorageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
+    void putStorageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
 
     void commit();
 
@@ -158,52 +162,55 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
   @Override
   public TrieWriter trieWriter() {
     return new TrieWriter() {
-      private NodeBatch batch;
+      private NodeBatch nodes;
       private long pendingBytes;
 
       @Override
       public void accountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        commitWhenFull(batch().putAccountNode(location, hash, rlp));
+        nodes().putAccountNode(location, hash, rlp);
+        commitWhenFull(rlp);
       }
 
       @Override
       public void storageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        commitWhenFull(batch().putStorageNode(accountHash, location, hash, rlp));
+        nodes().putStorageNode(accountHash, location, hash, rlp);
+        commitWhenFull(rlp);
       }
 
-      // a failed commit leaves the writer empty
       @Override
       public void commit() {
-        final NodeBatch pending = batch;
-        batch = null;
-        pendingBytes = 0;
-        if (pending != null) {
-          pending.commit();
-        }
+        end(NodeBatch::commit);
       }
 
       @Override
       public void abort() {
-        final NodeBatch pending = batch;
-        batch = null;
-        pendingBytes = 0;
-        if (pending != null) {
-          pending.abort();
-        }
+        end(NodeBatch::abort);
       }
 
-      private NodeBatch batch() {
-        if (batch == null) {
-          batch = nodeBatch();
+      private NodeBatch nodes() {
+        if (nodes == null) {
+          nodes = nodeBatch();
         }
-        return batch;
+        return nodes;
       }
 
-      private void commitWhenFull(final int addedBytes) {
-        pendingBytes += addedBytes;
+      // a node and its hash, about what the batch holds for it
+      private void commitWhenFull(final Bytes rlp) {
+        pendingBytes += Bytes32.SIZE + rlp.size();
         if (pendingBytes >= BYTES_PER_COMMIT) {
           commit();
+        }
+      }
+
+      private void end(final Consumer<NodeBatch> ending) {
+        if (nodes != null) {
+          try {
+            ending.accept(nodes);
+          } finally {
+            nodes = null;
+            pendingBytes = 0;
+          }
         }
       }
     };

@@ -115,12 +115,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
     };
   }
 
-  // a trie with this root is the same whichever account wrote it
-  @Override
-  public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
-    return forest.getAccountStorageTrieNode(storageRoot).isPresent();
-  }
-
+  // by hash: a trie with a root is the same whichever account wrote it
   @Override
   public Optional<Bytes> storageTrieNode(
       final Bytes32 accountHash, final Bytes location, final Bytes32 hash) {
@@ -132,16 +127,14 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
     final ForestWorldStateKeyValueStorage.Updater updater = forest.batchUpdater();
     return new NodeBatch() {
       @Override
-      public int putAccountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+      public void putAccountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
         updater.putAccountStateTrieNode(hash, rlp);
-        return Bytes32.SIZE + rlp.size();
       }
 
       @Override
-      public int putStorageNode(
+      public void putStorageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
         updater.putAccountStorageTrieNode(hash, rlp);
-        return Bytes32.SIZE + rlp.size();
       }
 
       @Override

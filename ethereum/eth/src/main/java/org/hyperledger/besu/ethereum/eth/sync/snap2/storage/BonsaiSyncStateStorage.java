@@ -114,14 +114,6 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     };
   }
 
-  // at the account's location: only a root it still has, a failed update may leave the old one
-  @Override
-  public boolean hasStorageTrie(final Bytes32 accountHash, final Bytes32 storageRoot) {
-    return bonsai
-        .getTrieNode(TrieNodeKey.of(Hash.wrap(accountHash), Bytes.EMPTY), storageRoot)
-        .isPresent();
-  }
-
   @Override
   public Optional<Bytes> storageTrieNode(
       final Bytes32 accountHash, final Bytes location, final Bytes32 hash) {
@@ -133,14 +125,14 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
     final BonsaiWorldStateKeyValueStorage.Updater updater = newUpdater();
     return new NodeBatch() {
       @Override
-      public int putAccountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        return put(location, hash, rlp);
+      public void putAccountNode(final Bytes location, final Bytes32 hash, final Bytes rlp) {
+        updater.putTrieNode(location, hash, rlp);
       }
 
       @Override
-      public int putStorageNode(
+      public void putStorageNode(
           final Bytes32 accountHash, final Bytes location, final Bytes32 hash, final Bytes rlp) {
-        return put(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
+        updater.putTrieNode(TrieNodeKey.of(Hash.wrap(accountHash), location), hash, rlp);
       }
 
       @Override
@@ -151,11 +143,6 @@ public final class BonsaiSyncStateStorage extends AbstractSyncStateStorage {
       @Override
       public void abort() {
         updater.rollback();
-      }
-
-      private int put(final Bytes key, final Bytes32 hash, final Bytes rlp) {
-        updater.putTrieNode(key, hash, rlp);
-        return key.size() + rlp.size();
       }
     };
   }
