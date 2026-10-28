@@ -43,8 +43,9 @@ final class ChainSender implements RequestSender {
   private final RespondingEthPeer.Responder responder;
   private final EthPeer peer = mock(EthPeer.class);
   private final List<MessageData> requests = new ArrayList<>();
-  // the requests that fail instead of being answered
+  // the requests that fail instead of being answered, and how
   private Predicate<MessageData> failing = message -> false;
+  private RuntimeException failure = new IllegalStateException("request failed");
 
   ChainSender(final Blockchain chain) {
     responder = RespondingEthPeer.blockchainResponder(chain);
@@ -55,7 +56,13 @@ final class ChainSender implements RequestSender {
 
   /** Fails the requests the predicate matches, from now on. */
   void fail(final Predicate<MessageData> requests) {
+    fail(requests, new IllegalStateException("request failed"));
+  }
+
+  /** Fails the requests the predicate matches with this failure, from now on. */
+  void fail(final Predicate<MessageData> requests, final RuntimeException failure) {
     failing = requests;
+    this.failure = failure;
   }
 
   /** Returns every request answered or failed, in order. */
@@ -69,7 +76,7 @@ final class ChainSender implements RequestSender {
     final MessageData message = request.message(peer);
     requests.add(message);
     if (failing.test(message)) {
-      return CompletableFuture.failedFuture(new IllegalStateException("request failed"));
+      return CompletableFuture.failedFuture(failure);
     }
     // an invalid answer fails the request, as with the scheduler
     try {

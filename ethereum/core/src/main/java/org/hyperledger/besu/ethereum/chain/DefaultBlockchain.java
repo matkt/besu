@@ -652,16 +652,17 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
-  public void unsafeStoreHeader(final BlockHeader blockHeader, final Difficulty totalDifficulty) {
+  public synchronized void unsafeStoreHeader(
+      final BlockHeader blockHeader, final Difficulty totalDifficulty) {
     // as this is used only to store premerge block headers, we don't cache the header in this case
+    final int transactionCount = transactionCount(blockHeader);
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
     updater.putBlockHeader(blockHeader.getHash(), blockHeader);
     updater.putBlockHash(blockHeader.getNumber(), blockHeader.getBlockHash());
     updater.putTotalDifficulty(blockHeader.getHash(), totalDifficulty);
-    this.chainHeader = blockHeader;
-    this.totalDifficulty = totalDifficulty;
     updater.setChainHead(blockHeader.getBlockHash());
     updater.commit();
+    publishChainHead(blockHeader, totalDifficulty, transactionCount);
   }
 
   private void cacheBlockData(
@@ -796,14 +797,13 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @Override
   public Difficulty unsafeStoreSyncTotalDifficulties(
-      final BlockHeader parent, final Difficulty parentTotal, final long last) {
-    checkArgument(
-        last > parent.getNumber(), "block %s is not above block %s", last, parent.getNumber());
-    Hash parentHash = parent.getHash();
+      final long parent, final Difficulty parentTotal, final long last) {
+    checkArgument(last > parent, "block %s is not above block %s", last, parent);
+    Hash parentHash = canonicalHeader(parent).getHash();
     Difficulty total = parentTotal;
     final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     try {
-      for (long number = parent.getNumber() + 1; number <= last; number++) {
+      for (long number = parent + 1; number <= last; number++) {
         final BlockHeader header = canonicalHeader(number);
         if (!header.getParentHash().equals(parentHash)) {
           throw new IllegalStateException(
@@ -839,16 +839,27 @@ public class DefaultBlockchain implements MutableBlockchain {
   @Override
   public synchronized void unsafeSetChainHead(
       final BlockHeader blockHeader, final Difficulty totalDifficulty) {
+    final int transactionCount = transactionCount(blockHeader);
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
-    this.chainHeader = blockHeader;
-    this.totalDifficulty = totalDifficulty;
-    this.chainHeadTransactionCount =
-        blockchainStorage
-            .getBlockBody(blockHeader.getBlockHash())
-            .map(body -> body.getTransactions().size())
-            .orElse(0);
     updater.setChainHead(blockHeader.getBlockHash());
     updater.commit();
+    publishChainHead(blockHeader, totalDifficulty, transactionCount);
+  }
+
+  // read before the commit, so that a body that cannot be read writes nothing
+  private int transactionCount(final BlockHeader blockHeader) {
+    return blockchainStorage
+        .getBlockBody(blockHeader.getBlockHash())
+        .map(body -> body.getTransactions().size())
+        .orElse(0);
+  }
+
+  // once committed, as a failed commit leaves the stored chain head where it was
+  private void publishChainHead(
+      final BlockHeader blockHeader, final Difficulty totalDifficulty, final int transactionCount) {
+    chainHeadTransactionCount = transactionCount;
+    this.totalDifficulty = totalDifficulty;
+    chainHeader = blockHeader;
   }
 
   @Override

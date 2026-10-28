@@ -14,14 +14,17 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
+import org.hyperledger.besu.ethereum.eth.sync.StorageExceptionManager;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
+
+import java.util.concurrent.CancellationException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Tries a write on the chain variables again, as RocksDB may fail to check the conflicts of its
- * transaction while a sync writes.
+ * Tries a write again when RocksDB fails to check the conflicts of its transaction, as the writes
+ * of a sync can make it do.
  */
 public final class WriteRetry {
 
@@ -35,19 +38,25 @@ public final class WriteRetry {
 
   private WriteRetry() {}
 
-  /** Runs the write up to six times, 20 ms to 320 ms apart; the last failure goes to the caller. */
+  /**
+   * Runs the write up to six times, 20 ms to 320 ms apart, while RocksDB fails to check it; any
+   * other failure, or the last one, goes to the caller.
+   */
   public static void run(final Runnable write, final Pause pause) {
     for (int attempt = 1; attempt < ATTEMPTS; attempt++) {
       try {
         write.run();
         return;
       } catch (final StorageException e) {
+        if (!StorageExceptionManager.canRetryOnError(e)) {
+          throw e;
+        }
         LOG.debug("Write not committed, retrying: {}", e.getMessage());
         try {
           pause.sleep(10L << attempt);
         } catch (final InterruptedException interrupted) {
           Thread.currentThread().interrupt();
-          throw e;
+          throw new CancellationException("interrupted while retrying a write");
         }
       }
     }

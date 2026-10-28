@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.core.encoding.receipt.SyncTransactionReceip
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncBlockBodiesFromPeerTask;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.task.GetSyncReceiptsFromPeerTask;
+import org.hyperledger.besu.ethereum.eth.sync.StorageExceptionManager;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BlockRanges.Gap;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.PeerTaskRequest;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
@@ -40,6 +41,7 @@ import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
 import org.hyperledger.besu.ethereum.rlp.SimpleNoCopyRlpEncoder;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 
 import java.time.Duration;
@@ -185,8 +187,8 @@ public final class BodyBackfill {
    *
    * @param sender the SNAP2 scheduler, which must run until the back-fill ends
    * @param inSync whether the node follows the chain head, the back-fill pausing otherwise
-   * @param lowest the lowest block whose body and receipts are stored already, the download
-   *     starting below it
+   * @param lowest the block the download starts below: the lowest whose body and receipts are
+   *     stored, or the one above a window
    * @param lowestNeeded the lowest block whose body is needed for a chain head, above the floor of
    *     the sync and, on a pruned chain, {@link
    *     org.hyperledger.besu.ethereum.chain.ChainDataPruner#lowestToBackfill}
@@ -212,7 +214,7 @@ public final class BodyBackfill {
         Thread::sleep);
   }
 
-  /** Creates the back-fill whose records wait {@code pause} between two tries. */
+  /** Creates the back-fill whose last record waits {@code pause} between two tries. */
   @VisibleForTesting
   BodyBackfill(
       final MutableBlockchain blockchain,
@@ -371,7 +373,12 @@ public final class BodyBackfill {
       updateAverages(blocks);
       store(range, blocks);
     } catch (final RuntimeException e) {
-      if (!ended) {
+      if (e instanceof StorageException storage
+          && !StorageExceptionManager.canRetryOnError(storage)) {
+        // the storage failed rather than a peer: asking again would fail the same way
+        LOG.warn("SNAP2 {} stopped: {}", settings.label(), e.getMessage(), e);
+        end(e);
+      } else if (!ended) {
         LOG.debug(
             "Blocks {} to {} failed, asked again later: {}",
             range.from(),
@@ -481,7 +488,7 @@ public final class BodyBackfill {
   private synchronized void recordLowest() {
     final long lowest = ranges.lowest();
     if (lowest < recordedLowest) {
-      WriteRetry.run(() -> blockchain.unsafeSetBodiesFrom(lowest), pause);
+      blockchain.unsafeSetBodiesFrom(lowest);
       recordedLowest = lowest;
       bytesSinceRecord = 0;
     }
@@ -504,7 +511,7 @@ public final class BodyBackfill {
       running = workers;
       // under the lock, so that a stop finds it recorded
       try {
-        recordLowest();
+        WriteRetry.run(this::recordLowest, pause);
       } catch (final RuntimeException e) {
         LOG.debug("Could not record the back-filled blocks: {}", e.getMessage());
         // a back-fill that could not record what it stored did not complete

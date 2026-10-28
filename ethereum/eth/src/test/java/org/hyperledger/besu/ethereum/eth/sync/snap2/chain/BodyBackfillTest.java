@@ -15,6 +15,10 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures.diskFailure;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures.notCommitted;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -320,10 +324,7 @@ class BodyBackfillTest {
   void recordsWhatItStoredAgainWhenTheRecordIsNotCommitted() {
     blockchain = spy(chain(51));
     // the transaction of the record fails its conflict check once
-    doThrow(new StorageException("not committed"))
-        .doCallRealMethod()
-        .when(blockchain)
-        .unsafeSetBodiesFrom(anyLong());
+    doThrow(notCommitted()).doCallRealMethod().when(blockchain).unsafeSetBodiesFrom(anyLong());
     final BodyBackfill backfill = backfill();
 
     runToEnd(backfill);
@@ -331,6 +332,23 @@ class BodyBackfillTest {
     assertThat(backfill.done()).isCompleted();
     assertThat(blockchain.getBodiesFrom()).contains(1L);
     assertThat(pauses).containsExactly(20L);
+  }
+
+  @Test
+  void endsOnAStorageFailure() {
+    blockchain = spy(chain(51));
+    final StorageException failure = diskFailure();
+    doThrow(failure).when(blockchain).unsafeStoreSyncBodiesAndReceipts(anyList(), anyBoolean());
+    final BodyBackfill backfill = backfill();
+
+    runToEnd(backfill);
+
+    // rather than asking the same range again and again
+    assertThat(backfill.done())
+        .failsWithin(Duration.ZERO)
+        .withThrowableThat()
+        .havingCause()
+        .isSameAs(failure);
   }
 
   @Test

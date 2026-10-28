@@ -16,6 +16,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures.diskFailure;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures.notCommitted;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -46,6 +48,8 @@ import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.QueuedExecutor;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException.Reason;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
@@ -76,6 +80,9 @@ class SyncChainTest {
   private static final int MERGE = 6;
   private static final int PIVOT = 20;
   private static final int WINDOW = 8;
+  // more requests at once than segments, as the stages of the header download share the test thread
+  private static final int HEADER_PARALLELISM = 16;
+  private static final int TOTAL_DIFFICULTIES_PER_COMMIT = 8;
 
   private final BlockDataGenerator gen = new BlockDataGenerator(7);
   private final List<Block> blocks = chain();
@@ -153,20 +160,19 @@ class SyncChainTest {
         .contains(totalDifficulty(MERGE - 1));
   }
 
-  @ParameterizedTest
-  @ValueSource(ints = {0, 1})
-  void storesTheHeadersInStartWhenTheFirstPivotIsAtTheCheckpointOrJustAbove(final int above) {
+  @Test
+  void storesTheHeadersInStartWhenTheFirstPivotIsJustAboveTheCheckpoint() {
     final SyncChain chain = chain(Optional.of(checkpoint()), true);
 
-    chain.start(header(MERGE + above));
+    chain.start(header(MERGE + 1));
 
     // nothing left to download
     assertThat(chain.headersDone()).isCompleted();
-    chain.downloadWindow(header(MERGE + above));
+    chain.downloadWindow(header(MERGE + 1));
     executor.runAll();
     windowWorkers.runAll();
-    chain.setChainHead(header(MERGE + above));
-    assertThat(blockchain.getChainHeadHeader()).isEqualTo(header(MERGE + above));
+    chain.setChainHead();
+    assertThat(blockchain.getChainHeadHeader()).isEqualTo(header(MERGE + 1));
   }
 
   @Test
@@ -203,16 +209,26 @@ class SyncChainTest {
   @Test
   void failsWhenTheHeadersCannotBeStored() {
     // the pivot is stored, then the headers below it fail
-    doCallRealMethod()
-        .doThrow(new StorageException("disk failure"))
-        .when(blockchain)
-        .storeBlockHeaders(anyList());
+    doCallRealMethod().doThrow(diskFailure()).when(blockchain).storeBlockHeaders(anyList());
     final SyncChain chain = chain(Optional.empty(), false);
 
     chain.start(header(PIVOT));
     executor.runAll();
 
     assertThat(chain.headersDone().exceptionNow()).isInstanceOf(StorageException.class);
+  }
+
+  @Test
+  void failsWhenTheSchedulerStops() {
+    sender.fail(
+        message -> true, new RequestFailedException(Reason.STOPPED, null, "scheduler stopped"));
+    final SyncChain chain = chain(Optional.empty(), false);
+
+    chain.start(header(PIVOT));
+    executor.runAll();
+
+    // rather than resuming a download nothing can serve
+    assertThat(chain.headersDone().exceptionNow()).isInstanceOf(RequestFailedException.class);
   }
 
   @Test
@@ -232,11 +248,13 @@ class SyncChainTest {
     assertThatThrownBy(() -> chain.start(header(PIVOT))).isInstanceOf(IllegalStateException.class);
   }
 
-  @Test
-  void rejectsAPivotBelowTheCheckpoint() {
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1})
+  void rejectsAPivotThatIsNotAboveTheCheckpoint(final int below) {
     final SyncChain chain = chain(Optional.of(checkpoint()), true);
 
-    assertThatThrownBy(() -> chain.start(header(MERGE - 1)))
+    // at the checkpoint, the window would store no body for the chain head
+    assertThatThrownBy(() -> chain.start(header(MERGE - below)))
         .isInstanceOf(IllegalStateException.class);
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
   }
@@ -323,25 +341,25 @@ class SyncChainTest {
   void setsTheChainHeadAtTheFinalPivot() {
     final SyncChain chain = synced(chain(Optional.empty(), false));
 
-    chain.setChainHead(header(PIVOT));
+    chain.setChainHead();
 
     assertThat(blockchain.getChainHeadHeader()).isEqualTo(header(PIVOT));
     assertThat(blockchain.getChainHead().getTotalDifficulty()).isEqualTo(totalDifficulty(PIVOT));
     // above the proof-of-work genesis, the total difficulties of eight headers a commit
     final InOrder order = inOrder(blockchain);
-    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(any(), any(), eq(8L));
-    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(any(), any(), eq(16L));
-    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(any(), any(), eq(20L));
+    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(eq(0L), any(), eq(8L));
+    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(eq(8L), any(), eq(16L));
+    order.verify(blockchain).unsafeStoreSyncTotalDifficulties(eq(16L), any(), eq(20L));
   }
 
   @Test
   void setsTheChainHeadAboveTheTerminalTotalDifficultyWithoutReadingTheHeaders() {
     final SyncChain chain = synced(chain(Optional.of(checkpoint()), true));
 
-    chain.setChainHead(header(PIVOT));
+    chain.setChainHead();
 
     assertThat(blockchain.getChainHead().getTotalDifficulty()).isEqualTo(totalDifficulty(PIVOT));
-    verify(blockchain, never()).unsafeStoreSyncTotalDifficulties(any(), any(), anyLong());
+    verify(blockchain, never()).unsafeStoreSyncTotalDifficulties(anyLong(), any(), anyLong());
   }
 
   @Test
@@ -349,44 +367,59 @@ class SyncChainTest {
     final SyncChain chain =
         synced(chain(Optional.of(checkpoint()), true, Optional.empty(), windowWorkers));
 
-    chain.setChainHead(header(PIVOT));
+    chain.setChainHead();
 
     assertThat(blockchain.getChainHead().getTotalDifficulty()).isEqualTo(totalDifficulty(PIVOT));
-    verify(blockchain, times(2)).unsafeStoreSyncTotalDifficulties(any(), any(), anyLong());
+    verify(blockchain, times(2)).unsafeStoreSyncTotalDifficulties(anyLong(), any(), anyLong());
   }
 
   @Test
-  void setsNoChainHeadUntilTheWindowUpToItIsStored() {
+  void setsNoChainHeadUntilTheWindowIsStored() {
     final SyncChain chain = chain(Optional.empty(), false);
     chain.start(header(PIVOT));
     executor.runAll();
-    assertThatThrownBy(() -> chain.setChainHead(header(PIVOT)))
-        .isInstanceOf(IllegalStateException.class);
-    // started, not stored yet
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(IllegalStateException.class);
     chain.downloadWindow(header(PIVOT));
     executor.runAll();
-    assertThatThrownBy(() -> chain.setChainHead(header(PIVOT)))
-        .isInstanceOf(IllegalStateException.class);
 
-    windowWorkers.runAll();
-
-    // another head than the pivot of the window
-    assertThatThrownBy(() -> chain.setChainHead(header(PIVOT - 1)))
-        .isInstanceOf(IllegalStateException.class);
+    // started, not stored yet
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(IllegalStateException.class);
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
   }
 
   @Test
-  void setsNoChainHeadOffTheCanonicalChain() {
-    final SyncChain chain = chain(Optional.empty(), false);
+  void downloadsNoWindowUpToAPivotOffTheCanonicalChain() {
+    final SyncChain chain = chain(Optional.of(checkpoint()), true);
     chain.start(header(PIVOT));
-    // a block of another chain at the height of the pivot, its window stored
-    final BlockHeader other = new BlockHeaderTestFixture().number(PIVOT).buildHeader();
-    chain.downloadWindow(other);
     executor.runAll();
-    windowWorkers.runAll();
+    // a sibling of the pivot, stored with its total difficulty
+    final Block other =
+        gen.block(
+            new BlockOptions()
+                .setBlockNumber(PIVOT)
+                .setParentHash(header(PIVOT - 1).getHash())
+                .setTimestamp((long) HEAD + 1)
+                .setDifficulty(Difficulty.ZERO)
+                .hasOmmers(false)
+                .hasTransactions(false));
+    blockchain.storeBlock(other, List.of());
+    final int asked = sender.requests().size();
 
-    assertThatThrownBy(() -> chain.setChainHead(other)).isInstanceOf(IllegalStateException.class);
+    final CompletableFuture<Void> window = chain.downloadWindow(other.getHeader());
+    executor.runAll();
+
+    assertThat(window.exceptionNow()).isInstanceOf(IllegalStateException.class);
+    assertThat(sender.requests()).hasSize(asked);
+  }
+
+  @Test
+  void setsNoChainHeadOnHeadersThatDoNotFollowTheChain() {
+    final SyncChain chain = synced(chain(Optional.empty(), false));
+    // the canonical block 10 is not the child of block 9
+    blockchain.storeBlockHeaders(
+        List.of(new BlockHeaderTestFixture().number(10).parentHash(Hash.ZERO).buildHeader()));
+
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(IllegalStateException.class);
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
   }
 
@@ -396,35 +429,20 @@ class SyncChainTest {
     // stored by a pivot move the final pivot is below
     chain.storeHeaders(headers(PIVOT + 1, PIVOT + 2));
 
-    chain.setChainHead(header(PIVOT));
+    chain.setChainHead();
 
     assertThat(blockchain.getBlockHeader(PIVOT + 1)).isEmpty();
     assertThat(blockchain.getBlockHeader(PIVOT + 2)).isEmpty();
   }
 
   @Test
-  void triesAWriteAgainUntilItCommits() {
-    doThrow(new StorageException("not committed"))
-        .doThrow(new StorageException("not committed"))
-        .doCallRealMethod()
-        .when(blockchain)
-        .unsafeSetChainHead(any(), any());
+  void triesAHeadWriteAgainUntilItCommits() {
+    doThrow(notCommitted()).doCallRealMethod().when(blockchain).unsafeSetChainHead(any(), any());
 
     chain(Optional.empty(), false).start(header(PIVOT));
 
-    assertThat(pauses).containsExactly(20L, 40L);
-    verify(blockchain, times(3)).unsafeSetChainHead(any(), any());
+    assertThat(pauses).containsExactly(20L);
     assertThat(blockchain.getBlockHeader(PIVOT)).contains(header(PIVOT));
-  }
-
-  @Test
-  void givesUpOnAWriteThatNeverCommits() {
-    doThrow(new StorageException("disk failure")).when(blockchain).unsafeSetChainHead(any(), any());
-    final SyncChain chain = chain(Optional.empty(), false);
-
-    assertThatThrownBy(() -> chain.start(header(PIVOT))).isInstanceOf(StorageException.class);
-    verify(blockchain, times(6)).unsafeSetChainHead(any(), any());
-    assertThat(pauses).containsExactly(20L, 40L, 80L, 160L, 320L);
   }
 
   @Test
@@ -459,8 +477,7 @@ class SyncChainTest {
     assertThat(window).isCompletedExceptionally();
     assertThatThrownBy(() -> chain.storeHeaders(headers(PIVOT + 1, PIVOT + 2)))
         .isInstanceOf(CancellationException.class);
-    assertThatThrownBy(() -> chain.setChainHead(header(PIVOT)))
-        .isInstanceOf(CancellationException.class);
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(CancellationException.class);
   }
 
   @Test
@@ -487,11 +504,25 @@ class SyncChainTest {
               return invocation.callRealMethod();
             })
         .when(blockchain)
-        .unsafeStoreSyncTotalDifficulties(any(), any(), anyLong());
+        .unsafeStoreSyncTotalDifficulties(anyLong(), any(), anyLong());
 
-    assertThatThrownBy(() -> chain.setChainHead(header(PIVOT)))
-        .isInstanceOf(CancellationException.class);
-    verify(blockchain, times(1)).unsafeStoreSyncTotalDifficulties(any(), any(), anyLong());
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(CancellationException.class);
+    verify(blockchain, times(1)).unsafeStoreSyncTotalDifficulties(anyLong(), any(), anyLong());
+    assertThat(blockchain.getChainHeadBlockNumber()).isZero();
+  }
+
+  @Test
+  void setsNoChainHeadOnceCancelledDuringTheLastCommit() {
+    final SyncChain chain = synced(chain(Optional.empty(), false));
+    doAnswer(
+            invocation -> {
+              chain.cancel();
+              return invocation.callRealMethod();
+            })
+        .when(blockchain)
+        .unsafeStoreSyncTotalDifficulties(anyLong(), any(), eq((long) PIVOT));
+
+    assertThatThrownBy(chain::setChainHead).isInstanceOf(CancellationException.class);
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
   }
 
@@ -533,8 +564,6 @@ class SyncChainTest {
         checkpoint, toCheckpointOnly, Optional.of(totalDifficulty(MERGE - 1)), windowWorkers);
   }
 
-  // 16 header requests at once, more than the segments, as the stages share the test thread, and
-  // the total difficulties of eight headers a commit
   private SyncChain chain(
       final Optional<Checkpoint> checkpoint,
       final boolean toCheckpointOnly,
@@ -546,13 +575,14 @@ class SyncChainTest {
         sender,
         new HeaderFetcher(sender, ProtocolScheduleFixture.MAINNET, Optional::empty, 4),
         checkpoint,
-        new SyncChain.Settings(4, 16, WINDOW, toCheckpointOnly, false, terminalTotalDifficulty),
+        new SyncChain.Settings(
+            4, HEADER_PARALLELISM, WINDOW, toCheckpointOnly, false, terminalTotalDifficulty),
         new NoOpMetricsSystem(),
         executor,
         workers,
-        delay -> resumes,
+        resumes,
         pauses::add,
-        8);
+        TOTAL_DIFFICULTIES_PER_COMMIT);
   }
 
   // started at the pivot, with the headers and the window up to it stored

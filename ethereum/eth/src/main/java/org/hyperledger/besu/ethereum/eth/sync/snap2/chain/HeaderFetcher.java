@@ -25,6 +25,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender.Response;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.util.FutureUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -72,12 +73,7 @@ public final class HeaderFetcher {
               final CompletableFuture<BlockHeader> header =
                   request.thenApply(answer -> answer.value().getFirst());
               // the scheduler retries the request until it is cancelled
-              header.whenComplete(
-                  (unused, error) -> {
-                    if (header.isCancelled()) {
-                      request.cancel(false);
-                    }
-                  });
+              FutureUtils.propagateCancellation(header, request);
               return header;
             });
   }
