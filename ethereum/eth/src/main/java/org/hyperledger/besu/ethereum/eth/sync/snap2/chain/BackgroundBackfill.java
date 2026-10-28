@@ -49,9 +49,6 @@ import org.slf4j.LoggerFactory;
 public final class BackgroundBackfill implements InitialSyncCompletionListener {
 
   private static final Logger LOG = LoggerFactory.getLogger(BackgroundBackfill.class);
-  // the requests of the SNAP2 sync: 15 s each, at most six a peer per protocol
-  private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
-  private static final int MAX_REQUESTS_PER_PEER = 6;
   // decoding an answer is short next to waiting for it
   private static final int DECODE_THREADS = 2;
   // a stopped back-fill writes nothing, its workers only end the reads they started
@@ -93,14 +90,7 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
         settings,
         metricsSystem,
         // a scheduler of its own, until the SNAP2 sync hands over the one it ran on
-        () ->
-            new RequestScheduler(
-                ethPeers,
-                metricsSystem,
-                REQUEST_TIMEOUT,
-                MAX_REQUESTS_PER_PEER,
-                MAX_REQUESTS_PER_PEER,
-                DECODE_THREADS),
+        () -> RequestScheduler.forSync(ethPeers, metricsSystem, DECODE_THREADS),
         () ->
             Executors.newFixedThreadPool(
                 settings.parallelism(),
