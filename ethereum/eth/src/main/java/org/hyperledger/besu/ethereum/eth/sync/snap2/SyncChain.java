@@ -27,6 +27,7 @@ import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BodyBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderBackfill;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.WriteRetry;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Priority;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
@@ -43,6 +44,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -58,10 +60,10 @@ import org.slf4j.LoggerFactory;
 final class SyncChain {
 
   private static final Logger LOG = LoggerFactory.getLogger(SyncChain.class);
-  private static final int WRITE_ATTEMPTS = 6;
   private static final Duration RESUME_DELAY = Duration.ofSeconds(5);
   // a stopped window writes nothing, its workers only end the reads they started
   private static final Duration WORKERS_TIMEOUT = Duration.ofSeconds(30);
+  private static final int TOTAL_DIFFICULTIES_PER_COMMIT = 10_000;
 
   /**
    * Sizes of the downloads.
@@ -83,11 +85,6 @@ final class SyncChain {
       boolean indexTransactions,
       Optional<Difficulty> terminalTotalDifficulty) {}
 
-  /** Waits between two tries of a write. */
-  interface Pause {
-    void sleep(long millis) throws InterruptedException;
-  }
-
   private final MutableBlockchain blockchain;
   private final ProtocolSchedule protocolSchedule;
   private final RequestSender sender;
@@ -98,10 +95,12 @@ final class SyncChain {
   private final ExecutorService executor;
   private final ExecutorService windowWorkers;
   private final Function<Duration, Executor> delays;
-  private final Pause pause;
+  private final WriteRetry.Pause pause;
+  private final int totalDifficultiesPerCommit;
   private final CompletableFuture<Void> headersDone = new CompletableFuture<>();
 
   private volatile BlockHeader floor;
+  private volatile Difficulty floorTotal;
   // when every block above the floor is proof of stake, the total difficulty of every header
   private volatile Optional<Difficulty> headerTotalDifficulty = Optional.empty();
   private volatile boolean cancelled;
@@ -109,6 +108,7 @@ final class SyncChain {
   private CompletableFuture<BlockHeader> checkpointFetch;
   private HeaderBackfill headers;
   private BodyBackfill window;
+  private BlockHeader windowPivot;
 
   /**
    * Creates the chain of an attempt.
@@ -139,13 +139,15 @@ final class SyncChain {
             Thread.ofPlatform().name("snap2-window-", 0).daemon().factory()),
         delay ->
             CompletableFuture.delayedExecutor(delay.toMillis(), TimeUnit.MILLISECONDS, executor),
-        Thread::sleep);
+        Thread::sleep,
+        TOTAL_DIFFICULTIES_PER_COMMIT);
   }
 
   /**
    * Creates the chain of an attempt whose window downloads on {@code windowWorkers}, whose failed
-   * header downloads wait on the executors {@code delays} returns, and whose writes wait {@code
-   * pause} between two tries.
+   * header downloads wait on the executors {@code delays} returns, whose writes wait {@code pause}
+   * between two tries, and whose total difficulties are committed {@code
+   * totalDifficultiesPerCommit} at a time.
    */
   @VisibleForTesting
   SyncChain(
@@ -159,7 +161,8 @@ final class SyncChain {
       final ExecutorService executor,
       final ExecutorService windowWorkers,
       final Function<Duration, Executor> delays,
-      final Pause pause) {
+      final WriteRetry.Pause pause,
+      final int totalDifficultiesPerCommit) {
     this.blockchain = blockchain;
     this.protocolSchedule = protocolSchedule;
     this.sender = sender;
@@ -171,13 +174,17 @@ final class SyncChain {
     this.windowWorkers = windowWorkers;
     this.delays = delays;
     this.pause = pause;
+    this.totalDifficultiesPerCommit = totalDifficultiesPerCommit;
   }
 
   /**
    * Sets the chain head on the floor, removes the canonical entries above the first pivot, stores
-   * it, and starts downloading the headers below it.
+   * it, and starts downloading the headers below it; an attempt starts once.
    *
    * @throws RestartException when peers do not serve the checkpoint
+   * @throws IllegalStateException when the checkpoint is at another height, or above the pivot
+   * @throws WrongChainException when the pivot is at the height of the checkpoint, with another
+   *     hash, once the head is on the floor
    * @throws CancellationException once cancelled
    */
   void start(final BlockHeader firstPivot) {
@@ -188,25 +195,22 @@ final class SyncChain {
     }
     synchronized (this) {
       throwIfCancelled();
+      checkState(floor == null, "an attempt starts once");
       floor = floorHeader;
-      trustedCheckpoint()
-          .ifPresent(
-              trusted ->
-                  retryWrite(
-                      () -> blockchain.unsafeStoreHeader(floorHeader, trusted.totalDifficulty())));
-      final Difficulty floorTotal =
-          blockchain
-              .getTotalDifficultyByHash(floorHeader.getHash())
-              .orElseThrow(() -> new IllegalStateException("no total difficulty for the floor"));
       // the chain head stays on the floor until every body above it is stored
-      retryWrite(() -> blockchain.unsafeSetChainHead(floorHeader, floorTotal));
-      // left by a failed attempt, or by an earlier run of the node
-      final long highestIndexed = highestIndexedFrom(firstPivot.getNumber());
-      if (highestIndexed > firstPivot.getNumber()) {
-        retryWrite(
-            () ->
-                blockchain.unsafeRemoveCanonicalIndexRange(firstPivot.getNumber(), highestIndexed));
+      final Optional<Checkpoint> trusted = trustedCheckpoint();
+      if (trusted.isPresent()) {
+        // stored as the chain head
+        floorTotal = trusted.get().totalDifficulty();
+        retryWrite(() -> blockchain.unsafeStoreHeader(floorHeader, floorTotal));
+      } else {
+        floorTotal =
+            blockchain
+                .getTotalDifficultyByHash(floorHeader.getHash())
+                .orElseThrow(() -> new IllegalStateException("no total difficulty for genesis"));
+        retryWrite(() -> blockchain.unsafeSetChainHead(floorHeader, floorTotal));
       }
+      removeIndexAbove(firstPivot.getNumber());
       // only proof of stake follows the terminal total difficulty, which Hoodi's genesis reaches
       if (settings.terminalTotalDifficulty().map(floorTotal::greaterOrEqualThan).orElse(false)) {
         headerTotalDifficulty = Optional.of(floorTotal);
@@ -216,7 +220,10 @@ final class SyncChain {
     }
   }
 
-  /** Completes once the headers reach the floor; fails when they lead to another chain. */
+  /**
+   * Completes once the headers are stored down to the checkpoint, or down to genesis unless they
+   * stop at the checkpoint; fails when they lead to another chain or cannot be stored.
+   */
   CompletableFuture<Void> headersDone() {
     return headersDone;
   }
@@ -228,17 +235,27 @@ final class SyncChain {
   }
 
   /**
-   * Downloads the bodies and receipts of the window below the final pivot once the headers are
+   * Downloads the bodies and receipts of the window up to the final pivot once every header is
    * stored; completes once they are stored and recorded.
    */
   CompletableFuture<Void> downloadWindow(final BlockHeader pivot) {
     return headersDone.thenComposeAsync(unused -> startWindow(pivot), executor);
   }
 
-  /** Makes the final pivot the chain head, once the headers and the window below it are stored. */
+  /**
+   * Makes the final pivot the chain head, once the window up to it is stored, and removes the
+   * canonical entries above it.
+   */
   synchronized void setChainHead(final BlockHeader head) {
     throwIfCancelled();
-    retryWrite(() -> blockchain.unsafeSetSyncChainHead(floor, head));
+    checkState(windowStored(head), "the window up to block %s is not stored", head.getNumber());
+    checkState(
+        blockchain.blockIsOnCanonicalChain(head.getHash()),
+        "block %s is not canonical",
+        head.getNumber());
+    final Difficulty total = headerTotalDifficulty.orElseGet(() -> storeTotalDifficulties(head));
+    retryWrite(() -> blockchain.unsafeSetChainHead(head, total));
+    removeIndexAbove(head.getNumber());
     LOG.info(
         "SNAP2 chain head set to {} | bodies and receipts from {}",
         block(head.getNumber()),
@@ -247,11 +264,12 @@ final class SyncChain {
 
   /** Stops the downloads and fails {@link #headersDone}; {@link #awaitStop} awaits the writes. */
   void cancel() {
+    // before the lock, which a long call holds until its next check
+    cancelled = true;
     final CompletableFuture<BlockHeader> fetch;
     final HeaderBackfill runningHeaders;
     final BodyBackfill runningWindow;
     synchronized (this) {
-      cancelled = true;
       fetch = checkpointFetch;
       runningHeaders = headers;
       runningWindow = window;
@@ -321,13 +339,16 @@ final class SyncChain {
     }
   }
 
-  // the highest block of the canonical index that goes on from this one
-  private long highestIndexedFrom(final long number) {
+  // left by a failed attempt or an earlier run; those above a gap stay until a pivot passes them
+  private void removeIndexAbove(final long number) {
     long highest = number;
     while (blockchain.getBlockHashByNumber(highest + 1).isPresent()) {
       highest++;
     }
-    return highest;
+    if (highest > number) {
+      final long last = highest;
+      retryWrite(() -> blockchain.unsafeRemoveCanonicalIndexRange(number, last));
+    }
   }
 
   // with proof of stake above the floor, the headers above it share its total difficulty
@@ -351,10 +372,7 @@ final class SyncChain {
       throw new WrongChainException(
           "proof-of-work blocks above the terminal total difficulty lead to the pivot");
     }
-    retryWrite(() -> store(below, above));
-  }
-
-  private void store(final List<BlockHeader> below, final List<BlockHeader> above) {
+    // in batches, which have no conflict check to retry
     if (!below.isEmpty()) {
       blockchain.storeBlockHeaders(below);
     }
@@ -363,6 +381,23 @@ final class SyncChain {
           total -> blockchain.storeBlockHeaders(above, total),
           () -> blockchain.storeBlockHeaders(above));
     }
+  }
+
+  // above a floor followed by proof of work, the total difficulty of every header up to the head
+  private Difficulty storeTotalDifficulties(final BlockHeader head) {
+    BlockHeader parent = floor;
+    Difficulty total = floorTotal;
+    while (parent.getNumber() < head.getNumber()) {
+      // a cancel waits for one commit at most
+      throwIfCancelled();
+      final long last = Math.min(head.getNumber(), parent.getNumber() + totalDifficultiesPerCommit);
+      total = blockchain.unsafeStoreSyncTotalDifficulties(parent, total, last);
+      parent =
+          blockchain
+              .getBlockHeader(last)
+              .orElseThrow(() -> new IllegalStateException("no header for block " + last));
+    }
+    return total;
   }
 
   // the headers below a stored one, down to the checkpoint or genesis
@@ -386,12 +421,16 @@ final class SyncChain {
   private void downloaded(final HeaderBackfill download, final Throwable error) {
     if (error == null) {
       headersDone.complete(null);
-    } else if (rootCause(error) instanceof WrongChainException wrong) {
-      headersDone.completeExceptionally(wrong);
+      return;
+    }
+    // its requests in flight are no longer awaited
+    download.stop();
+    final Throwable cause = rootCause(error);
+    if (cause instanceof WrongChainException || cause instanceof StorageException) {
+      // another chain, or a storage failure: a resume would end the same way
+      headersDone.completeExceptionally(cause);
     } else if (!cancelled) {
-      LOG.warn("SNAP2 header download failed, resuming: {}", rootCause(error).getMessage());
-      // its requests in flight are no longer awaited
-      download.stop();
+      LOG.warn("SNAP2 header download failed, resuming: {}", cause.getMessage());
       final long lowestStored = download.lowestStored();
       CompletableFuture.runAsync(() -> resumeBelow(lowestStored), delays.apply(RESUME_DELAY))
           .exceptionally(
@@ -427,8 +466,14 @@ final class SyncChain {
             head -> from,
             BodyBackfill.Settings.forWindow(settings.indexTransactions()),
             metricsSystem);
+    windowPivot = pivot;
     window.start(windowWorkers);
     return window.done();
+  }
+
+  // the window downloaded up to this head, with every body stored and recorded
+  private boolean windowStored(final BlockHeader head) {
+    return head.equals(windowPivot) && window.done().state() == Future.State.SUCCESS;
   }
 
   // the lowest block whose body and receipts are needed before the head is set at this pivot
@@ -436,22 +481,8 @@ final class SyncChain {
     return Math.max(floor.getNumber() + 1, pivot - settings.bodyWindow() + 1);
   }
 
-  // a write that starts its own transaction, which RocksDB may fail to check, is tried again
+  // a write in a transaction that RocksDB checks for conflicts
   private void retryWrite(final Runnable write) {
-    for (int attempt = 1; attempt < WRITE_ATTEMPTS; attempt++) {
-      try {
-        write.run();
-        return;
-      } catch (final StorageException e) {
-        LOG.debug("Write not committed, retrying: {}", e.getMessage());
-        try {
-          pause.sleep(10L << attempt);
-        } catch (final InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-          throw e;
-        }
-      }
-    }
-    write.run();
+    WriteRetry.run(write, pause);
   }
 }

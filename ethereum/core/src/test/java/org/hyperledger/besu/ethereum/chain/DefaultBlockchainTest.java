@@ -17,10 +17,10 @@ package org.hyperledger.besu.ethereum.chain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -28,7 +28,6 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.Block;
-import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator.BlockOptions;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
@@ -1315,125 +1314,106 @@ public class DefaultBlockchainTest {
   }
 
   @Test
-  public void setsTheSyncChainHeadWithTheTotalDifficultiesOfTheHeadersAbove() {
+  public void writesTheTotalDifficultiesOfTheHeadersAboveTheParentInOneBatch() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();
-    final KeyValueStorage chainKv = new InMemoryKeyValueStorage();
-    final KeyValueStorage variablesKv = new InMemoryKeyValueStorage();
-    final DefaultBlockchain blockchain =
-        createMutableBlockchain(chainKv, variablesKv, genesisBlock);
-    final List<Block> blocks = blocksAbove(gen, genesisBlock, 4, Difficulty.ONE);
-    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
-    // above a proof-of-work floor, a total difficulty already stored is computed again
-    final BlockchainStorage.Updater updater = createStorage(chainKv, variablesKv).updater();
-    updater.putTotalDifficulty(blocks.getLast().getHash(), Difficulty.ONE);
-    updater.commit();
-
-    blockchain.unsafeSetSyncChainHead(genesisBlock.getHeader(), blocks.getLast().getHeader());
-
-    assertBlockIsHead(blockchain, blocks.getLast());
-    assertTotalDifficultiesAreConsistent(blockchain, blocks.getLast());
-  }
-
-  @Test
-  public void setsTheSyncChainHeadWithoutReadingProofOfStakeHeadersAgain() {
-    final ProofOfStakeChain chain = new ProofOfStakeChain();
-    chain.blockchain.storeBlockHeaders(chain.headersAbove(), chain.floorTotal);
-    clearInvocations(chain.storage);
-
-    chain.blockchain.unsafeSetSyncChainHead(chain.floor(), chain.head().getHeader());
-
-    assertBlockIsHead(chain.blockchain, chain.head());
-    assertThat(chain.blockchain.getChainHead().getTotalDifficulty()).isEqualTo(chain.floorTotal);
-    // no pass over the headers, which writes their total difficulties
-    verify(chain.storage, never()).batchUpdater();
-  }
-
-  @Test
-  public void rejectsASyncChainHeadThatIsNotCanonical() {
-    final ProofOfStakeChain chain = new ProofOfStakeChain();
-    chain.blockchain.storeBlockHeaders(chain.headersAbove(), chain.floorTotal);
-    // a block of another branch, stored with its total difficulty
-    final Block other = blocksAbove(chain.gen, chain.blocks.get(2), 1, Difficulty.ZERO).getFirst();
-    chain.blockchain.storeBlock(other, chain.gen.receipts(other));
-
-    assertThatThrownBy(
-            () -> chain.blockchain.unsafeSetSyncChainHead(chain.floor(), other.getHeader()))
-        .isInstanceOf(IllegalStateException.class);
-    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.floor());
-  }
-
-  @Test
-  public void rejectsAHeaderThatDoesNotFollowTheCanonicalChain() {
-    final ProofOfStakeChain chain = new ProofOfStakeChain();
-    final List<BlockHeader> above = chain.headersAbove();
-    // the canonical block 2 is not the child of block 1
-    final BlockHeader orphan =
-        new BlockHeaderTestFixture()
-            .number(above.get(1).getNumber())
-            .parentHash(Hash.ZERO)
-            .difficulty(Difficulty.ZERO)
-            .buildHeader();
-    chain.blockchain.storeBlockHeaders(List.of(above.get(0), orphan, above.get(2), above.get(3)));
-
-    assertThatThrownBy(
-            () -> chain.blockchain.unsafeSetSyncChainHead(chain.floor(), chain.head().getHeader()))
-        .isInstanceOf(IllegalStateException.class);
-    assertThat(chain.blockchain.getChainHeadHeader()).isEqualTo(chain.floor());
-  }
-
-  @Test
-  public void writesTheTotalDifficultiesOfManyHeadersInSeveralCommits() {
-    final Block genesisBlock = new BlockDataGenerator().genesisBlock();
     final BlockchainStorage storage =
         spy(createStorage(new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage()));
     final DefaultBlockchain blockchain =
         (DefaultBlockchain)
             DefaultBlockchain.createMutable(genesisBlock, storage, new NoOpMetricsSystem(), 0);
-    final List<BlockHeader> headers = new ArrayList<>();
-    BlockHeader parent = genesisBlock.getHeader();
-    // one commit for every 10,000 headers
-    for (int i = 0; i < 10_002; i++) {
-      parent =
-          new BlockHeaderTestFixture()
-              .number(parent.getNumber() + 1)
-              .parentHash(parent.getHash())
-              .difficulty(Difficulty.ONE)
-              .buildHeader();
-      headers.add(parent);
-    }
-    blockchain.storeBlockHeaders(headers);
-    final Block head = new Block(headers.getLast(), BlockBody.empty());
+    final Difficulty genesisTotal = blockchain.getChainHead().getTotalDifficulty();
+    final List<Block> blocks = blocksAbove(gen, genesisBlock, 4, Difficulty.ONE);
+    clearInvocations(storage);
+    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
+    // a total difficulty already stored is computed again
+    final BlockchainStorage.Updater updater = storage.updater();
+    updater.putTotalDifficulty(blocks.get(1).getHash(), Difficulty.ONE);
+    updater.commit();
 
-    blockchain.unsafeSetSyncChainHead(genesisBlock.getHeader(), head.getHeader());
+    final Difficulty total =
+        blockchain.unsafeStoreSyncTotalDifficulties(genesisBlock.getHeader(), genesisTotal, 3);
 
-    assertTotalDifficultiesAreConsistent(blockchain, head);
+    blockchain.unsafeSetChainHead(blocks.get(2).getHeader(), total);
+    assertTotalDifficultiesAreConsistent(blockchain, blocks.get(2));
+    assertThat(blockchain.getTotalDifficultyByHash(blocks.get(3).getHash())).isEmpty();
+    // the headers, then their total difficulties, each in one batch without conflict checks
     verify(storage, times(2)).batchUpdater();
   }
 
-  // the chain head on a genesis of difficulty 1, as on Hoodi, and four proof-of-stake blocks above
-  private final class ProofOfStakeChain {
-    private final Difficulty floorTotal = Difficulty.ONE;
-    private final BlockDataGenerator gen = new BlockDataGenerator();
-    private final Block genesis = gen.genesisBlock(new BlockOptions().setDifficulty(floorTotal));
-    private final BlockchainStorage storage =
-        spy(createStorage(new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage()));
-    private final DefaultBlockchain blockchain =
-        (DefaultBlockchain)
-            DefaultBlockchain.createMutable(genesis, storage, new NoOpMetricsSystem(), 0);
-    private final List<Block> blocks = blocksAbove(gen, genesis, 4, Difficulty.ZERO);
+  @Test
+  public void rejectsAHeaderThatDoesNotFollowTheCanonicalChain() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final List<Block> blocks = blocksAbove(gen, genesisBlock, 3, Difficulty.ONE);
+    // the canonical block 2 is not the child of block 1
+    final BlockHeader orphan =
+        new BlockHeaderTestFixture()
+            .number(2)
+            .parentHash(Hash.ZERO)
+            .difficulty(Difficulty.ONE)
+            .buildHeader();
+    blockchain.storeBlockHeaders(
+        List.of(blocks.get(0).getHeader(), orphan, blocks.get(2).getHeader()));
+    final Difficulty genesisTotal = blockchain.getChainHead().getTotalDifficulty();
 
-    private BlockHeader floor() {
-      return genesis.getHeader();
-    }
+    assertThatThrownBy(
+            () ->
+                blockchain.unsafeStoreSyncTotalDifficulties(
+                    genesisBlock.getHeader(), genesisTotal, 3))
+        .isInstanceOf(IllegalStateException.class);
+    // not even the total difficulty of block 1 is written
+    assertThat(blockchain.getTotalDifficultyByHash(blocks.get(0).getHash())).isEmpty();
+  }
 
-    private List<BlockHeader> headersAbove() {
-      return blocks.stream().map(Block::getHeader).toList();
-    }
+  @Test
+  public void rejectsTotalDifficultiesUpToABlockThatIsNotAboveTheParent() {
+    final Block genesisBlock = new BlockDataGenerator().genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
 
-    private Block head() {
-      return blocks.getLast();
-    }
+    assertThatThrownBy(
+            () ->
+                blockchain.unsafeStoreSyncTotalDifficulties(
+                    genesisBlock.getHeader(), Difficulty.ONE, 0))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void countsTheTransactionsOfTheChainHeadASyncSets() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final MetricsSystem metricsSystem = mock(MetricsSystem.class);
+    final AtomicReference<IntSupplier> transactionCount = new AtomicReference<>();
+    doAnswer(
+            invocation -> {
+              transactionCount.set(invocation.getArgument(3));
+              return null;
+            })
+        .when(metricsSystem)
+        .createIntegerGauge(any(), eq("chain_head_transaction_count"), any(), any());
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(),
+            new InMemoryKeyValueStorage(),
+            genesisBlock,
+            metricsSystem);
+    final Block block =
+        gen.block(
+            new BlockOptions()
+                .setBlockNumber(1L)
+                .addTransaction(gen.transactions(2))
+                .setParentHash(genesisBlock.getHash()));
+    blockchain.storeBlockHeaders(List.of(block.getHeader()));
+    blockchain.unsafeStoreSyncBodiesAndReceipts(List.of(toSyncBlockWithReceipts(block)), false);
+
+    blockchain.unsafeSetChainHead(block.getHeader(), Difficulty.ONE);
+
+    assertThat(transactionCount.get().getAsInt()).isEqualTo(2);
   }
 
   // count blocks above the parent, each the child of the one before

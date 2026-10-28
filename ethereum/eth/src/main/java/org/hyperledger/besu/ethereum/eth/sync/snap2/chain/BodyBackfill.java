@@ -60,6 +60,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,6 +152,7 @@ public final class BodyBackfill {
   // the lowest block whose body is needed, given the chain head
   private final LongUnaryOperator lowestNeeded;
   private final Settings settings;
+  private final WriteRetry.Pause pause;
   private final SyncTransactionReceiptEncoder receiptEncoder =
       new SyncTransactionReceiptEncoder(new SimpleNoCopyRlpEncoder());
   private final CompletableFuture<Void> done = new CompletableFuture<>();
@@ -198,6 +200,30 @@ public final class BodyBackfill {
       final LongUnaryOperator lowestNeeded,
       final Settings settings,
       final MetricsSystem metricsSystem) {
+    this(
+        blockchain,
+        protocolSchedule,
+        sender,
+        inSync,
+        lowest,
+        lowestNeeded,
+        settings,
+        metricsSystem,
+        Thread::sleep);
+  }
+
+  /** Creates the back-fill whose records wait {@code pause} between two tries. */
+  @VisibleForTesting
+  BodyBackfill(
+      final MutableBlockchain blockchain,
+      final ProtocolSchedule protocolSchedule,
+      final RequestSender sender,
+      final BooleanSupplier inSync,
+      final long lowest,
+      final LongUnaryOperator lowestNeeded,
+      final Settings settings,
+      final MetricsSystem metricsSystem,
+      final WriteRetry.Pause pause) {
     checkArgument(settings.parallelism() > 0, "parallelism must be positive");
     checkArgument(
         settings.maxRangeBlocks() >= MIN_RANGE_BLOCKS,
@@ -212,6 +238,7 @@ public final class BodyBackfill {
     this.recordedLowest = lowest;
     this.lowestNeeded = lowestNeeded;
     this.settings = settings;
+    this.pause = pause;
     // the window shows in the progress of the sync
     if (settings.background()) {
       registerMetrics(metricsSystem);
@@ -454,7 +481,7 @@ public final class BodyBackfill {
   private synchronized void recordLowest() {
     final long lowest = ranges.lowest();
     if (lowest < recordedLowest) {
-      blockchain.unsafeSetBodiesFrom(lowest);
+      WriteRetry.run(() -> blockchain.unsafeSetBodiesFrom(lowest), pause);
       recordedLowest = lowest;
       bytesSinceRecord = 0;
     }

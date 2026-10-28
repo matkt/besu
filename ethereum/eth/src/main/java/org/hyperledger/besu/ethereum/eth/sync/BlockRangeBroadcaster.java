@@ -111,19 +111,20 @@ public class BlockRangeBroadcaster {
   /**
    * Broadcasts a block range update message to all connected peers that support the
    * BLOCK_RANGE_UPDATE protocol. This method is used to inform peers about the range of blocks
-   * available, from the earliest to the latest. If the earliest block number is not available, the
-   * genesis block number is used as a fallback.
+   * available, from the earliest to the latest. If the earliest block number is not available, or
+   * above the chain head, the genesis block number is used as a fallback.
    */
   @VisibleForTesting
   protected void broadcastBlockRange() {
+    final BlockHeader chainHeader = blockchain.getChainHeadHeader();
+    // a sync may move the chain head down while the earliest block is searched
     blockchain
         .getEarliestBlockNumber()
+        .filter(earliestBlockNumber -> earliestBlockNumber <= chainHeader.getNumber())
         .ifPresentOrElse(
-            earliestBlockNumber -> {
-              BlockHeader chainHeader = blockchain.getChainHeadHeader();
-              broadcastBlockRange(
-                  earliestBlockNumber, chainHeader.getNumber(), chainHeader.getHash());
-            },
+            earliestBlockNumber ->
+                broadcastBlockRange(
+                    earliestBlockNumber, chainHeader.getNumber(), chainHeader.getHash()),
             () -> {
               BlockHeader genesisBlock = blockchain.getGenesisBlockHeader();
               broadcastBlockRange(

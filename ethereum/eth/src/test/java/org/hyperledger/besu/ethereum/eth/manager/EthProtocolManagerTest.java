@@ -1490,6 +1490,33 @@ public final class EthProtocolManagerTest {
   }
 
   @Test
+  public void shouldSendTheGenesisRangeWhenTheEarliestBlockIsAboveTheChainHead() {
+    final Blockchain blockChainMock = spy(blockchain);
+    // a sync moved the chain head below the bodies it recorded
+    when(blockChainMock.getEarliestBlockNumber())
+        .thenReturn(Optional.of(blockchain.getChainHeadBlockNumber() + 1));
+    try (final EthProtocolManager ethManager =
+        EthProtocolManagerTestBuilder.builder()
+            .setProtocolSchedule(protocolSchedule)
+            .setBlockchain(blockChainMock)
+            .setEthScheduler(new DeterministicEthScheduler(() -> false))
+            .setWorldStateArchive(protocolContext.getWorldStateArchive())
+            .setTransactionPool(transactionPool)
+            .setEthereumWireProtocolConfiguration(EthProtocolConfiguration.DEFAULT)
+            .build()) {
+
+      setupPeerWithoutStatusExchange(
+          ethManager,
+          (cap, msg, conn) -> {
+            assertThat(msg.getCode() == EthProtocolMessages.STATUS).isTrue();
+            assertThat(StatusMessage.create(msg.getData()).blockRange())
+                .contains(new StatusMessage.BlockRange(0, 0));
+          },
+          EthProtocolVersion.V69.getCapability());
+    }
+  }
+
+  @Test
   public void shouldSendCorrectEarliestBlockToPeerWhenEarliestIsNotSet() {
     Blockchain blockChainMock = spy(blockchain);
     when(blockChainMock.getEarliestBlockNumber()).thenReturn(Optional.empty());

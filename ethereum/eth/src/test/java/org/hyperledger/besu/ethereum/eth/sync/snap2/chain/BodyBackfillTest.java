@@ -51,6 +51,7 @@ import org.hyperledger.besu.ethereum.p2p.rlpx.wire.MessageData;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.RawMessage;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -84,6 +85,7 @@ class BodyBackfillTest {
   private final Map<Hash, Block> blocksByHash = new HashMap<>();
   private final Map<Hash, List<TransactionReceipt>> receiptsByHash = new HashMap<>();
   private final FakeSender sender = new FakeSender();
+  private final List<Long> pauses = new ArrayList<>();
   private MutableBlockchain blockchain;
 
   @Test
@@ -315,6 +317,23 @@ class BodyBackfillTest {
   }
 
   @Test
+  void recordsWhatItStoredAgainWhenTheRecordIsNotCommitted() {
+    blockchain = spy(chain(51));
+    // the transaction of the record fails its conflict check once
+    doThrow(new StorageException("not committed"))
+        .doCallRealMethod()
+        .when(blockchain)
+        .unsafeSetBodiesFrom(anyLong());
+    final BodyBackfill backfill = backfill();
+
+    runToEnd(backfill);
+
+    assertThat(backfill.done()).isCompleted();
+    assertThat(blockchain.getBodiesFrom()).contains(1L);
+    assertThat(pauses).containsExactly(20L);
+  }
+
+  @Test
   void endsWhenItsWorkerIsInterrupted() {
     blockchain = chain(51);
     sender.leaveNextUnanswered = true;
@@ -375,7 +394,8 @@ class BodyBackfillTest {
         lowestNeeded,
         new Settings(
             "test", 1, recordBytes, Duration.ZERO, Duration.ZERO, RANGE_BLOCKS, false, true),
-        new NoOpMetricsSystem());
+        new NoOpMetricsSystem(),
+        pauses::add);
   }
 
   // each step asks whether the node is in sync: a back-fill that never ends fails, not hangs

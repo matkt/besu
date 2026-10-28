@@ -67,7 +67,6 @@ import org.slf4j.LoggerFactory;
 
 public class DefaultBlockchain implements MutableBlockchain {
   private static final Logger LOG = LoggerFactory.getLogger(DefaultBlockchain.class);
-  private static final int TOTAL_DIFFICULTIES_PER_COMMIT = 10_000;
 
   private final Comparator<BlockHeader> heaviestChainBlockChoiceRule =
       Comparator.comparing(this::calculateTotalDifficulty);
@@ -398,9 +397,8 @@ public class DefaultBlockchain implements MutableBlockchain {
   @Override
   public Optional<Long> getEarliestBlockNumber() {
     // a sync stores bodies out of order below the block it records, so the search starts there,
-    // read again as the back-fill moves it down, once the chain head reaches it
-    final Optional<Long> bodiesFrom =
-        getBodiesFrom().filter(from -> from <= getChainHeadBlockNumber());
+    // read again as the back-fill moves it down
+    final Optional<Long> bodiesFrom = getBodiesFrom();
     if (bodiesFrom.isPresent()) {
       return getFirstNonGenesisBlockNumber(bodiesFrom.get());
     }
@@ -612,7 +610,7 @@ public class DefaultBlockchain implements MutableBlockchain {
 
   @Override
   public void storeBlockHeaders(final List<BlockHeader> blockHeaders) {
-    final BlockchainStorage.Updater updater = blockchainStorage.updater();
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
     blockHeaders.forEach(header -> putCanonicalHeader(updater, header));
     updater.commit();
   }
@@ -797,50 +795,29 @@ public class DefaultBlockchain implements MutableBlockchain {
   }
 
   @Override
-  public synchronized void unsafeSetSyncChainHead(final BlockHeader from, final BlockHeader to) {
-    if (!blockIsOnCanonicalChain(to.getHash())) {
-      throw new IllegalStateException("block " + to.getNumber() + " is not canonical");
-    }
-    final Difficulty fromTotal =
-        blockchainStorage
-            .getTotalDifficulty(from.getHash())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException("no total difficulty for block " + from.getNumber()));
-    // a sync stores the proof-of-stake headers above from with its total difficulty
-    final boolean totalsStored =
-        blockchainStorage.getTotalDifficulty(to.getHash()).filter(fromTotal::equals).isPresent();
-    unsafeSetChainHead(
-        to, totalsStored ? fromTotal : storeSyncTotalDifficulties(from, to, fromTotal));
-  }
-
-  // reads every header above from, checking its parent link, and writes its total difficulty
-  private Difficulty storeSyncTotalDifficulties(
-      final BlockHeader from, final BlockHeader to, final Difficulty fromTotal) {
-    Hash parent = from.getHash();
-    Difficulty total = fromTotal;
-    for (long first = from.getNumber() + 1;
-        first <= to.getNumber();
-        first += TOTAL_DIFFICULTIES_PER_COMMIT) {
-      final long last = Math.min(to.getNumber(), first + TOTAL_DIFFICULTIES_PER_COMMIT - 1);
-      final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
-      try {
-        for (long number = first; number <= last; number++) {
-          final BlockHeader header = canonicalHeader(number);
-          if (!header.getParentHash().equals(parent)) {
-            throw new IllegalStateException(
-                "block " + number + " does not follow the canonical chain");
-          }
-          total = total.add(header.getDifficulty());
-          updater.putTotalDifficulty(header.getHash(), total);
-          parent = header.getHash();
+  public Difficulty unsafeStoreSyncTotalDifficulties(
+      final BlockHeader parent, final Difficulty parentTotal, final long last) {
+    checkArgument(
+        last > parent.getNumber(), "block %s is not above block %s", last, parent.getNumber());
+    Hash parentHash = parent.getHash();
+    Difficulty total = parentTotal;
+    final BlockchainStorage.Updater updater = blockchainStorage.batchUpdater();
+    try {
+      for (long number = parent.getNumber() + 1; number <= last; number++) {
+        final BlockHeader header = canonicalHeader(number);
+        if (!header.getParentHash().equals(parentHash)) {
+          throw new IllegalStateException(
+              "block " + number + " does not follow the canonical chain");
         }
-      } catch (final RuntimeException e) {
-        updater.rollback();
-        throw e;
+        total = total.add(header.getDifficulty());
+        updater.putTotalDifficulty(header.getHash(), total);
+        parentHash = header.getHash();
       }
-      updater.commit();
+    } catch (final RuntimeException e) {
+      updater.rollback();
+      throw e;
     }
+    updater.commit();
     return total;
   }
 
@@ -865,6 +842,11 @@ public class DefaultBlockchain implements MutableBlockchain {
     final BlockchainStorage.Updater updater = blockchainStorage.updater();
     this.chainHeader = blockHeader;
     this.totalDifficulty = totalDifficulty;
+    this.chainHeadTransactionCount =
+        blockchainStorage
+            .getBlockBody(blockHeader.getBlockHash())
+            .map(body -> body.getTransactions().size())
+            .orElse(0);
     updater.setChainHead(blockHeader.getBlockHash());
     updater.commit();
   }
@@ -1379,6 +1361,10 @@ public class DefaultBlockchain implements MutableBlockchain {
   private Optional<Long> getFirstNonGenesisBlockNumber(final long lowest) {
     long low = lowest;
     long high = getChainHeadBlockNumber();
+    // a sync records bodies above the chain head before it moves the head up to them
+    if (low > high) {
+      return Optional.empty();
+    }
     while (low < high) {
       long mid = (low + high) / 2;
       if (getBlockByNumber(mid).isPresent()) {
