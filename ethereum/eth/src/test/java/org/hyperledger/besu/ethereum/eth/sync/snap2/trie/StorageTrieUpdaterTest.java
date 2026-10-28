@@ -319,24 +319,12 @@ class StorageTrieUpdaterTest {
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     doReturn(batch).when(storage).batch();
     doThrow(new IllegalStateException("write failed")).when(batch).putAccount(any(), any());
-    // the updater only logs the error, read here where the root write runs
-    final AtomicReference<RuntimeException> failure = new AtomicReference<>();
-    final Predicate<Runnable> withoutMoves =
-        action -> {
-          try {
-            action.run();
-            return true;
-          } catch (final RuntimeException e) {
-            failure.set(e);
-            throw e;
-          }
-        };
-    final StorageTrieUpdater updater =
-        new StorageTrieUpdater(storage, withoutMoves, hash -> false, 0, 0);
+    final StorageTrieUpdater updater = updater(storage, 0);
     updater.changed(account, Hash.wrap(root), move(world, account, 1));
 
     assertThat(updater.applyNext()).isTrue();
-    assertThat(failure.get()).hasMessage("write failed");
+    // the error left the update to the final build
+    assertThat(updater.updated()).isZero();
     verify(batch, never()).commit();
     verify(batch).abort();
   }
