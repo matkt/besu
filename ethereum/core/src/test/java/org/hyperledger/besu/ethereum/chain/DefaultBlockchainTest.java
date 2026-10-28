@@ -20,6 +20,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -52,6 +54,7 @@ import org.hyperledger.besu.metrics.MetricsSystemFactory;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.metrics.prometheus.MetricsConfiguration;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.services.kvstore.InMemoryKeyValueStorage;
@@ -277,22 +280,11 @@ public class DefaultBlockchainTest {
     final KeyValueStorage variablesStorage = new InMemoryKeyValueStorage();
     final Block genesisBlock = gen.genesisBlock();
     final MetricsSystem metricsSystem = mock(MetricsSystem.class);
-    final AtomicReference<IntSupplier> chainHeadTransactionCount = new AtomicReference<>();
-    doAnswer(
-            invocation -> {
-              chainHeadTransactionCount.set(invocation.getArgument(3));
-              return null;
-            })
-        .when(metricsSystem)
-        .createIntegerGauge(any(), any(), any(), any());
+    final AtomicReference<IntSupplier> chainHeadTransactionCount =
+        chainHeadTransactionCount(metricsSystem);
     final DefaultBlockchain blockchain =
         createMutableBlockchain(chainStorage, variablesStorage, genesisBlock, metricsSystem);
-    final Block importedBlock =
-        gen.block(
-            new BlockDataGenerator.BlockOptions()
-                .setBlockNumber(1L)
-                .addTransaction(gen.transactions(2))
-                .setParentHash(genesisBlock.getHash()));
+    final Block importedBlock = blockWithTwoTransactions(gen, genesisBlock);
     blockchain.storeBlockHeaders(List.of(importedBlock.getHeader()));
     final SyncBlockWithReceipts syncBlockWithReceipts = toSyncBlockWithReceipts(importedBlock);
     final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -1264,36 +1256,21 @@ public class DefaultBlockchainTest {
             new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
     final List<Block> blocks = blocksAbove(gen, genesisBlock, 8, Difficulty.ONE);
     blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
-    blockchain.unsafeSetChainHead(blocks.getLast().getHeader(), Difficulty.of(9));
     // block 4 is where a search from block 1 looks first, its body stored apart
     storeBodies(blockchain, blocks, 4, 7, 8);
     blockchain.unsafeSetBodiesFrom(7);
+    // recorded by a sync whose chain head is still below
+    assertThat(blockchain.getEarliestBlockNumber()).isEmpty();
+    blockchain.unsafeSetChainHead(blocks.getLast().getHeader(), Difficulty.of(9));
 
     assertThat(blockchain.getEarliestBlockNumber()).contains(7L);
+    // above the chain head a caller read before the sync moved it up
+    assertThat(blockchain.getEarliestBlockNumber(6)).isEmpty();
 
     // the back-fill moves the record down
     storeBodies(blockchain, blocks, 5, 6);
     blockchain.unsafeSetBodiesFrom(4);
     assertThat(blockchain.getEarliestBlockNumber()).contains(4L);
-  }
-
-  @Test
-  public void findsTheEarliestBlockOnceTheChainHeadReachesTheBlockTheBodiesAreStoredFrom() {
-    final BlockDataGenerator gen = new BlockDataGenerator();
-    final Block genesisBlock = gen.genesisBlock();
-    final DefaultBlockchain blockchain =
-        createMutableBlockchain(
-            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
-    final List<Block> blocks = blocksAbove(gen, genesisBlock, 8, Difficulty.ONE);
-    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
-    storeBodies(blockchain, blocks, 7, 8);
-    // recorded by a sync whose chain head is still on its floor
-    blockchain.unsafeSetBodiesFrom(7);
-    assertThat(blockchain.getEarliestBlockNumber()).isEmpty();
-
-    blockchain.unsafeSetChainHead(blocks.getLast().getHeader(), Difficulty.of(9));
-
-    assertThat(blockchain.getEarliestBlockNumber()).contains(7L);
   }
 
   @Test
@@ -1331,8 +1308,7 @@ public class DefaultBlockchainTest {
     updater.putTotalDifficulty(blocks.get(1).getHash(), Difficulty.ONE);
     updater.commit();
 
-    final Difficulty total =
-        blockchain.unsafeStoreSyncTotalDifficulties(genesisBlock.getHeader(), genesisTotal, 3);
+    final Difficulty total = blockchain.unsafeStoreSyncTotalDifficulties(0, genesisTotal, 3);
 
     blockchain.unsafeSetChainHead(blocks.get(2).getHeader(), total);
     assertTotalDifficultiesAreConsistent(blockchain, blocks.get(2));
@@ -1360,10 +1336,7 @@ public class DefaultBlockchainTest {
         List.of(blocks.get(0).getHeader(), orphan, blocks.get(2).getHeader()));
     final Difficulty genesisTotal = blockchain.getChainHead().getTotalDifficulty();
 
-    assertThatThrownBy(
-            () ->
-                blockchain.unsafeStoreSyncTotalDifficulties(
-                    genesisBlock.getHeader(), genesisTotal, 3))
+    assertThatThrownBy(() -> blockchain.unsafeStoreSyncTotalDifficulties(0, genesisTotal, 3))
         .isInstanceOf(IllegalStateException.class);
     // not even the total difficulty of block 1 is written
     assertThat(blockchain.getTotalDifficultyByHash(blocks.get(0).getHash())).isEmpty();
@@ -1376,10 +1349,7 @@ public class DefaultBlockchainTest {
         createMutableBlockchain(
             new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
 
-    assertThatThrownBy(
-            () ->
-                blockchain.unsafeStoreSyncTotalDifficulties(
-                    genesisBlock.getHeader(), Difficulty.ONE, 0))
+    assertThatThrownBy(() -> blockchain.unsafeStoreSyncTotalDifficulties(0, Difficulty.ONE, 0))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -1388,6 +1358,51 @@ public class DefaultBlockchainTest {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();
     final MetricsSystem metricsSystem = mock(MetricsSystem.class);
+    final AtomicReference<IntSupplier> transactionCount = chainHeadTransactionCount(metricsSystem);
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(),
+            new InMemoryKeyValueStorage(),
+            genesisBlock,
+            metricsSystem);
+    final Block block = blockWithTwoTransactions(gen, genesisBlock);
+    blockchain.storeBlockHeaders(List.of(block.getHeader()));
+    blockchain.unsafeStoreSyncBodiesAndReceipts(List.of(toSyncBlockWithReceipts(block)), false);
+
+    blockchain.unsafeSetChainHead(block.getHeader(), Difficulty.ONE);
+    assertThat(transactionCount.get().getAsInt()).isEqualTo(2);
+
+    // a checkpoint, whose body is not stored
+    final BlockHeader checkpoint =
+        blocksAbove(gen, block, 1, Difficulty.ZERO).getFirst().getHeader();
+    blockchain.unsafeStoreHeader(checkpoint, Difficulty.ONE);
+    assertThat(transactionCount.get().getAsInt()).isZero();
+  }
+
+  @Test
+  public void keepsTheChainHeadWhenItsCommitFails() {
+    final Block genesisBlock = new BlockDataGenerator().genesisBlock();
+    final BlockchainStorage storage =
+        spy(createStorage(new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage()));
+    final DefaultBlockchain blockchain =
+        (DefaultBlockchain)
+            DefaultBlockchain.createMutable(genesisBlock, storage, new NoOpMetricsSystem(), 0);
+    final BlockchainStorage.Updater failing = spy(storage.updater());
+    doThrow(new StorageException("not committed")).when(failing).commit();
+    doReturn(failing).when(storage).updater();
+    final BlockHeader header =
+        new BlockHeaderTestFixture().number(1).parentHash(genesisBlock.getHash()).buildHeader();
+
+    assertThatThrownBy(() -> blockchain.unsafeSetChainHead(header, Difficulty.ONE))
+        .isInstanceOf(StorageException.class);
+    assertThatThrownBy(() -> blockchain.unsafeStoreHeader(header, Difficulty.ONE))
+        .isInstanceOf(StorageException.class);
+    assertThat(blockchain.getChainHeadHeader()).isEqualTo(genesisBlock.getHeader());
+  }
+
+  // the supplier of the transaction count gauge of the chain head
+  private static AtomicReference<IntSupplier> chainHeadTransactionCount(
+      final MetricsSystem metricsSystem) {
     final AtomicReference<IntSupplier> transactionCount = new AtomicReference<>();
     doAnswer(
             invocation -> {
@@ -1396,24 +1411,15 @@ public class DefaultBlockchainTest {
             })
         .when(metricsSystem)
         .createIntegerGauge(any(), eq("chain_head_transaction_count"), any(), any());
-    final DefaultBlockchain blockchain =
-        createMutableBlockchain(
-            new InMemoryKeyValueStorage(),
-            new InMemoryKeyValueStorage(),
-            genesisBlock,
-            metricsSystem);
-    final Block block =
-        gen.block(
-            new BlockOptions()
-                .setBlockNumber(1L)
-                .addTransaction(gen.transactions(2))
-                .setParentHash(genesisBlock.getHash()));
-    blockchain.storeBlockHeaders(List.of(block.getHeader()));
-    blockchain.unsafeStoreSyncBodiesAndReceipts(List.of(toSyncBlockWithReceipts(block)), false);
+    return transactionCount;
+  }
 
-    blockchain.unsafeSetChainHead(block.getHeader(), Difficulty.ONE);
-
-    assertThat(transactionCount.get().getAsInt()).isEqualTo(2);
+  private static Block blockWithTwoTransactions(final BlockDataGenerator gen, final Block parent) {
+    return gen.block(
+        new BlockOptions()
+            .setBlockNumber(parent.getHeader().getNumber() + 1)
+            .addTransaction(gen.transactions(2))
+            .setParentHash(parent.getHash()));
   }
 
   // count blocks above the parent, each the child of the one before

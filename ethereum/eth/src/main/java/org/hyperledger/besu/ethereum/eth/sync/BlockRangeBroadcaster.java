@@ -117,10 +117,8 @@ public class BlockRangeBroadcaster {
   @VisibleForTesting
   protected void broadcastBlockRange() {
     final BlockHeader chainHeader = blockchain.getChainHeadHeader();
-    // a sync may move the chain head down while the earliest block is searched
     blockchain
-        .getEarliestBlockNumber()
-        .filter(earliestBlockNumber -> earliestBlockNumber <= chainHeader.getNumber())
+        .getEarliestBlockNumber(chainHeader.getNumber())
         .ifPresentOrElse(
             earliestBlockNumber ->
                 broadcastBlockRange(

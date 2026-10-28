@@ -133,7 +133,8 @@ public class BlockRangeBroadcasterTest {
     final BlockHeader chainHead = mock(BlockHeader.class);
     when(chainHead.getNumber()).thenReturn(20L);
     when(blockchain.getChainHeadHeader()).thenReturn(chainHead);
-    // a sync moved the chain head below the bodies it recorded
+    // a sync moved the chain head up to the bodies it recorded after the head was read
+    when(blockchain.getEarliestBlockNumber(20L)).thenCallRealMethod();
     when(blockchain.getEarliestBlockNumber()).thenReturn(Optional.of(30L));
     final BlockHeader genesis = mock(BlockHeader.class);
     when(genesis.getHash()).thenReturn(Hash.ZERO);
@@ -149,7 +150,8 @@ public class BlockRangeBroadcasterTest {
     final BlockHeader latestBlockHeader = mock(BlockHeader.class);
     when(latestBlockHeader.getNumber()).thenReturn(latestBlockNumber);
     when(latestBlockHeader.getHash()).thenReturn(expectedBlockHash);
-    when(blockchain.getEarliestBlockNumber()).thenReturn(Optional.of(earliestBlockNumber));
+    when(blockchain.getEarliestBlockNumber(latestBlockNumber))
+        .thenReturn(Optional.of(earliestBlockNumber));
     when(blockchain.getChainHeadHeader()).thenReturn(latestBlockHeader);
   }
 
