@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.chain;
 import org.hyperledger.besu.ethereum.chain.ChainDataPruner;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
-import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestScheduler;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncConfiguration;
@@ -130,18 +129,20 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
    */
   @Override
   public synchronized void onInitialSyncCompleted() {
-    // it serves the back-fill that starts now, or none
     final Optional<RequestSender> handedOver = syncScheduler;
     syncScheduler = Optional.empty();
-    if (closed || isRunning()) {
-      handedOver.ifPresent(RequestSender::stop);
-      return;
+    boolean started = false;
+    if (!closed && !isRunning()) {
+      try {
+        started = maybeStart(handedOver);
+      } catch (final RuntimeException e) {
+        // the sync and the other listeners of the event go on without the back-fill
+        LOG.warn("SNAP2 back-fill not started", e);
+      }
     }
-    try {
-      maybeStart(handedOver);
-    } catch (final RuntimeException e) {
-      // the sync and the other listeners of the event go on without the back-fill
-      LOG.warn("SNAP2 back-fill not started", e);
+    // the scheduler of the sync serves the back-fill that starts now, or none
+    if (!started) {
+      handedOver.ifPresent(RequestSender::stop);
     }
   }
 
@@ -197,7 +198,8 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
     return current != null && !current.hasEnded();
   }
 
-  private void maybeStart(final Optional<RequestSender> handedOver) {
+  // whether a back-fill started, which stops its scheduler once it ends
+  private boolean maybeStart(final Optional<RequestSender> handedOver) {
     // recorded by a sync that stored the bodies of the latest blocks only
     final Optional<Long> bodiesFrom = blockchain.getBodiesFrom();
     final LongUnaryOperator lowestNeeded = lowestNeeded();
@@ -210,8 +212,7 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
           bodiesFrom.get());
     }
     if (!bodiesMissing || !enabled) {
-      handedOver.ifPresent(RequestSender::stop);
-      return;
+      return false;
     }
     final BodyBackfill backfill =
         build(bodiesFrom.get(), lowestNeeded, handedOver.orElseGet(senders));
@@ -226,6 +227,7 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
       backfill.stop();
       throw e;
     }
+    return true;
   }
 
   // the scheduler runs until the back-fill ends, however it ends
@@ -260,11 +262,8 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
 
   // above the floor of the sync, and a pruning run away from the blocks a pruner removes
   private LongUnaryOperator lowestNeeded() {
-    // the floor the sync recorded, whatever the checkpoint of this run
-    final long floor =
-        blockchain
-            .getSyncFloor()
-            .orElseGet(() -> syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L));
+    // recorded with the bodies from, whatever the checkpoint of this run
+    final long floor = blockchain.getSyncFloor().orElse(0L);
     return head ->
         Math.max(
             floor + 1, chainDataPruner.map(pruner -> pruner.lowestToBackfill(head)).orElse(0L));

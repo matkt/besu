@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateDiffApplier;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.google.common.base.Throwables;
 import org.apache.tuweni.bytes.Bytes;
@@ -55,6 +57,7 @@ final class PivotMoves {
   private static final Logger LOG = LoggerFactory.getLogger(PivotMoves.class);
   // blocks folded into one diff, so that it stays small
   private static final int MAX_BLOCKS_PER_MOVE = 128;
+  private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
 
   /**
    * When the pivot moves.
@@ -72,7 +75,7 @@ final class PivotMoves {
   private final BalFetcher balFetcher;
   private final Settings settings;
   private final Consumer<RestartException> restart;
-  private final Executor retries;
+  private final Function<Duration, Executor> delays;
   private final AtomicLong moves = new AtomicLong();
   private volatile boolean stopped;
   // guarded by this: the move in progress or the last one, and whether the periodic moves ended
@@ -84,7 +87,7 @@ final class PivotMoves {
    *
    * @param storeHeaders stores the headers of the blocks a move passes
    * @param restart ends the attempt, whose state cannot follow the chain any more
-   * @param retries runs a final catch-up again after a failure, some time later
+   * @param delays runs a task once a delay passed, as a final catch-up tried again
    */
   PivotMoves(
       final StateSync stateSync,
@@ -95,7 +98,7 @@ final class PivotMoves {
       final BalFetcher balFetcher,
       final Settings settings,
       final Consumer<RestartException> restart,
-      final Executor retries) {
+      final Function<Duration, Executor> delays) {
     this.stateSync = stateSync;
     this.storeHeaders = storeHeaders;
     this.blockchain = blockchain;
@@ -104,7 +107,7 @@ final class PivotMoves {
     this.balFetcher = balFetcher;
     this.settings = settings;
     this.restart = restart;
-    this.retries = retries;
+    this.delays = delays;
   }
 
   /**
@@ -157,12 +160,13 @@ final class PivotMoves {
               LOG.info(
                   "SNAP2 final pivot check failed, trying again: {}",
                   rootCause(error).getMessage());
-              return CompletableFuture.runAsync(() -> {}, retries).thenCompose(unused -> catchUp());
+              return CompletableFuture.runAsync(() -> {}, delays.apply(RETRY_DELAY))
+                  .thenCompose(unused -> catchUp());
             });
   }
 
-  /** Stops moving the pivot: nothing is stored afterwards. */
-  void stop() {
+  /** Stops moving the pivot: nothing is stored once it returns. */
+  synchronized void stop() {
     stopped = true;
   }
 
@@ -225,11 +229,9 @@ final class PivotMoves {
 
   // stores the blocks of a step, then moves the download to the last one
   private CompletableFuture<Void> moveTo(final List<BlockHeader> step, final List<Bytes> lists) {
-    if (stopped) {
+    if (!store(step, lists)) {
       return stoppedFuture();
     }
-    storeHeaders.accept(step);
-    storeBlockAccessLists(step, lists);
     final BlockHeader target = step.getLast();
     return stateSync
         .moveTo(target, fold(lists))
@@ -257,6 +259,16 @@ final class PivotMoves {
         count(outcome.staleStorage()));
   }
 
+  // under the lock, so that a stop either waits for the writes or keeps them from starting
+  private synchronized boolean store(final List<BlockHeader> step, final List<Bytes> lists) {
+    if (stopped) {
+      return false;
+    }
+    storeHeaders.accept(step);
+    storeBlockAccessLists(step, lists);
+    return true;
+  }
+
   // kept to serve them once the node follows the chain
   private void storeBlockAccessLists(final List<BlockHeader> headers, final List<Bytes> lists) {
     final Map<Hash, SyncBlockAccessList> accessLists = new HashMap<>();
@@ -279,9 +291,9 @@ final class PivotMoves {
   }
 
   private static boolean endsTheAttempt(final Throwable error) {
-    return Throwables.getCausalChain(error).stream()
-        .anyMatch(
-            cause -> cause instanceof RestartException || cause instanceof CancellationException);
+    return RestartException.in(error).isPresent()
+        || Throwables.getCausalChain(error).stream()
+            .anyMatch(CancellationException.class::isInstance);
   }
 
   private static <T> CompletableFuture<T> stoppedFuture() {

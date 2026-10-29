@@ -23,8 +23,7 @@ public enum SyncMode {
   FULL,
   // Perform snapsync
   SNAP,
-  // Download the chain and the state together, the state following the head through block access
-  // lists
+  // Download the chain and the state together, following the head through block access lists
   SNAP2;
 
   public String normalize() {

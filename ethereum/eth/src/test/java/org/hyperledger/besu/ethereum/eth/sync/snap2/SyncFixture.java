@@ -33,21 +33,26 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.S
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.TestTries;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 
 /**
  * A node that syncs a test chain on the test thread, in rounds: the network answers the state
  * requests, then the state download, the header download, the window and the attempts run what they
- * queued. The chain answers at once.
+ * queued. The chain answers at once, and the waits run when a test wakes them up.
  */
 final class SyncFixture {
 
   // a move once the head is six blocks ahead, to four blocks behind it
   static final PivotMoves.Settings MOVES = new PivotMoves.Settings(4, 2);
   static final int WINDOW = 4;
-  // 16 account ranges, 4 KiB responses, 8 storages a request, 8 ranges of a large storage
+  // 16 account ranges, 4 KiB answers, 8 storages a request, 8 ranges of a storage, 16 bytecodes
   private static final StateSync.Settings STATE = new StateSync.Settings(16, 4096, 8, 8, 16);
   // far more than a sync of these worlds takes
   private static final int MAX_ROUNDS = 10_000;
@@ -57,6 +62,9 @@ final class SyncFixture {
   final MutableBlockchain blockchain;
   final Storages storages = SyncStorageFixture.create(Format.BONSAI);
   final SyncStateStorage storage = spy(storages.sync());
+  final HeaderFetcher fetcher;
+  // a round without the lists fails the fetch
+  final BalFetcher balFetcher = new BalFetcher(network, 32, 1 << 20, 1);
   // the loop and the writes of the state download
   final QueuedExecutor tasks = new QueuedExecutor();
   final QueuedExecutor headers = new QueuedExecutor();
@@ -64,28 +72,35 @@ final class SyncFixture {
   final QueuedExecutor resumes = new QueuedExecutor();
   // the attempts and their final builds
   final QueuedExecutor executor = new QueuedExecutor();
-  final QueuedExecutor retries = new QueuedExecutor();
+  // the tasks that wait for a delay, run when the test wakes them up
+  final List<Runnable> waiting = new ArrayList<>();
+  final Function<Duration, Executor> delays = delay -> waiting::add;
 
   SyncFixture(final long seed) {
-    chain =
-        new TestChain(
-            new Random(seed), TestWorld.random(new Random(seed), 60, 2, 50), network, 300, 4);
+    this(seed, TestWorld.random(new Random(seed), 60, 2, 50));
+  }
+
+  SyncFixture(final long seed, final TestWorld genesisWorld) {
+    chain = new TestChain(new Random(seed), genesisWorld, network);
     blockchain = InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
+    fetcher = new HeaderFetcher(network, ProtocolScheduleFixture.MAINNET, chain, 8);
+  }
+
+  /** Returns a state download whose loop and writes run on {@link #tasks}. */
+  StateSync stateSync() {
+    return TestStateSync.create(storage, network, STATE, tasks);
   }
 
   /** Returns what the attempts share, the checkpoint as their floor. */
   SyncAttempt.Context context(final Optional<Checkpoint> checkpoint) {
-    final HeaderFetcher fetcher =
-        new HeaderFetcher(network, ProtocolScheduleFixture.MAINNET, chain, 8);
     return new SyncAttempt.Context(
         blockchain,
         storage,
         chain,
         fetcher,
-        // a round without the lists fails the fetch
-        new BalFetcher(network, 32, 1 << 20, 1),
+        balFetcher,
         MOVES,
-        () -> TestStateSync.create(storage, network, STATE, tasks),
+        this::stateSync,
         () ->
             new SyncChain(
                 blockchain,
@@ -102,7 +117,7 @@ final class SyncFixture {
                 10_000),
         trieLeft -> TestTries.builder(storage, trieLeft),
         executor,
-        retries);
+        delays);
   }
 
   /** Answers the state requests, then runs what the state download queued. */
@@ -127,5 +142,18 @@ final class SyncFixture {
       assertThat(rounds).as("rounds").isLessThan(MAX_ROUNDS);
       round.run();
     }
+  }
+
+  /** Runs the state rounds until no state request waits for an answer. */
+  void downloadState() {
+    stateRound();
+    runUntil(() -> !network.hasUnanswered(), this::stateRound);
+  }
+
+  /** Runs the waits due so far, not those they start. */
+  void wakeUp() {
+    final List<Runnable> due = List.copyOf(waiting);
+    waiting.clear();
+    due.forEach(Runnable::run);
   }
 }

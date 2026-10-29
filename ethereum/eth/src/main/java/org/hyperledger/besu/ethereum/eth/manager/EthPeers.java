@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.p2p.peers.Peer;
 import org.hyperledger.besu.ethereum.p2p.peers.PeerId;
 import org.hyperledger.besu.ethereum.p2p.rlpx.RlpxAgent;
 import org.hyperledger.besu.ethereum.p2p.rlpx.connections.PeerConnection;
+import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.PeerClientName;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.PeerInfo;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage;
@@ -51,6 +52,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -952,15 +954,13 @@ public class EthPeers implements PeerSelector {
     return snapServerPeersNeeded && numberOfSnapServers() < snapServerTargetNumber;
   }
 
-  // a SNAP2 sync ranks the peers serving no snap first, then snap/1, then snap/2, which also
-  // serves block access lists
+  // for a SNAP2 sync: no snap below snap/1, below snap/2, which serves block access lists too
   private static int snapRank(final EthPeer peer) {
-    if (!peer.isServingSnap()) {
+    final Set<Capability> capabilities = peer.getAgreedCapabilities();
+    if (!SnapProtocol.isAgreed(capabilities)) {
       return 0;
     }
-    return peer.getAgreedCapabilities().contains(SnapProtocolVersion.V2.getCapability())
-        ? SNAP2_RANK
-        : 1;
+    return capabilities.contains(SnapProtocolVersion.V2.getCapability()) ? SNAP2_RANK : 1;
   }
 
   // the lowest ranked peer a SNAP2 sync replaces with a better ranked one

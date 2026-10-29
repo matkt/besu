@@ -316,11 +316,9 @@ final class SyncChain {
     if (download == null) {
       return new HeaderProgress(0, 0, Duration.ZERO);
     }
-    final long bottom = settings.headersToCheckpointOnly() ? floor.getNumber() : 0;
-    final long lowest = download.lowestStored();
     return new HeaderProgress(
-        top.getNumber() - lowest,
-        Math.max(0, lowest - bottom - 1),
+        top.getNumber() - download.lowestStored(),
+        download.total() - download.done(),
         Duration.between(headersStarted, Instant.now()));
   }
 

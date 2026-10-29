@@ -58,7 +58,6 @@ public final class Snap2SyncFactory {
   private static final int BAL_BATCH_SIZE = 32;
   private static final int BAL_RESPONSE_BYTES = 2 * 1024 * 1024;
   private static final int BAL_ROUNDS = 60;
-  private static final long RETRY_SECONDS = 5;
 
   private Snap2SyncFactory() {}
 
@@ -94,6 +93,7 @@ public final class Snap2SyncFactory {
     final SyncStateStorage storage = syncStorage(worldStateStorageCoordinator);
     final Snap2Configuration config =
         Snap2Configuration.create(
+            syncConfig.getDownloaderHeaderRequestSize(),
             syncConfig.isSnapSyncHeadersToCheckpointOnly(),
             syncConfig.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled(),
             terminalTotalDifficulty);
@@ -139,7 +139,9 @@ public final class Snap2SyncFactory {
                     executor),
             trieLeft -> new WorldStateTrieBuilder(storage, config.trieBuildThreads(), trieLeft),
             executor,
-            CompletableFuture.delayedExecutor(RETRY_SECONDS, TimeUnit.SECONDS, executor));
+            delay ->
+                CompletableFuture.delayedExecutor(
+                    delay.toMillis(), TimeUnit.MILLISECONDS, executor));
     return Optional.of(
         new Snap2SyncController(
             context,
@@ -151,9 +153,6 @@ public final class Snap2SyncFactory {
             executor,
             Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("snap2-control").daemon().factory()),
-            delay ->
-                CompletableFuture.delayedExecutor(
-                    delay.toMillis(), TimeUnit.MILLISECONDS, executor),
             metricsSystem));
   }
 

@@ -29,7 +29,6 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
-import com.google.common.base.Throwables;
 import org.junit.jupiter.api.Test;
 
 class SyncAttemptTest {
@@ -81,7 +80,7 @@ class SyncAttemptTest {
 
     assertThat(synced).isNotDone();
     assertThat(node.blockchain.getChainHeadBlockNumber()).isZero();
-    assertThat(attempt.stage()).isEqualTo("chain");
+    assertThat(attempt.stage()).isEqualTo(SyncAttempt.Stage.CHAIN);
     assertThat(attempt.progress().headers()).isZero();
     node.runUntil(synced::isDone);
     assertThat(synced).isCompletedWithValue(chain.header(6));
@@ -94,8 +93,7 @@ class SyncAttemptTest {
     final SyncAttempt attempt = attempt(6);
     final CompletableFuture<BlockHeader> synced = attempt.start();
     // the whole state, the final build left waiting
-    node.stateRound();
-    node.runUntil(() -> !node.network.hasUnanswered(), node::stateRound);
+    node.downloadState();
     // the flat state lost an account
     node.storage.write(batch -> batch.removeAccount(chain.world(6).accountLeaves().firstKey()));
 
@@ -163,9 +161,7 @@ class SyncAttemptTest {
   private static Throwable restartCause(final CompletableFuture<BlockHeader> synced) {
     assertThat(synced).isCompletedExceptionally();
     final Throwable failure = synced.handle((unused, error) -> error).join();
-    return Throwables.getCausalChain(failure).stream()
-        .filter(RestartException.class::isInstance)
-        .findFirst()
+    return RestartException.in(failure)
         .orElseThrow(() -> new AssertionError("no restart in " + failure));
   }
 }

@@ -14,6 +14,10 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
+import java.util.Optional;
+
+import com.google.common.base.Throwables;
+
 /** An attempt of the SNAP2 sync cannot go on, and the sync starts over. */
 final class RestartException extends RuntimeException {
 
@@ -23,5 +27,13 @@ final class RestartException extends RuntimeException {
 
   RestartException(final String message, final Throwable cause) {
     super(message, cause);
+  }
+
+  /** Returns the restart a failure is, or wraps. */
+  static Optional<RestartException> in(final Throwable failure) {
+    return Throwables.getCausalChain(failure).stream()
+        .filter(RestartException.class::isInstance)
+        .map(RestartException.class::cast)
+        .findFirst();
   }
 }

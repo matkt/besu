@@ -496,7 +496,7 @@ public class EthPeersTest {
 
     // the static peer cannot be replaced, so a new candidate brings nothing
     final Peer candidate = mock(Peer.class);
-    when(candidate.getId()).thenReturn(Bytes.random(EthPeers.NODE_ID_LENGTH));
+    when(candidate.getId()).thenReturn(Bytes.repeat((byte) 1, EthPeers.NODE_ID_LENGTH));
     assertThat(snap2Peers.gatePeerConnection(candidate, false))
         .contains(DisconnectReason.TOO_MANY_PEERS);
   }
