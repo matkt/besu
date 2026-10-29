@@ -98,7 +98,8 @@ final class StateWriter {
           }
         });
     final boolean done = reachesLimit(hashes, result.hasMore(), request.limit);
-    final Bytes32 end = coveredEnd(hashes, result.hasMore(), request.limit);
+    // a copy, as keys decoded from a response slice the whole message
+    final Bytes32 end = coveredEnd(hashes, result.hasMore(), request.limit).copy();
     storageTasks.forEach(coverage::addStorageTask);
     coverage.accounts().add(request.origin, end);
     accountsWritten.addAndGet(count);
@@ -132,7 +133,8 @@ final class StateWriter {
     final StorageRangesRequest.Slots last = result.accounts().getLast();
     return new StorageWritten(
         result.accounts().size(),
-        last.hashes().isEmpty() ? null : last.hashes().getLast(),
+        // a copy, as keys decoded from a response slice the whole message
+        last.hashes().isEmpty() ? null : last.hashes().getLast().copy(),
         reachesLimit(last.hashes(), !last.complete(), request.limit),
         last.hashes().size());
   }
