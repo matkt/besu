@@ -123,6 +123,11 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
     if (context.isSequentialExecutionRequested()) {
       return blockProcessingResult;
     }
+    // With its block access list, every transaction ran on its exact pre-state, so the failure is
+    // the block's own and a sequential rerun would only repeat it.
+    if (isBalPerfectParallelization(context)) {
+      return blockProcessingResult;
+    }
     final Block block = context.getBlock();
     LOG.info(
         "Parallel transaction processing failure. Falling back to non-parallel processing for block #{} ({})",
@@ -133,6 +138,11 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
       ((BonsaiWorldStateUpdateAccumulator) worldState.updater()).reset();
     }
     return processBlockSequentially(context);
+  }
+
+  private boolean isBalPerfectParallelization(final BlockExecutionContext context) {
+    return balConfiguration.isPerfectParallelizationEnabled()
+        && context.getBlockAccessList().isPresent();
   }
 
   /** Returns whether a block whose parallel processing failed is rerun sequentially. */

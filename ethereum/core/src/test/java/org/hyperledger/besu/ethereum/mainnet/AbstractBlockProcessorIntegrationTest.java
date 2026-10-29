@@ -445,6 +445,46 @@ class AbstractBlockProcessorIntegrationTest {
   }
 
   @Test
+  void balPerfectParallelizationFailureIsNotRerun() {
+    final Block block = createBlockWithTwoTransfers();
+
+    final FailingAtSecondTransaction blockProcessor =
+        new FailingAtSecondTransaction(protocolSchedule());
+    final BlockProcessingResult result =
+        blockProcessor.processBlock(
+            BlockExecutionContext.builder()
+                .protocolContext(protocolContext)
+                .worldState(worldStateArchive.getWorldState())
+                .block(block)
+                .blockAccessList(Optional.of(new BlockAccessList(List.of())))
+                .build());
+
+    assertThat(result.isFailed()).isTrue();
+    assertThat(blockProcessor.parallelAttempts).isEqualTo(1);
+    assertThat(blockProcessor.sequentialReruns).isZero();
+  }
+
+  @Test
+  void blockAccessListFailureIsRerunWhenPerfectParallelizationIsDisabled() {
+    final Block block = createBlockWithTwoTransfers();
+
+    final FailingAtSecondTransaction blockProcessor =
+        new FailingAtSecondTransaction(
+            protocolSchedule(),
+            ImmutableBalConfiguration.builder().isPerfectParallelizationEnabled(false).build());
+    blockProcessor.processBlock(
+        BlockExecutionContext.builder()
+            .protocolContext(protocolContext)
+            .worldState(worldStateArchive.getWorldState())
+            .block(block)
+            .blockAccessList(Optional.of(new BlockAccessList(List.of())))
+            .build());
+
+    assertThat(blockProcessor.parallelAttempts).isEqualTo(1);
+    assertThat(blockProcessor.sequentialReruns).isEqualTo(1);
+  }
+
+  @Test
   void blockTracerObservesEveryTransactionOnParallelProcessor() {
     final ProtocolSchedule protocolSchedule = protocolSchedule();
     final ProtocolSpec spec = genesisSpec(protocolSchedule);
@@ -521,17 +561,24 @@ class AbstractBlockProcessorIntegrationTest {
   private static final class FailingAtSecondTransaction extends MainnetParallelBlockProcessor {
 
     FailingAtSecondTransaction(final ProtocolSchedule protocolSchedule) {
-      this(genesisSpec(protocolSchedule), protocolSchedule);
+      this(protocolSchedule, BalConfiguration.DEFAULT);
+    }
+
+    FailingAtSecondTransaction(
+        final ProtocolSchedule protocolSchedule, final BalConfiguration balConfiguration) {
+      this(genesisSpec(protocolSchedule), protocolSchedule, balConfiguration);
     }
 
     private FailingAtSecondTransaction(
-        final ProtocolSpec spec, final ProtocolSchedule protocolSchedule) {
+        final ProtocolSpec spec,
+        final ProtocolSchedule protocolSchedule,
+        final BalConfiguration balConfiguration) {
       super(
           spec.getTransactionProcessor(),
           spec.getTransactionReceiptFactory(),
           BlockHeader::getCoinbase,
           protocolSchedule,
-          BalConfiguration.DEFAULT,
+          balConfiguration,
           new NoOpMetricsSystem(),
           Runnable::run);
     }
