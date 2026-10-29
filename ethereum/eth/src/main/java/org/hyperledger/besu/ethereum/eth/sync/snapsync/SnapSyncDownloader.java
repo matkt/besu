@@ -198,7 +198,7 @@ public class SnapSyncDownloader implements SnapSyncController {
     }
   }
 
-  // as before this method: nothing waits for this sync once stopped
+  // its pipelines run on the EthScheduler, which the node awaits before the storage closes
   @Override
   public void awaitStop() {}
 
