@@ -37,9 +37,8 @@ final class StorageTask {
   private Bytes trieRootNode;
   private boolean trieGivenUp;
 
-  // its download, which only the loop of the state download touches
+  // the slot ranges of its download, which only the loop of the state download touches
   final List<RangeTask> chunks = new ArrayList<>();
-  boolean queued;
 
   StorageTask(final Bytes32 accountHash, final Bytes32 storageRoot) {
     // copies, as hashes decoded from a response slice the whole message

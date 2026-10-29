@@ -141,6 +141,11 @@ public final class FakeSnapNetwork implements RequestSender {
     answering.forEach(this::answer);
   }
 
+  /** Returns the number of requests waiting for an answer that the download withdrew. */
+  public long withdrawnRequestCount() {
+    return unanswered.stream().filter(sent -> sent.future().isCancelled()).count();
+  }
+
   /** Returns the number of requests sent, those that failed at once included. */
   public int requestCount() {
     return requests;

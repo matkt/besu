@@ -18,6 +18,7 @@ import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.datatypes.Wei;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.rlp.RLP;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.patricia.SimpleMerklePatriciaTrie;
@@ -87,7 +88,7 @@ public final class TestWorld {
           final PatriciaTrieAccountValue value =
               new PatriciaTrieAccountValue(
                   account.nonce, account.balance, Hash.wrap(storageRoot(account)), codeHash);
-          out.put(hash(address), RLP.encode(value::writeTo));
+          out.put(hash(address), Accounts.encode(value));
         });
     return out;
   }

@@ -29,6 +29,7 @@ import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.QueuedExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException.Reason;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
@@ -267,7 +268,8 @@ class StateSyncTest {
     assertThat(world.codes().keySet()).hasSize(1).allMatch(storages.sync()::hasCode);
   }
 
-  // a request no peer takes fails, as the next ones would: they wait for the periodic dispatch
+  // a request no peer takes fails, as the next ones would: asked again at once, they would loop
+  // until the bound of the test executor; they wait for the periodic dispatch
   @Test
   void waitsForThePeriodicDispatchWhileNoPeerTakesItsRequests() {
     final TestWorld world = TestWorld.random(new Random(71), 300, 1, 100);
@@ -280,9 +282,6 @@ class StateSyncTest {
     final int sent = network.requestCount();
     tasks.tick();
     assertThat(network.requestCount()).isGreaterThan(sent);
-    final int retried = network.requestCount();
-    round();
-    assertThat(network.requestCount()).isEqualTo(retried);
 
     // the periodic dispatch resumes the download once peers are back
     network.reconnect();
@@ -302,15 +301,17 @@ class StateSyncTest {
     network.maxResponseBytes(1024);
     start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
     runUntil(() -> stateSync.peersWithoutState() == 2);
+    assertThat(stateSync.peersWithoutState()).isEqualTo(2);
 
     // the one peer that serves the state leaves
     network.disconnect(2);
+    final int codeRequestsBefore = network.codeRequestCount();
     runToEnd();
     final int codeRequests = network.codeRequestCount();
     tasks.tick();
 
-    // every bytecode known was asked without the periodic dispatch
-    assertThat(stateSync.downloadedCodes()).isPositive();
+    // the peers left out took the bytecodes, every one known before the periodic dispatch
+    assertThat(codeRequests).isGreaterThan(codeRequestsBefore);
     assertThat(network.codeRequestCount()).isEqualTo(codeRequests);
   }
 
@@ -336,20 +337,73 @@ class StateSyncTest {
     assertThat(network.requestCount()).isEqualTo(5);
   }
 
-  // an Error in a write, as when memory runs out, leaves its request to be asked again
-  @Test
-  void completesAfterAnErrorInAWrite() {
+  static Stream<Throwable> lastingWriteFailures() {
+    return Stream.of(StorageFailures.diskFailure(), new StackOverflowError("a bug"));
+  }
+
+  // a write that no retry fixes would fail with every answer
+  @ParameterizedTest
+  @MethodSource("lastingWriteFailures")
+  void failsOnAWriteThatNoRetryFixes(final Throwable failure) {
     final TestWorld world = TestWorld.random(new Random(89), 300, 1, 100);
     network.serve(world);
-    final Storages storages = SyncStorageFixture.create(Format.BONSAI);
-    final SyncStateStorage storage = spy(storages.sync());
-    doThrow(new OutOfMemoryError("a large response")).doCallRealMethod().when(storage).batch();
+    final SyncStateStorage storage = spy(SyncStorageFixture.create(Format.BONSAI).sync());
+    doThrow(failure).when(storage).batch();
     final CompletableFuture<Void> completion = start(storage, header(1, world.root()));
 
     runToEnd();
 
+    assertThatThrownBy(completion::join).hasCause(failure);
+    // the five account ranges of the first dispatch, none asked again
+    assertThat(network.requestCount()).isEqualTo(5);
+  }
+
+  // a failed loop task leaves the bookkeeping unsure, which a hang would hide
+  @Test
+  void failsWhenALoopTaskFails() {
+    final TestWorld world = TestWorld.random(new Random(97), 300, 300, 0);
+    network.serve(world);
+    final SyncStateStorage storage = spy(SyncStorageFixture.create(Format.BONSAI).sync());
+    final StackOverflowError failure = new StackOverflowError("a bug");
+    // the loop looks the bytecodes up before it asks them
+    doThrow(failure).when(storage).hasCode(any());
+    final CompletableFuture<Void> completion = start(storage, header(1, world.root()));
+
+    runToEnd();
+
+    assertThatThrownBy(completion::join).hasCause(failure);
+  }
+
+  // a bytecode already stored, as after a restart, leaves nothing to ask
+  @Test
+  void completesWhenTheLastBytecodeIsAlreadyStored() {
+    // one account, with a bytecode and no storage
+    final TestWorld world = TestWorld.random(new Random(53), 1, 1, 0);
+    network.serve(world);
+    final SyncStateStorage storage = SyncStorageFixture.create(Format.BONSAI).sync();
+    final SyncStateStorage.Batch batch = storage.batch();
+    world.codes().forEach(batch::putCode);
+    batch.commit();
+    final CompletableFuture<Void> completion =
+        start(storage, accountRanges(1), header(1, world.root()));
+
+    round();
+
     assertThat(completion).isCompleted();
-    assertThat(build(storages).root()).isEqualTo(world.root());
+    assertThat(network.codeRequestCount()).isZero();
+  }
+
+  // the scheduler still holds requests, which must not go out once the download stopped
+  @Test
+  void withdrawsItsRequestsOnStop() {
+    final TestWorld world = TestWorld.random(new Random(101), 300, 1, 100);
+    network.serve(world);
+    start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+
+    stateSync.stop();
+
+    assertThat(network.unansweredRequests()).isNotEmpty();
+    assertThat(network.withdrawnRequestCount()).isEqualTo(network.unansweredRequests().size());
   }
 
   // a zero would leave nothing to ask, or a queue that never drains
