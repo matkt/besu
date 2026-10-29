@@ -37,6 +37,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.LogWithMetadata;
 import org.hyperledger.besu.ethereum.core.SyncBlock;
+import org.hyperledger.besu.ethereum.core.SyncBlockAccessList;
 import org.hyperledger.besu.ethereum.core.SyncBlockBody;
 import org.hyperledger.besu.ethereum.core.SyncBlockWithReceipts;
 import org.hyperledger.besu.ethereum.core.SyncTransactionReceipt;
@@ -46,6 +47,7 @@ import org.hyperledger.besu.ethereum.core.encoding.receipt.TransactionReceiptEnc
 import org.hyperledger.besu.ethereum.core.encoding.receipt.TransactionReceiptEncodingConfiguration;
 import org.hyperledger.besu.ethereum.mainnet.DefaultProtocolSchedule;
 import org.hyperledger.besu.ethereum.mainnet.MainnetBlockHeaderFunctions;
+import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPInput;
 import org.hyperledger.besu.ethereum.rlp.BytesValueRLPOutput;
 import org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueStoragePrefixedKeyBlockchainStorage;
@@ -65,6 +67,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -1193,6 +1196,35 @@ public class DefaultBlockchainTest {
   }
 
   @Test
+  public void storesSyncBlockAccessListsWithoutMovingTheChainHead() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), genesisBlock);
+    final List<Block> blocks = blocksAbove(gen, genesisBlock, 2, Difficulty.ONE);
+    final List<BlockAccessList> accessLists =
+        List.of(gen.blockAccessList(3), gen.blockAccessList(2));
+    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
+
+    blockchain.unsafeStoreSyncBlockAccessLists(
+        Map.of(
+            blocks.get(0).getHash(),
+            new SyncBlockAccessList(accessLists.get(0).encode()),
+            blocks.get(1).getHash(),
+            new SyncBlockAccessList(accessLists.get(1).encode())));
+
+    assertThat(blockchain.getChainHeadBlockNumber()).isZero();
+    for (int i = 0; i < blocks.size(); i++) {
+      assertThat(
+              blockchain
+                  .getBlockAccessList(blocks.get(i).getHash())
+                  .map(BlockAccessList::accountChanges))
+          .contains(accessLists.get(i).accountChanges());
+    }
+  }
+
+  @Test
   public void storesSyncBodiesInAnyOrderWithoutMovingTheChainHead() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();
@@ -1255,6 +1287,19 @@ public class DefaultBlockchainTest {
     assertThatThrownBy(() -> blockchain.storeBlockHeaders(headers, Difficulty.of(17)))
         .isInstanceOf(IllegalArgumentException.class);
     assertThat(blockchain.getBlockHeader(1)).isEmpty();
+  }
+
+  @Test
+  public void recordsTheFloorOfASync() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(
+            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), gen.genesisBlock());
+    assertThat(blockchain.getSyncFloor()).isEmpty();
+
+    blockchain.unsafeSetSyncFloor(6);
+
+    assertThat(blockchain.getSyncFloor()).contains(6L);
   }
 
   @Test
