@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.AfterEach;
@@ -46,6 +47,8 @@ class PivotMovesTest {
 
   private SyncFixture node = new SyncFixture(11);
   private final List<BlockHeader> storedHeaders = new ArrayList<>();
+  // how the moves store headers, unless a test makes the writes fail
+  private Consumer<List<BlockHeader>> storeHeaders = storedHeaders::addAll;
   private final List<RestartException> restarts = new ArrayList<>();
   private StateSync stateSync;
 
@@ -141,6 +144,25 @@ class PivotMovesTest {
   }
 
   @Test
+  void storesTheListsOfAStepBeforeItsHeaders() {
+    node.chain.extend(8);
+    storeHeaders =
+        headers -> {
+          throw new StorageException("disk failure");
+        };
+    final PivotMoves moves = moves(2);
+
+    moves.maybeMove();
+
+    // the headers of the blocks passed failed to store, not their lists
+    assertThat(node.blockchain.getBlockAccessList(node.chain.header(3).getHash())).isPresent();
+    assertThat(node.blockchain.getBlockAccessList(node.chain.header(4).getHash())).isPresent();
+    // tried again at the next check
+    assertThat(restarts).isEmpty();
+    assertThat(pivot()).isEqualTo(2);
+  }
+
+  @Test
   void settlesOnceTheMoveInProgressEnds() {
     node.chain.extend(8);
     final HeaderFetcher fetcher = spy(node.fetcher);
@@ -227,7 +249,7 @@ class PivotMovesTest {
     node.tasks.runAll();
     return new PivotMoves(
         stateSync,
-        storedHeaders::addAll,
+        storeHeaders,
         node.blockchain,
         node.chain,
         fetcher,
