@@ -84,8 +84,7 @@ public interface Blockchain {
   }
 
   /**
-   * Returns the floor of the sync that recorded {@link #getBodiesFrom}: the block above which it
-   * needs every body, its checkpoint or genesis.
+   * Returns the floor of the last sync: its checkpoint or genesis, above which it needs every body.
    *
    * @return the block, or empty when no sync recorded one
    */

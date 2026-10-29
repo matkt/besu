@@ -264,8 +264,9 @@ final class PivotMoves {
     if (stopped) {
       return false;
     }
-    storeHeaders.accept(step);
+    // the lists first, so that a stored header always has its list
     storeBlockAccessLists(step, lists);
+    storeHeaders.accept(step);
     return true;
   }
 

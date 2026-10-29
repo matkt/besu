@@ -73,7 +73,7 @@ public interface VariablesStorage {
   /** Returns the block from which a sync stored every body and receipts up to the chain head. */
   Optional<Long> getBodiesFrom();
 
-  /** Returns the block above which the sync that recorded the bodies from needs every body. */
+  /** Returns the floor of the last sync. */
   Optional<Long> getSyncFloor();
 
   Updater updater();

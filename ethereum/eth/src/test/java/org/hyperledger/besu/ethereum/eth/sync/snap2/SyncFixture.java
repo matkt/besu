@@ -31,6 +31,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Storages;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.TestTries;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 
 import java.time.Duration;
@@ -62,6 +63,9 @@ final class SyncFixture {
   final MutableBlockchain blockchain;
   final Storages storages = SyncStorageFixture.create(Format.BONSAI);
   final SyncStateStorage storage = spy(storages.sync());
+  // where the sync records the world state root and its block
+  final BonsaiWorldStateKeyValueStorage bonsai =
+      storages.worldState().getStrategy(BonsaiWorldStateKeyValueStorage.class);
   final HeaderFetcher fetcher;
   // a round without the lists fails the fetch
   final BalFetcher balFetcher = new BalFetcher(network, 32, 1 << 20, 1);

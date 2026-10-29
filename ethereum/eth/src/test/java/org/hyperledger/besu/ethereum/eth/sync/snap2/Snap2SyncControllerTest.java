@@ -64,7 +64,7 @@ class Snap2SyncControllerTest {
 
     assertThat(pivot(result)).isEqualTo(chain.header(12));
     assertThat(node.blockchain.getChainHeadHeader()).isEqualTo(chain.header(12));
-    assertThat(node.storages.bonsai().getWorldStateRootHash()).contains(chain.world(12).root());
+    assertThat(node.bonsai.getWorldStateRootHash()).contains(chain.world(12).root());
     assertThat(controller.pivotMoves()).isOne();
     assertThat(controller.restarts()).isZero();
     assertThat(metricsSystem.getGaugeValue("snap2_pivot_block")).isEqualTo(12);
@@ -91,7 +91,7 @@ class Snap2SyncControllerTest {
 
     // the new attempt at the new chain, a move away from its head
     assertThat(pivot(result)).isEqualTo(chain.header(12));
-    assertThat(node.storages.bonsai().getWorldStateRootHash()).contains(chain.world(12).root());
+    assertThat(node.bonsai.getWorldStateRootHash()).contains(chain.world(12).root());
     assertThat(controller.restarts()).isOne();
   }
 

@@ -37,7 +37,7 @@ public interface SyncStateStorage {
   /** Starts a batch of flat writes. */
   Batch batch();
 
-  /** Fills a batch and commits it, or drops it if that fails. */
+  /** Fills a batch and commits it, or aborts it if that fails. */
   default void write(final Consumer<Batch> writes) {
     final Batch batch = batch();
     try {
@@ -92,7 +92,7 @@ public interface SyncStateStorage {
 
     void putCode(Bytes32 codeHash, Bytes code);
 
-    /** Writes the batch, or drops it if that fails. */
+    /** Writes the batch, or drops its accounts and slots if that fails: its code may stay. */
     void commit();
 
     /** Drops the writes, or does nothing once {@link #commit()} has started or after an abort. */
@@ -104,6 +104,7 @@ public interface SyncStateStorage {
     /** Visits an account and returns whether its slots are to be visited too. */
     boolean onAccount(Bytes32 accountHash, Bytes account);
 
+    /** Visits a slot, whose value may come without its leading zeros. */
     void onSlot(Bytes32 accountHash, Bytes32 slotHash, Bytes value);
   }
 

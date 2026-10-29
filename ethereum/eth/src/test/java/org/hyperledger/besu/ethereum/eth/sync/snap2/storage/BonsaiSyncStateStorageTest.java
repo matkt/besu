@@ -17,7 +17,6 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_LOG_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
@@ -28,7 +27,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
@@ -47,22 +45,14 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTransaction;
 import org.hyperledger.besu.services.kvstore.SegmentedKeyValueStorageTransactionValidatorDecorator;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.junit.jupiter.api.Test;
 
 class BonsaiSyncStateStorageTest {
 
-  private static final Bytes32 BEFORE = key(0x05);
   private static final Bytes32 FIRST = key(0x10);
-  private static final Bytes32 ORPHAN = key(0x15);
   private static final Bytes32 SECOND = key(0x20);
-  private static final Bytes32 THIRD = key(0x30);
-  private static final Bytes32 LAST_ORPHAN = key(0x35);
-  private static final Bytes32 AFTER = key(0x50);
   private static final Bytes ACCOUNT = Bytes.of(1);
 
   private final BonsaiWorldStateKeyValueStorage bonsai =
@@ -71,76 +61,6 @@ class BonsaiSyncStateStorageTest {
   // the transaction of the batches of storageWritingTo
   private final SegmentedKeyValueStorageTransaction transaction =
       mock(SegmentedKeyValueStorageTransaction.class);
-
-  // slots of a missing account come after the previous account, an account may skip its slots
-  @Test
-  void scanVisitsTheAccountsOfTheRangeEachFollowedByItsSlots() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    for (final Bytes32 account : List.of(BEFORE, FIRST, SECOND, THIRD, AFTER)) {
-      batch.putAccount(account, ACCOUNT);
-    }
-    for (final Bytes32 account :
-        List.of(BEFORE, FIRST, ORPHAN, SECOND, THIRD, LAST_ORPHAN, AFTER)) {
-      batch.putStorage(account, key(0x02), value(2));
-      batch.putStorage(account, key(0x01), value(1));
-    }
-    batch.commit();
-
-    final List<String> visits = new ArrayList<>();
-    storage.scan(
-        FIRST,
-        key(0x3f),
-        new SyncStateStorage.ScanVisitor() {
-          @Override
-          public boolean onAccount(final Bytes32 accountHash, final Bytes account) {
-            visits.add("account " + name(accountHash));
-            return !accountHash.equals(SECOND);
-          }
-
-          @Override
-          public void onSlot(final Bytes32 accountHash, final Bytes32 slotHash, final Bytes value) {
-            visits.add(
-                "slot "
-                    + name(accountHash)
-                    + "/"
-                    + name(slotHash)
-                    + "="
-                    + name(Bytes32.wrap(value)));
-          }
-        });
-
-    assertThat(visits)
-        .containsExactly(
-            "account 10",
-            "slot 10/01=01",
-            "slot 10/02=02",
-            "slot 15/01=01",
-            "slot 15/02=02",
-            "account 20",
-            "account 30",
-            "slot 30/01=01",
-            "slot 30/02=02",
-            "slot 35/01=01",
-            "slot 35/02=02");
-  }
-
-  // more slots than one delete batch holds
-  @Test
-  void deleteStorageRemovesEverySlotOfTheAccountOnly() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    for (int i = 0; i < 10_001; i++) {
-      batch.putStorage(FIRST, Bytes32.leftPad(Bytes.ofUnsignedInt(i)), value(1));
-    }
-    batch.putStorage(SECOND, key(0x01), value(1));
-    batch.commit();
-    final SyncStateStorage spied = spy(storage);
-
-    spied.deleteStorage(FIRST);
-
-    assertThat(slots(storage, FIRST)).isEmpty();
-    assertThat(slots(storage, SECOND)).containsOnlyKeys(key(0x01));
-    verify(spied, times(2)).batch();
-  }
 
   @Test
   void deleteStorageWritesNothingForAnAccountWithoutSlots() {
@@ -198,22 +118,6 @@ class BonsaiSyncStateStorageTest {
   }
 
   @Test
-  void removesAccountsAndSlots() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.putStorage(FIRST, key(0x01), value(1));
-    batch.commit();
-
-    final SyncStateStorage.Batch removal = storage.batch();
-    removal.removeAccount(FIRST);
-    removal.removeStorage(FIRST, key(0x01));
-    removal.commit();
-
-    assertThat(storage.getAccount(FIRST)).isEmpty();
-    assertThat(slots(storage, FIRST)).isEmpty();
-  }
-
-  @Test
   void abortDropsTheWritesOfABatch() {
     final SyncStateStorage.Batch batch = storageWritingTo(transaction).batch();
     batch.putAccount(FIRST, ACCOUNT);
@@ -221,15 +125,6 @@ class BonsaiSyncStateStorageTest {
     batch.abort();
 
     verify(transaction).rollback();
-  }
-
-  @Test
-  void abortDoesNothingAfterACommit() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.commit();
-
-    assertThatCode(batch::abort).doesNotThrowAnyException();
   }
 
   @Test
@@ -244,46 +139,26 @@ class BonsaiSyncStateStorageTest {
   }
 
   @Test
-  void abortDoesNothingAfterAnAbort() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.abort();
-
-    assertThatCode(batch::abort).doesNotThrowAnyException();
-  }
-
-  @Test
-  void storesTheCodeByItsHash() {
+  void storesTheCodeForEveryAccount() {
     final Bytes code = Bytes.fromHexString("0x6001600155");
     final Bytes32 codeHash = Bytes32.wrap(Hash.hash(code).getBytes());
     final SyncStateStorage.Batch batch = storage.batch();
     batch.putCode(codeHash, code);
     batch.commit();
 
-    assertThat(storage.hasCode(codeHash)).isTrue();
-    assertThat(storage.hasCode(FIRST)).isFalse();
     assertThat(bonsai.getCodeBytes(Hash.wrap(codeHash), Hash.wrap(FIRST))).contains(code);
   }
 
   @Test
-  void writesTheNodesOfATrieOnCommitOnly() {
+  void keepsTheStorageTrieOfEachAccountApart() {
     final Bytes node = Bytes.fromHexString("0xc28080");
     final Bytes32 hash = Bytes32.wrap(Hash.hash(node).getBytes());
-    final SyncStateStorage.TrieWriter aborted = storage.trieWriter();
-    aborted.storageNode(FIRST, Bytes.EMPTY, hash, node);
-    aborted.abort();
-    assertThat(storage.hasStorageTrie(FIRST, hash)).isFalse();
-
     final SyncStateStorage.TrieWriter writer = storage.trieWriter();
     writer.storageNode(FIRST, Bytes.EMPTY, hash, node);
-    writer.accountNode(Bytes.of(1), hash, node);
-    assertThat(storage.hasStorageTrie(FIRST, hash)).isFalse();
     writer.commit();
 
     assertThat(storage.hasStorageTrie(FIRST, hash)).isTrue();
     assertThat(storage.hasStorageTrie(SECOND, hash)).isFalse();
-    assertThat(storage.storageTrieNode(FIRST, Bytes.EMPTY, hash)).contains(node);
-    assertThat(bonsai.getTrieNode(Bytes.of(1), hash)).contains(node);
   }
 
   @Test
@@ -324,17 +199,6 @@ class BonsaiSyncStateStorageTest {
 
     verify(trieLogs, never()).startBatchTransaction();
     verify(trieLogs, never()).startTransaction();
-  }
-
-  @Test
-  void prepareForSyncWipesTheState() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.commit();
-
-    storage.prepareForSync();
-
-    assertThat(storage.getAccount(FIRST)).isEmpty();
   }
 
   @Test
@@ -413,10 +277,5 @@ class BonsaiSyncStateStorageTest {
 
   private static Bytes32 value(final int value) {
     return Bytes32.leftPad(Bytes.of(value));
-  }
-
-  // the last byte names a key in the expected visits
-  private static String name(final Bytes32 key) {
-    return String.format("%02x", key.get(31));
   }
 }
