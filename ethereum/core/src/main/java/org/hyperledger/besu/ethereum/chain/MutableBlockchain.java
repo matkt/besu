@@ -117,10 +117,10 @@ public interface MutableBlockchain extends Blockchain {
       List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
 
   /**
-   * Stores in one batch the block access lists of blocks whose headers a sync stored, without
+   * Stores in one batch the block access lists of blocks whose headers a sync then stores, without
    * updating the chain state.
    *
-   * @param accessLists the access lists, by block hash
+   * @param accessLists the access lists, by block hash, none of them unavailable
    */
   void unsafeStoreSyncBlockAccessLists(Map<Hash, SyncBlockAccessList> accessLists);
 
@@ -145,8 +145,7 @@ public interface MutableBlockchain extends Blockchain {
   void unsafeSetBodiesFrom(long blockNumber);
 
   /**
-   * Records the floor of a sync: the block above which it needs every body, its checkpoint or
-   * genesis.
+   * Records the floor of a sync, which {@link #getSyncFloor} returns.
    *
    * @param blockNumber the floor
    */

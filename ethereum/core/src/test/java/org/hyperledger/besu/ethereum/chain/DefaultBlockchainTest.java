@@ -1205,7 +1205,6 @@ public class DefaultBlockchainTest {
     final List<Block> blocks = blocksAbove(gen, genesisBlock, 2, Difficulty.ONE);
     final List<BlockAccessList> accessLists =
         List.of(gen.blockAccessList(3), gen.blockAccessList(2));
-    blockchain.storeBlockHeaders(blocks.stream().map(Block::getHeader).toList());
 
     blockchain.unsafeStoreSyncBlockAccessLists(
         Map.of(
@@ -1216,11 +1215,8 @@ public class DefaultBlockchainTest {
 
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
     for (int i = 0; i < blocks.size(); i++) {
-      assertThat(
-              blockchain
-                  .getBlockAccessList(blocks.get(i).getHash())
-                  .map(BlockAccessList::accountChanges))
-          .contains(accessLists.get(i).accountChanges());
+      assertThat(blockchain.getBlockAccessList(blocks.get(i).getHash()))
+          .contains(accessLists.get(i));
     }
   }
 
@@ -1290,19 +1286,6 @@ public class DefaultBlockchainTest {
   }
 
   @Test
-  public void recordsTheFloorOfASync() {
-    final BlockDataGenerator gen = new BlockDataGenerator();
-    final DefaultBlockchain blockchain =
-        createMutableBlockchain(
-            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), gen.genesisBlock());
-    assertThat(blockchain.getSyncFloor()).isEmpty();
-
-    blockchain.unsafeSetSyncFloor(6);
-
-    assertThat(blockchain.getSyncFloor()).contains(6L);
-  }
-
-  @Test
   public void findsTheEarliestBlockFromTheBlockTheBodiesAreStoredFrom() {
     final BlockDataGenerator gen = new BlockDataGenerator();
     final Block genesisBlock = gen.genesisBlock();
@@ -1329,20 +1312,22 @@ public class DefaultBlockchainTest {
   }
 
   @Test
-  public void keepsTheBlockTheBodiesAreStoredFrom() {
+  public void keepsTheBlockTheBodiesAreStoredFromAndTheFloorOfTheSync() {
     final Block genesisBlock = new BlockDataGenerator().genesisBlock();
     final KeyValueStorage chainKv = new InMemoryKeyValueStorage();
     final KeyValueStorage variablesKv = new InMemoryKeyValueStorage();
     final DefaultBlockchain blockchain =
         createMutableBlockchain(chainKv, variablesKv, genesisBlock);
     assertThat(blockchain.getBodiesFrom()).isEmpty();
+    assertThat(blockchain.getSyncFloor()).isEmpty();
 
-    blockchain.unsafeSetBodiesFrom(2);
+    blockchain.unsafeSetBodiesFrom(7);
+    blockchain.unsafeSetSyncFloor(1);
 
-    assertThat(blockchain.getBodiesFrom()).contains(2L);
-    // stored, so a restarted node reads it back
-    assertThat(createMutableBlockchain(chainKv, variablesKv, genesisBlock).getBodiesFrom())
-        .contains(2L);
+    // stored apart, so a restarted node reads both back
+    final DefaultBlockchain restarted = createMutableBlockchain(chainKv, variablesKv, genesisBlock);
+    assertThat(restarted.getBodiesFrom()).contains(7L);
+    assertThat(restarted.getSyncFloor()).contains(1L);
   }
 
   @Test
