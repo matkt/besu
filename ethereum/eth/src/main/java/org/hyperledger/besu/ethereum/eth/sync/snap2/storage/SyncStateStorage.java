@@ -17,6 +17,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -35,6 +36,18 @@ public interface SyncStateStorage {
 
   /** Starts a batch of flat writes. */
   Batch batch();
+
+  /** Fills a batch and commits it, or drops it if that fails. */
+  default void write(final Consumer<Batch> writes) {
+    final Batch batch = batch();
+    try {
+      writes.accept(batch);
+      batch.commit();
+    } catch (final RuntimeException e) {
+      batch.abort();
+      throw e;
+    }
+  }
 
   /**
    * Visits accounts with hash in {@code [from, to]} in key order, each followed by its slots in key
@@ -79,9 +92,10 @@ public interface SyncStateStorage {
 
     void putCode(Bytes32 codeHash, Bytes code);
 
+    /** Writes the batch, or drops it if that fails. */
     void commit();
 
-    /** Drops the writes not committed yet. */
+    /** Drops the writes, or does nothing once {@link #commit()} has started or after an abort. */
     void abort();
   }
 
@@ -99,9 +113,10 @@ public interface SyncStateStorage {
 
     void storageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
 
+    /** Writes the nodes put since the last commit, or drops them if that fails. */
     void commit();
 
-    /** Drops the nodes not committed yet. */
+    /** Drops the nodes put since the last {@link #commit()}, even a failed one. */
     void abort();
   }
 }
