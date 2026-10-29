@@ -54,9 +54,8 @@ class SyncAttemptTest {
     assertThat(attempt.progressLine())
         .isEqualTo("SNAP2 sync | state 100.0% | tries 100.0% | headers 100.0% | bodies 100.0%");
     assertThat(node.blockchain.getChainHeadHeader()).isEqualTo(chain.header(12));
-    assertThat(node.storages.bonsai().getWorldStateRootHash()).contains(chain.world(12).root());
-    assertThat(node.storages.bonsai().getWorldStateBlockHash())
-        .contains(chain.header(12).getHash());
+    assertThat(node.bonsai.getWorldStateRootHash()).contains(chain.world(12).root());
+    assertThat(node.bonsai.getWorldStateBlockHash()).contains(chain.header(12).getHash());
     for (long number = 1; number <= 12; number++) {
       assertThat(node.blockchain.getBlockHeader(number)).contains(chain.header(number));
       assertThat(node.blockchain.getBlockBody(chain.header(number).getHash()).isPresent())
@@ -72,7 +71,7 @@ class SyncAttemptTest {
 
     // the state and the tries, the header download left waiting
     node.runUntil(
-        () -> node.storages.bonsai().getWorldStateRootHash().isPresent(),
+        () -> node.bonsai.getWorldStateRootHash().isPresent(),
         () -> {
           node.stateRound();
           node.executor.runAll();
@@ -100,7 +99,7 @@ class SyncAttemptTest {
     node.runUntil(synced::isDone);
 
     assertThat(restartCause(synced)).hasMessageContaining("does not match");
-    assertThat(node.storages.bonsai().getWorldStateRootHash()).isEmpty();
+    assertThat(node.bonsai.getWorldStateRootHash()).isEmpty();
     assertThat(node.blockchain.getChainHeadBlockNumber()).isZero();
   }
 
