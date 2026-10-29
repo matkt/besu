@@ -57,6 +57,7 @@ import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.Test;
+import org.mockito.Answers;
 
 class StateWriterTest {
 
@@ -352,20 +353,16 @@ class StateWriterTest {
   }
 
   @Test
-  void abortsTheBatchOfAFailedWriteButNotOneWhoseCommitFailed() {
-    final SyncStateStorage mocked = mock(SyncStateStorage.class);
+  void abortsTheBatchOfAFailedWrite() {
+    final SyncStateStorage mocked = mock(SyncStateStorage.class, Answers.CALLS_REAL_METHODS);
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     when(mocked.batch()).thenReturn(batch);
     final StateWriter mockedWriter = new StateWriter(mocked, coverage);
     final Bytes32 codeHash = Bytes32.wrap(Hash.hash(CODE).getBytes());
-
-    // the commit of the transaction has started, it cannot be rolled back
-    doThrow(new StorageException("disk full")).when(batch).commit();
-    assertThatThrownBy(() -> mockedWriter.codes(Map.of(codeHash, CODE))).hasMessage("disk full");
-    verify(batch, never()).abort();
-
     doThrow(new StorageException("write failed")).when(batch).putCode(any(), any());
+
     assertThatThrownBy(() -> mockedWriter.codes(Map.of(codeHash, CODE))).hasMessage("write failed");
+    verify(batch, never()).commit();
     verify(batch).abort();
   }
 

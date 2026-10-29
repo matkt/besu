@@ -16,6 +16,9 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
@@ -107,11 +110,13 @@ class SyncStateStorageTest {
     }
     batch.putStorage(SECOND, key(0x01), value(1));
     batch.commit();
+    final SyncStateStorage spied = spy(storage);
 
-    storage.deleteStorage(FIRST);
+    spied.deleteStorage(FIRST);
 
     assertThat(slots(storage, FIRST)).isEmpty();
     assertThat(slots(storage, SECOND)).containsOnlyKeys(key(0x01));
+    verify(spied, times(2)).batch();
   }
 
   @ParameterizedTest
