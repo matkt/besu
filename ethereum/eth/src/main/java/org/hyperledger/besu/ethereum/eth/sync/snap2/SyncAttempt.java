@@ -33,13 +33,13 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -68,7 +68,7 @@ final class SyncAttempt {
    * @param trieBuilders creates the final build, given whether the download left the trie of a
    *     storage to it
    * @param executor runs the final build
-   * @param retries runs a final catch-up of the pivot again, some time after it failed
+   * @param delays runs a task once a delay passed, as a retry
    */
   record Context(
       MutableBlockchain blockchain,
@@ -81,7 +81,20 @@ final class SyncAttempt {
       Supplier<SyncChain> chains,
       Function<Predicate<Bytes32>, WorldStateTrieBuilder> trieBuilders,
       Executor executor,
-      Executor retries) {}
+      Function<Duration, Executor> delays) {}
+
+  /** What an attempt is busy with. */
+  enum Stage {
+    STATE,
+    TRIES,
+    CHAIN,
+    DONE;
+
+    /** Returns the label of the stage in the metrics. */
+    String label() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+  }
 
   private final Context context;
   private final BlockHeader firstPivot;
@@ -90,10 +103,9 @@ final class SyncAttempt {
   private final PivotMoves moves;
   // fails when the attempt must start over before its end
   private final CompletableFuture<BlockHeader> aborted = new CompletableFuture<>();
-  private final CompletableFuture<Void> buildEnded = new CompletableFuture<>();
+  private final CountDownLatch buildEnded = new CountDownLatch(1);
   private volatile boolean cancelled;
-  private volatile boolean triesBuilt;
-  private volatile boolean done;
+  private volatile Stage stage = Stage.STATE;
   // guarded by this: the final build, once started
   private WorldStateTrieBuilder trieBuilder;
 
@@ -112,7 +124,7 @@ final class SyncAttempt {
             context.balFetcher(),
             context.moveSettings(),
             aborted::completeExceptionally,
-            context.retries());
+            context.delays());
   }
 
   /**
@@ -132,7 +144,7 @@ final class SyncAttempt {
             .thenApply(
                 pivot -> {
                   chain.setChainHead();
-                  done = true;
+                  stage = Stage.DONE;
                   return pivot;
                 });
     return synced.applyToEither(aborted, Function.identity());
@@ -155,7 +167,7 @@ final class SyncAttempt {
     }
     if (builder == null) {
       // none starts once cancelled
-      buildEnded.complete(null);
+      buildEnded.countDown();
     } else {
       builder.cancel();
     }
@@ -164,11 +176,7 @@ final class SyncAttempt {
   /** Waits for the reads and writes of a cancelled attempt to end, before the storage is wiped. */
   void awaitStop() throws InterruptedException {
     chain.awaitStop();
-    try {
-      buildEnded.get(BUILD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (final ExecutionException e) {
-      // the build ended
-    } catch (final TimeoutException e) {
+    if (!buildEnded.await(BUILD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
       LOG.warn("SNAP2 trie build still running after {}", BUILD_TIMEOUT);
     }
   }
@@ -190,21 +198,22 @@ final class SyncAttempt {
 
   /** Returns what the attempt did of each phase. */
   Progress progress() {
-    final Optional<WorldStateTrieBuilder> builder = trieBuilder();
-    final double tries =
-        triesBuilt
-            ? 1
-            : builder
-                .map(
-                    build ->
-                        share(build.accountsProcessed(), stateSync.downloadedAccounts(), false))
-                .orElse(0.0);
+    final Stage current = stage;
     final SyncChain.HeaderProgress headers = chain.headerProgress();
     return new Progress(
-        builder.isPresent() ? 1 : stateSync.accountCoverage(),
-        tries,
+        current == Stage.STATE ? stateSync.accountCoverage() : 1,
+        switch (current) {
+          case STATE -> 0;
+          case TRIES ->
+              trieBuilder()
+                  .map(
+                      build ->
+                          share(build.accountsProcessed(), stateSync.downloadedAccounts(), false))
+                  .orElse(0.0);
+          case CHAIN, DONE -> 1;
+        },
         share(headers.stored(), headers.stored() + headers.left(), chain.headersDone().isDone()),
-        done ? 1 : chain.windowProgress());
+        current == Stage.DONE ? 1 : chain.windowProgress());
   }
 
   /** Returns the line of a progress log: the share done of each phase. */
@@ -245,15 +254,9 @@ final class SyncAttempt {
         + stateSync.peersWithoutState();
   }
 
-  /** Returns the phase the attempt is busy with: the state, the tries, the chain, or done. */
-  String stage() {
-    if (done) {
-      return "done";
-    }
-    if (triesBuilt) {
-      return "chain";
-    }
-    return trieBuilder().isPresent() ? "tries" : "state";
+  /** Returns what the attempt is busy with. */
+  Stage stage() {
+    return stage;
   }
 
   /** Returns the current pivot, 0 before the state download starts. */
@@ -322,7 +325,7 @@ final class SyncAttempt {
       }
       context.storage().saveWorldState(pivot, built.rootNode());
       context.storage().completeSync();
-      triesBuilt = true;
+      stage = Stage.CHAIN;
       LOG.info(
           "SNAP2 trie build complete in {} | root verified | accounts {} | storage tries kept {}"
               + " | slots read {}",
@@ -331,7 +334,7 @@ final class SyncAttempt {
           compact(built.keptStorageTries()),
           compact(built.slots()));
     } finally {
-      buildEnded.complete(null);
+      buildEnded.countDown();
     }
   }
 
@@ -341,6 +344,7 @@ final class SyncAttempt {
       throw new CancellationException("attempt abandoned");
     }
     trieBuilder = context.trieBuilders().apply(stateSync::storageTrieLeft);
+    stage = Stage.TRIES;
     return trieBuilder;
   }
 }

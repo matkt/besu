@@ -20,7 +20,6 @@ import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.function.ToDoubleFunction;
@@ -30,7 +29,6 @@ import java.util.function.ToLongFunction;
 final class Snap2Metrics {
 
   private static final BesuMetricCategory CATEGORY = BesuMetricCategory.SYNCHRONIZER;
-  private static final List<String> STAGES = List.of("waiting", "state", "tries", "chain", "done");
 
   private final Supplier<Optional<SyncAttempt>> current;
 
@@ -62,8 +60,10 @@ final class Snap2Metrics {
     final LabelledSuppliedMetric stage =
         metricsSystem.createLabelledSuppliedGauge(
             CATEGORY, "snap2_stage", "Current SNAP2 stage, 1 for the active one", "stage");
-    for (final String name : STAGES) {
-      stage.labels(() -> name.equals(metrics.stage()) ? 1 : 0, name);
+    // waiting before the first attempt, and between two
+    stage.labels(() -> metrics.stage().isEmpty() ? 1 : 0, "waiting");
+    for (final SyncAttempt.Stage name : SyncAttempt.Stage.values()) {
+      stage.labels(() -> metrics.stage().filter(name::equals).isPresent() ? 1 : 0, name.label());
     }
   }
 
@@ -133,8 +133,8 @@ final class Snap2Metrics {
         () -> trieValue(WorldStateTrieBuilder::keptStorageTries));
   }
 
-  private String stage() {
-    return current.get().map(SyncAttempt::stage).orElse("waiting");
+  private Optional<SyncAttempt.Stage> stage() {
+    return current.get().map(SyncAttempt::stage);
   }
 
   private double progressValue(final ToDoubleFunction<SyncAttempt.Progress> phase) {

@@ -39,16 +39,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
-import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,12 +72,11 @@ final class Snap2SyncController implements SnapSyncController {
   private final Consumer<RequestSender> handOver;
   private final ExecutorService executor;
   private final ScheduledExecutorService control;
-  private final Function<Duration, Executor> delays;
   private final MetricsSystem metricsSystem;
   private final CompletableFuture<SnapSyncProcessState> result = new CompletableFuture<>();
   private final AtomicInteger restarts = new AtomicInteger();
-  // the moves of the attempts that started over
-  private final AtomicLong earlierMoves = new AtomicLong();
+  // guarded by this: the moves of the attempts that started over
+  private long earlierMoves;
   private volatile SyncAttempt current;
   // set under the lock with the attempts it cancels
   private volatile boolean stopped;
@@ -93,7 +88,6 @@ final class Snap2SyncController implements SnapSyncController {
    * @param handOver takes the scheduler once the sync completes
    * @param executor runs the attempts, owned by the sync
    * @param control moves the pivot when due, owned by the sync
-   * @param delays runs a task once a delay passed
    * @param metricsSystem shows the progress of the sync
    */
   Snap2SyncController(
@@ -105,7 +99,6 @@ final class Snap2SyncController implements SnapSyncController {
       final Consumer<RequestSender> handOver,
       final ExecutorService executor,
       final ScheduledExecutorService control,
-      final Function<Duration, Executor> delays,
       final MetricsSystem metricsSystem) {
     this.context = context;
     this.scheduler = scheduler;
@@ -115,7 +108,6 @@ final class Snap2SyncController implements SnapSyncController {
     this.handOver = handOver;
     this.executor = executor;
     this.control = control;
-    this.delays = delays;
     this.metricsSystem = metricsSystem;
   }
 
@@ -185,9 +177,8 @@ final class Snap2SyncController implements SnapSyncController {
   }
 
   /** Returns the number of pivot moves of every attempt. */
-  long pivotMoves() {
-    final SyncAttempt attempt = current;
-    return earlierMoves.get() + (attempt == null ? 0 : attempt.pivotMoves());
+  synchronized long pivotMoves() {
+    return earlierMoves + (current == null ? 0 : current.pivotMoves());
   }
 
   private void prepare() {
@@ -238,16 +229,11 @@ final class Snap2SyncController implements SnapSyncController {
         Thread.currentThread().interrupt();
         return CompletableFuture.failedFuture(e);
       }
+      endAttempt(failed);
     }
-    final Optional<Throwable> restart =
-        Throwables.getCausalChain(error).stream()
-            .filter(RestartException.class::isInstance)
-            .findFirst();
+    final Optional<RestartException> restart = RestartException.in(error);
     if (stopped || restart.isEmpty() || restarts.get() >= MAX_RESTARTS) {
       return CompletableFuture.failedFuture(error);
-    }
-    if (failed != null) {
-      earlierMoves.addAndGet(failed.pivotMoves());
     }
     LOG.warn(
         "SNAP2 restart {} of {}: {}",
@@ -255,6 +241,12 @@ final class Snap2SyncController implements SnapSyncController {
         MAX_RESTARTS,
         restart.get().getMessage());
     return run();
+  }
+
+  // its moves counted with the earlier ones, none current until the next attempt
+  private synchronized void endAttempt(final SyncAttempt failed) {
+    earlierMoves += failed.pivotMoves();
+    current = null;
   }
 
   private CompletableFuture<Void> waitForPeers() {
@@ -371,7 +363,7 @@ final class Snap2SyncController implements SnapSyncController {
   }
 
   private CompletableFuture<Void> later(final Duration delay) {
-    return CompletableFuture.runAsync(() -> {}, delays.apply(delay));
+    return CompletableFuture.runAsync(() -> {}, context.delays().apply(delay));
   }
 
   private static <T> CompletableFuture<T> stoppedFuture() {

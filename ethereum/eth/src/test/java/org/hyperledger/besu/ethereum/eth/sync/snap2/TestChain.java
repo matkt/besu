@@ -36,39 +36,26 @@ import org.apache.tuweni.bytes.Bytes32;
 
 /**
  * A chain of empty proof-of-stake blocks whose state changes through their block access lists. The
- * network answers at once for its headers, bodies and lists, and serves the states of its latest
- * blocks.
+ * network answers at once for its headers, bodies and lists, and serves the state of each block.
  */
 final class TestChain implements ChainHeadSource {
 
   private static final BlockBody EMPTY_BODY =
       new BlockBody(List.of(), List.of(), Optional.of(List.of()));
+  // accounts and slots a block changes
+  private static final int CHANGES_PER_BLOCK = 4;
 
   private final Random random;
   private final FakeSnapNetwork network;
-  private final int servedStates;
-  private final int changesPerBlock;
   private final MutableBlockchain source;
   private final ChainSender sender;
   // the world of each block of the chain, by number
   private final List<TestWorld> worlds = new ArrayList<>();
 
-  /**
-   * Creates a chain of its genesis only.
-   *
-   * @param servedStates the number of latest blocks whose state the network serves
-   * @param changesPerBlock the accounts and slots each block changes
-   */
-  TestChain(
-      final Random random,
-      final TestWorld genesisWorld,
-      final FakeSnapNetwork network,
-      final int servedStates,
-      final int changesPerBlock) {
+  /** Creates a chain of its genesis only. */
+  TestChain(final Random random, final TestWorld genesisWorld, final FakeSnapNetwork network) {
     this.random = random;
     this.network = network;
-    this.servedStates = servedStates;
-    this.changesPerBlock = changesPerBlock;
     final BlockHeader genesis =
         new BlockHeaderTestFixture()
             .number(0)
@@ -92,19 +79,16 @@ final class TestChain implements ChainHeadSource {
     return sender;
   }
 
-  /** Appends blocks, the last one becoming the head; the states too old are no longer served. */
+  /** Appends blocks, the last one becoming the head. */
   void extend(final int blocks) {
     for (int i = 0; i < blocks; i++) {
       final TestWorld world = worlds.getLast().copy();
-      final BlockAccessList accessList = world.mutate(random, changesPerBlock);
+      final BlockAccessList accessList = world.mutate(random, CHANGES_PER_BLOCK);
       final BlockHeader header =
           header(source.getChainHeadHeader(), world.root(), BodyValidation.balHash(accessList));
       source.appendBlock(new Block(header, EMPTY_BODY), List.of(), Optional.of(accessList));
       worlds.add(world);
       network.serve(world);
-      if (worlds.size() > servedStates) {
-        network.forget(worlds.get(worlds.size() - 1 - servedStates).root());
-      }
     }
   }
 
@@ -132,10 +116,6 @@ final class TestChain implements ChainHeadSource {
 
   TestWorld world(final long number) {
     return worlds.get((int) number);
-  }
-
-  long headNumber() {
-    return source.getChainHeadBlockNumber();
   }
 
   @Override

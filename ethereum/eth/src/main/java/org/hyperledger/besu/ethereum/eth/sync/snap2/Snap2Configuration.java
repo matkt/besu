@@ -40,17 +40,25 @@ record Snap2Configuration(
 
   /** Returns the tuning of a node, with what it configures. */
   static Snap2Configuration create(
+      final int headersPerRequest,
       final boolean headersToCheckpointOnly,
       final boolean indexTransactions,
       final Optional<Difficulty> terminalTotalDifficulty) {
     final int threads = Math.max(2, Runtime.getRuntime().availableProcessors());
     return new Snap2Configuration(
-        // 65,536 account ranges, 512 KiB responses, 256 storages a request, 64 ranges of a large
-        // storage, 64 bytecodes a request
-        new StateSync.Settings(65_536, 512 * 1024, 256, 64, 64),
-        // 192 headers a request, 64 requests at once, the bodies of 128 blocks before the head
+        new StateSync.Settings(
+            65_536, // account ranges
+            512 * 1024, // bytes an answer
+            256, // storages a request
+            64, // ranges of a large storage
+            64), // bytecodes a request
         new SyncChain.Settings(
-            192, 64, 128, headersToCheckpointOnly, indexTransactions, terminalTotalDifficulty),
+            headersPerRequest,
+            64, // header requests at once
+            128, // blocks whose bodies are stored before the chain head is set
+            headersToCheckpointOnly,
+            indexTransactions,
+            terminalTotalDifficulty),
         // the pivot 64 blocks behind the head, moved once the head is 96 blocks ahead
         new PivotMoves.Settings(64, 32),
         threads,

@@ -48,7 +48,6 @@ class Snap2SyncControllerTest {
   private final SyncFixture node = new SyncFixture(31);
   private final TestChain chain = node.chain;
   private final QueuedExecutor control = new QueuedExecutor();
-  private final List<Runnable> waiting = new ArrayList<>();
   private final List<RequestSender> handedOver = new ArrayList<>();
   private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
 
@@ -69,7 +68,7 @@ class Snap2SyncControllerTest {
     assertThat(controller.pivotMoves()).isOne();
     assertThat(controller.restarts()).isZero();
     assertThat(metricsSystem.getGaugeValue("snap2_pivot_block")).isEqualTo(12);
-    assertThat(controller.current().orElseThrow().stage()).isEqualTo("done");
+    assertThat(controller.current().orElseThrow().stage()).isEqualTo(SyncAttempt.Stage.DONE);
     // the back-fill goes on with the scheduler
     assertThat(handedOver).containsExactly(node.network);
     verify(node.network, never()).stop();
@@ -117,10 +116,10 @@ class Snap2SyncControllerTest {
     node.network.disconnect();
     final CompletableFuture<SnapSyncProcessState> result = controller(Optional.empty()).start();
     node.round();
-    assertThat(waiting).hasSize(1);
+    assertThat(node.waiting).hasSize(1);
 
     node.network.reconnect();
-    wakeUp();
+    node.wakeUp();
     node.runUntil(result::isDone);
 
     assertThat(pivot(result)).isEqualTo(chain.header(8));
@@ -132,10 +131,10 @@ class Snap2SyncControllerTest {
     final CompletableFuture<SnapSyncProcessState> result =
         controller(Optional.of(checkpoint(10, chain.header(10).getHash()))).start();
     node.round();
-    assertThat(waiting).hasSize(1);
+    assertThat(node.waiting).hasSize(1);
 
     chain.extend(2);
-    wakeUp();
+    node.wakeUp();
     node.runUntil(result::isDone);
 
     // the first block above the checkpoint, nearer the head than the pivot distance
@@ -170,7 +169,7 @@ class Snap2SyncControllerTest {
 
     controller.stop();
     node.network.reconnect();
-    wakeUp();
+    node.wakeUp();
     node.round();
 
     assertThat(result).isCancelled();
@@ -188,15 +187,7 @@ class Snap2SyncControllerTest {
         handedOver::add,
         node.executor,
         control,
-        delay -> waiting::add,
         metricsSystem);
-  }
-
-  // runs the waits due so far, not those they start
-  private void wakeUp() {
-    final List<Runnable> due = List.copyOf(waiting);
-    waiting.clear();
-    due.forEach(Runnable::run);
   }
 
   private static BlockHeader pivot(final CompletableFuture<SnapSyncProcessState> result) {
