@@ -37,7 +37,7 @@ public interface SyncStateStorage {
   /** Starts a batch of flat writes. */
   Batch batch();
 
-  /** Writes a batch and commits it, or drops it if that fails. */
+  /** Fills a batch and commits it, or drops it if that fails. */
   default void write(final Consumer<Batch> writes) {
     final Batch batch = batch();
     try {
@@ -92,9 +92,10 @@ public interface SyncStateStorage {
 
     void putCode(Bytes32 codeHash, Bytes code);
 
+    /** Writes the batch, or drops it if that fails. */
     void commit();
 
-    /** Drops the writes, or does nothing once {@link #commit()} has started. */
+    /** Drops the writes, or does nothing once {@link #commit()} has started or after an abort. */
     void abort();
   }
 
@@ -112,6 +113,7 @@ public interface SyncStateStorage {
 
     void storageNode(Bytes32 accountHash, Bytes location, Bytes32 hash, Bytes rlp);
 
+    /** Writes the nodes put since the last commit, or drops them if that fails. */
     void commit();
 
     /** Drops the nodes put since the last {@link #commit()}, even a failed one. */

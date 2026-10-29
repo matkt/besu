@@ -189,24 +189,22 @@ class StateDiffApplierTest {
     final SyncStateStorage storage = mock(SyncStateStorage.class);
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     when(storage.batch()).thenReturn(batch);
-    final StateCoverage coverage = new StateCoverage();
-    coverage.accounts().add(hash(N), hash(N));
-    final StateDiff diff = new StateDiff();
-    diff.add(
-        new BlockAccessList(
-            List.of(
-                changes(
-                    N,
-                    List.of(),
-                    List.of(new BalanceChange(1, Wei.of(1))),
-                    List.of(),
-                    List.of()))));
     doThrow(new IllegalStateException("write failed")).when(batch).putAccount(any(), any());
 
-    assertThatThrownBy(() -> StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {}))
-        .hasMessage("write failed");
+    assertThatThrownBy(() -> applyAChangeOfN(storage, List.of())).hasMessage("write failed");
     verify(batch, never()).commit();
     verify(batch).abort();
+  }
+
+  // StateDiffApplier commits its batches itself, not through SyncStateStorage.write
+  @Test
+  void throwsTheErrorOfAFailedCommit() {
+    final SyncStateStorage storage = mock(SyncStateStorage.class);
+    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
+    when(storage.batch()).thenReturn(batch);
+    doThrow(new IllegalStateException("disk full")).when(batch).commit();
+
+    assertThatThrownBy(() -> applyAChangeOfN(storage, List.of())).hasMessage("disk full");
   }
 
   @Test
@@ -214,24 +212,30 @@ class StateDiffApplierTest {
     final SyncStateStorage storage = mock(SyncStateStorage.class);
     final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
     when(storage.batch()).thenReturn(batch);
-    final StateCoverage coverage = new StateCoverage();
-    coverage.accounts().add(hash(N), hash(N));
     final List<SlotChanges> slots =
         IntStream.range(0, StateDiffApplier.WRITES_PER_COMMIT)
             .mapToObj(i -> slot(UInt256.valueOf(i + 1), 1))
             .toList();
+
+    applyAChangeOfN(storage, slots);
+
+    // the account and its slots are one write more than a batch takes
+    verify(storage, times(2)).batch();
+    verify(batch, times(2)).commit();
+  }
+
+  // a change of the balance and of these slots of N, an account of the ranges
+  private static void applyAChangeOfN(
+      final SyncStateStorage storage, final List<SlotChanges> slots) {
+    final StateCoverage coverage = new StateCoverage();
+    coverage.accounts().add(hash(N), hash(N));
     final StateDiff diff = new StateDiff();
     diff.add(
         new BlockAccessList(
             List.of(
                 changes(
                     N, slots, List.of(new BalanceChange(1, Wei.of(1))), List.of(), List.of()))));
-
     StateDiffApplier.apply(diff, storage, coverage, (a, r, s) -> {});
-
-    // the account and its slots are one write more than a batch takes
-    verify(storage, times(2)).batch();
-    verify(batch, times(2)).commit();
   }
 
   private static PatriciaTrieAccountValue read(final SyncStateStorage storage, final Address a) {

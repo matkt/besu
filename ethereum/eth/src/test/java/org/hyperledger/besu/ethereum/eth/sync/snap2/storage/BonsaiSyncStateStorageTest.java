@@ -68,6 +68,9 @@ class BonsaiSyncStateStorageTest {
   private final BonsaiWorldStateKeyValueStorage bonsai =
       bonsai(DataStorageConfiguration.DEFAULT_BONSAI_CONFIG);
   private final SyncStateStorage storage = new BonsaiSyncStateStorage(bonsai);
+  // the transaction of the batches of storageWritingTo
+  private final SegmentedKeyValueStorageTransaction transaction =
+      mock(SegmentedKeyValueStorageTransaction.class);
 
   // slots of a missing account come after the previous account, an account may skip its slots
   @Test
@@ -149,28 +152,49 @@ class BonsaiSyncStateStorageTest {
   }
 
   @Test
-  void writeAbortsTheBatchOfAFailedWrite() {
-    final SyncStateStorage spied = spy(storage);
-    final SyncStateStorage.Batch mocked = mock(SyncStateStorage.Batch.class);
-    doReturn(mocked).when(spied).batch();
-    doThrow(new IllegalStateException("write failed")).when(mocked).putAccount(any(), any());
+  void deleteStorageAbortsTheBatchOfAFailedWrite() {
+    final SyncStateStorage.Batch slots = storage.batch();
+    slots.putStorage(FIRST, key(0x01), value(1));
+    slots.commit();
+    final StorageException writeFailed = new StorageException("write failed");
+    doThrow(writeFailed).when(transaction).remove(any(), any());
 
-    assertThatThrownBy(() -> spied.write(batch -> batch.putAccount(FIRST, ACCOUNT)))
-        .hasMessage("write failed");
-    verify(mocked, never()).commit();
-    verify(mocked).abort();
+    assertThatThrownBy(() -> storageWritingTo(transaction).deleteStorage(FIRST))
+        .isSameAs(writeFailed);
+    verify(transaction, never()).commit();
+    verify(transaction).rollback();
+  }
+
+  @Test
+  void writeAbortsTheBatchOfAFailedWrite() {
+    final StorageException writeFailed = new StorageException("write failed");
+    doThrow(writeFailed).when(transaction).put(any(), any(), any());
+
+    assertThatThrownBy(
+            () -> storageWritingTo(transaction).write(batch -> batch.putAccount(FIRST, ACCOUNT)))
+        .isSameAs(writeFailed);
+    verify(transaction, never()).commit();
+    verify(transaction).rollback();
   }
 
   @Test
   void writeThrowsTheErrorOfAFailedCommit() {
-    final SyncStateStorage spied = spy(storage);
-    final SyncStateStorage.Batch mocked = mock(SyncStateStorage.Batch.class);
-    doReturn(mocked).when(spied).batch();
     final StorageException diskFull = new StorageException("disk full");
-    doThrow(diskFull).when(mocked).commit();
+    doThrow(diskFull).when(transaction).commit();
+
+    assertThatThrownBy(
+            () -> storageWritingTo(transaction).write(batch -> batch.putAccount(FIRST, ACCOUNT)))
+        .isSameAs(diskFull);
+  }
+
+  @Test
+  void writeThrowsTheErrorOfABatchThatFailsToStart() {
+    final SyncStateStorage spied = spy(storage);
+    final StorageException closed = new StorageException("storage closed");
+    doThrow(closed).when(spied).batch();
 
     assertThatThrownBy(() -> spied.write(batch -> batch.putAccount(FIRST, ACCOUNT)))
-        .isSameAs(diskFull);
+        .isSameAs(closed);
   }
 
   @Test
@@ -191,8 +215,6 @@ class BonsaiSyncStateStorageTest {
 
   @Test
   void abortDropsTheWritesOfABatch() {
-    final SegmentedKeyValueStorageTransaction transaction =
-        mock(SegmentedKeyValueStorageTransaction.class);
     final SyncStateStorage.Batch batch = storageWritingTo(transaction).batch();
     batch.putAccount(FIRST, ACCOUNT);
 
@@ -212,14 +234,21 @@ class BonsaiSyncStateStorageTest {
 
   @Test
   void abortDoesNothingAfterAFailedCommit() {
-    final SegmentedKeyValueStorageTransaction transaction =
-        mock(SegmentedKeyValueStorageTransaction.class);
     final StorageException diskFull = new StorageException("disk full");
     doThrow(diskFull).when(transaction).commit();
     final SyncStateStorage.Batch batch = storageWritingTo(transaction).batch();
     batch.putAccount(FIRST, ACCOUNT);
 
     assertThatThrownBy(batch::commit).isSameAs(diskFull);
+    assertThatCode(batch::abort).doesNotThrowAnyException();
+  }
+
+  @Test
+  void abortDoesNothingAfterAnAbort() {
+    final SyncStateStorage.Batch batch = storage.batch();
+    batch.putAccount(FIRST, ACCOUNT);
+    batch.abort();
+
     assertThatCode(batch::abort).doesNotThrowAnyException();
   }
 
