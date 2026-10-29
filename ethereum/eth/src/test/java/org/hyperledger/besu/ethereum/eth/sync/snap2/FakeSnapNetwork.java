@@ -68,6 +68,7 @@ public final class FakeSnapNetwork implements RequestSender {
   private final Map<Bytes32, ServedState> states = new HashMap<>();
   private final Map<Bytes32, Bytes> codes = new HashMap<>();
   private final Set<EthPeer> withoutState = new HashSet<>();
+  private final Set<EthPeer> invalid = new HashSet<>();
   private final List<Sent<?>> unanswered = new ArrayList<>();
   private final List<Bytes32> accountRangeOrigins = new ArrayList<>();
   private final Map<EthPeer, Integer> stateRequests = new HashMap<>();
@@ -104,6 +105,11 @@ public final class FakeSnapNetwork implements RequestSender {
   /** Makes a peer answer every account and storage range request with nothing. */
   public void serveNoState(final int peer) {
     withoutState.add(peers.get(peer));
+  }
+
+  /** Makes a peer answer every request with an invalid response. */
+  public void answerInvalid(final int peer) {
+    invalid.add(peers.get(peer));
   }
 
   public List<EthPeer> peers() {
@@ -252,6 +258,11 @@ public final class FakeSnapNetwork implements RequestSender {
   }
 
   private <T> void answer(final Sent<T> sent) {
+    if (invalid.contains(sent.peer())) {
+      sent.future()
+          .completeExceptionally(new RequestFailedException(INVALID, sent.peer(), "invalid"));
+      return;
+    }
     // snap responses reach a request with their request id
     final MessageData response =
         respond(sent.peer(), sent.message()).wrapMessageData(BigInteger.ONE);

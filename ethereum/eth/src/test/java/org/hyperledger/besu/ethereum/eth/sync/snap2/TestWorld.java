@@ -164,7 +164,8 @@ public final class TestWorld {
         nonces.add(new NonceChange(1, account.nonce));
         if (!account.code.isEmpty()) {
           final List<UInt256> keys = new ArrayList<>(account.storage.keySet());
-          for (int s = 0; s < 1 + random.nextInt(4); s++) {
+          final int slotChanges = 1 + random.nextInt(4);
+          for (int s = 0; s < slotChanges; s++) {
             final UInt256 key =
                 keys.isEmpty() || random.nextBoolean()
                     ? randomSlot(random)
