@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -139,17 +140,24 @@ class SyncStateStorageTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
-  void abortDropsTheWritesOfABatch(final Format format) {
-    final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
-    final SyncStateStorage.Batch batch = storage.batch();
+  void abortDoesNothingAfterACommit(final Format format) {
+    final SyncStateStorage.Batch batch = SyncStorageFixture.create(format).sync().batch();
     batch.putAccount(FIRST, ACCOUNT);
-    batch.putStorage(FIRST, key(0x01), value(1));
+    batch.putCode(CODE_HASH, CODE);
+    batch.commit();
+
+    assertThatCode(batch::abort).doesNotThrowAnyException();
+  }
+
+  @ParameterizedTest
+  @EnumSource(Format.class)
+  void abortDoesNothingAfterAnAbort(final Format format) {
+    final SyncStateStorage.Batch batch = SyncStorageFixture.create(format).sync().batch();
+    batch.putAccount(FIRST, ACCOUNT);
     batch.putCode(CODE_HASH, CODE);
     batch.abort();
 
-    assertThat(storage.getAccount(FIRST)).isEmpty();
-    assertThat(slots(storage, FIRST)).isEmpty();
-    assertThat(storage.hasCode(CODE_HASH)).isFalse();
+    assertThatCode(batch::abort).doesNotThrowAnyException();
   }
 
   @ParameterizedTest

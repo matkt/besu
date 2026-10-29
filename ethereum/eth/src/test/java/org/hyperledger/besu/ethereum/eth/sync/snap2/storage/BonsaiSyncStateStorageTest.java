@@ -128,15 +128,6 @@ class BonsaiSyncStateStorageTest {
   }
 
   @Test
-  void abortDoesNothingAfterACommit() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.commit();
-
-    assertThatCode(batch::abort).doesNotThrowAnyException();
-  }
-
-  @Test
   void abortDoesNothingAfterAFailedCommit() {
     final StorageException diskFull = new StorageException("disk full");
     doThrow(diskFull).when(transaction).commit();
@@ -144,15 +135,6 @@ class BonsaiSyncStateStorageTest {
     batch.putAccount(FIRST, ACCOUNT);
 
     assertThatThrownBy(batch::commit).isSameAs(diskFull);
-    assertThatCode(batch::abort).doesNotThrowAnyException();
-  }
-
-  @Test
-  void abortDoesNothingAfterAnAbort() {
-    final SyncStateStorage.Batch batch = storage.batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.abort();
-
     assertThatCode(batch::abort).doesNotThrowAnyException();
   }
 

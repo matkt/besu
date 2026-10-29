@@ -55,7 +55,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
   @Override
   public Batch batch() {
     final SegmentedKeyValueStorageTransaction staging = flat.startBatchTransaction();
-    return new Batch() {
+    return new FlatBatch() {
       private ForestWorldStateKeyValueStorage.Updater codes;
 
       @Override
@@ -93,7 +93,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
 
       // the code first: no account is left pointing to a code whose commit failed
       @Override
-      public void commit() {
+      protected void commitWrites() {
         if (codes != null) {
           try {
             codes.commit();
@@ -106,7 +106,7 @@ public final class ForestSyncStateStorage extends AbstractSyncStateStorage {
       }
 
       @Override
-      public void abort() {
+      protected void dropWrites() {
         if (codes != null) {
           codes.rollback();
         }

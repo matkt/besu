@@ -141,6 +141,32 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
     return storageTrieNode(accountHash, Bytes.EMPTY, storageRoot).isPresent();
   }
 
+  /** A batch whose abort does nothing once its commit has started, or after an abort. */
+  protected abstract static class FlatBatch implements Batch {
+    private boolean completed;
+
+    @Override
+    public final void commit() {
+      completed = true;
+      commitWrites();
+    }
+
+    // a completed transaction refuses its rollback, even one whose commit failed
+    @Override
+    public final void abort() {
+      if (!completed) {
+        completed = true;
+        dropWrites();
+      }
+    }
+
+    /** Writes the batch. */
+    protected abstract void commitWrites();
+
+    /** Drops the writes. */
+    protected abstract void dropWrites();
+  }
+
   /** Trie nodes put through one updater of the format, until committed or aborted. */
   protected interface NodeBatch {
     void putAccountNode(Bytes location, Bytes32 hash, Bytes rlp);

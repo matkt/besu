@@ -32,6 +32,7 @@ import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorage;
 import org.hyperledger.besu.plugin.services.storage.KeyValueStorageTransaction;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
@@ -118,16 +119,31 @@ class ForestSyncStateStorageTest {
     final SegmentedKeyValueStorageTransaction flatWrites =
         mock(SegmentedKeyValueStorageTransaction.class);
     final KeyValueStorageTransaction codes = mock(KeyValueStorageTransaction.class);
-    doThrow(new IllegalStateException("disk full")).when(codes).commit();
+    final StorageException diskFull = new StorageException("disk full");
+    doThrow(diskFull).when(codes).commit();
     doReturn(codes).when(worldState).startBatchTransaction();
-    final SyncStateStorage.Batch batch = writingFlatStateWith(flatWrites).batch();
-    batch.putAccount(FIRST, ACCOUNT);
-    batch.putCode(CODE_HASH, CODE);
 
-    assertThatThrownBy(batch::commit).hasMessage("disk full");
+    assertThatThrownBy(() -> writingFlatStateWith(flatWrites).write(this::putAccountAndCode))
+        .isSameAs(diskFull);
 
     verify(flatWrites, never()).commit();
     verify(flatWrites).rollback();
+    verify(codes, never()).rollback();
+  }
+
+  // the code is written first, and stays: it is keyed by hash
+  @Test
+  void keepsTheCodeOfABatchWhoseFlatWritesFailToCommit() {
+    final SegmentedKeyValueStorageTransaction flatWrites =
+        mock(SegmentedKeyValueStorageTransaction.class);
+    final StorageException diskFull = new StorageException("disk full");
+    doThrow(diskFull).when(flatWrites).commit();
+    final SyncStateStorage writing = writingFlatStateWith(flatWrites);
+
+    assertThatThrownBy(() -> writing.write(this::putAccountAndCode)).isSameAs(diskFull);
+
+    verify(flatWrites, never()).rollback();
+    assertThat(writing.hasCode(CODE_HASH)).isTrue();
   }
 
   @Test
@@ -156,6 +172,11 @@ class ForestSyncStateStorageTest {
     writer.abort();
 
     verify(nodes).rollback();
+  }
+
+  private void putAccountAndCode(final SyncStateStorage.Batch batch) {
+    batch.putAccount(FIRST, ACCOUNT);
+    batch.putCode(CODE_HASH, CODE);
   }
 
   // a sync storage whose batches write the flat state through the given transaction
