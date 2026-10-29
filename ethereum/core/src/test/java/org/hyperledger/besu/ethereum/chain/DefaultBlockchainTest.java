@@ -1047,7 +1047,6 @@ public class DefaultBlockchainTest {
     assertThat(blockchain.getBlockHeadersCache()).isEmpty();
     assertThat(blockchain.getBlockBodiesCache()).isEmpty();
     assertThat(blockchain.getTransactionReceiptsCache()).isEmpty();
-    assertThat(blockchain.getTotalDifficultyCache()).isEmpty();
   }
 
   @Test
@@ -1069,12 +1068,10 @@ public class DefaultBlockchainTest {
     assertThat(blockchain.getBlockHeadersCache()).isNotEmpty();
     assertThat(blockchain.getBlockBodiesCache()).isNotEmpty();
     assertThat(blockchain.getTransactionReceiptsCache()).isNotEmpty();
-    assertThat(blockchain.getTotalDifficultyCache()).isNotEmpty();
 
     assertThat(blockchain.getBlockHeadersCache().get().size()).isEqualTo(0);
     assertThat(blockchain.getBlockBodiesCache().get().size()).isEqualTo(0);
     assertThat(blockchain.getTransactionReceiptsCache().get().size()).isEqualTo(0);
-    assertThat(blockchain.getTotalDifficultyCache().get().size()).isEqualTo(0);
 
     blockchain.appendBlock(newBlock, receipts);
 
@@ -1089,10 +1086,24 @@ public class DefaultBlockchainTest {
     assertThat(blockchain.getTransactionReceiptsCache().get().size()).isEqualTo(1);
     assertThat(blockchain.getTransactionReceiptsCache().get().getIfPresent(newBlock.getHash()))
         .isEqualTo(receipts);
+  }
 
-    assertThat(blockchain.getTotalDifficultyCache().get().size()).isEqualTo(1);
-    assertThat(blockchain.getTotalDifficultyCache().get().getIfPresent(newBlock.getHash()))
-        .isEqualTo(newBlock.getHeader().getDifficulty());
+  @Test
+  public void totalDifficultyOfCachedBlockIsTheTotalDifficulty() {
+    final BlockDataGenerator gen = new BlockDataGenerator();
+    final KeyValueStorage kvStore = new InMemoryKeyValueStorage();
+    final KeyValueStorage kvStoreVariables = new InMemoryKeyValueStorage();
+    final Block genesisBlock = gen.genesisBlock();
+    final DefaultBlockchain blockchain =
+        createMutableBlockchain(kvStore, kvStoreVariables, genesisBlock, "/data/test", 512, 0);
+    final Block newBlock =
+        gen.block(new BlockOptions().setBlockNumber(1L).setParentHash(genesisBlock.getHash()));
+
+    blockchain.appendBlock(newBlock, gen.receipts(newBlock));
+
+    assertThat(blockchain.getTotalDifficultyByHash(newBlock.getHash()))
+        .contains(
+            genesisBlock.getHeader().getDifficulty().add(newBlock.getHeader().getDifficulty()));
   }
 
   @Test
@@ -1114,7 +1125,6 @@ public class DefaultBlockchainTest {
     assertThat(blockchain.getBlockHeadersCache()).isNotEmpty();
     assertThat(blockchain.getBlockBodiesCache()).isEmpty();
     assertThat(blockchain.getTransactionReceiptsCache()).isEmpty();
-    assertThat(blockchain.getTotalDifficultyCache()).isEmpty();
 
     assertThat(blockchain.getBlockHeadersCache().get().size()).isEqualTo(0);
 
