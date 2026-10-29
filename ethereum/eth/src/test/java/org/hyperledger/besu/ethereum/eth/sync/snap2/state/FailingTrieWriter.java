@@ -17,8 +17,8 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
-import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
@@ -26,7 +26,10 @@ import java.util.function.Predicate;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
-/** A trie writer that fails the first commit holding a node at some location. */
+/**
+ * A trie writer that fails the first commit holding a node at some location, as RocksDB fails a
+ * commit it could not check, which a retry may commit.
+ */
 final class FailingTrieWriter implements SyncStateStorage.TrieWriter {
 
   private final SyncStateStorage.TrieWriter writer;
@@ -76,7 +79,7 @@ final class FailingTrieWriter implements SyncStateStorage.TrieWriter {
   public void commit() {
     if (holdsFailingNode && failed.compareAndSet(false, true)) {
       writer.abort();
-      throw new StorageException("disk failure");
+      throw StorageFailures.notCommitted();
     }
     holdsFailingNode = false;
     writer.commit();

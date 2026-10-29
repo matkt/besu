@@ -39,8 +39,6 @@ final class StorageTask {
 
   // its download, which only the loop of the state download touches
   final List<RangeTask> chunks = new ArrayList<>();
-  boolean queued;
-  boolean refreshQueued;
   int inFlight;
   boolean refreshing;
 

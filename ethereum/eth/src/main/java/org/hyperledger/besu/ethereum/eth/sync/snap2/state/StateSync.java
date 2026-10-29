@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkState;
 
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
+import org.hyperledger.besu.ethereum.eth.sync.StorageExceptionManager;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.ProgressFormat;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
@@ -27,10 +28,10 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.SyncRequest.Protocol;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.StorageTrieUpdater;
 import org.hyperledger.besu.ethereum.trie.RangeManager;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -40,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -89,7 +91,18 @@ public final class StateSync {
       int responseBytes,
       int storageBatchSize,
       int maxStorageChunks,
-      int codeBatchSize) {}
+      int codeBatchSize) {
+
+    /** Checks the sizes: a zero would leave nothing to ask, or a queue that never drains. */
+    @SuppressWarnings("MethodInputParametersMustBeFinal") // none is final in a compact constructor
+    public Settings {
+      checkArgument(accountChunks > 0, "accountChunks must be positive");
+      checkArgument(responseBytes > 0, "responseBytes must be positive");
+      checkArgument(storageBatchSize > 0, "storageBatchSize must be positive");
+      checkArgument(maxStorageChunks > 0, "maxStorageChunks must be positive");
+      checkArgument(codeBatchSize > 0, "codeBatchSize must be positive");
+    }
+  }
 
   private final SyncStateStorage storage;
   private final RequestSender scheduler;
@@ -98,34 +111,39 @@ public final class StateSync {
   private final StateWriter writer;
   // applies the pivot moves to the storage tries written while downloading
   private final StorageTrieUpdater trieUpdater;
-  // the writes hold it shared, a pivot move or a stop exclusively
+  // writes and sends hold it shared, a pivot move or a stop exclusively
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
   private final ScheduledExecutorService loop;
   // writes the verified responses, off the threads that verify them
   private final ExecutorService persister;
   private final LongSupplier nanoTime;
   private final CompletableFuture<Void> completion = new CompletableFuture<>();
+  // the requests the scheduler holds, which a stop withdraws
+  private final Set<CompletableFuture<?>> submitted = ConcurrentHashMap.newKeySet();
   private volatile Pivot pivot;
   private volatile Instant started = Instant.now();
   private volatile boolean pivotStale;
   private volatile boolean stopped;
   private volatile boolean paused;
+  // peers left out of state requests, a new set on each dispatch
+  private volatile Set<EthPeer> excluded = Set.of();
 
   // bookkeeping, loop thread only
   private final List<RangeTask> accountTasks = new ArrayList<>();
   // the lowest account range not done yet
   private int firstAccountTask;
-  private final ArrayDeque<StorageTask> storageQueue = new ArrayDeque<>();
-  private final ArrayDeque<StorageTask> refreshQueue = new ArrayDeque<>();
+  // the storages to ask in batches, each once, in the order they came
+  private final LinkedHashSet<StorageTask> storageQueue = new LinkedHashSet<>();
+  // the storages whose account to ask again for its new root, each once
+  private final LinkedHashSet<StorageTask> refreshQueue = new LinkedHashSet<>();
   private final Set<StorageTask> chunked = new LinkedHashSet<>();
   private final CodeQueue codeQueue;
   private final StateServers servers = new StateServers();
   private final EmptyAnswers emptyAnswers = new EmptyAnswers();
-  // peers left out of state requests, refreshed on each dispatch
-  private Set<EthPeer> excluded = Set.of();
-  private volatile int excludedCount;
-  // no peer took a request: no request until the periodic dispatch
+  // no peer took a bytecode request, so none would take any: no request until the periodic dispatch
   private boolean waitingForPeers;
+  // no peer took a state request, as when only peers left out serve: only bytecodes until then
+  private boolean waitingForStatePeers;
   private int accountsInFlight;
   private int storageInFlight;
   private int codesRequestsInFlight;
@@ -173,12 +191,6 @@ public final class StateSync {
       final LongSupplier nanoTime,
       final BiFunction<Predicate<Runnable>, Predicate<Bytes32>, StorageTrieUpdater>
           newTrieUpdater) {
-    // a zero would leave nothing to ask, or a queue that never drains
-    checkArgument(settings.accountChunks() > 0, "accountChunks must be positive");
-    checkArgument(settings.responseBytes() > 0, "responseBytes must be positive");
-    checkArgument(settings.storageBatchSize() > 0, "storageBatchSize must be positive");
-    checkArgument(settings.maxStorageChunks() > 0, "maxStorageChunks must be positive");
-    checkArgument(settings.codeBatchSize() > 0, "codeBatchSize must be positive");
     this.storage = storage;
     this.scheduler = scheduler;
     this.settings = settings;
@@ -201,8 +213,7 @@ public final class StateSync {
     started = Instant.now();
     execute(
         () -> {
-          RangeManager.generateRanges(
-                  RangeManager.MIN_RANGE, RangeManager.MAX_RANGE, settings.accountChunks())
+          RangeManager.generateAllRanges(settings.accountChunks())
               .forEach((from, to) -> accountTasks.add(new RangeTask(from, to)));
           LOG.info(
               "SNAP2 state download started at {} | {} account ranges",
@@ -210,11 +221,16 @@ public final class StateSync {
               ProgressFormat.count(accountTasks.size()));
           dispatch();
         });
-    loop.scheduleWithFixedDelay(
-        this::dispatchPeriodically,
-        DISPATCH_PERIOD_MILLIS,
-        DISPATCH_PERIOD_MILLIS,
-        TimeUnit.MILLISECONDS);
+    try {
+      loop.scheduleWithFixedDelay(
+          this::dispatchPeriodically,
+          DISPATCH_PERIOD_MILLIS,
+          DISPATCH_PERIOD_MILLIS,
+          TimeUnit.MILLISECONDS);
+    } catch (final RejectedExecutionException e) {
+      // a stop on another thread failed the completion meanwhile
+      LOG.trace("State loop rejected the periodic dispatch", e);
+    }
     return completion;
   }
 
@@ -262,8 +278,8 @@ public final class StateSync {
   }
 
   /**
-   * Stops downloading; once it returns, nothing more is written. It also releases the threads of a
-   * download that completed.
+   * Stops downloading; once it returns, nothing more is sent or written. It also releases the
+   * threads of a download that completed.
    */
   public void stop() {
     stop(new CancellationException("state download stopped"));
@@ -296,7 +312,7 @@ public final class StateSync {
 
   /** Returns the number of peers left out of state requests because they serve no state. */
   public int peersWithoutState() {
-    return excludedCount;
+    return excluded.size();
   }
 
   /** Returns the number of accounts written. */
@@ -396,23 +412,26 @@ public final class StateSync {
 
   // fails the download with the cause, unless it ended before; the caller must not hold the lock
   private void stop(final Throwable cause) {
-    // waits for writes in progress
+    // waits for the writes and the sends under way
     lock.writeLock().lock();
     try {
       stopped = true;
     } finally {
       lock.writeLock().unlock();
     }
-    loop.shutdownNow();
-    persister.shutdownNow();
+    // no interrupt: a completion callback that stops the download runs on these threads
+    loop.shutdown();
+    persister.shutdown();
     trieUpdater.stop();
+    // the requests the scheduler still holds no longer go out
+    submitted.forEach(request -> request.cancel(false));
     completion.completeExceptionally(cause);
   }
 
   // nothing runs once the loop is stopped
   private void execute(final Runnable task) {
     try {
-      loop.execute(() -> runLogged(task));
+      loop.execute(() -> runGuarded(task));
     } catch (final RejectedExecutionException e) {
       LOG.trace("State loop rejected a task", e);
     }
@@ -420,19 +439,21 @@ public final class StateSync {
 
   // on a timer, for what no response triggers: peers back from being left out, more capacity
   private void dispatchPeriodically() {
-    runLogged(
+    runGuarded(
         () -> {
           waitingForPeers = false;
+          waitingForStatePeers = false;
           dispatch();
         });
   }
 
-  // a scheduled executor keeps the exceptions of its tasks to itself
-  private static void runLogged(final Runnable task) {
+  // a failed task leaves the bookkeeping unsure, so it fails the download; a scheduled executor
+  // would keep the failure to itself, and stop the periodic dispatch
+  private void runGuarded(final Runnable task) {
     try {
       task.run();
-    } catch (final RuntimeException e) {
-      LOG.warn("SNAP2 state task failed", e);
+    } catch (final Throwable e) {
+      completion.completeExceptionally(e);
     }
   }
 
@@ -444,36 +465,48 @@ public final class StateSync {
     if (stopped || completion.isDone()) {
       return;
     }
+    if (!pivotStale && !paused && !waitingForPeers) {
+      // a pivot move or a stop waits for the sends under way, which read the storage too
+      lock.readLock().lock();
+      try {
+        if (!stopped) {
+          sendRequests();
+        }
+      } finally {
+        lock.readLock().unlock();
+      }
+    }
+    // after the sends, which may find every queued bytecode stored; outside the lock, as a
+    // completion callback may stop the download
     if (isDownloaded()) {
       complete();
-      return;
     }
-    if (pivotStale || paused || waitingForPeers) {
-      return;
-    }
+  }
+
+  private void sendRequests() {
     excluded = servers.excluded(nanoTime.getAsLong());
-    excludedCount = excluded.size();
     final Pivot current = pivot;
     final int capacity = Math.max(1, scheduler.capacity(Protocol.SNAP));
     // more than the peers take now, so that a peer gets its next request at once
     final int target = capacity + capacity / 4;
 
-    sendRefreshes(current, target);
-    sendAccountRanges(current, target);
-    // bytecodes flow alongside the state
-    sendCodes(target, Math.max(1, target / 8));
-    sendChunks(current, target);
-    sendStorageBatches(current, target);
-    // the refreshes these storages asked for, rather than at the next dispatch
-    sendRefreshes(current, target);
+    if (!waitingForStatePeers) {
+      sendRefreshes(current, target);
+      sendAccountRanges(current, target);
+      // bytecodes flow alongside the state
+      sendCodes(target, Math.max(1, target / 8));
+      sendChunks(current, target);
+      sendStorageBatches(current, target);
+      // the refreshes these storages asked for, rather than at the next dispatch
+      sendRefreshes(current, target);
+    }
     // idle capacity goes to bytecodes
     sendCodes(target, target);
   }
 
   private void sendRefreshes(final Pivot current, final int target) {
     while (inFlight() < target && !refreshQueue.isEmpty()) {
-      final StorageTask task = refreshQueue.poll();
-      task.refreshQueued = false;
+      final StorageTask task = refreshQueue.removeFirst();
       if (coverage.isPending(task) && !task.refreshing) {
         sendRefresh(task, current);
       }
@@ -545,8 +578,7 @@ public final class StateSync {
   private List<StorageTask> takeStorageBatch() {
     final List<StorageTask> batch = new ArrayList<>();
     while (batch.size() < settings.storageBatchSize() && !storageQueue.isEmpty()) {
-      final StorageTask task = storageQueue.poll();
-      task.queued = false;
+      final StorageTask task = storageQueue.removeFirst();
       if (coverage.isPending(task)) {
         if (task.isRootStale()) {
           requestRefresh(task);
@@ -558,16 +590,14 @@ public final class StateSync {
     return batch;
   }
 
+  // a storage already queued keeps its place
   private void queueStorage(final StorageTask task) {
-    if (!task.queued) {
-      task.queued = true;
-      storageQueue.add(task);
-    }
+    storageQueue.add(task);
   }
 
+  // a storage already queued keeps its place
   private void requestRefresh(final StorageTask task) {
-    if (!task.refreshing && !task.refreshQueued) {
-      task.refreshQueued = true;
+    if (!task.refreshing) {
       refreshQueue.add(task);
     }
   }
@@ -719,7 +749,8 @@ public final class StateSync {
   }
 
   private Set<Bytes32> writeCodes(final Map<Bytes32, Bytes> received) {
-    return withoutMoves(() -> writer.codes(received)) ? received.keySet() : Set.of();
+    // a copy: the keys of the map keep its codes, which slice the response
+    return withoutMoves(() -> writer.codes(received)) ? Set.copyOf(received.keySet()) : Set.of();
   }
 
   /**
@@ -733,32 +764,42 @@ public final class StateSync {
       final int epoch,
       final Function<T, R> write,
       final Consumer<R> bookkeeping) {
-    scheduler
-        .submit(request, epoch == NO_EPOCH ? Set.of() : excluded)
-        .whenCompleteAsync(
-            (response, error) -> {
-              final R written =
-                  error == null ? writeSafely(() -> write.apply(response.value()), request) : null;
-              execute(
-                  () -> {
-                    if (error != null) {
-                      onFailure(error, epoch);
-                    } else if (epoch != NO_EPOCH) {
-                      onServed(response.peer(), epoch);
-                    }
-                    bookkeeping.accept(written);
-                    dispatch();
-                  });
-            },
-            persister);
+    final CompletableFuture<RequestSender.Response<T>> sent =
+        scheduler.submit(request, epoch == NO_EPOCH ? Set.of() : excluded);
+    submitted.add(sent);
+    sent.whenCompleteAsync(
+        (response, error) -> {
+          submitted.remove(sent);
+          // the peer alone, so that the loop does not keep the response
+          final EthPeer peer = error == null ? response.peer() : null;
+          final R written =
+              error == null ? writeSafely(() -> write.apply(response.value()), request) : null;
+          execute(
+              () -> {
+                if (error != null) {
+                  onFailure(error, epoch);
+                } else if (epoch != NO_EPOCH) {
+                  onServed(peer, epoch);
+                }
+                bookkeeping.accept(written);
+                dispatch();
+              });
+        },
+        persister);
   }
 
-  // a failed write is retried like a discarded response, and never skips the bookkeeping
+  // a failed write leaves its request to be asked again, unless no retry can fix it
   private <R> R writeSafely(final Supplier<R> write, final SyncRequest<?> request) {
     try {
       return write.get();
-    } catch (final RuntimeException e) {
-      LOG.warn("Failed to persist {}, retrying it", request.name(), e);
+    } catch (final Throwable e) {
+      if (e instanceof StorageException failure
+          && StorageExceptionManager.canRetryOnError(failure)) {
+        LOG.debug("Failed to persist {}, asking it again: {}", request.name(), e.getMessage());
+      } else {
+        // it would come back with every answer
+        completion.completeExceptionally(e);
+      }
       return null;
     }
   }
@@ -773,18 +814,25 @@ public final class StateSync {
   private void onFailure(final Throwable error, final int epoch) {
     final Optional<RequestFailedException> failure = RequestFailedException.from(error);
     if (failure.isEmpty()) {
-      LOG.debug("State request failed", error);
+      // the code of the request failed, it would on any peer
+      completion.completeExceptionally(error);
       return;
     }
     LOG.trace("State request failed: {}", failure.get().getMessage());
     final RequestFailedException.Reason reason = failure.get().reason();
-    if (reason == RequestFailedException.Reason.NO_PEER) {
+    if (reason == RequestFailedException.Reason.STOPPED) {
+      // no request goes out any more
+      completion.completeExceptionally(failure.get());
+    } else if (reason == RequestFailedException.Reason.NO_PEER) {
       // the next requests would fail too: they wait for the periodic dispatch
-      waitingForPeers = true;
-    } else if (reason == RequestFailedException.Reason.EMPTY
-        && epoch == pivot.epoch()
-        && failure.get().peer().isPresent()) {
-      onEmpty(failure.get().peer().get(), epoch);
+      if (epoch == NO_EPOCH) {
+        waitingForPeers = true;
+      } else {
+        waitingForStatePeers = true;
+      }
+    } else if (reason == RequestFailedException.Reason.EMPTY && epoch == pivot.epoch()) {
+      // only empty answers about the current pivot tell about its state, bytecode ones never do
+      failure.get().peer().ifPresent(peer -> onEmpty(peer, epoch));
     }
   }
 

@@ -16,6 +16,9 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
 
@@ -26,6 +29,9 @@ import org.hyperledger.besu.ethereum.eth.manager.EthPeer;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.FakeSnapNetwork;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.QueuedExecutor;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.TestWorld;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.StorageFailures;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestFailedException.Reason;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.Accounts;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture;
@@ -42,6 +48,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -54,6 +61,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -499,7 +507,8 @@ class StateSyncTest {
     assertThat(completion).isCompleted();
   }
 
-  // a request no peer takes fails, as the next ones would: they wait for the periodic dispatch
+  // a request no peer takes fails, as the next ones would: asked again at once, they would loop
+  // until the bound of the test executor; they wait for the periodic dispatch
   @Test
   void waitsForThePeriodicDispatchWhileNoPeerTakesItsRequests() {
     final TestWorld world = TestWorld.random(new Random(71), 300, 1, 100);
@@ -512,9 +521,6 @@ class StateSyncTest {
     final int sent = network.requestCount();
     tasks.tick();
     assertThat(network.requestCount()).isGreaterThan(sent);
-    final int retried = network.requestCount();
-    round();
-    assertThat(network.requestCount()).isEqualTo(retried);
 
     // the periodic dispatch resumes the download once peers are back
     network.reconnect();
@@ -523,22 +529,145 @@ class StateSyncTest {
     assertThat(completion).isCompleted();
   }
 
-  static Stream<StateSync.Settings> settingsWithAZero() {
+  // bytecodes ignore the exclusions: they go on while only peers left out serve the state
+  @Test
+  void keepsAskingBytecodesWhileNoPeerTakesTheStateRequests() {
+    final TestWorld world = TestWorld.random(new Random(83), 600, 600, 0);
+    network.serve(world);
+    network.serveNoState(0);
+    network.serveNoState(1);
+    // answers with a few bytecodes, so that they still wait when the state requests stop
+    network.maxResponseBytes(1024);
+    start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+    runUntil(() -> stateSync.peersWithoutState() == 2);
+    assertThat(stateSync.peersWithoutState()).isEqualTo(2);
+
+    // the one peer that serves the state leaves
+    network.disconnect(2);
+    final int codeRequestsBefore = network.codeRequestCount();
+    runToEnd();
+    final int codeRequests = network.codeRequestCount();
+    tasks.tick();
+
+    // the peers left out took the bytecodes, every one known before the periodic dispatch
+    assertThat(codeRequests).isGreaterThan(codeRequestsBefore);
+    assertThat(network.codeRequestCount()).isEqualTo(codeRequests);
+  }
+
+  static Stream<Throwable> finalFailures() {
     return Stream.of(
-        new StateSync.Settings(0, 4096, 8, 8, 16),
-        new StateSync.Settings(16, 0, 8, 8, 16),
-        new StateSync.Settings(16, 4096, 0, 8, 16),
-        new StateSync.Settings(16, 4096, 8, 0, 16),
-        new StateSync.Settings(16, 4096, 8, 8, 0));
+        new RequestFailedException(Reason.STOPPED, null, "the scheduler stopped"),
+        new IllegalStateException("the request cannot be sent"));
+  }
+
+  // a stopped scheduler, or a request that fails on its own, would fail any request again
+  @ParameterizedTest
+  @MethodSource("finalFailures")
+  void failsWhenNoRequestCanSucceed(final Throwable failure) {
+    final TestWorld world = TestWorld.random(new Random(79), 300, 1, 100);
+    network.serve(world);
+    network.failEveryRequest(failure);
+
+    final CompletableFuture<Void> completion =
+        start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+
+    assertThatThrownBy(completion::join).hasCause(failure);
+    // the five account ranges of the first dispatch, none asked again
+    assertThat(network.requestCount()).isEqualTo(5);
+  }
+
+  static Stream<Throwable> lastingWriteFailures() {
+    return Stream.of(StorageFailures.diskFailure(), new StackOverflowError("a bug"));
+  }
+
+  // a write that no retry fixes would fail with every answer
+  @ParameterizedTest
+  @MethodSource("lastingWriteFailures")
+  void failsOnAWriteThatNoRetryFixes(final Throwable failure) {
+    final TestWorld world = TestWorld.random(new Random(89), 300, 1, 100);
+    network.serve(world);
+    final SyncStateStorage storage = spy(SyncStorageFixture.create(Format.BONSAI).sync());
+    doThrow(failure).when(storage).batch();
+    final CompletableFuture<Void> completion = start(storage, header(1, world.root()));
+
+    runToEnd();
+
+    assertThatThrownBy(completion::join).hasCause(failure);
+    // the five account ranges of the first dispatch, none asked again
+    assertThat(network.requestCount()).isEqualTo(5);
+  }
+
+  // a failed loop task leaves the bookkeeping unsure, which a hang would hide
+  @Test
+  void failsWhenALoopTaskFails() {
+    final TestWorld world = TestWorld.random(new Random(97), 300, 300, 0);
+    network.serve(world);
+    final SyncStateStorage storage = spy(SyncStorageFixture.create(Format.BONSAI).sync());
+    final StackOverflowError failure = new StackOverflowError("a bug");
+    // the loop looks the bytecodes up before it asks them
+    doThrow(failure).when(storage).hasCode(any());
+    final CompletableFuture<Void> completion = start(storage, header(1, world.root()));
+
+    runToEnd();
+
+    assertThatThrownBy(completion::join).hasCause(failure);
+  }
+
+  // a bytecode already stored, as after a restart, leaves nothing to ask
+  @Test
+  void completesWhenTheLastBytecodeIsAlreadyStored() {
+    // one account, with a bytecode and no storage
+    final TestWorld world = TestWorld.random(new Random(53), 1, 1, 0);
+    network.serve(world);
+    final SyncStateStorage storage = SyncStorageFixture.create(Format.BONSAI).sync();
+    final SyncStateStorage.Batch batch = storage.batch();
+    world.codes().forEach(batch::putCode);
+    batch.commit();
+    final CompletableFuture<Void> completion =
+        start(storage, accountRanges(1), header(1, world.root()));
+
+    round();
+
+    assertThat(completion).isCompleted();
+    assertThat(network.codeRequestCount()).isZero();
+  }
+
+  // the scheduler still holds requests, which must not go out once the download stopped
+  @Test
+  void withdrawsItsRequestsOnStop() {
+    final TestWorld world = TestWorld.random(new Random(101), 300, 1, 100);
+    network.serve(world);
+    start(SyncStorageFixture.create(Format.BONSAI).sync(), header(1, world.root()));
+
+    stateSync.stop();
+
+    assertThat(network.unansweredRequests()).isNotEmpty();
+    assertThat(network.withdrawnRequestCount()).isEqualTo(network.unansweredRequests().size());
   }
 
   // a zero would leave nothing to ask, or a queue that never drains
   @ParameterizedTest
-  @MethodSource("settingsWithAZero")
-  void refusesSettingsWithAZero(final StateSync.Settings settings) {
-    final SyncStateStorage storage = SyncStorageFixture.create(Format.BONSAI).sync();
-
-    assertThatThrownBy(() -> stateSync(storage, settings, tasks))
+  @CsvSource({
+    "0, 4096, 8, 8, 16",
+    "16, 0, 8, 8, 16",
+    "16, 4096, 0, 8, 16",
+    "16, 4096, 8, 0, 16",
+    "16, 4096, 8, 8, 0"
+  })
+  void refusesSettingsWithAZero(
+      final int accountChunks,
+      final int responseBytes,
+      final int storageBatchSize,
+      final int maxStorageChunks,
+      final int codeBatchSize) {
+    assertThatThrownBy(
+            () ->
+                new StateSync.Settings(
+                    accountChunks,
+                    responseBytes,
+                    storageBatchSize,
+                    maxStorageChunks,
+                    codeBatchSize))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -561,6 +690,22 @@ class StateSyncTest {
 
     assertThat(stateSync.start(header(1, Bytes32.ZERO))).isCompletedExceptionally();
     assertThat(network.requestCount()).isZero();
+  }
+
+  // a stop on another thread can land between the check of the start and its periodic dispatch
+  @Test
+  void returnsTheFailedCompletionOfAStopDuringTheStart() {
+    final QueuedExecutor loop = spy(new QueuedExecutor());
+    stateSync = stateSync(SyncStorageFixture.create(Format.BONSAI).sync(), SETTINGS, loop);
+    doAnswer(
+            invocation -> {
+              stateSync.stop();
+              throw new RejectedExecutionException("stopped");
+            })
+        .when(loop)
+        .scheduleWithFixedDelay(any(), anyLong(), anyLong(), any());
+
+    assertThat(stateSync.start(header(1, Bytes32.ZERO))).isCompletedExceptionally();
   }
 
   // the settings, the account key space split into that many ranges
