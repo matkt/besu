@@ -110,6 +110,7 @@ class SyncChainTest {
     assertThat(chain.headersDone()).isCompleted();
     assertHeadersStored(1, PIVOT);
     assertThat(blockchain.getChainHeadBlockNumber()).isZero();
+    assertThat(blockchain.getSyncFloor()).contains(0L);
   }
 
   @Test
@@ -122,6 +123,7 @@ class SyncChainTest {
     assertThat(chain.headersDone()).isCompleted();
     // downloaded, then stored as the head until the bodies above it are stored
     assertThat(blockchain.getChainHeadHeader()).isEqualTo(header(MERGE));
+    assertThat(blockchain.getSyncFloor()).contains((long) MERGE);
     verify(blockchain, never()).unsafeSetChainHead(any(), any());
     assertHeadersStored(MERGE, PIVOT);
     assertThat(blockchain.getBlockHeader(MERGE - 1)).isEmpty();

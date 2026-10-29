@@ -65,10 +65,11 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
   private final Supplier<ExecutorService> workerPools;
 
   // guarded by this: the last back-fill started, the pools its workers and earlier ones ran on,
-  // and whether the node stopped
+  // whether the node stopped, and the scheduler a SNAP2 sync handed over for the next back-fill
   private BodyBackfill current;
   private final List<ExecutorService> startedPools = new ArrayList<>();
   private boolean closed;
+  private Optional<RequestSender> syncScheduler = Optional.empty();
 
   /** Creates the back-fill of a node, idle until the initial sync completes. */
   public static BackgroundBackfill create(
@@ -89,7 +90,7 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
         config.isSnap2BackfillEnabled(),
         settings,
         metricsSystem,
-        // a scheduler of its own, until the SNAP2 sync hands over the one it ran on
+        // a scheduler of its own, when no SNAP2 sync handed over the one it ran on
         () -> RequestScheduler.forSync(ethPeers, metricsSystem, DECODE_THREADS),
         () ->
             Executors.newFixedThreadPool(
@@ -129,15 +130,28 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
    */
   @Override
   public synchronized void onInitialSyncCompleted() {
+    // it serves the back-fill that starts now, or none
+    final Optional<RequestSender> handedOver = syncScheduler;
+    syncScheduler = Optional.empty();
     if (closed || isRunning()) {
+      handedOver.ifPresent(RequestSender::stop);
       return;
     }
     try {
-      maybeStart();
+      maybeStart(handedOver);
     } catch (final RuntimeException e) {
       // the sync and the other listeners of the event go on without the back-fill
       LOG.warn("SNAP2 back-fill not started", e);
     }
+  }
+
+  /**
+   * Takes the scheduler a SNAP2 sync ran on: the back-fill that starts once the sync completes
+   * sends through it, and stops it once it ends, as when none starts.
+   */
+  public synchronized void handOver(final RequestSender scheduler) {
+    syncScheduler.ifPresent(RequestSender::stop);
+    syncScheduler = Optional.of(scheduler);
   }
 
   /** Stops the back-fill, which starts again with the next initial sync. */
@@ -163,6 +177,8 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
       closed = true;
       // a sync that just completed may have started one after the stop
       stop();
+      syncScheduler.ifPresent(RequestSender::stop);
+      syncScheduler = Optional.empty();
       pools = List.copyOf(startedPools);
     }
     // one deadline for every pool, so that the wait stays bounded
@@ -181,23 +197,24 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
     return current != null && !current.hasEnded();
   }
 
-  private void maybeStart() {
+  private void maybeStart(final Optional<RequestSender> handedOver) {
     // recorded by a sync that stored the bodies of the latest blocks only
     final Optional<Long> bodiesFrom = blockchain.getBodiesFrom();
     final LongUnaryOperator lowestNeeded = lowestNeeded();
     final boolean bodiesMissing =
         bodiesFrom.isPresent()
             && bodiesFrom.get() > lowestNeeded.applyAsLong(blockchain.getChainHeadBlockNumber());
-    if (!bodiesMissing) {
-      return;
-    }
-    if (!enabled) {
+    if (bodiesMissing && !enabled) {
       LOG.info(
           "SNAP2 back-fill disabled, the bodies and receipts below block {} are not downloaded",
           bodiesFrom.get());
+    }
+    if (!bodiesMissing || !enabled) {
+      handedOver.ifPresent(RequestSender::stop);
       return;
     }
-    final BodyBackfill backfill = build(bodiesFrom.get(), lowestNeeded);
+    final BodyBackfill backfill =
+        build(bodiesFrom.get(), lowestNeeded, handedOver.orElseGet(senders));
     try {
       final ExecutorService workers = workerPools.get();
       startedPools.removeIf(ExecutorService::isTerminated);
@@ -211,9 +228,9 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
     }
   }
 
-  // a back-fill on a scheduler of its own, which runs until the back-fill ends, however it ends
-  private BodyBackfill build(final long lowest, final LongUnaryOperator lowestNeeded) {
-    final RequestSender sender = senders.get();
+  // the scheduler runs until the back-fill ends, however it ends
+  private BodyBackfill build(
+      final long lowest, final LongUnaryOperator lowestNeeded, final RequestSender sender) {
     final BodyBackfill backfill;
     try {
       backfill =
@@ -243,7 +260,11 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
 
   // above the floor of the sync, and a pruning run away from the blocks a pruner removes
   private LongUnaryOperator lowestNeeded() {
-    final long floor = syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L);
+    // the floor the sync recorded, whatever the checkpoint of this run
+    final long floor =
+        blockchain
+            .getSyncFloor()
+            .orElseGet(() -> syncState.getCheckpoint().map(Checkpoint::blockNumber).orElse(0L));
     return head ->
         Math.max(
             floor + 1, chainDataPruner.map(pruner -> pruner.lowestToBackfill(head)).orElse(0L));

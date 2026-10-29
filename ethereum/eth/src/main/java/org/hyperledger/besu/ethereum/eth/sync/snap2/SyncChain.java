@@ -218,6 +218,8 @@ final class SyncChain {
         retryWrite(() -> blockchain.unsafeSetChainHead(floorHeader, floorTotal));
       }
       removeIndexAbove(firstPivot.getNumber());
+      // the back-fill needs every body above it, whatever the checkpoint of later runs
+      retryWrite(() -> blockchain.unsafeSetSyncFloor(floorHeader.getNumber()));
       // only proof of stake follows the terminal total difficulty, which Hoodi's genesis reaches
       proofOfStakeAboveFloor =
           settings.terminalTotalDifficulty().map(floorTotal::greaterOrEqualThan).orElse(false);
