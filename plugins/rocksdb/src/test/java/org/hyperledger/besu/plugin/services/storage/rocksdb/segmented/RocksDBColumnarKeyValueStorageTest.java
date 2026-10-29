@@ -61,6 +61,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.FlushOptions;
 import org.rocksdb.LiveFileMetaData;
 import org.rocksdb.Snapshot;
 
@@ -704,6 +705,30 @@ public abstract class RocksDBColumnarKeyValueStorageTest extends AbstractKeyValu
     assertThat(store.streamKeys(TestSegment.FOO).map(Bytes::wrap))
         .containsExactly(Bytes.wrap(keptKey));
     assertThat(store.get(TestSegment.FOO, keptKey)).contains(bytesFromHexString("0AAA"));
+    store.close();
+  }
+
+  @Test
+  public void deleteAllExceptReleasesTheDeletedFiles() throws Exception {
+    final RocksDBColumnarKeyValueStorage store =
+        (RocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    for (int i = 0; i < 10_000; i++) {
+      final byte[] key = Bytes.ofUnsignedInt(i * 429_497L).toArrayUnsafe();
+      tx.put(TestSegment.FOO, key, key);
+    }
+    tx.commit();
+    final ColumnFamilyHandle foo = store.safeColumnHandle(TestSegment.FOO);
+    try (final FlushOptions flush = new FlushOptions().setWaitForFlush(true)) {
+      store.getDB().flush(flush, foo);
+    }
+
+    store.deleteAllExcept(TestSegment.FOO, List.of(bytesFromHexString("8000")));
+
+    // An iterator left open would keep the deleted files in an older version of the column.
+    assertThat(store.getDB().getLongProperty(foo, "rocksdb.num-live-versions")).isEqualTo(1);
+    assertThat(store.getDB().getLongProperty(foo, "rocksdb.total-sst-files-size"))
+        .isEqualTo(store.getDB().getLongProperty(foo, "rocksdb.live-sst-files-size"));
     store.close();
   }
 

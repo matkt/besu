@@ -757,7 +757,8 @@ public abstract class RocksDBColumnarKeyValueStorage implements SegmentedKeyValu
     final RocksDB baseDB = maybeBaseDB.get();
     final ColumnFamilyHandle handle = safeColumnHandle(segmentIdentifier);
     final byte[] lastKey;
-    try (final RocksIterator iterator = baseDB.newIterator(handle)) {
+    // getDB(): closing an iterator of the non-owning base DB wrapper frees nothing.
+    try (final RocksIterator iterator = getDB().newIterator(handle)) {
       iterator.seekToLast();
       if (!iterator.isValid()) {
         return;
