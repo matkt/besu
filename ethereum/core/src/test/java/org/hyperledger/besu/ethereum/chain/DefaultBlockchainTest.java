@@ -1291,15 +1291,19 @@ public class DefaultBlockchainTest {
 
   @Test
   public void recordsTheFloorOfASync() {
-    final BlockDataGenerator gen = new BlockDataGenerator();
+    final Block genesisBlock = new BlockDataGenerator().genesisBlock();
+    final KeyValueStorage chainKv = new InMemoryKeyValueStorage();
+    final KeyValueStorage variablesKv = new InMemoryKeyValueStorage();
     final DefaultBlockchain blockchain =
-        createMutableBlockchain(
-            new InMemoryKeyValueStorage(), new InMemoryKeyValueStorage(), gen.genesisBlock());
+        createMutableBlockchain(chainKv, variablesKv, genesisBlock);
     assertThat(blockchain.getSyncFloor()).isEmpty();
 
     blockchain.unsafeSetSyncFloor(6);
 
     assertThat(blockchain.getSyncFloor()).contains(6L);
+    // stored, so a restarted node reads it back
+    assertThat(createMutableBlockchain(chainKv, variablesKv, genesisBlock).getSyncFloor())
+        .contains(6L);
   }
 
   @Test

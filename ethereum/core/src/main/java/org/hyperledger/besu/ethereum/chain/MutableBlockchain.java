@@ -117,10 +117,10 @@ public interface MutableBlockchain extends Blockchain {
       List<SyncBlockWithReceipts> blocksAndReceipts, boolean indexTransactions);
 
   /**
-   * Stores in one batch the block access lists of blocks whose headers a sync stored, without
-   * updating the chain state.
+   * Stores in one batch the block access lists of blocks a sync stores, without updating the chain
+   * state.
    *
-   * @param accessLists the access lists, by block hash
+   * @param accessLists the access lists, by block hash, none of them unavailable
    */
   void unsafeStoreSyncBlockAccessLists(Map<Hash, SyncBlockAccessList> accessLists);
 

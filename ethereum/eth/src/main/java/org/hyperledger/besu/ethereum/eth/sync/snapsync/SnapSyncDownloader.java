@@ -198,6 +198,10 @@ public class SnapSyncDownloader implements SnapSyncController {
     }
   }
 
+  // as before this method: nothing waits for this sync once stopped
+  @Override
+  public void awaitStop() {}
+
   @Override
   public void deletePivotSyncState() {
     // Make sure downloader is stopped before we start cleaning up its dependencies

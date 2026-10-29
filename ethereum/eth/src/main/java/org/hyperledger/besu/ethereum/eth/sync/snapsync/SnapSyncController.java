@@ -28,7 +28,7 @@ public interface SnapSyncController {
   void deletePivotSyncState();
 
   /** Waits for the reads and writes of a stopped sync to end, before the storage closes. */
-  default void awaitStop() throws InterruptedException {}
+  void awaitStop() throws InterruptedException;
 
   Optional<TrailingPeerRequirements> calculateTrailingPeerRequirements();
 }
