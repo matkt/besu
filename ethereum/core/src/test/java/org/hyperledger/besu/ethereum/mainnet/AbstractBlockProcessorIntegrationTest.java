@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.mainnet;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -56,6 +57,7 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams;
 import org.hyperledger.besu.evm.blockhash.BlockHashLookup;
 import org.hyperledger.besu.evm.worldstate.WorldView;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
+import org.hyperledger.besu.plugin.services.exception.StorageException;
 import org.hyperledger.besu.plugin.services.metrics.Counter;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import org.hyperledger.besu.plugin.services.tracer.BlockAwareOperationTracer;
@@ -493,6 +495,28 @@ class AbstractBlockProcessorIntegrationTest {
     assertThat(blockProcessor.sequentialReruns).isEqualTo(1);
   }
 
+  @Test
+  void storageFaultResetsTheWorldState() {
+    final BlockExecutionContext context =
+        BlockExecutionContext.builder()
+            .protocolContext(protocolContext)
+            .worldState(worldStateArchive.getWorldState())
+            .block(createBlockWithTwoTransfers())
+            .blockAccessList(Optional.empty())
+            .build();
+
+    final StorageFaultAtSecondTransaction blockProcessor =
+        new StorageFaultAtSecondTransaction(protocolSchedule());
+    assertThatThrownBy(() -> blockProcessor.processBlock(context))
+        .isInstanceOf(StorageException.class);
+
+    // The first transfer was applied before the fault. Processing the block again on the same
+    // world state only succeeds if it was reset; otherwise the first transfer fails on its nonce.
+    final BlockProcessingResult result =
+        blockProcessor.processBlock(context.toBuilder().sequentialExecutionRequested(true).build());
+    assertThat(result.isSuccessful()).isTrue();
+  }
+
   /** The block's access list, built by processing it sequentially on a separate world state. */
   private static BlockAccessList blockAccessListOf(final Block block) {
     final ExecutionContextTestFixture fixture =
@@ -592,7 +616,7 @@ class AbstractBlockProcessorIntegrationTest {
    * the block allows. That failure path does not reset the world state, so only the fallback's
    * reset makes the sequential rerun succeed.
    */
-  private static final class FailingAtSecondTransaction extends MainnetParallelBlockProcessor {
+  private static class FailingAtSecondTransaction extends MainnetParallelBlockProcessor {
 
     FailingAtSecondTransaction(final ProtocolSchedule protocolSchedule) {
       this(protocolSchedule, BalConfiguration.DEFAULT);
@@ -638,8 +662,24 @@ class AbstractBlockProcessorIntegrationTest {
         final Optional<BlockAccessList> blockAccessList,
         final Optional<BlockHeader> maybeParentHeader) {
       parallelAttempts++;
-      return Optional.of(
-          new OverBudgetSecondTransaction(transactionProcessor, blockHeader.getGasLimit() + 1));
+      return Optional.of(failingProcessor(blockHeader));
+    }
+
+    ParallelBlockTransactionProcessor failingProcessor(final BlockHeader blockHeader) {
+      return new OverBudgetSecondTransaction(transactionProcessor, blockHeader.getGasLimit() + 1);
+    }
+  }
+
+  /** Like {@link FailingAtSecondTransaction}, but the second transaction hits a storage fault. */
+  private static final class StorageFaultAtSecondTransaction extends FailingAtSecondTransaction {
+
+    StorageFaultAtSecondTransaction(final ProtocolSchedule protocolSchedule) {
+      super(protocolSchedule);
+    }
+
+    @Override
+    ParallelBlockTransactionProcessor failingProcessor(final BlockHeader blockHeader) {
+      return new StorageFaultSecondTransaction(transactionProcessor);
     }
   }
 
@@ -736,6 +776,32 @@ class AbstractBlockProcessorIntegrationTest {
               Bytes.EMPTY,
               Optional.empty(),
               ValidationResult.valid()));
+    }
+  }
+
+  /**
+   * Has no result for the first transaction, so it is processed sequentially, and fails to import
+   * the second, as a storage fault would.
+   */
+  private static final class StorageFaultSecondTransaction
+      extends OptimisticConcurrentTransactionProcessor {
+
+    StorageFaultSecondTransaction(final MainnetTransactionProcessor transactionProcessor) {
+      super(transactionProcessor);
+    }
+
+    @Override
+    public Optional<TransactionProcessingResult> getProcessingResult(
+        final MutableWorldState worldState,
+        final Address miningBeneficiary,
+        final Transaction transaction,
+        final int location,
+        final Optional<Counter> confirmedParallelizedTransactionCounter,
+        final Optional<Counter> conflictingButCachedTransactionCounter) {
+      if (location == 0) {
+        return Optional.empty();
+      }
+      throw new StorageException("Simulated storage fault");
     }
   }
 
