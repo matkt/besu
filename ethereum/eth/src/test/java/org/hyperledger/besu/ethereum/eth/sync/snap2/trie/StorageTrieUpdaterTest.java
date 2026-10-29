@@ -358,13 +358,14 @@ class StorageTrieUpdaterTest {
         storage, StorageTrieUpdaterTest::noMoves, hash -> false, 0, budget);
   }
 
-  // runs an action on the first trie read of an update, as a move or a stop during it does
+  // runs an action on an update's first read below the root, as a move or a stop during it does
   private SyncStateStorage onTheFirstRead(final Runnable action) {
     final SyncStateStorage storage = spy(storages.sync());
     final AtomicBoolean read = new AtomicBoolean();
     doAnswer(
             invocation -> {
-              if (read.compareAndSet(false, true)) {
+              final Bytes location = invocation.getArgument(1);
+              if (!location.isEmpty() && read.compareAndSet(false, true)) {
                 action.run();
               }
               return invocation.callRealMethod();

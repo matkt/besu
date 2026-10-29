@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import org.hyperledger.besu.ethereum.trie.RangeManager;
+import org.hyperledger.besu.ethereum.trie.TrieBytes;
 import org.hyperledger.besu.plugin.services.storage.SegmentIdentifier;
 import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 
@@ -35,7 +36,7 @@ import org.apache.tuweni.bytes.Bytes32;
 abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   // bounds the write batch a writer keeps before committing
-  private static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
+  static final int BYTES_PER_COMMIT = 8 * 1024 * 1024;
   private static final int DELETES_PER_COMMIT = 10_000;
   private static final byte[] ZEROS = new byte[32];
   private static final byte[] ONES = RangeManager.MAX_RANGE.toArray();
@@ -195,7 +196,7 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
         return nodes;
       }
 
-      // a node and its hash, about what the batch holds for it
+      // the node and about 32 bytes for its key, whatever the format
       private void commitWhenFull(final Bytes rlp) {
         pendingBytes += Bytes32.SIZE + rlp.size();
         if (pendingBytes >= BYTES_PER_COMMIT) {
@@ -218,7 +219,7 @@ abstract class AbstractSyncStateStorage implements SyncStateStorage {
 
   /** Returns the key of a slot in the storage segment. */
   protected static byte[] slotKey(final Bytes32 accountHash, final Bytes32 slotHash) {
-    return concat(accountHash.toArrayUnsafe(), slotHash.toArrayUnsafe());
+    return TrieBytes.concat(accountHash, slotHash).toArrayUnsafe();
   }
 
   // visits the slots of the accounts before the given one

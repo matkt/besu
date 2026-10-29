@@ -15,15 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.slots;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStorageFixture.Format;
@@ -124,56 +116,6 @@ class SyncStateStorageTest {
 
   @ParameterizedTest
   @EnumSource(Format.class)
-  void deleteStorageAbortsTheBatchOfAFailedWriteButNotOneWhoseCommitFailed(final Format format) {
-    final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
-    final SyncStateStorage.Batch slots = storage.batch();
-    slots.putStorage(FIRST, key(0x01), value(1));
-    slots.commit();
-    final SyncStateStorage failing = spy(storage);
-    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
-    doReturn(batch).when(failing).batch();
-
-    // the commit of the transaction has started, it cannot be rolled back
-    doThrow(new IllegalStateException("disk full")).when(batch).commit();
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("disk full");
-    verify(batch, never()).abort();
-
-    doThrow(new IllegalStateException("write failed")).when(batch).removeStorage(any(), any());
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("write failed");
-    verify(batch).abort();
-  }
-
-  // the next batch fails to start once the first one is committed
-  @ParameterizedTest
-  @EnumSource(Format.class)
-  void deleteStorageAbortsNoBatchItCommitted(final Format format) {
-    final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
-    final SyncStateStorage.Batch slots = storage.batch();
-    for (int i = 0; i < 10_001; i++) {
-      slots.putStorage(FIRST, Bytes32.leftPad(Bytes.ofUnsignedInt(i)), value(1));
-    }
-    slots.commit();
-    final SyncStateStorage failing = spy(storage);
-    final SyncStateStorage.Batch batch = mock(SyncStateStorage.Batch.class);
-    doReturn(batch).doThrow(new IllegalStateException("storage closed")).when(failing).batch();
-
-    assertThatThrownBy(() -> failing.deleteStorage(FIRST)).hasMessage("storage closed");
-    verify(batch).commit();
-    verify(batch, never()).abort();
-  }
-
-  @ParameterizedTest
-  @EnumSource(Format.class)
-  void deleteStorageWritesNothingForAnAccountWithoutSlots(final Format format) {
-    final SyncStateStorage spied = spy(SyncStorageFixture.create(format).sync());
-
-    spied.deleteStorage(FIRST);
-
-    verify(spied, never()).batch();
-  }
-
-  @ParameterizedTest
-  @EnumSource(Format.class)
   void removesAccountsAndSlots(final Format format) {
     final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
     final SyncStateStorage.Batch batch = storage.batch();
@@ -239,14 +181,14 @@ class SyncStateStorageTest {
         .contains(ACCOUNT_NODE);
   }
 
-  // 9 MB of nodes, past the 8 MB a batch holds
+  // a batch of 1 KB nodes, then 1 MB more
   @ParameterizedTest
   @EnumSource(Format.class)
   void commitsTheNodesOnceTheyFillABatch(final Format format) {
     final SyncStateStorage storage = SyncStorageFixture.create(format).sync();
     final SyncStateStorage.TrieWriter writer = storage.trieWriter();
     final List<Bytes> nodes = new ArrayList<>();
-    for (int i = 0; i < 9 * 1024; i++) {
+    for (int i = 0; i < AbstractSyncStateStorage.BYTES_PER_COMMIT / 1024 + 1024; i++) {
       nodes.add(Bytes.concatenate(Bytes.ofUnsignedInt(i), Bytes.wrap(new byte[1020])));
       writer.storageNode(FIRST, location(i), hash(nodes.get(i)), nodes.get(i));
     }

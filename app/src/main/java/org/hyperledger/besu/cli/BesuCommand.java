@@ -3004,7 +3004,7 @@ public class BesuCommand implements DefaultCommandValues, Runnable {
   }
 
   /** Set ignorable segments in RocksDB Storage Provider plugin. */
-  public void setIgnorableStorageSegments() {
+  private void setIgnorableStorageSegments() {
     if (unstableChainPruningOptions.getChainPruningStrategy().equals(ChainPruningStrategy.NONE)
         && !getDataStorageConfiguration().getHistoryExpiryPruneEnabled()) {
       rocksDBPlugin.addIgnorableSegmentIdentifier(KeyValueSegmentIdentifier.CHAIN_PRUNER_STATE);
