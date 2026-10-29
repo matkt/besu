@@ -42,6 +42,7 @@ import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.mainnet.AbstractBlockProcessor.TransactionReceiptFactory;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessListAccountLookup;
+import org.hyperledger.besu.ethereum.mainnet.parallelization.BalConcurrentTransactionProcessor;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.MainnetParallelBlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.NoFallbackParallelBlockProcessor;
 import org.hyperledger.besu.ethereum.mainnet.parallelization.OptimisticConcurrentTransactionProcessor;
@@ -448,8 +449,11 @@ class AbstractBlockProcessorIntegrationTest {
   void balPerfectParallelizationFailureIsNotRerun() {
     final Block block = createBlockWithTwoTransfers();
 
-    final FailingAtSecondTransaction blockProcessor =
-        new FailingAtSecondTransaction(protocolSchedule());
+    final CountingParallelBlockProcessor blockProcessor =
+        new CountingParallelBlockProcessor(
+            protocolSchedule(),
+            ImmutableBalConfiguration.builder().isBalPreFetchReadingEnabled(false).build());
+    // An access list that is not the block's fails it.
     final BlockProcessingResult result =
         blockProcessor.processBlock(
             BlockExecutionContext.builder()
@@ -460,7 +464,9 @@ class AbstractBlockProcessorIntegrationTest {
                 .build());
 
     assertThat(result.isFailed()).isTrue();
-    assertThat(blockProcessor.parallelAttempts).isEqualTo(1);
+    assertThat(blockProcessor.startedProcessors)
+        .singleElement()
+        .isInstanceOf(BalConcurrentTransactionProcessor.class);
     assertThat(blockProcessor.sequentialReruns).isZero();
   }
 
@@ -472,16 +478,44 @@ class AbstractBlockProcessorIntegrationTest {
         new FailingAtSecondTransaction(
             protocolSchedule(),
             ImmutableBalConfiguration.builder().isPerfectParallelizationEnabled(false).build());
-    blockProcessor.processBlock(
-        BlockExecutionContext.builder()
-            .protocolContext(protocolContext)
-            .worldState(worldStateArchive.getWorldState())
-            .block(block)
-            .blockAccessList(Optional.of(new BlockAccessList(List.of())))
-            .build());
+    final BlockProcessingResult result =
+        blockProcessor.processBlock(
+            BlockExecutionContext.builder()
+                .protocolContext(protocolContext)
+                .worldState(worldStateArchive.getWorldState())
+                .block(block)
+                .blockAccessList(Optional.of(blockAccessListOf(block)))
+                .build());
 
+    // The state root comes from the access list, so the rerun only succeeds with the block's own.
+    assertThat(result.isSuccessful()).isTrue();
     assertThat(blockProcessor.parallelAttempts).isEqualTo(1);
     assertThat(blockProcessor.sequentialReruns).isEqualTo(1);
+  }
+
+  /** The block's access list, built by processing it sequentially on a separate world state. */
+  private static BlockAccessList blockAccessListOf(final Block block) {
+    final ExecutionContextTestFixture fixture =
+        ExecutionContextTestFixture.builder(GenesisConfig.fromResource(GENESIS_RESOURCE))
+            .dataStorageFormat(DataStorageFormat.BONSAI)
+            .build();
+    final ProtocolSchedule protocolSchedule = fixture.getProtocolSchedule();
+    final ProtocolSpec spec = genesisSpec(protocolSchedule);
+    final BlockProcessingResult result =
+        new MainnetBlockProcessor(
+                spec.getTransactionProcessor(),
+                spec.getTransactionReceiptFactory(),
+                BlockHeader::getCoinbase,
+                protocolSchedule,
+                BalConfiguration.DEFAULT)
+            .processBlock(
+                BlockExecutionContext.builder()
+                    .protocolContext(fixture.getProtocolContext())
+                    .worldState(fixture.getStateArchive().getWorldState())
+                    .block(block)
+                    .blockAccessList(Optional.empty())
+                    .build());
+    return result.getYield().orElseThrow().getBlockAccessList().orElseThrow();
   }
 
   @Test
@@ -606,6 +640,64 @@ class AbstractBlockProcessorIntegrationTest {
       parallelAttempts++;
       return Optional.of(
           new OverBudgetSecondTransaction(transactionProcessor, blockHeader.getGasLimit() + 1));
+    }
+  }
+
+  /** Keeps the parallel processors it starts and counts its sequential reruns. */
+  private static final class CountingParallelBlockProcessor extends MainnetParallelBlockProcessor {
+
+    private final List<ParallelBlockTransactionProcessor> startedProcessors = new ArrayList<>();
+    private int sequentialReruns;
+
+    CountingParallelBlockProcessor(
+        final ProtocolSchedule protocolSchedule, final BalConfiguration balConfiguration) {
+      this(genesisSpec(protocolSchedule), protocolSchedule, balConfiguration);
+    }
+
+    private CountingParallelBlockProcessor(
+        final ProtocolSpec spec,
+        final ProtocolSchedule protocolSchedule,
+        final BalConfiguration balConfiguration) {
+      super(
+          spec.getTransactionProcessor(),
+          spec.getTransactionReceiptFactory(),
+          BlockHeader::getCoinbase,
+          protocolSchedule,
+          balConfiguration,
+          new NoOpMetricsSystem(),
+          Runnable::run);
+    }
+
+    @Override
+    protected BlockProcessingResult processBlockSequentially(final BlockExecutionContext context) {
+      sequentialReruns++;
+      return super.processBlockSequentially(context);
+    }
+
+    @Override
+    protected Optional<ParallelBlockTransactionProcessor> startParallelExecution(
+        final ProtocolContext protocolContext,
+        final BlockHeader blockHeader,
+        final List<Transaction> transactions,
+        final Address miningBeneficiary,
+        final BlockHashLookup blockHashLookup,
+        final Wei blobGasPrice,
+        final Optional<BlockAccessList.BlockAccessListBuilder> blockAccessListBuilder,
+        final Optional<BlockAccessList> blockAccessList,
+        final Optional<BlockHeader> maybeParentHeader) {
+      final Optional<ParallelBlockTransactionProcessor> parallelProcessor =
+          super.startParallelExecution(
+              protocolContext,
+              blockHeader,
+              transactions,
+              miningBeneficiary,
+              blockHashLookup,
+              blobGasPrice,
+              blockAccessListBuilder,
+              blockAccessList,
+              maybeParentHeader);
+      parallelProcessor.ifPresent(startedProcessors::add);
+      return parallelProcessor;
     }
   }
 

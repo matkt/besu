@@ -125,7 +125,7 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
     }
     // With its block access list, every transaction ran on its exact pre-state, so the failure is
     // the block's own and a sequential rerun would only repeat it.
-    if (isBalPerfectParallelization(context)) {
+    if (isBalPerfectParallelization(context.getBlockAccessList())) {
       return blockProcessingResult;
     }
     final Block block = context.getBlock();
@@ -140,12 +140,15 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
     return processBlockSequentially(context);
   }
 
-  private boolean isBalPerfectParallelization(final BlockExecutionContext context) {
-    return balConfiguration.isPerfectParallelizationEnabled()
-        && context.getBlockAccessList().isPresent();
+  /** Whether parallel execution runs on {@link BalConcurrentTransactionProcessor}. */
+  private boolean isBalPerfectParallelization(final Optional<BlockAccessList> blockAccessList) {
+    return balConfiguration.isPerfectParallelizationEnabled() && blockAccessList.isPresent();
   }
 
-  /** Returns whether a block whose parallel processing failed is rerun sequentially. */
+  /**
+   * Returns whether a block whose parallel processing failed is rerun sequentially. A block run on
+   * its block access list is never rerun.
+   */
   protected boolean shouldRerunSequentially() {
     return true;
   }
@@ -175,7 +178,7 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
 
     final ParallelBlockTransactionProcessor parallelProcessor;
 
-    if (balConfiguration.isPerfectParallelizationEnabled() && blockAccessList.isPresent()) {
+    if (isBalPerfectParallelization(blockAccessList)) {
       parallelProcessor =
           new BalConcurrentTransactionProcessor(
               transactionProcessor, blockAccessList.get(), balConfiguration);
