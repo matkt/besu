@@ -16,6 +16,7 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.SyncFixture.checkpoint;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.SNAPSYNC_FLAT_ACCOUNTS;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.SNAPSYNC_FLAT_STORAGE;
 import static org.mockito.Mockito.mock;
@@ -24,6 +25,9 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
+import org.hyperledger.besu.ethereum.core.BlockBody;
+import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
 import org.hyperledger.besu.ethereum.eth.sync.PivotBlockSelector;
@@ -41,10 +45,14 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class Snap2SyncFactoryTest {
+
+  private static final BlockHeader GENESIS = header(0);
+  private static final BlockHeader CHECKPOINT = header(10);
 
   @TempDir Path dataDirectory;
 
@@ -53,29 +61,54 @@ class Snap2SyncFactoryTest {
   private final WorldStateStorageCoordinator worldState = mock(WorldStateStorageCoordinator.class);
   private final StorageProvider storageProvider = mock(StorageProvider.class);
 
+  @BeforeEach
+  void aNewNode() {
+    head(GENESIS);
+  }
+
   @Test
-  void needsNoSyncOnceTheChainHeadIsAboveTheFloor() {
-    assertThat(Snap2SyncFactory.needsSync(marker(), syncState, 11, 10)).isFalse();
-    assertThat(Snap2SyncFactory.needsSync(marker(), syncState, 10, 10)).isTrue();
+  void syncsANodeThatHoldsNothingButGenesisOrTheCheckpointHeader() {
+    when(syncState.getCheckpoint()).thenReturn(Optional.of(checkpoint(10, CHECKPOINT.getHash())));
+    assertThat(needsSync()).isTrue();
+
+    head(CHECKPOINT);
+
+    assertThat(needsSync()).isTrue();
+  }
+
+  @Test
+  void keepsTheChainOfANodeBelowTheCheckpoint() {
+    when(syncState.getCheckpoint()).thenReturn(Optional.of(checkpoint(10, CHECKPOINT.getHash())));
+    // down while a release raised the checkpoint
+    head(header(5));
+    assertThat(needsSync()).isFalse();
+
+    // the checkpoint with its body, imported
+    head(CHECKPOINT);
+    when(blockchain.getBlockBody(CHECKPOINT.getHash())).thenReturn(Optional.of(BlockBody.empty()));
+
+    assertThat(needsSync()).isFalse();
   }
 
   @Test
   void syncsAgainWhenASyncDidNotFinish() throws IOException {
+    head(header(11));
     Files.createFile(marker());
 
-    assertThat(Snap2SyncFactory.needsSync(marker(), syncState, 11, 10)).isTrue();
+    assertThat(needsSync()).isTrue();
   }
 
   @Test
   void syncsTheStateAgainOnAResync() {
+    head(header(11));
     when(syncState.isResyncNeeded()).thenReturn(true);
 
-    assertThat(Snap2SyncFactory.needsSync(marker(), syncState, 11, 10)).isTrue();
+    assertThat(needsSync()).isTrue();
   }
 
   @Test
   void createsNoSyncOnASyncedChain() {
-    when(blockchain.getChainHeadBlockNumber()).thenReturn(1L);
+    head(header(1));
 
     assertThat(create()).isEmpty();
   }
@@ -115,6 +148,19 @@ class Snap2SyncFactoryTest {
         mock(PivotBlockSelector.class),
         Optional.empty(),
         scheduler -> {});
+  }
+
+  private boolean needsSync() {
+    return Snap2SyncFactory.needsSync(marker(), syncState, blockchain);
+  }
+
+  private void head(final BlockHeader header) {
+    when(blockchain.getChainHeadHeader()).thenReturn(header);
+    when(blockchain.getChainHeadBlockNumber()).thenReturn(header.getNumber());
+  }
+
+  private static BlockHeader header(final long number) {
+    return new BlockHeaderTestFixture().number(number).buildHeader();
   }
 
   private Path marker() {

@@ -15,6 +15,7 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import org.hyperledger.besu.ethereum.ProtocolContext;
+import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeers;
@@ -31,6 +32,7 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.BonsaiSyncStateStora
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.ForestSyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
+import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapDownloaderFactory;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
@@ -52,7 +54,7 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Creates the SNAP2 sync, or nothing when the node holds a synced chain. */
+/** Creates the SNAP2 sync, or nothing when the node already holds a chain. */
 public final class Snap2SyncFactory {
 
   private static final Logger LOG = LoggerFactory.getLogger(Snap2SyncFactory.class);
@@ -64,8 +66,8 @@ public final class Snap2SyncFactory {
   private Snap2SyncFactory() {}
 
   /**
-   * Creates the sync unless the chain head is above the floor of the sync, a sync left unfinished
-   * and a resync both aside.
+   * Creates the sync when the node holds nothing but genesis or the bare checkpoint header, when a
+   * sync did not finish, or on a resync.
    *
    * @param storageProvider gives the segments a sync on Forest stages its flat state in
    * @param pivotBlockSelector the source of the chain head, when it is one
@@ -91,7 +93,7 @@ public final class Snap2SyncFactory {
     final Path marker = Snap2SyncController.markerFile(dataDirectory);
     final Optional<Checkpoint> checkpoint = syncState.getCheckpoint();
     final long floor = checkpoint.map(Checkpoint::blockNumber).orElse(0L);
-    if (!needsSync(marker, syncState, blockchain.getChainHeadBlockNumber(), floor)) {
+    if (!needsSync(marker, syncState, blockchain)) {
       return Optional.empty();
     }
     final SyncStateStorage storage = syncStorage(worldStateStorageCoordinator, storageProvider);
@@ -160,9 +162,9 @@ public final class Snap2SyncFactory {
             metricsSystem));
   }
 
-  // a resync, a sync left unfinished, or a chain head not above the floor yet
+  // a resync, a sync left unfinished, or nothing but the trust anchor, as for the snap sync
   static boolean needsSync(
-      final Path marker, final SyncState syncState, final long chainHead, final long floor) {
+      final Path marker, final SyncState syncState, final Blockchain blockchain) {
     if (syncState.isResyncNeeded()) {
       LOG.info("World state resync requested, syncing it again with SNAP2");
       return true;
@@ -171,8 +173,11 @@ public final class Snap2SyncFactory {
       LOG.info("A previous SNAP2 sync did not finish, syncing again");
       return true;
     }
-    if (chainHead > floor) {
-      LOG.info("Chain head is block {}, no SNAP2 sync needed", chainHead);
+    // a chain is kept, even below a checkpoint a later release raised
+    if (!SnapDownloaderFactory.holdsNothingButTheTrustAnchor(blockchain, syncState)) {
+      LOG.info(
+          "The node holds a chain up to block {}, no SNAP2 sync needed",
+          blockchain.getChainHeadBlockNumber());
       return false;
     }
     return true;
