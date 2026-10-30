@@ -175,6 +175,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
                       metricsSystem,
                       ethContext.getEthPeers(),
                       worldStateStorageCoordinator,
+                      storageProvider,
                       syncState,
                       pivotBlockSelector,
                       terminalTotalDifficulty,
