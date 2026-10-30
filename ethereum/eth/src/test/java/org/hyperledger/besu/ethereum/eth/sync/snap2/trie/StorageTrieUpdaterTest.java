@@ -229,6 +229,31 @@ class StorageTrieUpdaterTest {
     assertThat(storages.sync().hasStorageTrie(account, movedRoot)).isFalse();
   }
 
+  // the writer commits on its own every few megabytes, so a stop is checked before each write
+  @Test
+  void writesNoMoreNodesOnceStoppedDuringACommit() {
+    final SyncStateStorage.TrieWriter writer = spy(storages.sync().trieWriter());
+    final StorageTrieUpdater updater = stoppedOnTheNode(writer, location -> true);
+
+    assertThat(updater.applyNext()).isTrue();
+
+    verify(writer).storageNode(any(), any(), any(), any());
+    verify(writer, never()).commit();
+    verify(writer).abort();
+    assertThat(updater.updated()).isZero();
+  }
+
+  @Test
+  void commitsNothingOnceStoppedOnTheRootNode() {
+    final SyncStateStorage.TrieWriter writer = spy(storages.sync().trieWriter());
+    final StorageTrieUpdater updater = stoppedOnTheNode(writer, Bytes::isEmpty);
+
+    assertThat(updater.applyNext()).isTrue();
+
+    verify(writer, never()).commit();
+    verify(writer).abort();
+  }
+
   @Test
   void needsAWorker() {
     assertThatThrownBy(
@@ -357,6 +382,28 @@ class StorageTrieUpdaterTest {
         .when(storage)
         .storageTrieNode(any(), any(), any());
     return storage;
+  }
+
+  // an updater with an update to apply, stopped as the update writes a node at such a location
+  private StorageTrieUpdater stoppedOnTheNode(
+      final SyncStateStorage.TrieWriter writer, final Predicate<Bytes> atLocation) {
+    final World world = SyncStorageFixture.randomWorld(new Random(20), 80);
+    final Bytes32 account = largestStorage(world);
+    final Bytes32 root = downloaded(world, account);
+    final SyncStateStorage storage = spy(storages.sync());
+    doReturn(writer).when(storage).trieWriter();
+    final StorageTrieUpdater updater = updater(storage, 0);
+    doAnswer(
+            invocation -> {
+              if (atLocation.test(invocation.getArgument(1))) {
+                updater.stop();
+              }
+              return invocation.callRealMethod();
+            })
+        .when(writer)
+        .storageNode(any(), any(), any(), any());
+    updater.changed(account, Hash.wrap(root), move(world, account, 1));
+    return updater;
   }
 
   private static Bytes32 largestStorage(final World world) {
