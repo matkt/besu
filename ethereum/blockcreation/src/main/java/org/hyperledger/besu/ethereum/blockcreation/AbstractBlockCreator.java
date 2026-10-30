@@ -404,7 +404,7 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
       if (stateRoot != null) {
         try {
           disposableWorldState.persist(
-              trieLogHeader(blockHeader), (ws, header, updater) -> stateRoot);
+              trieLogKeyHeader(blockHeader), (ws, header, updater) -> stateRoot);
           timings.register("trieLogSaved");
         } catch (final RuntimeException e) {
           // block is still valid, import will just execute it again
@@ -434,12 +434,12 @@ public abstract class AbstractBlockCreator implements AsyncBlockCreator {
   }
 
   /**
-   * Header to save the trie log of a created block under, the block header by default.
+   * Header whose hash keys the trie log of a created block, the block header by default.
    *
    * @param blockHeader the created block header
    * @return the header whose hash keys the trie log
    */
-  protected BlockHeader trieLogHeader(final BlockHeader blockHeader) {
+  protected BlockHeader trieLogKeyHeader(final BlockHeader blockHeader) {
     return blockHeader;
   }
 

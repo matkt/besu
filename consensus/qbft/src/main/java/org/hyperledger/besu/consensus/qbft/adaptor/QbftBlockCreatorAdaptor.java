@@ -17,7 +17,6 @@ package org.hyperledger.besu.consensus.qbft.adaptor;
 import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
 import org.hyperledger.besu.consensus.common.bft.BftExtraData;
 import org.hyperledger.besu.consensus.common.bft.BftExtraDataCodec;
-import org.hyperledger.besu.consensus.common.bft.BftHelpers;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlock;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockCreator;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockHeader;
@@ -63,7 +62,7 @@ public class QbftBlockCreatorAdaptor implements QbftBlockCreator {
     final Block block = blockResult.getBlock();
     // keep outputs under the committed block hash, so validation and import don't execute it again
     validatedBlockCache.put(
-        BftHelpers.toOnchainHeader(bftExtraDataCodec, block.getHeader()).getHash(),
+        BftBlockHeaderFunctions.forOnchainBlock(bftExtraDataCodec).hash(block.getHeader()),
         new ValidatedBlockCache.ValidatedBlock(
             block.getHeader().getNumber(),
             block.getBody(),

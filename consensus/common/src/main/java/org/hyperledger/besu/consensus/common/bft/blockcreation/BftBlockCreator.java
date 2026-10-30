@@ -125,7 +125,7 @@ public class BftBlockCreator extends AbstractBlockCreator {
 
   // the committed block hash, which ignores the round, so import finds it in any round
   @Override
-  protected BlockHeader trieLogHeader(final BlockHeader blockHeader) {
+  protected BlockHeader trieLogKeyHeader(final BlockHeader blockHeader) {
     return BftHelpers.toOnchainHeader(bftExtraDataCodec, blockHeader);
   }
 

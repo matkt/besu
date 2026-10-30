@@ -59,12 +59,12 @@ public class QbftBlockValidatorAdaptor implements QbftBlockValidator {
   public ValidationResult validateBlock(
       final QbftBlock block, final Optional<BlockAccessList> blockAccessList) {
     final Block proposedBlock = AdaptorUtil.toBesuBlock(block);
-    // hashed as on-chain, so cache entry and trie log match the committed block of any round
+    // hashed as on-chain: cache, trie log and bad block keys match the committed block, any round
     final Block besuBlock =
         new Block(
             BftHelpers.toOnchainHeader(bftExtraDataCodec, proposedBlock.getHeader()),
             proposedBlock.getBody());
-    // block already created or validated with same body and BAL, no need to execute it again
+    // proposal or round-change block already created or validated with same body and BAL
     if (validatedBlockCache
         .get(besuBlock.getHash())
         .filter(
