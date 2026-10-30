@@ -114,18 +114,12 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
   @Override
   public final BlockProcessingResult processBlock(final BlockExecutionContext context) {
     final BlockProcessingResult blockProcessingResult = super.processBlock(context);
-    // Return the result as-is if the block succeeded or this processor does not rerun failed
-    // blocks.
-    if (!blockProcessingResult.isFailed() || !shouldRerunSequentially()) {
+    // Return the result as-is if the block succeeded or its failure is not rerun.
+    if (!blockProcessingResult.isFailed() || !shouldRerunSequentially(context)) {
       return blockProcessingResult;
     }
     // The block already ran sequentially, so there is no parallel attempt to fall back from.
     if (context.isSequentialExecutionRequested()) {
-      return blockProcessingResult;
-    }
-    // With its block access list, every transaction ran on its exact pre-state, so the failure is
-    // the block's own and a sequential rerun would only repeat it.
-    if (isBalPerfectParallelization(context.getBlockAccessList())) {
       return blockProcessingResult;
     }
     final Block block = context.getBlock();
@@ -147,10 +141,11 @@ public class MainnetParallelBlockProcessor extends MainnetBlockProcessor {
 
   /**
    * Returns whether a block whose parallel processing failed is rerun sequentially. A block run on
-   * its block access list is never rerun.
+   * its block access list is not: each transaction ran on its exact pre-state, so the failure is
+   * the block's own and a rerun would only repeat it.
    */
-  protected boolean shouldRerunSequentially() {
-    return true;
+  protected boolean shouldRerunSequentially(final BlockExecutionContext context) {
+    return !isBalPerfectParallelization(context.getBlockAccessList());
   }
 
   /**
