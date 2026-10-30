@@ -201,9 +201,10 @@ class StorageTrieUpdaterTest {
             account -> assertThat(storageRoot(account)).isEqualTo(Accounts.UNKNOWN_STORAGE_ROOT));
   }
 
-  // a move after the stop is not recorded, so the update in progress must not give its root
+  // a move after the stop is not recorded, and a stop waits a minute at most: the update in
+  // progress commits no node and gives no root
   @Test
-  void writesNoRootOnceStoppedDuringAnUpdate() {
+  void writesNothingOnceStoppedDuringAnUpdate() {
     final World world = SyncStorageFixture.randomWorld(new Random(20), 80);
     final Bytes32 account = largestStorage(world);
     final Bytes32 root = downloaded(world, account);
@@ -220,10 +221,12 @@ class StorageTrieUpdaterTest {
             0));
 
     updater.get().changed(account, Hash.wrap(root), move(world, account, 1));
+    final Bytes32 movedRoot = world.storageRoot(account);
     assertThat(updater.get().applyNext()).isTrue();
 
     assertThat(updater.get().updated()).isZero();
     assertThat(storageRoot(account)).isEqualTo(Accounts.UNKNOWN_STORAGE_ROOT);
+    assertThat(storages.sync().hasStorageTrie(account, movedRoot)).isFalse();
   }
 
   @Test

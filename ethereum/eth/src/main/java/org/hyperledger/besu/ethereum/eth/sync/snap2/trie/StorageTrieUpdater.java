@@ -337,6 +337,13 @@ public final class StorageTrieUpdater {
           }
         });
     trie.commit((location, hash, node) -> writer.storageNode(accountHash, location, hash, node));
+    // a stop waits a minute at most for the updates: one that outlasts it commits nothing
+    synchronized (this) {
+      if (stopped) {
+        writer.abort();
+        throw new CancellationException("storage trie updates stopped");
+      }
+    }
     writer.commit();
     return trie.getRootHash();
   }

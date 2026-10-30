@@ -122,7 +122,8 @@ public final class StateSync {
   private final Set<CompletableFuture<?>> submitted = ConcurrentHashMap.newKeySet();
   private volatile Pivot pivot;
   private volatile Instant started = Instant.now();
-  private volatile boolean pivotStale;
+  // the epoch of the pivot that peers stopped serving, so that a move leaves its successor fresh
+  private volatile int staleEpoch = NO_EPOCH;
   private volatile boolean stopped;
   private volatile boolean paused;
   // peers left out of state requests, a new set on each dispatch
@@ -240,6 +241,7 @@ public final class StateSync {
    */
   public CompletableFuture<StateDiffApplier.Outcome> moveTo(
       final BlockHeader newPivot, final StateDiff diff) {
+    checkState(pivot != null, "the state download moves once started");
     return CompletableFuture.supplyAsync(
         () -> {
           try {
@@ -250,7 +252,7 @@ public final class StateSync {
                   switchPivot(newPivot);
                   return outcome;
                 });
-          } catch (final RuntimeException e) {
+          } catch (final Throwable e) {
             // the diff is partly applied, the download cannot go on from it
             stop(e);
             throw e;
@@ -261,7 +263,7 @@ public final class StateSync {
         scheduler.workers());
   }
 
-  /** Stops sending new requests, while several pivot moves are applied in a row. */
+  /** Stops asking for state while several pivot moves are applied in a row; bytecodes go on. */
   public void pause() {
     paused = true;
   }
@@ -292,7 +294,8 @@ public final class StateSync {
 
   /** Returns whether peers stopped serving the state of the pivot. */
   public boolean isPivotStale() {
-    return pivotStale;
+    final Pivot current = pivot;
+    return current != null && staleEpoch == current.epoch();
   }
 
   /** Returns the time since the download started. */
@@ -406,7 +409,6 @@ public final class StateSync {
   // callers hold the exclusive lock
   private void switchPivot(final BlockHeader newPivot) {
     pivot = new Pivot(pivot.epoch() + 1, newPivot);
-    pivotStale = false;
     execute(emptyAnswers::clear);
   }
 
@@ -422,9 +424,10 @@ public final class StateSync {
     // no interrupt: a completion callback that stops the download runs on these threads
     loop.shutdown();
     persister.shutdown();
-    trieUpdater.stop();
-    // the requests the scheduler still holds no longer go out
+    // the requests the scheduler still holds no longer go out, before the wait for the updates
     submitted.forEach(request -> request.cancel(false));
+    trieUpdater.stop();
+    // last, as a callback may start a new download
     completion.completeExceptionally(cause);
   }
 
@@ -465,7 +468,7 @@ public final class StateSync {
     if (stopped || completion.isDone()) {
       return;
     }
-    if (!pivotStale && !paused && !waitingForPeers) {
+    if (!waitingForPeers) {
       // a pivot move or a stop waits for the sends under way, which read the storage too
       lock.readLock().lock();
       try {
@@ -490,7 +493,8 @@ public final class StateSync {
     // more than the peers take now, so that a peer gets its next request at once
     final int target = capacity + capacity / 4;
 
-    if (!waitingForStatePeers) {
+    // bytecodes do not depend on the pivot: they go on while it waits for a move
+    if (!isPivotStale() && !paused && !waitingForStatePeers) {
       sendRefreshes(current, target);
       sendAccountRanges(current, target);
       // bytecodes flow alongside the state
@@ -846,13 +850,14 @@ public final class StateSync {
       emptyAnswers.forget(peer);
       return;
     }
-    final int candidates = Math.max(1, scheduler.peerCount(Protocol.SNAP) - excluded.size());
+    // only the peers that served the state and are not left out can answer empty
+    final int candidates = Math.max(1, servers.serving(nanoTime.getAsLong()));
     // a peer that never served state says nothing about the age of the pivot
-    if (servers.hasServed(peer) && emptyAnswers.add(peer, candidates) && !pivotStale) {
+    if (servers.hasServed(peer) && emptyAnswers.add(peer, candidates) && staleEpoch != epoch) {
       LOG.info(
           "Peers stopped serving the state of block {}, the pivot must move",
           pivot.header().getNumber());
-      pivotStale = true;
+      staleEpoch = epoch;
     }
   }
 
