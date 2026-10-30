@@ -14,6 +14,8 @@
  */
 package org.hyperledger.besu.consensus.qbft.adaptor;
 
+import org.hyperledger.besu.consensus.common.bft.BftExtraDataCodec;
+import org.hyperledger.besu.consensus.common.bft.BftHelpers;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlock;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockValidator;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
@@ -31,6 +33,7 @@ public class QbftBlockValidatorAdaptor implements QbftBlockValidator {
 
   private final BlockValidator blockValidator;
   private final ProtocolContext protocolContext;
+  private final BftExtraDataCodec bftExtraDataCodec;
   private final ValidatedBlockCache validatedBlockCache;
 
   /**
@@ -38,21 +41,29 @@ public class QbftBlockValidatorAdaptor implements QbftBlockValidator {
    *
    * @param blockValidator The Besu block validator
    * @param protocolContext The protocol context
+   * @param bftExtraDataCodec the codec to compute the on-chain hash of the block
    * @param validatedBlockCache outputs of created and validated blocks
    */
   public QbftBlockValidatorAdaptor(
       final BlockValidator blockValidator,
       final ProtocolContext protocolContext,
+      final BftExtraDataCodec bftExtraDataCodec,
       final ValidatedBlockCache validatedBlockCache) {
     this.blockValidator = blockValidator;
     this.protocolContext = protocolContext;
+    this.bftExtraDataCodec = bftExtraDataCodec;
     this.validatedBlockCache = validatedBlockCache;
   }
 
   @Override
   public ValidationResult validateBlock(
       final QbftBlock block, final Optional<BlockAccessList> blockAccessList) {
-    final Block besuBlock = AdaptorUtil.toBesuBlock(block);
+    final Block proposedBlock = AdaptorUtil.toBesuBlock(block);
+    // hashed as on-chain, so cache entry and trie log match the committed block of any round
+    final Block besuBlock =
+        new Block(
+            BftHelpers.toOnchainHeader(bftExtraDataCodec, proposedBlock.getHeader()),
+            proposedBlock.getBody());
     // block already created or validated with same body and BAL, no need to execute it again
     if (validatedBlockCache
         .get(besuBlock.getHash())

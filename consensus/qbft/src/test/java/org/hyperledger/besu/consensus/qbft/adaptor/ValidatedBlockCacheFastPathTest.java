@@ -50,12 +50,13 @@ import java.util.List;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/** Proposer flow with the real adaptors sharing one cache: the block is executed only once. */
+/** Real adaptors sharing one cache: the block is executed only once, whatever the round. */
 @ExtendWith(MockitoExtension.class)
 class ValidatedBlockCacheFastPathTest {
   @Mock private BlockCreator besuBlockCreator;
@@ -78,9 +79,10 @@ class ValidatedBlockCacheFastPathTest {
   private final List<SECPSignature> commitSeals =
       List.of(new SECPSignature(BigInteger.ONE, BigInteger.ONE, (byte) 1));
 
-  @Test
-  void proposerExecutesItsBlockOnlyWhenCreatingIt() {
-    final Block createdBlock = proposal(0, body);
+  @ParameterizedTest
+  @ValueSource(ints = {0, 2})
+  void proposerExecutesItsBlockOnlyWhenCreatingIt(final int round) {
+    final Block createdBlock = proposal(round, body);
     final List<TransactionReceipt> receipts = generator.receipts(createdBlock);
     when(transactionSelectionResults.getReceipts()).thenReturn(receipts);
     when(besuBlockCreator.createBlock(10L, parentHeader))
@@ -99,10 +101,9 @@ class ValidatedBlockCacheFastPathTest {
     assertThat(validator().validateBlock(proposal, Optional.empty()).success()).isTrue();
     verifyNoInteractions(blockValidator);
 
-    // the sealed block keeps the proposal hash in round 0, and its body object
-    final QbftBlock sealed = creator.createSealedBlock(proposal, 0, commitSeals);
+    // the sealed block keeps the body object of the proposal
+    final QbftBlock sealed = creator.createSealedBlock(proposal, round, commitSeals);
     final Block sealedBlock = AdaptorUtil.toBesuBlock(sealed);
-    assertThat(sealedBlock.getHash()).isEqualTo(createdBlock.getHash());
     assertThat(sealedBlock.getBody()).isSameAs(createdBlock.getBody());
 
     // importing the committed block uses the receipts from block creation
@@ -133,7 +134,8 @@ class ValidatedBlockCacheFastPathTest {
   }
 
   private QbftBlockValidatorAdaptor validator() {
-    return new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache);
+    return new QbftBlockValidatorAdaptor(
+        blockValidator, protocolContext, codec, validatedBlockCache);
   }
 
   private QbftBlockImporterAdaptor importer() {
@@ -141,7 +143,7 @@ class ValidatedBlockCacheFastPathTest {
         blockImporter, blockHeaderValidator, protocolContext, validatedBlockCache);
   }
 
-  // the trie log was saved at block creation or proposal validation
+  // the trie log was saved under the on-chain hash, at block creation or proposal validation
   private void stubFastPathPreconditions(final Block sealedBlock) {
     when(protocolContext.getBlockchain()).thenReturn(blockchain);
     when(protocolContext.getWorldStateArchive()).thenReturn(worldStateArchive);

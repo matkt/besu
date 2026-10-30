@@ -30,6 +30,9 @@ import java.util.Optional;
  *
  * <p>Block creation and proposal validation both save the block trie log. On commit, the importer
  * only needs the receipts, and moves the head world state with the trie log.
+ *
+ * <p>Keyed by the on-chain hash, which ignores round and commit seals, so a proposal of any round
+ * and its committed block share the entry.
  */
 public class ValidatedBlockCache {
 

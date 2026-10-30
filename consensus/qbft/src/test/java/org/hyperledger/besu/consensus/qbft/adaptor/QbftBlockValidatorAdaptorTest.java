@@ -22,9 +22,11 @@ import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
 import org.hyperledger.besu.consensus.common.bft.BftExtraData;
+import org.hyperledger.besu.consensus.common.bft.BftHelpers;
 import org.hyperledger.besu.consensus.qbft.QbftExtraDataCodec;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockValidator;
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.BlockValidator;
@@ -80,14 +82,16 @@ class QbftBlockValidatorAdaptorTest {
   }
 
   @Test
-  void recordsOutputsOfSuccessfullyValidatedBlock() {
-    final Block block = proposal(0, body);
+  void recordsOutputsOfValidatedBlockUnderOnchainHash() {
+    // round 1, so the proposal hash is not the on-chain hash
+    final Block block = proposal(1, body);
+    assertThat(onchainHash(block)).isNotEqualTo(block.getHash());
     final List<TransactionReceipt> receipts = generator.receipts(block);
     stubValidation(block, Optional.empty(), successWith(receipts));
 
     validate(block, Optional.empty());
 
-    assertThat(validatedBlockCache.take(block.getHash(), block.getHeader().getNumber()))
+    assertThat(validatedBlockCache.take(onchainHash(block), block.getHeader().getNumber()))
         .contains(
             new ValidatedBlockCache.ValidatedBlock(
                 block.getHeader().getNumber(), body, receipts, Optional.empty()));
@@ -100,7 +104,8 @@ class QbftBlockValidatorAdaptorTest {
 
     validate(block, Optional.empty());
 
-    assertThat(validatedBlockCache.take(block.getHash(), block.getHeader().getNumber())).isEmpty();
+    assertThat(validatedBlockCache.take(onchainHash(block), block.getHeader().getNumber()))
+        .isEmpty();
   }
 
   @Test
@@ -109,14 +114,14 @@ class QbftBlockValidatorAdaptorTest {
     final ValidatedBlockCache.ValidatedBlock validatedBlock =
         new ValidatedBlockCache.ValidatedBlock(
             block.getHeader().getNumber(), body, List.of(), Optional.empty());
-    validatedBlockCache.put(block.getHash(), validatedBlock);
+    validatedBlockCache.put(onchainHash(block), validatedBlock);
 
     final QbftBlockValidator.ValidationResult validationResult = validate(block, Optional.empty());
 
     assertThat(validationResult.success()).isTrue();
     assertThat(validationResult.errorMessage()).isEmpty();
     verifyNoInteractions(blockValidator);
-    assertThat(validatedBlockCache.take(block.getHash(), block.getHeader().getNumber()))
+    assertThat(validatedBlockCache.take(onchainHash(block), block.getHeader().getNumber()))
         .contains(validatedBlock);
   }
 
@@ -124,7 +129,7 @@ class QbftBlockValidatorAdaptorTest {
   void executesBlockCreatedBeforeWhenBlockAccessListDiffers() {
     final Block block = proposal(0, body);
     validatedBlockCache.put(
-        block.getHash(),
+        onchainHash(block),
         new ValidatedBlockCache.ValidatedBlock(
             block.getHeader().getNumber(), body, List.of(), Optional.empty()));
     final Optional<BlockAccessList> blockAccessList = Optional.of(new BlockAccessList(List.of()));
@@ -140,7 +145,7 @@ class QbftBlockValidatorAdaptorTest {
   void executesBlockWithSameHashWhenBodyIsNotTheExecutedOne() {
     final Block block = proposal(0, body);
     validatedBlockCache.put(
-        block.getHash(),
+        onchainHash(block),
         new ValidatedBlockCache.ValidatedBlock(
             block.getHeader().getNumber(), body, List.of(), Optional.empty()));
     // same header and same transactions, but not the body object that was executed
@@ -168,18 +173,27 @@ class QbftBlockValidatorAdaptorTest {
         blockBody);
   }
 
+  private Block onchainBlock(final Block block) {
+    return new Block(BftHelpers.toOnchainHeader(codec, block.getHeader()), block.getBody());
+  }
+
+  private Hash onchainHash(final Block block) {
+    return onchainBlock(block).getHash();
+  }
+
   private BlockProcessingResult successWith(final List<TransactionReceipt> receipts) {
     return new BlockProcessingResult(
         Optional.of(new BlockProcessingOutputs(mock(MutableWorldState.class), receipts)));
   }
 
+  // the validator processes the on-chain view of the proposal
   private void stubValidation(
       final Block block,
       final Optional<BlockAccessList> blockAccessList,
       final BlockProcessingResult result) {
     when(blockValidator.validateAndProcessBlock(
             protocolContext,
-            block,
+            onchainBlock(block),
             HeaderValidationMode.LIGHT,
             HeaderValidationMode.FULL,
             blockAccessList,
@@ -190,7 +204,8 @@ class QbftBlockValidatorAdaptorTest {
 
   private QbftBlockValidator.ValidationResult validate(
       final Block block, final Optional<BlockAccessList> blockAccessList) {
-    return new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
+    return new QbftBlockValidatorAdaptor(
+            blockValidator, protocolContext, codec, validatedBlockCache)
         .validateBlock(new QbftBlockAdaptor(block), blockAccessList);
   }
 }
