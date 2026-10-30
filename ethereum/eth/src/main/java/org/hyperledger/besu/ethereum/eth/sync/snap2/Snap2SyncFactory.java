@@ -28,15 +28,17 @@ import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestScheduler;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.BonsaiSyncStateStorage;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.ForestSyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.storage.SyncStateStorage;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
 import org.hyperledger.besu.ethereum.mainnet.ProtocolSchedule;
+import org.hyperledger.besu.ethereum.storage.StorageProvider;
+import org.hyperledger.besu.ethereum.trie.forest.storage.ForestWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
-import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,6 +67,7 @@ public final class Snap2SyncFactory {
    * Creates the sync unless the chain head is above the floor of the sync, a sync left unfinished
    * and a resync both aside.
    *
+   * @param storageProvider gives the segments a sync on Forest stages its flat state in
    * @param pivotBlockSelector the source of the chain head, when it is one
    * @param terminalTotalDifficulty where proof of stake starts, none on a network that does not
    *     merge
@@ -79,6 +82,7 @@ public final class Snap2SyncFactory {
       final MetricsSystem metricsSystem,
       final EthPeers ethPeers,
       final WorldStateStorageCoordinator worldStateStorageCoordinator,
+      final StorageProvider storageProvider,
       final SyncState syncState,
       final PivotBlockSelector pivotBlockSelector,
       final Optional<Difficulty> terminalTotalDifficulty,
@@ -90,7 +94,7 @@ public final class Snap2SyncFactory {
     if (!needsSync(marker, syncState, blockchain.getChainHeadBlockNumber(), floor)) {
       return Optional.empty();
     }
-    final SyncStateStorage storage = syncStorage(worldStateStorageCoordinator);
+    final SyncStateStorage storage = syncStorage(worldStateStorageCoordinator, storageProvider);
     final Snap2Configuration config =
         Snap2Configuration.create(
             syncConfig.getDownloaderHeaderRequestSize(),
@@ -174,14 +178,18 @@ public final class Snap2SyncFactory {
     return true;
   }
 
-  // Bonsai only, until the sync storage on Forest
-  private static SyncStateStorage syncStorage(final WorldStateStorageCoordinator coordinator) {
-    if (coordinator.getDataStorageFormat() != DataStorageFormat.BONSAI) {
-      throw new IllegalStateException(
-          "SNAP2 sync needs the BONSAI data storage format, not "
-              + coordinator.getDataStorageFormat());
-    }
-    return new BonsaiSyncStateStorage(
-        coordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class));
+  private static SyncStateStorage syncStorage(
+      final WorldStateStorageCoordinator coordinator, final StorageProvider storageProvider) {
+    return switch (coordinator.getDataStorageFormat()) {
+      case BONSAI ->
+          new BonsaiSyncStateStorage(
+              coordinator.getStrategy(BonsaiWorldStateKeyValueStorage.class));
+      case FOREST ->
+          new ForestSyncStateStorage(
+              coordinator.getStrategy(ForestWorldStateKeyValueStorage.class), storageProvider);
+      case X_BONSAI_ARCHIVE ->
+          throw new IllegalStateException(
+              "SNAP2 sync needs the BONSAI or FOREST data storage format, not X_BONSAI_ARCHIVE");
+    };
   }
 }

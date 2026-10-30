@@ -16,15 +16,24 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hyperledger.besu.ethereum.eth.sync.snap2.SyncFixture.WINDOW;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.SyncFixture.checkpoint;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.ethereum.core.BlockHeader;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.core.Difficulty;
+import org.hyperledger.besu.ethereum.eth.sync.common.WrongChainException;
+import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.plugin.services.exception.StorageException;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -127,6 +136,59 @@ class SyncAttemptTest {
     attempt.maybeMove();
 
     assertThat(restartCause(synced)).hasMessageContaining("reorganised");
+  }
+
+  @Test
+  void endsOnceTheHeaderDownloadEndsForGood() {
+    chain.extend(10);
+    // a checkpoint of another chain at the same height, stored already
+    final BlockHeader other =
+        new BlockHeaderTestFixture().number(2).difficulty(Difficulty.ZERO).buildHeader();
+    node.blockchain.unsafeStoreHeader(other, Difficulty.ZERO);
+    final SyncAttempt attempt =
+        new SyncAttempt(node.context(Optional.of(checkpoint(2, other.getHash()))), chain.header(6));
+
+    final CompletableFuture<BlockHeader> synced = attempt.start();
+    node.runUntil(synced::isDone);
+
+    // before the state download ended
+    assertThat(attempt.stage()).isEqualTo(SyncAttempt.Stage.STATE);
+    assertThat(synced)
+        .failsWithin(Duration.ZERO)
+        .withThrowableThat()
+        .havingRootCause()
+        .isInstanceOf(WrongChainException.class);
+  }
+
+  @Test
+  void leavesACancelWhileTheStorageTriesFinishToTheBuild() {
+    chain.extend(10);
+    final SyncAttempt attempt = attempt(6);
+    final CompletableFuture<BlockHeader> synced = attempt.start();
+    node.downloadState();
+    // the next writer is that of the storage tries the final build finishes first
+    final List<Optional<WorldStateTrieBuilder>> builds = new ArrayList<>();
+    doAnswer(
+            invocation -> {
+              if (builds.isEmpty()) {
+                attempt.cancel();
+                builds.add(attempt.trieBuilder());
+              }
+              return invocation.callRealMethod();
+            })
+        .when(node.storage)
+        .trieWriter();
+
+    node.runUntil(synced::isDone);
+
+    // the build started, so that awaitStop waits for the end of this thread's writes
+    assertThat(builds).singleElement().satisfies(build -> assertThat(build).isPresent());
+    assertThat(synced)
+        .failsWithin(Duration.ZERO)
+        .withThrowableThat()
+        .havingRootCause()
+        .isInstanceOf(CancellationException.class);
+    verify(node.storage, never()).saveWorldState(any(), any());
   }
 
   @Test
