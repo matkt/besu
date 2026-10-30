@@ -54,15 +54,14 @@ public class ValidatedBlockCache {
       Optional<BlockAccessList> blockAccessList) {
 
     /**
-     * Check the body is the one executed. Same object and not equals, to not compare all the
-     * transactions. The proposal and the committed block share the same body object.
+     * Check the body is the one executed. Compares the content, as a re-proposal received from a
+     * peer is decoded again; returns at once when it is the same object.
      *
      * @param blockBody the body of the block to validate or import
      * @return true if it is the executed body
      */
-    @SuppressWarnings("ReferenceEquality")
     public boolean isExecutedBody(final BlockBody blockBody) {
-      return body == blockBody;
+      return body.equals(blockBody);
     }
   }
 

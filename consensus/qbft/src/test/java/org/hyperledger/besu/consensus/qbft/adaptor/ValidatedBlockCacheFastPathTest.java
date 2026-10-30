@@ -16,8 +16,13 @@ package org.hyperledger.besu.consensus.qbft.adaptor;
 
 import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
@@ -26,6 +31,8 @@ import org.hyperledger.besu.consensus.qbft.QbftExtraDataCodec;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlock;
 import org.hyperledger.besu.crypto.SECPSignature;
 import org.hyperledger.besu.datatypes.Address;
+import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
+import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.BlockValidator;
 import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.blockcreation.BlockCreationTiming;
@@ -42,14 +49,17 @@ import org.hyperledger.besu.ethereum.core.BlockImporter;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.BlockHeaderValidator;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
+import org.hyperledger.besu.ethereum.mainnet.inclusionlist.InclusionListTransactions;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Optional;
 
 import org.apache.tuweni.bytes.Bytes;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -111,6 +121,54 @@ class ValidatedBlockCacheFastPathTest {
     assertThat(importer().importBlock(sealed, Optional.empty())).isTrue();
     verify(blockchain).appendBlock(sealedBlock, receipts, Optional.empty());
     verify(badBlockManager).removeBadBlock(sealedBlock.getHash());
+    verifyNoInteractions(blockImporter);
+  }
+
+  @Test
+  void validatorExecutesReproposedBlockOnlyOnce() {
+    final Block proposedBlock = proposal(0, body);
+    final List<TransactionReceipt> receipts = generator.receipts(proposedBlock);
+    when(blockValidator.validateAndProcessBlock(
+            eq(protocolContext),
+            any(),
+            eq(HeaderValidationMode.LIGHT),
+            eq(HeaderValidationMode.FULL),
+            eq(Optional.empty()),
+            eq(InclusionListTransactions.EMPTY),
+            eq(false)))
+        .thenReturn(
+            new BlockProcessingResult(
+                Optional.of(new BlockProcessingOutputs(mock(MutableWorldState.class), receipts))));
+    assertThat(
+            validator()
+                .validateBlock(new QbftBlockAdaptor(proposedBlock), Optional.empty())
+                .success())
+        .isTrue();
+
+    // round change: the prepared block is proposed again in round 2, decoded from a peer message
+    final QbftBlock reproposal =
+        new QbftBlockAdaptor(
+            proposal(
+                2, new BlockBody(body.getTransactions(), body.getOmmers(), body.getWithdrawals())));
+    assertThat(validator().validateBlock(reproposal, Optional.empty()).success()).isTrue();
+
+    final QbftBlock sealed = creator().createSealedBlock(reproposal, 2, commitSeals);
+    final Block sealedBlock = AdaptorUtil.toBesuBlock(sealed);
+    stubFastPathPreconditions(sealedBlock);
+    assertThat(importer().importBlock(sealed, Optional.empty())).isTrue();
+
+    // processed once, with the committed block hash, so import finds the trie log it saved
+    verify(blockValidator)
+        .validateAndProcessBlock(
+            eq(protocolContext),
+            argThat(processed -> processed.getHash().equals(sealedBlock.getHash())),
+            any(),
+            any(),
+            any(),
+            eq(InclusionListTransactions.EMPTY),
+            eq(false));
+    verifyNoMoreInteractions(blockValidator);
+    verify(blockchain).appendBlock(sealedBlock, receipts, Optional.empty());
     verifyNoInteractions(blockImporter);
   }
 

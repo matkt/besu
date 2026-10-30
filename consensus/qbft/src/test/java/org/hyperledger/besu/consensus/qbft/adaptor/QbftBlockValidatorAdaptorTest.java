@@ -17,7 +17,9 @@ package org.hyperledger.besu.consensus.qbft.adaptor;
 import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
@@ -126,6 +128,31 @@ class QbftBlockValidatorAdaptorTest {
   }
 
   @Test
+  void doesNotExecuteReproposalOfValidatedBlockFromPeer() {
+    final Block proposal = proposal(0, body);
+    stubValidation(proposal, Optional.empty(), successWith(List.of()));
+    validate(proposal, Optional.empty());
+
+    // re-proposal in a later round, decoded from a peer message: new body object, same content
+    final Block reproposal =
+        proposal(2, new BlockBody(body.getTransactions(), body.getOmmers(), body.getWithdrawals()));
+    final QbftBlockValidator.ValidationResult validationResult =
+        validate(reproposal, Optional.empty());
+
+    assertThat(validationResult.success()).isTrue();
+    verify(blockValidator)
+        .validateAndProcessBlock(
+            protocolContext,
+            onchainBlock(proposal),
+            HeaderValidationMode.LIGHT,
+            HeaderValidationMode.FULL,
+            Optional.empty(),
+            InclusionListTransactions.EMPTY,
+            false);
+    verifyNoMoreInteractions(blockValidator);
+  }
+
+  @Test
   void executesBlockCreatedBeforeWhenBlockAccessListDiffers() {
     final Block block = proposal(0, body);
     validatedBlockCache.put(
@@ -142,15 +169,15 @@ class QbftBlockValidatorAdaptorTest {
   }
 
   @Test
-  void executesBlockWithSameHashWhenBodyIsNotTheExecutedOne() {
+  void executesBlockWithSameHashWhenBodyDiffers() {
     final Block block = proposal(0, body);
     validatedBlockCache.put(
         onchainHash(block),
         new ValidatedBlockCache.ValidatedBlock(
             block.getHeader().getNumber(), body, List.of(), Optional.empty()));
-    // same header and same transactions, but not the body object that was executed
+    // same header, but not the transactions that were executed
     final Block otherBody =
-        new Block(block.getHeader(), new BlockBody(body.getTransactions(), body.getOmmers()));
+        new Block(block.getHeader(), new BlockBody(List.of(generator.transaction()), emptyList()));
     stubValidation(otherBody, Optional.empty(), new BlockProcessingResult("failed"));
 
     final QbftBlockValidator.ValidationResult validationResult =
