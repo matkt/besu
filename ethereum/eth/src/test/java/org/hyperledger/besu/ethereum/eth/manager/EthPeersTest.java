@@ -501,19 +501,71 @@ public class EthPeersTest {
         .contains(DisconnectReason.TOO_MANY_PEERS);
   }
 
-  // a peer serving snap with the given version, or no snap
+  @Test
+  public void snap2SyncKeepsASnapServerForAPeerThatServesNoState() {
+    final EthProtocolManager snap2Manager =
+        EthProtocolManagerTestBuilder.builder().setSyncMode(SyncMode.SNAP2).build();
+    final EthPeers snap2Peers = snap2Manager.ethContext().getEthPeers();
+    snap2Peers.snapServerPeersNeeded(true);
+    while (snap2Peers.peerCount() < snap2Peers.getMaxPeers()) {
+      assertThat(snap2Peers.addPeerToEthPeers(peer(snap2Manager, SnapProtocolVersion.V1))).isTrue();
+    }
+
+    // a node that syncs announces snap/2, and its state check failed
+    assertThat(
+            snap2Peers.addPeerToEthPeers(peer(snap2Manager, SnapProtocolVersion.V2, false, false)))
+        .isFalse();
+  }
+
+  @Test
+  public void snap2SyncReplacesOnlyAnInboundPeerPastTheInboundLimit() {
+    final EthProtocolManager snap2Manager =
+        EthProtocolManagerTestBuilder.builder()
+            .setSyncMode(SyncMode.SNAP2)
+            .setMaxRemotelyInitiatedPeers(2)
+            .build();
+    final EthPeers snap2Peers = snap2Manager.ethContext().getEthPeers();
+    snap2Peers.snapServerPeersNeeded(true);
+    // three inbound snap/1 peers, past the limit of two, the others outbound without snap
+    for (int i = 0; i < 3; i++) {
+      assertThat(
+              snap2Peers.addPeerToEthPeers(peer(snap2Manager, SnapProtocolVersion.V1, true, true)))
+          .isTrue();
+    }
+    while (snap2Peers.peerCount() < snap2Peers.getMaxPeers()) {
+      assertThat(snap2Peers.addPeerToEthPeers(peer(snap2Manager, null))).isTrue();
+    }
+
+    // an inbound snap/2 peer replaces an inbound one, not an outbound peer without snap
+    assertThat(snap2Peers.addPeerToEthPeers(peer(snap2Manager, SnapProtocolVersion.V2, true, true)))
+        .isTrue();
+
+    assertThat(snap2Peers.streamAvailablePeers().filter(p -> p.isInboundInitiated())).hasSize(3);
+  }
+
+  // an outbound peer serving snap with the given version, or no snap
   private static EthPeer peer(final EthProtocolManager manager, final SnapProtocolVersion snap) {
+    return peer(manager, snap, snap != null, false);
+  }
+
+  private static EthPeer peer(
+      final EthProtocolManager manager,
+      final SnapProtocolVersion snap,
+      final boolean servingSnap,
+      final boolean inbound) {
     final RespondingEthPeer.Builder builder =
         RespondingEthPeer.builder()
             .ethProtocolManager(manager)
             .totalDifficulty(Difficulty.of(50))
             .estimatedHeight(20)
-            .isServingSnap(snap != null)
+            .isServingSnap(servingSnap)
             .addToEthPeers(false);
     if (snap != null) {
       builder.extraCapability(snap.getCapability());
     }
-    return builder.build().getEthPeer();
+    final RespondingEthPeer peer = builder.build();
+    peer.getPeerConnection().setInboundInitiated(inbound);
+    return peer.getEthPeer();
   }
 
   @Test

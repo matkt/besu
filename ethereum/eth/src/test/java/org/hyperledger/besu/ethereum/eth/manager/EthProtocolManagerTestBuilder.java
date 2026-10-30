@@ -66,6 +66,7 @@ public class EthProtocolManagerTestBuilder {
   private SynchronizerConfiguration synchronizerConfiguration;
   private PeerTaskExecutor peerTaskExecutor;
   private SyncMode syncMode = SyncMode.SNAP;
+  private int maxRemotelyInitiatedPeers = 25;
 
   public static EthProtocolManagerTestBuilder builder() {
     return new EthProtocolManagerTestBuilder();
@@ -172,6 +173,12 @@ public class EthProtocolManagerTestBuilder {
     return this;
   }
 
+  public EthProtocolManagerTestBuilder setMaxRemotelyInitiatedPeers(
+      final int maxRemotelyInitiatedPeers) {
+    this.maxRemotelyInitiatedPeers = maxRemotelyInitiatedPeers;
+    return this;
+  }
+
   public EthProtocolManager build() {
     if (protocolSchedule == null) {
       protocolSchedule = ProtocolScheduleFixture.TESTING_NETWORK;
@@ -213,7 +220,7 @@ public class EthProtocolManagerTestBuilder {
               Collections.emptyList(),
               Bytes.random(64),
               25,
-              25,
+              maxRemotelyInitiatedPeers,
               false,
               syncMode,
               forkIdManager);

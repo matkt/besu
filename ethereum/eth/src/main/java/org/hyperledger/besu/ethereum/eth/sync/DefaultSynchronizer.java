@@ -70,6 +70,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
   private final Optional<FullSyncDownloader> fullSyncDownloader;
   private final ProtocolContext protocolContext;
   private final PivotBlockSelector pivotBlockSelector;
+  private final boolean keepsPivotBlockSelector;
   private final SyncTerminationCondition terminationCondition;
   private final BackgroundBackfill backgroundBackfill;
 
@@ -92,6 +93,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
       final Optional<Difficulty> terminalTotalDifficulty) {
     this.syncState = syncState;
     this.pivotBlockSelector = pivotBlockSelector;
+    this.keepsPivotBlockSelector = syncConfig.getSyncMode() == SyncMode.SNAP2;
     this.protocolContext = protocolContext;
     this.terminationCondition = terminationCondition;
     this.backgroundBackfill =
@@ -112,7 +114,7 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
         protocolContext.getBlockchain(),
         this::calculateTrailingPeerRequirements);
 
-    if (syncConfig.getSyncMode() == SyncMode.SNAP) {
+    if (syncConfig.getSyncMode().usesSnap()) {
       SnapServerChecker.createAndSetSnapServerChecker(ethContext, metricsSystem);
     }
 
@@ -297,7 +299,10 @@ public class DefaultSynchronizer implements Synchronizer, UnverifiedForkchoiceLi
         LOG.info(
             "Sync completed successfully with pivot block {}",
             result.getPivotBlockNumber().getAsLong());
-      pivotBlockSelector.close();
+      // the head tracker of SNAP2 stays subscribed, as a resync needs the head again
+      if (!keepsPivotBlockSelector) {
+        pivotBlockSelector.close();
+      }
       syncState.markInitialSyncPhaseAsDone();
     }
 

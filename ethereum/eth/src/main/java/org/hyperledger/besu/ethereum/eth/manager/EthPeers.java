@@ -16,7 +16,6 @@ package org.hyperledger.besu.ethereum.eth.manager;
 
 import org.hyperledger.besu.ethereum.core.BlockHeader;
 import org.hyperledger.besu.ethereum.eth.EthProtocol;
-import org.hyperledger.besu.ethereum.eth.SnapProtocol;
 import org.hyperledger.besu.ethereum.eth.SnapProtocolVersion;
 import org.hyperledger.besu.ethereum.eth.manager.EthPeer.DisconnectCallback;
 import org.hyperledger.besu.ethereum.eth.manager.peertask.PeerSelector;
@@ -32,7 +31,6 @@ import org.hyperledger.besu.ethereum.p2p.peers.Peer;
 import org.hyperledger.besu.ethereum.p2p.peers.PeerId;
 import org.hyperledger.besu.ethereum.p2p.rlpx.RlpxAgent;
 import org.hyperledger.besu.ethereum.p2p.rlpx.connections.PeerConnection;
-import org.hyperledger.besu.ethereum.p2p.rlpx.wire.Capability;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.PeerClientName;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.PeerInfo;
 import org.hyperledger.besu.ethereum.p2p.rlpx.wire.messages.DisconnectMessage;
@@ -52,7 +50,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -654,7 +651,7 @@ public class EthPeers implements PeerSelector {
 
             peer.chainState().updateHeightEstimate(peerHeadBlockHeader.getNumber());
             CompletableFuture<Void> isServingSnapFuture;
-            if (syncMode == SyncMode.SNAP) {
+            if (syncMode.usesSnap()) {
               // even if we have finished the snap sync, we still want to know if the peer is a snap
               // server
               isServingSnapFuture =
@@ -666,10 +663,6 @@ public class EthPeers implements PeerSelector {
                           throw new RuntimeException(e);
                         }
                       });
-            } else if (syncMode == SyncMode.SNAP2) {
-              // any snap peer serves the state ranges; see snapRank for the preferred ones
-              peer.setIsServingSnap(SnapProtocol.isAgreed(peer.getAgreedCapabilities()));
-              isServingSnapFuture = CompletableFuture.completedFuture(null);
             } else {
               isServingSnapFuture = CompletableFuture.completedFuture(null);
             }
@@ -954,13 +947,15 @@ public class EthPeers implements PeerSelector {
     return snapServerPeersNeeded && numberOfSnapServers() < snapServerTargetNumber;
   }
 
-  // for a SNAP2 sync: no snap below snap/1, below snap/2, which serves block access lists too
+  // for a SNAP2 sync: a peer that served no state below snap/1, below snap/2, which serves block
+  // access lists too; a node that syncs announces snap/2 and serves nothing
   private static int snapRank(final EthPeer peer) {
-    final Set<Capability> capabilities = peer.getAgreedCapabilities();
-    if (!SnapProtocol.isAgreed(capabilities)) {
+    if (!peer.isServingSnap()) {
       return 0;
     }
-    return capabilities.contains(SnapProtocolVersion.V2.getCapability()) ? SNAP2_RANK : 1;
+    return peer.getAgreedCapabilities().contains(SnapProtocolVersion.V2.getCapability())
+        ? SNAP2_RANK
+        : 1;
   }
 
   // the lowest ranked peer a SNAP2 sync replaces with a better ranked one
@@ -969,9 +964,12 @@ public class EthPeers implements PeerSelector {
       return Optional.empty();
     }
     final int rank = snapRank(peer);
+    final boolean inboundLimitExceeded = inboundInitiatedConnectionLimitExceeded();
     return activeConnections.values().stream()
         .filter(p -> !canExceedPeerLimits(p.getId()) && snapRank(p) < rank)
         .map(EthPeerImmutableAttributes::from)
+        // as below: past the inbound limit, only an inbound peer makes room
+        .filter(inboundLimitExceeded ? p -> p.isInboundInitiated() : p -> true)
         .min(
             Comparator.comparingInt((EthPeerImmutableAttributes p) -> snapRank(p.ethPeer()))
                 .thenComparing(MOST_USEFUL_PEER))

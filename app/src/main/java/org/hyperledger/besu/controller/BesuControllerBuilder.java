@@ -917,7 +917,7 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
           dataStorageConfiguration.getExtraStorageConfiguration().getMaxLayersToLoad());
     }
 
-    if (syncConfig.getSyncMode() == SyncMode.SNAP || syncConfig.getSyncMode() == SyncMode.SNAP2) {
+    if (syncConfig.getSyncMode().usesSnap()) {
       synchronizer.subscribeInSync((b) -> ethPeers.snapServerPeersNeeded(!b));
       ethPeers.snapServerPeersNeeded(true);
     } else {
