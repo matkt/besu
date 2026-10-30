@@ -14,8 +14,6 @@
  */
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
-import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
-import org.hyperledger.besu.ethereum.eth.sync.snap2.trie.WorldStateTrieBuilder;
 import org.hyperledger.besu.metrics.BesuMetricCategory;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.metrics.LabelledSuppliedMetric;
@@ -25,25 +23,28 @@ import java.util.function.Supplier;
 import java.util.function.ToDoubleFunction;
 import java.util.function.ToLongFunction;
 
-/** The metrics of the SNAP2 sync, read from its current attempt, 0 before the first one. */
+/**
+ * The metrics of the SNAP2 sync, read from its current attempt, then from the figures of the last
+ * one once the sync ended; 0 before the first one.
+ */
 final class Snap2Metrics {
 
   private static final BesuMetricCategory CATEGORY = BesuMetricCategory.SYNCHRONIZER;
 
-  private final Supplier<Optional<SyncAttempt>> current;
+  private final Supplier<Optional<SyncAttempt.Figures>> figures;
 
-  private Snap2Metrics(final Supplier<Optional<SyncAttempt>> current) {
-    this.current = current;
+  private Snap2Metrics(final Supplier<Optional<SyncAttempt.Figures>> figures) {
+    this.figures = figures;
   }
 
   /** Registers the metrics of the sync. */
   static void register(final MetricsSystem metricsSystem, final Snap2SyncController sync) {
-    final Snap2Metrics metrics = new Snap2Metrics(sync::current);
+    final Snap2Metrics metrics = new Snap2Metrics(sync::figures);
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_pivot_block",
         "Block of the SNAP2 pivot",
-        () -> metrics.attemptValue(SyncAttempt::pivotNumber));
+        () -> metrics.value(SyncAttempt.Figures::pivot));
     metricsSystem.createCounter(
         CATEGORY, "snap2_pivot_moves_total", "Pivot moves of SNAP2", sync::pivotMoves);
     metricsSystem.createCounter(
@@ -72,47 +73,47 @@ final class Snap2Metrics {
         CATEGORY,
         "snap2_accounts_downloaded_total",
         "Accounts downloaded by SNAP2",
-        () -> stateValue(StateSync::downloadedAccounts));
+        () -> value(SyncAttempt.Figures::accounts));
     metricsSystem.createCounter(
         CATEGORY,
         "snap2_slots_downloaded_total",
         "Storage slots downloaded by SNAP2",
-        () -> stateValue(StateSync::downloadedSlots));
+        () -> value(SyncAttempt.Figures::slots));
     metricsSystem.createCounter(
         CATEGORY,
         "snap2_bytecodes_downloaded_total",
         "Bytecodes downloaded by SNAP2",
-        () -> stateValue(StateSync::downloadedCodes));
+        () -> value(SyncAttempt.Figures::codes));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_pending_storages",
         "Accounts whose storage SNAP2 still has to download",
-        () -> stateValue(StateSync::pendingStorageCount));
+        () -> value(SyncAttempt.Figures::pendingStorages));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_peers_without_state",
         "Peers left out of the state requests, as they serve nothing for the pivot",
-        () -> stateValue(StateSync::peersWithoutState));
+        () -> value(SyncAttempt.Figures::peersWithoutState));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_storage_tries_built",
         "Storage tries SNAP2 wrote while downloading",
-        () -> stateValue(StateSync::storageTriesBuilt));
+        () -> value(SyncAttempt.Figures::storageTriesBuilt));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_storage_tries_updated",
         "Storage tries SNAP2 wrote while downloading, then changed for pivot moves",
-        () -> stateValue(StateSync::storageTriesUpdated));
+        () -> value(SyncAttempt.Figures::storageTriesUpdated));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_storage_tries_left",
         "Downloaded storages whose trie SNAP2 left to the final build",
-        () -> stateValue(StateSync::storageTriesLeft));
+        () -> value(SyncAttempt.Figures::storageTriesLeft));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_storage_trie_updates_pending",
         "Storage tries whose changes from pivot moves wait to be applied",
-        () -> stateValue(StateSync::storageTrieUpdatesPending));
+        () -> value(SyncAttempt.Figures::storageTrieUpdatesPending));
   }
 
   private void registerTries(final MetricsSystem metricsSystem) {
@@ -120,36 +121,28 @@ final class Snap2Metrics {
         CATEGORY,
         "snap2_trie_accounts_processed",
         "Accounts added to the tries SNAP2 builds",
-        () -> trieValue(WorldStateTrieBuilder::accountsProcessed));
+        () -> value(SyncAttempt.Figures::trieAccounts));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_trie_slots_processed",
         "Storage slots added to the tries SNAP2 builds",
-        () -> trieValue(WorldStateTrieBuilder::slotsProcessed));
+        () -> value(SyncAttempt.Figures::trieSlots));
     metricsSystem.createLongGauge(
         CATEGORY,
         "snap2_trie_storage_tries_kept",
         "Storage tries written while downloading that the final SNAP2 build kept",
-        () -> trieValue(WorldStateTrieBuilder::keptStorageTries));
+        () -> value(SyncAttempt.Figures::keptStorageTries));
   }
 
   private Optional<SyncAttempt.Stage> stage() {
-    return current.get().map(SyncAttempt::stage);
+    return figures.get().map(SyncAttempt.Figures::stage);
   }
 
   private double progressValue(final ToDoubleFunction<SyncAttempt.Progress> phase) {
-    return current.get().map(attempt -> phase.applyAsDouble(attempt.progress())).orElse(0.0);
+    return figures.get().map(read -> phase.applyAsDouble(read.progress())).orElse(0.0);
   }
 
-  private long trieValue(final ToLongFunction<WorldStateTrieBuilder> value) {
-    return current.get().flatMap(SyncAttempt::trieBuilder).map(value::applyAsLong).orElse(0L);
-  }
-
-  private long stateValue(final ToLongFunction<StateSync> value) {
-    return attemptValue(attempt -> value.applyAsLong(attempt.stateSync()));
-  }
-
-  private long attemptValue(final ToLongFunction<SyncAttempt> value) {
-    return current.get().map(value::applyAsLong).orElse(0L);
+  private long value(final ToLongFunction<SyncAttempt.Figures> value) {
+    return figures.get().map(value::applyAsLong).orElse(0L);
   }
 }

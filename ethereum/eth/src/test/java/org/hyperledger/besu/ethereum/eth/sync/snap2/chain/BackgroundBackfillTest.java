@@ -198,6 +198,18 @@ class BackgroundBackfillTest {
   }
 
   @Test
+  void stopsASchedulerHandedOverOnceClosed() throws InterruptedException {
+    final BackgroundBackfill backfill = backfill();
+    backfill.awaitStop();
+    final RequestSender scheduler = mock(RequestSender.class);
+
+    // a sync that completes as the node stops
+    backfill.handOver(scheduler);
+
+    verify(scheduler).stop();
+  }
+
+  @Test
   void stopsWhenTheInitialSyncStartsAgainAndStartsOnceItCompletes() {
     final BackgroundBackfill backfill = backfill();
     backfill.onInitialSyncCompleted();

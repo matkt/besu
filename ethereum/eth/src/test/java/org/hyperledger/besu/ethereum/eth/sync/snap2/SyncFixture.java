@@ -17,11 +17,13 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.spy;
 
+import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.chain.MutableBlockchain;
 import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.core.InMemoryKeyValueStorageProvider;
 import org.hyperledger.besu.ethereum.core.ProtocolScheduleFixture;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
+import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.BalFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.chain.HeaderFetcher;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.state.StateSync;
@@ -88,6 +90,15 @@ final class SyncFixture {
     chain = new TestChain(new Random(seed), genesisWorld, network);
     blockchain = InMemoryKeyValueStorageProvider.createInMemoryBlockchain(chain.genesisBlock());
     fetcher = new HeaderFetcher(network, ProtocolScheduleFixture.MAINNET, chain, 8);
+  }
+
+  /** Returns a checkpoint of proof of stake. */
+  static Checkpoint checkpoint(final long number, final Hash hash) {
+    return ImmutableCheckpoint.builder()
+        .blockNumber(number)
+        .blockHash(hash)
+        .totalDifficulty(Difficulty.ZERO)
+        .build();
   }
 
   /** Returns a state download whose loop and writes run on {@link #tasks}. */

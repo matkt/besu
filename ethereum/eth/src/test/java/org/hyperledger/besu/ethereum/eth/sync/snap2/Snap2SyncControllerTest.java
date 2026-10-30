@@ -15,14 +15,13 @@
 package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hyperledger.besu.ethereum.eth.sync.snap2.SyncFixture.checkpoint;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockHeader;
-import org.hyperledger.besu.ethereum.core.Difficulty;
 import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.Checkpoint;
-import org.hyperledger.besu.ethereum.eth.sync.common.checkpoint.ImmutableCheckpoint;
 import org.hyperledger.besu.ethereum.eth.sync.snap2.net.RequestSender;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncProcessState;
 import org.hyperledger.besu.metrics.StubMetricsSystem;
@@ -68,7 +67,9 @@ class Snap2SyncControllerTest {
     assertThat(controller.pivotMoves()).isOne();
     assertThat(controller.restarts()).isZero();
     assertThat(metricsSystem.getGaugeValue("snap2_pivot_block")).isEqualTo(12);
-    assertThat(controller.current().orElseThrow().stage()).isEqualTo(SyncAttempt.Stage.DONE);
+    // the attempt released, its figures kept for the metrics
+    assertThat(controller.current()).isEmpty();
+    assertThat(controller.figures().orElseThrow().stage()).isEqualTo(SyncAttempt.Stage.DONE);
     // the back-fill goes on with the scheduler
     assertThat(handedOver).containsExactly(node.network);
     verify(node.network, never()).stop();
@@ -160,6 +161,19 @@ class Snap2SyncControllerTest {
   }
 
   @Test
+  void wipesNothingOnceStopped() {
+    final Snap2SyncController controller = controller(Optional.empty());
+    final CompletableFuture<SnapSyncProcessState> result = controller.start();
+
+    // before the sync thread gets to the wipe
+    controller.stop();
+    node.executor.runAll();
+
+    assertThat(result).isCancelled();
+    verify(node.storage, never()).prepareForSync();
+  }
+
+  @Test
   void startsNoAttemptOnceStopped() {
     chain.extend(12);
     node.network.disconnect();
@@ -193,13 +207,5 @@ class Snap2SyncControllerTest {
   private static BlockHeader pivot(final CompletableFuture<SnapSyncProcessState> result) {
     assertThat(result).isCompleted();
     return result.join().getPivotBlockHeader().orElseThrow();
-  }
-
-  private static Checkpoint checkpoint(final long number, final Hash hash) {
-    return ImmutableCheckpoint.builder()
-        .blockNumber(number)
-        .blockHash(hash)
-        .totalDifficulty(Difficulty.ZERO)
-        .build();
   }
 }

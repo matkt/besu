@@ -78,6 +78,8 @@ final class Snap2SyncController implements SnapSyncController {
   // guarded by this: the moves of the attempts that started over
   private long earlierMoves;
   private volatile SyncAttempt current;
+  // the figures of the last attempt, kept once the sync released it
+  private volatile Optional<SyncAttempt.Figures> lastFigures = Optional.empty();
   // set under the lock with the attempts it cancels
   private volatile boolean stopped;
 
@@ -166,9 +168,17 @@ final class Snap2SyncController implements SnapSyncController {
     return Optional.empty();
   }
 
-  /** Returns the attempt in progress, or the last one. */
+  /** Returns the attempt in progress. */
   Optional<SyncAttempt> current() {
     return Optional.ofNullable(current);
+  }
+
+  /**
+   * Returns the figures of the attempt in progress, or those of the last one once the sync ended.
+   */
+  Optional<SyncAttempt.Figures> figures() {
+    final SyncAttempt attempt = current;
+    return attempt == null ? lastFigures : Optional.of(attempt.figures());
   }
 
   /** Returns the number of attempts that started over. */
@@ -202,11 +212,22 @@ final class Snap2SyncController implements SnapSyncController {
 
   // an attempt from scratch, started over while the state cannot be recovered
   private CompletableFuture<BlockHeader> run() {
-    context.storage().prepareForSync();
+    if (!prepareForSync()) {
+      return stoppedFuture();
+    }
     return waitForPeers()
         .thenCompose(unused -> selectPivot())
         .thenComposeAsync(pivot -> newAttempt(pivot).start(), executor)
         .exceptionallyComposeAsync(this::startOver, executor);
+  }
+
+  // under the lock, so that a stop either waits for the wipe or keeps it from starting
+  private synchronized boolean prepareForSync() {
+    if (stopped) {
+      return false;
+    }
+    context.storage().prepareForSync();
+    return true;
   }
 
   // under the lock, so that a stop either finds it or keeps it from starting
@@ -218,13 +239,13 @@ final class Snap2SyncController implements SnapSyncController {
     return current;
   }
 
-  // once the failed attempt stopped, as the next one wipes the state it wrote
+  // once the failed attempt ended, however long it takes, as the next one wipes the state it wrote
   private CompletableFuture<BlockHeader> startOver(final Throwable error) {
     final SyncAttempt failed = current;
     if (failed != null) {
       failed.cancel();
       try {
-        failed.awaitStop();
+        failed.awaitEnd();
       } catch (final InterruptedException e) {
         Thread.currentThread().interrupt();
         return CompletableFuture.failedFuture(e);
@@ -244,8 +265,8 @@ final class Snap2SyncController implements SnapSyncController {
   }
 
   // its moves counted with the earlier ones, none current until the next attempt
-  private synchronized void endAttempt(final SyncAttempt failed) {
-    earlierMoves += failed.pivotMoves();
+  private synchronized void endAttempt(final SyncAttempt ended) {
+    earlierMoves += ended.pivotMoves();
     current = null;
   }
 
@@ -342,6 +363,12 @@ final class Snap2SyncController implements SnapSyncController {
 
   private void end(final BlockHeader pivot, final Throwable error, final Instant started) {
     control.shutdownNow();
+    // released with what it downloaded with, its figures kept for the metrics
+    final SyncAttempt last = current;
+    if (last != null) {
+      lastFigures = Optional.of(last.figures());
+      endAttempt(last);
+    }
     if (error == null) {
       LOG.info(
           "SNAP2 sync complete at {} in {} | {} pivot moves, {} restarts",

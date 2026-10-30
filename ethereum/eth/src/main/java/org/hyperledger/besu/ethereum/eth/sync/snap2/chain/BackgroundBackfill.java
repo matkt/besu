@@ -151,6 +151,11 @@ public final class BackgroundBackfill implements InitialSyncCompletionListener {
    * sends through it, and stops it once it ends, as when none starts.
    */
   public synchronized void handOver(final RequestSender scheduler) {
+    if (closed) {
+      // nothing would stop it once closed
+      scheduler.stop();
+      return;
+    }
     syncScheduler.ifPresent(RequestSender::stop);
     syncScheduler = Optional.of(scheduler);
   }

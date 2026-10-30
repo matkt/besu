@@ -101,7 +101,7 @@ final class SyncAttempt {
   private final StateSync stateSync;
   private final SyncChain chain;
   private final PivotMoves moves;
-  // fails when the attempt must start over before its end
+  // fails when the attempt ends early: a restart, or a header download that ended for good
   private final CompletableFuture<BlockHeader> aborted = new CompletableFuture<>();
   private final CountDownLatch buildEnded = new CountDownLatch(1);
   private volatile boolean cancelled;
@@ -134,6 +134,17 @@ final class SyncAttempt {
    */
   CompletableFuture<BlockHeader> start() {
     chain.start(firstPivot);
+    // a header download that ended for good ends the attempt now, not after the state
+    chain
+        .headersDone()
+        .exceptionally(
+            error -> {
+              // a cancel fails it too
+              if (!cancelled) {
+                aborted.completeExceptionally(error);
+              }
+              return null;
+            });
     final CompletableFuture<BlockHeader> synced =
         stateSync
             .start(firstPivot)
@@ -181,6 +192,14 @@ final class SyncAttempt {
     }
   }
 
+  /**
+   * As {@link #awaitStop}, however long the build takes, before the next attempt wipes the state.
+   */
+  void awaitEnd() throws InterruptedException {
+    awaitStop();
+    buildEnded.await();
+  }
+
   /** Returns the number of pivot moves applied. */
   long pivotMoves() {
     return moves.moves();
@@ -214,6 +233,48 @@ final class SyncAttempt {
         },
         share(headers.stored(), headers.stored() + headers.left(), chain.headersDone().isDone()),
         current == Stage.DONE ? 1 : chain.windowProgress());
+  }
+
+  /**
+   * The figures the metrics show: the pivot, the stage and the progress, the counts of the state
+   * download, then those of the final build.
+   */
+  record Figures(
+      long pivot,
+      Stage stage,
+      Progress progress,
+      long accounts,
+      long slots,
+      long codes,
+      long pendingStorages,
+      long peersWithoutState,
+      long storageTriesBuilt,
+      long storageTriesUpdated,
+      long storageTriesLeft,
+      long storageTrieUpdatesPending,
+      long trieAccounts,
+      long trieSlots,
+      long keptStorageTries) {}
+
+  /** Returns the figures of the attempt, read at once. */
+  Figures figures() {
+    final Optional<WorldStateTrieBuilder> build = trieBuilder();
+    return new Figures(
+        pivotNumber(),
+        stage,
+        progress(),
+        stateSync.downloadedAccounts(),
+        stateSync.downloadedSlots(),
+        stateSync.downloadedCodes(),
+        stateSync.pendingStorageCount(),
+        stateSync.peersWithoutState(),
+        stateSync.storageTriesBuilt(),
+        stateSync.storageTriesUpdated(),
+        stateSync.storageTriesLeft(),
+        stateSync.storageTrieUpdatesPending(),
+        build.map(WorldStateTrieBuilder::accountsProcessed).orElse(0L),
+        build.map(WorldStateTrieBuilder::slotsProcessed).orElse(0L),
+        build.map(WorldStateTrieBuilder::keptStorageTries).orElse(0L));
   }
 
   /** Returns the line of a progress log: the share done of each phase. */
@@ -265,11 +326,6 @@ final class SyncAttempt {
     return pivot == null ? 0 : pivot.header().getNumber();
   }
 
-  /** Returns the state download, for its counters. */
-  StateSync stateSync() {
-    return stateSync;
-  }
-
   /** Returns the final build, once started. */
   synchronized Optional<WorldStateTrieBuilder> trieBuilder() {
     return Optional.ofNullable(trieBuilder);
@@ -302,17 +358,18 @@ final class SyncAttempt {
   }
 
   private void buildTries(final BlockHeader pivot) {
-    // the tries the last moves changed are kept by the build
-    stateSync.finishStorageTries();
-    stateSync.stop();
-    final WorldStateTrieBuilder builder = newTrieBuilder();
-    final Instant started = Instant.now();
-    LOG.info(
-        "SNAP2 trie build started at {} | accounts {} | storage tries built while downloading {}",
-        block(pivot.getNumber()),
-        compact(stateSync.downloadedAccounts()),
-        compact(stateSync.storageTriesBuilt()));
     try {
+      // first, so that a cancel goes to the build while the storage tries finish on this thread
+      final WorldStateTrieBuilder builder = newTrieBuilder();
+      // the tries the last moves changed are kept by the build
+      stateSync.finishStorageTries();
+      stateSync.stop();
+      final Instant started = Instant.now();
+      LOG.info(
+          "SNAP2 trie build started at {} | accounts {} | storage tries built while downloading {}",
+          block(pivot.getNumber()),
+          compact(stateSync.downloadedAccounts()),
+          compact(stateSync.storageTriesBuilt()));
       final WorldStateTrieBuilder.Result built = builder.build();
       if (!built.root().equals(pivot.getStateRoot().getBytes())) {
         throw new RestartException(

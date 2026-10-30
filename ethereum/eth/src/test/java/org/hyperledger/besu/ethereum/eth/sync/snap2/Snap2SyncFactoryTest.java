@@ -16,7 +16,10 @@ package org.hyperledger.besu.ethereum.eth.sync.snap2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.SNAPSYNC_FLAT_ACCOUNTS;
+import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.SNAPSYNC_FLAT_STORAGE;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.hyperledger.besu.ethereum.ProtocolContext;
@@ -27,6 +30,7 @@ import org.hyperledger.besu.ethereum.eth.sync.PivotBlockSelector;
 import org.hyperledger.besu.ethereum.eth.sync.SynchronizerConfiguration;
 import org.hyperledger.besu.ethereum.eth.sync.snapsync.SnapSyncController;
 import org.hyperledger.besu.ethereum.eth.sync.state.SyncState;
+import org.hyperledger.besu.ethereum.storage.StorageProvider;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.metrics.noop.NoOpMetricsSystem;
 import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
@@ -34,6 +38,7 @@ import org.hyperledger.besu.plugin.services.storage.DataStorageFormat;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -46,6 +51,7 @@ class Snap2SyncFactoryTest {
   private final SyncState syncState = mock(SyncState.class);
   private final MutableBlockchain blockchain = mock(MutableBlockchain.class);
   private final WorldStateStorageCoordinator worldState = mock(WorldStateStorageCoordinator.class);
+  private final StorageProvider storageProvider = mock(StorageProvider.class);
 
   @Test
   void needsNoSyncOnceTheChainHeadIsAboveTheFloor() {
@@ -75,12 +81,21 @@ class Snap2SyncFactoryTest {
   }
 
   @Test
-  void refusesADatabaseThatIsNotBonsai() {
+  void stagesTheFlatStateOfASyncOnForestInItsOwnSegments() {
     when(worldState.getDataStorageFormat()).thenReturn(DataStorageFormat.FOREST);
+
+    assertThat(create()).isPresent();
+    verify(storageProvider)
+        .getStorageBySegmentIdentifiers(List.of(SNAPSYNC_FLAT_ACCOUNTS, SNAPSYNC_FLAT_STORAGE));
+  }
+
+  @Test
+  void refusesAnArchiveDatabase() {
+    when(worldState.getDataStorageFormat()).thenReturn(DataStorageFormat.X_BONSAI_ARCHIVE);
 
     assertThatThrownBy(this::create)
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("FOREST");
+        .hasMessageContaining("X_BONSAI_ARCHIVE");
   }
 
   private Optional<SnapSyncController> create() {
@@ -95,6 +110,7 @@ class Snap2SyncFactoryTest {
         new NoOpMetricsSystem(),
         mock(EthPeers.class),
         worldState,
+        storageProvider,
         syncState,
         mock(PivotBlockSelector.class),
         Optional.empty(),
