@@ -27,8 +27,10 @@ import org.hyperledger.besu.consensus.common.bft.BftExtraData;
 import org.hyperledger.besu.consensus.common.bft.BftHelpers;
 import org.hyperledger.besu.consensus.qbft.QbftExtraDataCodec;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockValidator;
+import org.hyperledger.besu.datatypes.AccessListEntry;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
+import org.hyperledger.besu.datatypes.TransactionType;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.BlockValidator;
@@ -37,6 +39,7 @@ import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
 import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
+import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
@@ -150,6 +153,27 @@ class QbftBlockValidatorAdaptorTest {
             InclusionListTransactions.EMPTY,
             false);
     verifyNoMoreInteractions(blockValidator);
+  }
+
+  @Test
+  void executesReproposalWhoseTransactionDiffersOnlyInAccessList() {
+    final Transaction transaction = generator.transaction(TransactionType.ACCESS_LIST);
+    final Block proposal = proposal(0, new BlockBody(List.of(transaction), emptyList()));
+    stubValidation(proposal, Optional.empty(), successWith(List.of()));
+    validate(proposal, Optional.empty());
+
+    // same fields and signature, other access list: Transaction.equals does not see it
+    final Transaction changed =
+        Transaction.builder()
+            .copiedFrom(transaction)
+            .accessList(List.of(new AccessListEntry(Address.ZERO, List.of())))
+            .build();
+    assertThat(changed).isEqualTo(transaction);
+    assertThat(changed.getHash()).isNotEqualTo(transaction.getHash());
+    final Block reproposal = proposal(2, new BlockBody(List.of(changed), emptyList()));
+    stubValidation(reproposal, Optional.empty(), new BlockProcessingResult("failed"));
+
+    assertThat(validate(reproposal, Optional.empty()).success()).isFalse();
   }
 
   @Test

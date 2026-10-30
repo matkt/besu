@@ -17,6 +17,7 @@ package org.hyperledger.besu.consensus.qbft.adaptor;
 import org.hyperledger.besu.consensus.common.bft.SizeLimitedMap;
 import org.hyperledger.besu.datatypes.Hash;
 import org.hyperledger.besu.ethereum.core.BlockBody;
+import org.hyperledger.besu.ethereum.core.Transaction;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 
@@ -54,14 +55,21 @@ public class ValidatedBlockCache {
       Optional<BlockAccessList> blockAccessList) {
 
     /**
-     * Check the body is the one executed. Compares the content, as a re-proposal received from a
-     * peer is decoded again; returns at once when it is the same object.
+     * Check the body is the one executed. A block received again from a peer, re-proposed or in a
+     * round change, is decoded again. Transactions are compared by hash, which covers their whole
+     * encoding, unlike {@code Transaction.equals}.
      *
      * @param blockBody the body of the block to validate or import
      * @return true if it is the executed body
      */
     public boolean isExecutedBody(final BlockBody blockBody) {
-      return body.equals(blockBody);
+      return transactionHashes(body).equals(transactionHashes(blockBody))
+          && body.getOmmers().equals(blockBody.getOmmers())
+          && body.getWithdrawals().equals(blockBody.getWithdrawals());
+    }
+
+    private static List<Hash> transactionHashes(final BlockBody blockBody) {
+      return blockBody.getTransactions().stream().map(Transaction::getHash).toList();
     }
   }
 
