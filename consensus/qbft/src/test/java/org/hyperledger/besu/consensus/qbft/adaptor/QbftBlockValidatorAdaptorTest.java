@@ -14,12 +14,17 @@
  */
 package org.hyperledger.besu.consensus.qbft.adaptor;
 
+import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import org.hyperledger.besu.consensus.common.bft.BftBlockHeaderFunctions;
+import org.hyperledger.besu.consensus.common.bft.BftExtraData;
+import org.hyperledger.besu.consensus.qbft.QbftExtraDataCodec;
 import org.hyperledger.besu.consensus.qbft.core.types.QbftBlockValidator;
+import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.ethereum.BlockProcessingOutputs;
 import org.hyperledger.besu.ethereum.BlockProcessingResult;
 import org.hyperledger.besu.ethereum.BlockValidator;
@@ -27,6 +32,7 @@ import org.hyperledger.besu.ethereum.ProtocolContext;
 import org.hyperledger.besu.ethereum.core.Block;
 import org.hyperledger.besu.ethereum.core.BlockBody;
 import org.hyperledger.besu.ethereum.core.BlockDataGenerator;
+import org.hyperledger.besu.ethereum.core.BlockHeaderTestFixture;
 import org.hyperledger.besu.ethereum.core.TransactionReceipt;
 import org.hyperledger.besu.ethereum.mainnet.HeaderValidationMode;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
@@ -36,6 +42,7 @@ import org.hyperledger.besu.plugin.services.worldstate.MutableWorldState;
 import java.util.List;
 import java.util.Optional;
 
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -45,108 +52,66 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class QbftBlockValidatorAdaptorTest {
   @Mock private BlockValidator blockValidator;
   @Mock private ProtocolContext protocolContext;
-  @Mock private Block besuBlock;
-  @Mock private QbftBlockAdaptor qbftBlock;
+  private final QbftExtraDataCodec codec = new QbftExtraDataCodec();
+  private final BlockDataGenerator generator = new BlockDataGenerator();
+  private final BlockBody body = new BlockBody(List.of(generator.transaction()), emptyList());
   private final ValidatedBlockCache validatedBlockCache = new ValidatedBlockCache();
 
   @Test
   void validateSuccessfullyWhenBesuValidatorSuccessful() {
-    when(qbftBlock.getBesuBlock()).thenReturn(besuBlock);
-    when(blockValidator.validateAndProcessBlock(
-            protocolContext,
-            besuBlock,
-            HeaderValidationMode.LIGHT,
-            HeaderValidationMode.FULL,
-            Optional.empty(),
-            InclusionListTransactions.EMPTY,
-            false))
-        .thenReturn(new BlockProcessingResult(Optional.empty()));
+    final Block block = proposal(0, body);
+    stubValidation(block, Optional.empty(), new BlockProcessingResult(Optional.empty()));
 
-    QbftBlockValidatorAdaptor qbftBlockValidator =
-        new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache);
-    QbftBlockValidator.ValidationResult validationResult =
-        qbftBlockValidator.validateBlock(qbftBlock, Optional.empty());
+    final QbftBlockValidator.ValidationResult validationResult = validate(block, Optional.empty());
+
     assertThat(validationResult.success()).isTrue();
     assertThat(validationResult.errorMessage()).isEmpty();
   }
 
   @Test
   void validateFailsWhenBesuValidatorFails() {
-    when(qbftBlock.getBesuBlock()).thenReturn(besuBlock);
-    when(blockValidator.validateAndProcessBlock(
-            protocolContext,
-            besuBlock,
-            HeaderValidationMode.LIGHT,
-            HeaderValidationMode.FULL,
-            Optional.empty(),
-            InclusionListTransactions.EMPTY,
-            false))
-        .thenReturn(new BlockProcessingResult("failed"));
+    final Block block = proposal(0, body);
+    stubValidation(block, Optional.empty(), new BlockProcessingResult("failed"));
 
-    QbftBlockValidatorAdaptor qbftBlockValidator =
-        new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache);
-    QbftBlockValidator.ValidationResult validationResult =
-        qbftBlockValidator.validateBlock(qbftBlock, Optional.empty());
+    final QbftBlockValidator.ValidationResult validationResult = validate(block, Optional.empty());
+
     assertThat(validationResult.success()).isFalse();
     assertThat(validationResult.errorMessage()).contains("failed");
   }
 
   @Test
   void recordsOutputsOfSuccessfullyValidatedBlock() {
-    final BlockDataGenerator generator = new BlockDataGenerator();
-    final Block block = generator.block();
+    final Block block = proposal(0, body);
     final List<TransactionReceipt> receipts = generator.receipts(block);
-    when(blockValidator.validateAndProcessBlock(
-            protocolContext,
-            block,
-            HeaderValidationMode.LIGHT,
-            HeaderValidationMode.FULL,
-            Optional.empty(),
-            InclusionListTransactions.EMPTY,
-            false))
-        .thenReturn(
-            new BlockProcessingResult(
-                Optional.of(new BlockProcessingOutputs(mock(MutableWorldState.class), receipts))));
+    stubValidation(block, Optional.empty(), successWith(receipts));
 
-    new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-        .validateBlock(new QbftBlockAdaptor(block), Optional.empty());
+    validate(block, Optional.empty());
 
     assertThat(validatedBlockCache.take(block.getHash(), block.getHeader().getNumber()))
         .contains(
             new ValidatedBlockCache.ValidatedBlock(
-                block.getHeader().getNumber(), block.getBody(), receipts, Optional.empty()));
+                block.getHeader().getNumber(), body, receipts, Optional.empty()));
   }
 
   @Test
   void doesNotRecordBlockThatFailedValidation() {
-    final Block block = new BlockDataGenerator().block();
-    when(blockValidator.validateAndProcessBlock(
-            protocolContext,
-            block,
-            HeaderValidationMode.LIGHT,
-            HeaderValidationMode.FULL,
-            Optional.empty(),
-            InclusionListTransactions.EMPTY,
-            false))
-        .thenReturn(new BlockProcessingResult("failed"));
+    final Block block = proposal(0, body);
+    stubValidation(block, Optional.empty(), new BlockProcessingResult("failed"));
 
-    new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-        .validateBlock(new QbftBlockAdaptor(block), Optional.empty());
+    validate(block, Optional.empty());
 
     assertThat(validatedBlockCache.take(block.getHash(), block.getHeader().getNumber())).isEmpty();
   }
 
   @Test
   void doesNotExecuteBlockCreatedOrValidatedBefore() {
-    final Block block = new BlockDataGenerator().block();
+    final Block block = proposal(0, body);
     final ValidatedBlockCache.ValidatedBlock validatedBlock =
         new ValidatedBlockCache.ValidatedBlock(
-            block.getHeader().getNumber(), block.getBody(), List.of(), Optional.empty());
+            block.getHeader().getNumber(), body, List.of(), Optional.empty());
     validatedBlockCache.put(block.getHash(), validatedBlock);
 
-    final QbftBlockValidator.ValidationResult validationResult =
-        new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-            .validateBlock(new QbftBlockAdaptor(block), Optional.empty());
+    final QbftBlockValidator.ValidationResult validationResult = validate(block, Optional.empty());
 
     assertThat(validationResult.success()).isTrue();
     assertThat(validationResult.errorMessage()).isEmpty();
@@ -157,12 +122,61 @@ class QbftBlockValidatorAdaptorTest {
 
   @Test
   void executesBlockCreatedBeforeWhenBlockAccessListDiffers() {
-    final Block block = new BlockDataGenerator().block();
+    final Block block = proposal(0, body);
     validatedBlockCache.put(
         block.getHash(),
         new ValidatedBlockCache.ValidatedBlock(
-            block.getHeader().getNumber(), block.getBody(), List.of(), Optional.empty()));
+            block.getHeader().getNumber(), body, List.of(), Optional.empty()));
     final Optional<BlockAccessList> blockAccessList = Optional.of(new BlockAccessList(List.of()));
+    stubValidation(block, blockAccessList, new BlockProcessingResult("failed"));
+
+    final QbftBlockValidator.ValidationResult validationResult = validate(block, blockAccessList);
+
+    assertThat(validationResult.success()).isFalse();
+    assertThat(validationResult.errorMessage()).contains("failed");
+  }
+
+  @Test
+  void executesBlockWithSameHashWhenBodyIsNotTheExecutedOne() {
+    final Block block = proposal(0, body);
+    validatedBlockCache.put(
+        block.getHash(),
+        new ValidatedBlockCache.ValidatedBlock(
+            block.getHeader().getNumber(), body, List.of(), Optional.empty()));
+    // same header and same transactions, but not the body object that was executed
+    final Block otherBody =
+        new Block(block.getHeader(), new BlockBody(body.getTransactions(), body.getOmmers()));
+    stubValidation(otherBody, Optional.empty(), new BlockProcessingResult("failed"));
+
+    final QbftBlockValidator.ValidationResult validationResult =
+        validate(otherBody, Optional.empty());
+
+    assertThat(validationResult.success()).isFalse();
+  }
+
+  // a proposal of the given round, hashed like proposals are
+  private Block proposal(final int round, final BlockBody blockBody) {
+    final BftExtraData extraData =
+        new BftExtraData(
+            Bytes.wrap(new byte[32]), emptyList(), Optional.empty(), round, List.of(Address.ZERO));
+    return new Block(
+        new BlockHeaderTestFixture()
+            .number(2)
+            .extraData(codec.encode(extraData))
+            .blockHeaderFunctions(BftBlockHeaderFunctions.forCommittedSeal(codec))
+            .buildHeader(),
+        blockBody);
+  }
+
+  private BlockProcessingResult successWith(final List<TransactionReceipt> receipts) {
+    return new BlockProcessingResult(
+        Optional.of(new BlockProcessingOutputs(mock(MutableWorldState.class), receipts)));
+  }
+
+  private void stubValidation(
+      final Block block,
+      final Optional<BlockAccessList> blockAccessList,
+      final BlockProcessingResult result) {
     when(blockValidator.validateAndProcessBlock(
             protocolContext,
             block,
@@ -171,42 +185,12 @@ class QbftBlockValidatorAdaptorTest {
             blockAccessList,
             InclusionListTransactions.EMPTY,
             false))
-        .thenReturn(new BlockProcessingResult("failed"));
-
-    final QbftBlockValidator.ValidationResult validationResult =
-        new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-            .validateBlock(new QbftBlockAdaptor(block), blockAccessList);
-
-    assertThat(validationResult.success()).isFalse();
-    assertThat(validationResult.errorMessage()).contains("failed");
+        .thenReturn(result);
   }
 
-  @Test
-  void executesBlockWithSameHashWhenBodyIsNotTheExecutedOne() {
-    final Block block = new BlockDataGenerator().block();
-    validatedBlockCache.put(
-        block.getHash(),
-        new ValidatedBlockCache.ValidatedBlock(
-            block.getHeader().getNumber(), block.getBody(), List.of(), Optional.empty()));
-    // same header and same transactions, but not the body object that was executed
-    final Block otherBody =
-        new Block(
-            block.getHeader(),
-            new BlockBody(block.getBody().getTransactions(), block.getBody().getOmmers()));
-    when(blockValidator.validateAndProcessBlock(
-            protocolContext,
-            otherBody,
-            HeaderValidationMode.LIGHT,
-            HeaderValidationMode.FULL,
-            Optional.empty(),
-            InclusionListTransactions.EMPTY,
-            false))
-        .thenReturn(new BlockProcessingResult("failed"));
-
-    final QbftBlockValidator.ValidationResult validationResult =
-        new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-            .validateBlock(new QbftBlockAdaptor(otherBody), Optional.empty());
-
-    assertThat(validationResult.success()).isFalse();
+  private QbftBlockValidator.ValidationResult validate(
+      final Block block, final Optional<BlockAccessList> blockAccessList) {
+    return new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
+        .validateBlock(new QbftBlockAdaptor(block), blockAccessList);
   }
 }

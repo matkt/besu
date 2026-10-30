@@ -72,29 +72,15 @@ class ValidatedBlockCacheFastPathTest {
   private final QbftExtraDataCodec codec = new QbftExtraDataCodec();
   private final BlockDataGenerator generator = new BlockDataGenerator();
   private final ValidatedBlockCache validatedBlockCache = new ValidatedBlockCache();
+  private final BlockHeader parentHeader = new BlockHeaderTestFixture().number(1).buildHeader();
+  private final BlockBody body =
+      new BlockBody(List.of(generator.transaction(), generator.transaction()), emptyList());
+  private final List<SECPSignature> commitSeals =
+      List.of(new SECPSignature(BigInteger.ONE, BigInteger.ONE, (byte) 1));
 
   @Test
   void proposerExecutesItsBlockOnlyWhenCreatingIt() {
-    final BlockHeader parentHeader = new BlockHeaderTestFixture().number(1).buildHeader();
-    // round 0 proposal, hashed like BftBlockCreator does
-    final BlockHeader header =
-        new BlockHeaderTestFixture()
-            .number(2)
-            .parentHash(parentHeader.getHash())
-            .extraData(
-                codec.encode(
-                    new BftExtraData(
-                        Bytes.wrap(new byte[32]),
-                        emptyList(),
-                        Optional.empty(),
-                        0,
-                        List.of(Address.ZERO))))
-            .blockHeaderFunctions(BftBlockHeaderFunctions.forCommittedSeal(codec))
-            .buildHeader();
-    final Block createdBlock =
-        new Block(
-            header,
-            new BlockBody(List.of(generator.transaction(), generator.transaction()), emptyList()));
+    final Block createdBlock = proposal(0, body);
     final List<TransactionReceipt> receipts = generator.receipts(createdBlock);
     when(transactionSelectionResults.getReceipts()).thenReturn(receipts);
     when(besuBlockCreator.createBlock(10L, parentHeader))
@@ -104,29 +90,59 @@ class ValidatedBlockCacheFastPathTest {
                 transactionSelectionResults,
                 new BlockCreationTiming(),
                 Optional.empty()));
-    final QbftBlockCreatorAdaptor creator =
-        new QbftBlockCreatorAdaptor(besuBlockCreator, codec, validatedBlockCache);
+    final QbftBlockCreatorAdaptor creator = creator();
 
     final QbftBlock proposal =
         creator.createBlock(10L, new QbftBlockHeaderAdaptor(parentHeader)).block();
 
     // validating its own proposal does not execute the block again
-    assertThat(
-            new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache)
-                .validateBlock(proposal, Optional.empty())
-                .success())
-        .isTrue();
+    assertThat(validator().validateBlock(proposal, Optional.empty()).success()).isTrue();
     verifyNoInteractions(blockValidator);
 
     // the sealed block keeps the proposal hash in round 0, and its body object
-    final QbftBlock sealed =
-        creator.createSealedBlock(
-            proposal, 0, List.of(new SECPSignature(BigInteger.ONE, BigInteger.ONE, (byte) 1)));
+    final QbftBlock sealed = creator.createSealedBlock(proposal, 0, commitSeals);
     final Block sealedBlock = AdaptorUtil.toBesuBlock(sealed);
     assertThat(sealedBlock.getHash()).isEqualTo(createdBlock.getHash());
     assertThat(sealedBlock.getBody()).isSameAs(createdBlock.getBody());
 
     // importing the committed block uses the receipts from block creation
+    stubFastPathPreconditions(sealedBlock);
+    assertThat(importer().importBlock(sealed, Optional.empty())).isTrue();
+    verify(blockchain).appendBlock(sealedBlock, receipts, Optional.empty());
+    verify(badBlockManager).removeBadBlock(sealedBlock.getHash());
+    verifyNoInteractions(blockImporter);
+  }
+
+  // a proposal of the given round, hashed like BftBlockCreator and QbftBlockCodecAdaptor do
+  private Block proposal(final int round, final BlockBody blockBody) {
+    final BftExtraData extraData =
+        new BftExtraData(
+            Bytes.wrap(new byte[32]), emptyList(), Optional.empty(), round, List.of(Address.ZERO));
+    return new Block(
+        new BlockHeaderTestFixture()
+            .number(2)
+            .parentHash(parentHeader.getHash())
+            .extraData(codec.encode(extraData))
+            .blockHeaderFunctions(BftBlockHeaderFunctions.forCommittedSeal(codec))
+            .buildHeader(),
+        blockBody);
+  }
+
+  private QbftBlockCreatorAdaptor creator() {
+    return new QbftBlockCreatorAdaptor(besuBlockCreator, codec, validatedBlockCache);
+  }
+
+  private QbftBlockValidatorAdaptor validator() {
+    return new QbftBlockValidatorAdaptor(blockValidator, protocolContext, validatedBlockCache);
+  }
+
+  private QbftBlockImporterAdaptor importer() {
+    return new QbftBlockImporterAdaptor(
+        blockImporter, blockHeaderValidator, protocolContext, validatedBlockCache);
+  }
+
+  // the trie log was saved at block creation or proposal validation
+  private void stubFastPathPreconditions(final Block sealedBlock) {
     when(protocolContext.getBlockchain()).thenReturn(blockchain);
     when(protocolContext.getWorldStateArchive()).thenReturn(worldStateArchive);
     when(protocolContext.getBadBlockManager()).thenReturn(badBlockManager);
@@ -137,14 +153,5 @@ class ValidatedBlockCacheFastPathTest {
     when(blockHeaderValidator.validateHeader(
             sealedBlock.getHeader(), parentHeader, protocolContext, HeaderValidationMode.FULL))
         .thenReturn(true);
-
-    assertThat(
-            new QbftBlockImporterAdaptor(
-                    blockImporter, blockHeaderValidator, protocolContext, validatedBlockCache)
-                .importBlock(sealed, Optional.empty()))
-        .isTrue();
-    verify(blockchain).appendBlock(sealedBlock, receipts, Optional.empty());
-    verify(badBlockManager).removeBadBlock(sealedBlock.getHash());
-    verifyNoInteractions(blockImporter);
   }
 }
