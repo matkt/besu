@@ -57,7 +57,8 @@ import org.apache.tuweni.bytes.Bytes32;
 /**
  * Serves the snap requests of the state download from in-memory worlds, with real range proofs, in
  * place of the request scheduler. A request waits until the test answers it; one that no peer takes
- * fails at once, as with the scheduler when only peers left out serve it.
+ * fails at once, as with the scheduler when only peers left out serve it. The other requests go to
+ * the chain it serves, if any, which answers them at once.
  */
 public final class FakeSnapNetwork implements RequestSender {
 
@@ -74,6 +75,7 @@ public final class FakeSnapNetwork implements RequestSender {
   private final Map<EthPeer, Integer> stateRequests = new HashMap<>();
   private final Map<EthPeer, Integer> codeRequests = new HashMap<>();
   private final Set<EthPeer> disconnected = new HashSet<>();
+  private Optional<ChainSender> chain = Optional.empty();
   // fails every request at once, if set
   private Throwable failure;
   private int requests;
@@ -90,6 +92,11 @@ public final class FakeSnapNetwork implements RequestSender {
   public void serve(final TestWorld world) {
     states.put(world.root(), new ServedState(world));
     codes.putAll(world.codes());
+  }
+
+  /** Answers the requests for headers, bodies, receipts and block access lists from a chain. */
+  void serveChain(final ChainSender chain) {
+    this.chain = Optional.of(chain);
   }
 
   /** Stops serving the state with this root, as peers do once it is too old. */
@@ -201,6 +208,9 @@ public final class FakeSnapNetwork implements RequestSender {
   @Override
   public <T> CompletableFuture<Response<T>> submit(
       final SyncRequest<T> request, final Set<EthPeer> excluded) {
+    if (request.protocol() != Protocol.SNAP && chain.isPresent()) {
+      return chain.get().submit(request, excluded);
+    }
     requests++;
     if (failure != null) {
       return CompletableFuture.failedFuture(failure);
