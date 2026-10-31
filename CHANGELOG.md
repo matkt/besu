@@ -6,6 +6,7 @@
 - `eth_getProof` now follows the execution-apis rules, regarding leading zeros and error codes. [#11668](https://github.com/besu-eth/besu/pull/11668)
 - `engine_getPayload` no longer waits for the in-progress block build when only the empty block has been built, as [execution-apis#958](https://github.com/ethereum/execution-apis/pull/958) requires. The default of `--Xpos-block-finalization-timeout-ms` changes from 800 to 0 and the option now accepts 0; set it to a positive value to restore the previous wait. [#11774](https://github.com/besu-eth/besu/pull/11774)
 - `eth_simulateV1` now rejects unknown account overrides [#11695](https://github.com/besu-eth/besu/pull/11695)
+- `trace_filter` rejects a single address string as `fromAddress` or `toAddress`, and a negative `after` or `count`, with `Invalid filter params` (`-32602`). A legacy call with another chain's `chainId` fails with `Wrong chainId` instead of running with the `chainId` dropped. [#11439](https://github.com/besu-eth/besu/pull/11439)
 
 ### Bug fixes
 - `eth_simulateV1` now rejects precompiles moved to their own address with error `-38022`. [#11793](https://github.com/besu-eth/besu/issues/11793)
