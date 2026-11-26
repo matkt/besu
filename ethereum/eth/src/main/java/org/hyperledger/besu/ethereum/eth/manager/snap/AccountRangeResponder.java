@@ -30,6 +30,7 @@ import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 
 import kotlin.Pair;
@@ -79,17 +80,19 @@ final class AccountRangeResponder {
               range.worldStateRootHash(),
               storage -> {
                 LOGGER.trace("obtained worldstate in {}", stopWatch);
+                // each account is encoded once, for its size and for the response
+                final Map<Bytes32, Bytes> slimAccounts = new HashMap<>();
                 ResponseSizePredicate<Pair<Bytes32, Bytes>> responseSizePredicate =
                     new ResponseSizePredicate<>(
                         "account",
                         stopWatch,
                         maxResponseBytes,
                         maxMillisPerRequest,
-                        (pair) -> {
-                          Bytes bytes =
-                              AccountRangeMessage.toSlimAccount(RLP.input(pair.getSecond()));
-                          return Bytes32.SIZE + bytes.size();
-                        });
+                        (pair) ->
+                            Bytes32.SIZE
+                                + slimAccounts
+                                    .computeIfAbsent(pair.getFirst(), __ -> slim(pair.getSecond()))
+                                    .size());
 
                 final Bytes32 endKeyBytes = Bytes32.wrap(range.endKeyHash().getBytes());
                 var shouldContinuePredicate =
@@ -124,7 +127,9 @@ final class AccountRangeResponder {
                       worldStateProof.getAccountProofRelatedNodes(
                           range.worldStateRootHash(), accounts.lastKey()));
                 }
-                var resp = AccountRangeMessage.create(accounts, proof);
+                accounts.replaceAll(
+                    (hash, account) -> slimAccounts.computeIfAbsent(hash, __ -> slim(account)));
+                var resp = AccountRangeMessage.createFromSlimAccounts(accounts, proof);
                 if (accounts.isEmpty()) {
                   LOGGER.debug(
                       "returned empty account range message for {} to  {}, proof count {}",
@@ -152,5 +157,9 @@ final class AccountRangeResponder {
       LOGGER.error("Unexpected exception serving account range request", ex);
     }
     return EMPTY;
+  }
+
+  private static Bytes slim(final Bytes account) {
+    return AccountRangeMessage.toSlimAccount(RLP.input(account));
   }
 }

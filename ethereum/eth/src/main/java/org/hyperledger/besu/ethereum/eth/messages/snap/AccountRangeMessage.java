@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
@@ -55,6 +56,25 @@ public final class AccountRangeMessage extends AbstractSnapMessageData {
 
   public static AccountRangeMessage create(
       final Map<Bytes32, Bytes> accounts, final List<Bytes> proof) {
+    return create(accounts, proof, account -> toSlimAccount(RLP.input(account)));
+  }
+
+  /**
+   * Creates the message from accounts already in their slim encoding.
+   *
+   * @param slimAccounts the slim encoding of each account by its hash, in key order
+   * @param proof the proof of the range
+   * @return the message
+   */
+  public static AccountRangeMessage createFromSlimAccounts(
+      final Map<Bytes32, Bytes> slimAccounts, final List<Bytes> proof) {
+    return create(slimAccounts, proof, Function.identity());
+  }
+
+  private static AccountRangeMessage create(
+      final Map<Bytes32, Bytes> accounts,
+      final List<Bytes> proof,
+      final Function<Bytes, Bytes> slimAccount) {
     final BytesValueRLPOutput tmp = new BytesValueRLPOutput();
     tmp.startList();
     tmp.writeList(
@@ -62,7 +82,7 @@ public final class AccountRangeMessage extends AbstractSnapMessageData {
         (entry, rlpOutput) -> {
           rlpOutput.startList();
           rlpOutput.writeBytes(entry.getKey());
-          rlpOutput.writeRLPBytes(toSlimAccount(RLP.input(entry.getValue())));
+          rlpOutput.writeRLPBytes(slimAccount.apply(entry.getValue()));
           rlpOutput.endList();
         });
     tmp.writeList(proof, (bytes, rlpOutput) -> rlpOutput.writeBytes(bytes));
