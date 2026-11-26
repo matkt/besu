@@ -382,6 +382,8 @@ configure(allprojects - project(':platform')) {
     jvmArgs += [
       '-Xmx4g',
       '-XX:-UseGCOverheadLimit',
+      // lean-pq calls its native library through the foreign function API.
+      '--enable-native-access=ALL-UNNAMED',
       // Mockito and jackson-databind do some strange reflection during tests.
       // This suppresses an illegal access warning.
       '--add-opens',

@@ -121,6 +121,8 @@ dependencies {
     api 'info.picocli:picocli:4.7.7'
     api 'info.picocli:picocli-codegen:4.7.7'
 
+    api 'io.github.crate-crypto:lean-pq:0.18.0'
+
     api 'io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0:2.33.1-alpha'
     api 'io.opentelemetry.proto:opentelemetry-proto:1.9.0-alpha'
     api 'io.opentelemetry.semconv:opentelemetry-semconv:1.44.0'
