@@ -46,17 +46,17 @@ public class SnapSyncConfiguration {
   public static final Boolean DEFAULT_SNAP_SERVER_ENABLED = Boolean.FALSE;
 
   /**
-   * Default cap on the number of snap/1-2 GET_* requests from a single peer that may have a service
-   * task concurrently scheduled on the EthScheduler services pool. Sized with modest headroom above
-   * the number of outstanding requests we ourselves send a peer ({@code
-   * EthPeer.MAX_OUTSTANDING_REQUESTS = 5}). 0 disables the check.
+   * Default cap on the number of snap/1-2 GET_* requests from a single peer that may be queued or
+   * served concurrently by the snap server threads. Sized with modest headroom above the number of
+   * outstanding requests we ourselves send a peer ({@code EthPeer.MAX_OUTSTANDING_REQUESTS = 5}). 0
+   * disables the check.
    */
   public static final int DEFAULT_MAX_CONCURRENT_SNAP_REQUESTS_PER_PEER = 8;
 
   /**
-   * Default cap on the total number of snap/1-2 GET_* requests, across all peers, that may have a
-   * service task concurrently scheduled on the EthScheduler services pool. Bounds worst-case
-   * native-thread/stack overhead from an unbounded fan-out of snap requests. 0 disables the check.
+   * Default cap on the total number of snap/1-2 GET_* requests, across all peers, that may be
+   * queued or served concurrently by the snap server threads. Bounds the requests waiting for those
+   * threads. 0 disables the check.
    *
    * <p>Sized as {@code DEFAULT_MAX_PEERS (25) * DEFAULT_MAX_CONCURRENT_SNAP_REQUESTS_PER_PEER (8) =
    * 200}, so that a node running with the default peer count never has legitimate,
@@ -68,6 +68,9 @@ public class SnapSyncConfiguration {
    * value proportionally, since the two are not coupled at runtime.
    */
   public static final int DEFAULT_MAX_CONCURRENT_SNAP_REQUESTS_GLOBAL = 200;
+
+  /** Default number of threads answering snap requests, apart from the node's own threads. */
+  public static final int DEFAULT_SNAP_SERVER_THREADS = 2;
 
   public static final Boolean DEFAULT_SNAP_SYNC_TRANSACTION_INDEXING_ENABLED = Boolean.FALSE;
   public static final Boolean DEFAULT_SNAP_SYNC_SAVE_PRE_MERGE_HEADERS_ONLY_ENABLED = Boolean.TRUE;
@@ -125,6 +128,11 @@ public class SnapSyncConfiguration {
   @Value.Default
   public int getMaxConcurrentSnapRequestsGlobal() {
     return DEFAULT_MAX_CONCURRENT_SNAP_REQUESTS_GLOBAL;
+  }
+
+  @Value.Default
+  public int getSnapServerThreads() {
+    return DEFAULT_SNAP_SERVER_THREADS;
   }
 
   @Value.Default

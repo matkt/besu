@@ -104,6 +104,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private static final String SNAP_SERVER_MAX_CONCURRENT_REQUESTS_FLAG =
       "--Xsnapsync-server-max-concurrent-requests";
 
+  private static final String SNAP_SERVER_THREADS_FLAG = "--Xsnapsync-server-threads";
+
   private static final String CHECKPOINT_POST_MERGE_FLAG = "--Xcheckpoint-post-merge-enabled";
 
   private static final String SNAP_SYNC_SAVE_PRE_CHECKPOINT_HEADERS_ONLY_FLAG =
@@ -387,6 +389,14 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
   private int snapsyncServerMaxConcurrentRequests =
       SnapSyncConfiguration.DEFAULT_MAX_CONCURRENT_SNAP_REQUESTS_GLOBAL;
 
+  @CommandLine.Option(
+      names = SNAP_SERVER_THREADS_FLAG,
+      hidden = true,
+      paramLabel = "<INTEGER>",
+      description =
+          "Number of threads answering snap sync GET_* requests, apart from the threads of the node (default: ${DEFAULT-VALUE})")
+  private int snapsyncServerThreads = SnapSyncConfiguration.DEFAULT_SNAP_SERVER_THREADS;
+
   @SuppressWarnings("unused")
   @CommandLine.Option(
       names = {CHECKPOINT_POST_MERGE_FLAG},
@@ -550,6 +560,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
         config.getSnapSyncConfiguration().getMaxConcurrentSnapRequestsPerPeer();
     options.snapsyncServerMaxConcurrentRequests =
         config.getSnapSyncConfiguration().getMaxConcurrentSnapRequestsGlobal();
+    options.snapsyncServerThreads = config.getSnapSyncConfiguration().getSnapServerThreads();
     options.snapTransactionIndexingEnabled =
         config.getSnapSyncConfiguration().isSnapSyncTransactionIndexingEnabled();
     options.snap2BackfillEnabled = config.getSnapSyncConfiguration().isSnap2BackfillEnabled();
@@ -597,6 +608,7 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             .isSnapServerEnabled(snapsyncServerEnabled)
             .maxConcurrentSnapRequestsPerPeer(snapsyncServerMaxConcurrentRequestsPerPeer)
             .maxConcurrentSnapRequestsGlobal(snapsyncServerMaxConcurrentRequests)
+            .snapServerThreads(snapsyncServerThreads)
             .isSnapSyncTransactionIndexingEnabled(snapTransactionIndexingEnabled)
             .isSnap2BackfillEnabled(snap2BackfillEnabled)
             .build());
@@ -674,6 +686,8 @@ public class SynchronizerOptions implements CLIOptions<SynchronizerConfiguration
             OptionParser.format(snapsyncServerMaxConcurrentRequestsPerPeer),
             SNAP_SERVER_MAX_CONCURRENT_REQUESTS_FLAG,
             OptionParser.format(snapsyncServerMaxConcurrentRequests),
+            SNAP_SERVER_THREADS_FLAG,
+            OptionParser.format(snapsyncServerThreads),
             SNAP_TRANSACTION_INDEXING_ENABLED_FLAG,
             OptionParser.format(snapTransactionIndexingEnabled),
             SNAP2_BACKFILL_ENABLED_FLAG,

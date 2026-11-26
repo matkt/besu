@@ -76,6 +76,7 @@ public class SynchronizerOptionsTest
                 .bytecodeCountPerRequest(
                     SnapSyncConfiguration.DEFAULT_BYTECODE_COUNT_PER_REQUEST + 2)
                 .isSnapServerEnabled(Boolean.TRUE)
+                .snapServerThreads(SnapSyncConfiguration.DEFAULT_SNAP_SERVER_THREADS + 2)
                 .isSnapSyncTransactionIndexingEnabled(Boolean.TRUE)
                 .isSnap2BackfillEnabled(Boolean.FALSE)
                 .build())

@@ -716,7 +716,9 @@ public abstract class BesuControllerBuilder implements MiningConfigurationOverri
         new EthScheduler(
             syncConfig.getDownloaderParallelism(),
             syncConfig.getTransactionsParallelism(),
+            EthScheduler.TX_WORKER_CAPACITY,
             syncConfig.getComputationParallelism(),
+            syncConfig.getSnapSyncConfiguration().getSnapServerThreads(),
             metricsSystem);
 
     final MutableBlockchain blockchain =

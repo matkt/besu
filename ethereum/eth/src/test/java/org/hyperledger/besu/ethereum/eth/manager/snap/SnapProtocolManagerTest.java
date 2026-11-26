@@ -84,6 +84,7 @@ class SnapProtocolManagerTest {
   @Mock private EthScheduler ethScheduler;
   @Mock private EthPeer ethPeer;
   private final StubMetricsSystem metricsSystem = new StubMetricsSystem();
+  private long nanoTime;
 
   private SnapProtocolManager snapProtocolManager;
 
@@ -196,7 +197,7 @@ class SnapProtocolManagerTest {
 
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     for (int i = 0; i < 5; i++) {
       snapProtocolManager.processMessage(
@@ -205,7 +206,7 @@ class SnapProtocolManagerTest {
 
     // Only the first 2 requests are scheduled; the remaining 3 are dropped once the per-peer cap
     // (reproducing the unbounded fan-out this test guards against, absent the cap) is reached.
-    verify(ethScheduler, times(2)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(2)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
@@ -218,7 +219,7 @@ class SnapProtocolManagerTest {
     final EthPeer ethPeerB = mock(EthPeer.class);
     final MockPeerConnection peerConnectionB = snapPeerConnection();
     stubPeer(ethPeerB, peerConnectionB);
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     for (int i = 0; i < 2; i++) {
       snapProtocolManager.processMessage(
@@ -228,14 +229,14 @@ class SnapProtocolManagerTest {
     }
 
     // Both peers stay within their own per-peer cap, so all 4 requests are scheduled.
-    verify(ethScheduler, times(4)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(4)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
   void limitsConcurrentSnapRequestsGlobally() {
     when(snapConfig.getMaxConcurrentSnapRequestsGlobal()).thenReturn(3);
     snapProtocolManager = createSnapProtocolManager();
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     // 3 distinct peers, each individually under any per-peer cap, sending 2 requests each.
     for (int peerIndex = 0; peerIndex < 3; peerIndex++) {
@@ -249,7 +250,7 @@ class SnapProtocolManagerTest {
     }
 
     // Only the first 3 requests (across all peers) are scheduled once the global cap is reached.
-    verify(ethScheduler, times(3)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(3)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
@@ -260,7 +261,7 @@ class SnapProtocolManagerTest {
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
     final List<CompletableFuture<Void>> scheduledTasks = new ArrayList<>();
-    when(ethScheduler.scheduleServiceTask(any(Runnable.class)))
+    when(ethScheduler.scheduleSnapServerTask(any(Runnable.class)))
         .thenAnswer(
             invocation -> {
               final CompletableFuture<Void> future = new CompletableFuture<>();
@@ -273,14 +274,14 @@ class SnapProtocolManagerTest {
     snapProtocolManager.processMessage(
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 1));
     // Second request dropped: the peer's single slot is still held by the first, in-flight task.
-    verify(ethScheduler, times(1)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(1)).scheduleSnapServerTask(any(Runnable.class));
 
     scheduledTasks.get(0).complete(null);
 
     snapProtocolManager.processMessage(
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 2));
     // Completing the first task freed the slot, so the third request is now accepted.
-    verify(ethScheduler, times(2)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(2)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
@@ -290,7 +291,7 @@ class SnapProtocolManagerTest {
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
     final List<CompletableFuture<Void>> scheduledTasks = new ArrayList<>();
-    when(ethScheduler.scheduleServiceTask(any(Runnable.class)))
+    when(ethScheduler.scheduleSnapServerTask(any(Runnable.class)))
         .thenAnswer(
             invocation -> {
               final CompletableFuture<Void> future = new CompletableFuture<>();
@@ -320,7 +321,7 @@ class SnapProtocolManagerTest {
     // Simulates CompletableFuture.runAsync throwing RejectedExecutionException synchronously,
     // e.g. because the services executor is shutting down, before scheduleServiceTask ever
     // returns a future to attach the release-on-complete handler to.
-    when(ethScheduler.scheduleServiceTask(any(Runnable.class)))
+    when(ethScheduler.scheduleSnapServerTask(any(Runnable.class)))
         .thenThrow(new RejectedExecutionException("executor is shutting down"))
         .thenAnswer(invocation -> new CompletableFuture<Void>());
 
@@ -334,7 +335,7 @@ class SnapProtocolManagerTest {
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 1));
     // If the failed first attempt had leaked its reserved slot, this second request would be
     // dropped (only 1 call to scheduleServiceTask) instead of being scheduled (2 calls).
-    verify(ethScheduler, times(2)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(2)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
@@ -344,11 +345,11 @@ class SnapProtocolManagerTest {
 
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     snapProtocolManager.processMessage(
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 0));
-    verify(ethScheduler, times(1)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(1)).scheduleSnapServerTask(any(Runnable.class));
 
     // The peer disconnects before its in-flight task ever completes.
     snapProtocolManager.handleDisconnect(
@@ -357,7 +358,7 @@ class SnapProtocolManagerTest {
     snapProtocolManager.processMessage(
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 1));
     // Disconnect cleanup freed the slot rather than leaking it, so this request is accepted.
-    verify(ethScheduler, times(2)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(2)).scheduleSnapServerTask(any(Runnable.class));
   }
 
   @Test
@@ -367,7 +368,7 @@ class SnapProtocolManagerTest {
 
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     snapProtocolManager.processMessage(
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, 0));
@@ -376,7 +377,7 @@ class SnapProtocolManagerTest {
 
     // The first request holds the peer's only slot; the second is rejected but still answered
     // rather than left to time out.
-    verify(ethScheduler, times(1)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(1)).scheduleSnapServerTask(any(Runnable.class));
     final ArgumentCaptor<MessageData> sent = ArgumentCaptor.forClass(MessageData.class);
     verify(ethPeer).send(sent.capture(), eq(SnapProtocol.NAME));
     assertThat(sent.getValue().getCode()).isEqualTo(SnapV1.TRIE_NODES);
@@ -388,7 +389,7 @@ class SnapProtocolManagerTest {
   void respondsEmptyWhenGlobalCapReached() throws PeerConnection.PeerNotConnected {
     when(snapConfig.getMaxConcurrentSnapRequestsGlobal()).thenReturn(1);
     snapProtocolManager = createSnapProtocolManager();
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     final MockPeerConnection peerConnectionA = snapPeerConnection();
     stubPeer(ethPeer, peerConnectionA);
@@ -402,7 +403,7 @@ class SnapProtocolManagerTest {
         SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnectionB, 7));
 
     // The global cap is already spent on peer A's request, so peer B's is rejected but answered.
-    verify(ethScheduler, times(1)).scheduleServiceTask(any(Runnable.class));
+    verify(ethScheduler, times(1)).scheduleSnapServerTask(any(Runnable.class));
     final ArgumentCaptor<MessageData> sent = ArgumentCaptor.forClass(MessageData.class);
     verify(ethPeerB).send(sent.capture(), eq(SnapProtocol.NAME));
     assertThat(sent.getValue().unwrapMessageData().getKey()).isEqualTo(BigInteger.valueOf(7));
@@ -416,7 +417,7 @@ class SnapProtocolManagerTest {
 
     final MockPeerConnection peerConnection = snapPeerConnection();
     stubPeer(ethPeer, peerConnection);
-    stubPendingServiceTasks();
+    stubPendingSnapServerTasks();
 
     // First request holds the peer's only slot.
     snapProtocolManager.processMessage(
@@ -432,14 +433,55 @@ class SnapProtocolManagerTest {
     verify(ethPeer, never()).send(any(), any());
   }
 
+  @Test
+  void answersEmptyARequestThatWaitedTooLongForAThread() throws PeerConnection.PeerNotConnected {
+    final MockPeerConnection peerConnection = snapPeerConnection();
+    stubPeer(ethPeer, peerConnection);
+    final Runnable request = queuedRequest(peerConnection, 3);
+
+    nanoTime += SnapProtocolManager.MAX_QUEUE_WAIT_NANOS + 1;
+    request.run();
+
+    verify(snapMessages, never()).dispatch(any(), any());
+    final ArgumentCaptor<MessageData> sent = ArgumentCaptor.forClass(MessageData.class);
+    verify(ethPeer).send(sent.capture(), eq(SnapProtocol.NAME));
+    assertThat(TrieNodesMessage.readFrom(sent.getValue()).nodes(true)).isEmpty();
+    assertThat(sent.getValue().unwrapMessageData().getKey()).isEqualTo(BigInteger.valueOf(3));
+    assertThat(metricsSystem.getCounterValue("snap_service_requests_expired_total")).isEqualTo(1);
+  }
+
+  @Test
+  void servesARequestThatWaitedUpToTheLimit() {
+    final MockPeerConnection peerConnection = snapPeerConnection();
+    stubPeer(ethPeer, peerConnection);
+    final Runnable request = queuedRequest(peerConnection, 3);
+
+    nanoTime += SnapProtocolManager.MAX_QUEUE_WAIT_NANOS;
+    request.run();
+
+    verify(snapMessages).dispatch(any(), any());
+    assertThat(metricsSystem.getCounterValue("snap_service_requests_expired_total")).isZero();
+  }
+
+  // sends a request that waits for a snap server thread, returned to run it
+  private Runnable queuedRequest(final PeerConnection peerConnection, final int requestId) {
+    snapProtocolManager = createSnapProtocolManager();
+    stubPendingSnapServerTasks();
+    snapProtocolManager.processMessage(
+        SnapProtocolVersion.V1.getCapability(), getTrieNodesMessage(peerConnection, requestId));
+    final ArgumentCaptor<Runnable> request = ArgumentCaptor.forClass(Runnable.class);
+    verify(ethScheduler).scheduleSnapServerTask(request.capture());
+    return request.getValue();
+  }
+
   private void stubPeer(final EthPeer peer, final PeerConnection connection) {
     when(ethPeers.peer(connection)).thenReturn(peer);
     when(peer.getConnection()).thenReturn(connection);
     when(peer.validateReceivedMessage(any(), any())).thenReturn(true);
   }
 
-  private void stubPendingServiceTasks() {
-    when(ethScheduler.scheduleServiceTask(any(Runnable.class)))
+  private void stubPendingSnapServerTasks() {
+    when(ethScheduler.scheduleSnapServerTask(any(Runnable.class)))
         .thenAnswer(invocation -> new CompletableFuture<Void>());
   }
 
@@ -478,6 +520,7 @@ class SnapProtocolManagerTest {
         ethScheduler,
         protocolContext,
         synchronizer,
-        metricsSystem);
+        metricsSystem,
+        () -> nanoTime);
   }
 }

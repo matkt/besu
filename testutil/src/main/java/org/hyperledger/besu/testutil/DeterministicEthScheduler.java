@@ -49,6 +49,7 @@ public class DeterministicEthScheduler extends EthScheduler {
         new MockExecutorService(),
         new MockExecutorService(),
         new MockExecutorService(),
+        new MockExecutorService(),
         new MockExecutorService());
 
     this.timeoutPolicy = timeoutPolicy;
@@ -59,7 +60,8 @@ public class DeterministicEthScheduler extends EthScheduler {
             (MockExecutorService) this.txWorkerExecutor,
             (MockExecutorService) this.servicesExecutor,
             (MockExecutorService) this.computationExecutor,
-            (MockExecutorService) this.blockCreationExecutor);
+            (MockExecutorService) this.blockCreationExecutor,
+            (MockExecutorService) this.snapServerExecutor);
   }
 
   /** Test utility for manually running pending futures, when autorun is disabled */
