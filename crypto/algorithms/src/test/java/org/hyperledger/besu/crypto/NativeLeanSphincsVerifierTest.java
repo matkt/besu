@@ -16,73 +16,70 @@ package org.hyperledger.besu.crypto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
-
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes32;
+import org.ethereum.leanpq.SphincsSecretKey;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** Checks the lean-pq wrapper against EthLib's known answer, described in the README next to it. */
+/** Checks the lean-pq wrapper with a signature that lean-pq makes; leanVM tests lean-pq itself. */
 class NativeLeanSphincsVerifierTest {
 
+  private static final Bytes32 SEED = Bytes32.fromHexString("0x" + "07".repeat(32));
+  private static final Bytes32 MESSAGE = Bytes32.fromHexString("0x" + "42".repeat(32));
+
   private static Bytes publicKey;
-  private static Bytes message;
   private static Bytes signature;
 
   private final LeanSphincsVerifier verifier = new NativeLeanSphincsVerifier();
 
+  // Signing is deterministic, so the same seed and message give the same signature on every run.
   @BeforeAll
-  static void readKnownAnswer() throws IOException, URISyntaxException {
-    final Map<String, String> fields = readFields("leansphincs/verify_valid_known_answer.yaml");
-    assertThat(fields).containsEntry("output", "true");
-    publicKey = Bytes.fromHexString(fields.get("public_key"));
-    message = Bytes.fromHexString(fields.get("message"));
-    signature = Bytes.fromHexString(fields.get("signature"));
+  static void sign() {
+    try (SphincsSecretKey key = SphincsSecretKey.fromSeed(SEED.toArrayUnsafe())) {
+      publicKey = Bytes.wrap(key.publicKey());
+      signature = Bytes.wrap(key.sign(MESSAGE.toArrayUnsafe()));
+    }
   }
 
   @Test
-  void knownAnswerVerifies() {
-    assertThat(verifier.verify(publicKey, message, signature)).isTrue();
+  void signatureVerifies() {
+    assertThat(verifier.verify(publicKey, MESSAGE, signature)).isTrue();
   }
 
   // The first byte is the randomizer and the last one ends the top layer's path.
   @ParameterizedTest
   @ValueSource(ints = {0, LeanSphincsVerifier.SIGNATURE_SIZE - 1})
   void flippedSignatureBitIsRejected(final int offset) {
-    assertThat(verifier.verify(publicKey, message, flipLowBit(signature, offset))).isFalse();
+    assertThat(verifier.verify(publicKey, MESSAGE, flipLowBit(signature, offset))).isFalse();
   }
 
   @Test
   void otherMessageIsRejected() {
-    assertThat(verifier.verify(publicKey, flipLowBit(message, 0), signature)).isFalse();
+    assertThat(verifier.verify(publicKey, flipLowBit(MESSAGE, 0), signature)).isFalse();
   }
 
   // The first half of the key is PK.seed, the second half PK.root.
   @ParameterizedTest
   @ValueSource(ints = {0, LeanSphincsVerifier.PUBLIC_KEY_SIZE / 2})
   void otherPublicKeyIsRejected(final int offset) {
-    assertThat(verifier.verify(flipLowBit(publicKey, offset), message, signature)).isFalse();
+    assertThat(verifier.verify(flipLowBit(publicKey, offset), MESSAGE, signature)).isFalse();
   }
 
   @Test
   void inputOfAnotherSizeIsRejected() {
     final Bytes extraByte = Bytes.of(0);
 
-    assertThat(verifier.verify(publicKey.slice(1), message, signature)).isFalse();
-    assertThat(verifier.verify(Bytes.concatenate(publicKey, extraByte), message, signature))
+    assertThat(verifier.verify(publicKey.slice(1), MESSAGE, signature)).isFalse();
+    assertThat(verifier.verify(Bytes.concatenate(publicKey, extraByte), MESSAGE, signature))
         .isFalse();
-    assertThat(verifier.verify(publicKey, message.slice(1), signature)).isFalse();
-    assertThat(verifier.verify(publicKey, Bytes.concatenate(message, extraByte), signature))
+    assertThat(verifier.verify(publicKey, MESSAGE.slice(1), signature)).isFalse();
+    assertThat(verifier.verify(publicKey, Bytes.concatenate(MESSAGE, extraByte), signature))
         .isFalse();
-    assertThat(verifier.verify(publicKey, message, signature.slice(1))).isFalse();
-    assertThat(verifier.verify(publicKey, message, Bytes.concatenate(signature, extraByte)))
+    assertThat(verifier.verify(publicKey, MESSAGE, signature.slice(1))).isFalse();
+    assertThat(verifier.verify(publicKey, MESSAGE, Bytes.concatenate(signature, extraByte)))
         .isFalse();
   }
 
@@ -90,20 +87,5 @@ class NativeLeanSphincsVerifierTest {
     final byte[] flipped = bytes.toArray();
     flipped[offset] ^= 0x01;
     return Bytes.wrap(flipped);
-  }
-
-  // Each line of the vector is "key: value", with hex values in single quotes.
-  private static Map<String, String> readFields(final String resource)
-      throws IOException, URISyntaxException {
-    final Path file = Path.of(NativeLeanSphincsVerifierTest.class.getResource(resource).toURI());
-    final Map<String, String> fields = new HashMap<>();
-    for (final String line : Files.readAllLines(file)) {
-      final int colon = line.indexOf(':');
-      final String value = line.substring(colon + 1).trim();
-      if (colon > 0 && !value.isEmpty()) {
-        fields.put(line.substring(0, colon).trim(), value.replace("'", ""));
-      }
-    }
-    return fields;
   }
 }
