@@ -22,6 +22,7 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.atMostOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,11 +32,13 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorage;
 import org.hyperledger.besu.services.kvstore.LayeredKeyValueStorage;
 
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -532,5 +535,80 @@ public class LayeredKeyValueStorageTest {
     assertTrue(result.get(0).isEmpty());
     assertArrayEquals(parentValue2, result.get(1).orElseThrow());
     verify(parentStorage).multiget(segmentId, List.of(key2));
+  }
+
+  @Test
+  void streamFromKeySeeksTheParentAndSkipsLayerKeysBeforeTheStart() {
+    when(parentStorage.streamFromKey(segmentId, new byte[] {3}))
+        .thenReturn(Stream.of(Pair.of(new byte[] {3}, new byte[] {30}), pair(4)));
+    layeredKeyValueStorage = withLayer(Map.of(1, 1, 3, 33, 5, 5, 6, -1));
+
+    assertEquals(
+        List.of("03=21", "04=04", "05=05"),
+        entries(layeredKeyValueStorage.streamFromKey(segmentId, new byte[] {3})));
+    verify(parentStorage, never()).stream(segmentId);
+  }
+
+  @Test
+  void streamFromKeyToEndKeyKeepsLayerKeysInTheRange() {
+    when(parentStorage.streamFromKey(segmentId, new byte[] {2}, new byte[] {5}))
+        .thenReturn(Stream.of(pair(2), pair(4)));
+    layeredKeyValueStorage = withLayer(Map.of(1, 1, 3, 3, 4, -1, 5, 5, 6, 6));
+
+    assertEquals(
+        List.of("02=02", "03=03", "05=05"),
+        entries(layeredKeyValueStorage.streamFromKey(segmentId, new byte[] {2}, new byte[] {5})));
+    verify(parentStorage, never()).stream(segmentId);
+  }
+
+  @Test
+  void streamFromKeyAfterEndKeyIsEmpty() {
+    layeredKeyValueStorage = withLayer(Map.of(3, 3));
+
+    assertEquals(
+        List.of(),
+        entries(layeredKeyValueStorage.streamFromKey(segmentId, new byte[] {4}, new byte[] {2})));
+  }
+
+  @Test
+  void closingAMergedStreamClosesTheParentStream() {
+    final AtomicBoolean parentClosed = new AtomicBoolean();
+    when(parentStorage.streamFromKey(segmentId, new byte[] {1}))
+        .thenReturn(Stream.of(pair(1), pair(2)).onClose(() -> parentClosed.set(true)));
+
+    try (Stream<Pair<byte[], byte[]>> stream =
+        layeredKeyValueStorage.streamFromKey(segmentId, new byte[] {1})) {
+      assertEquals(1, stream.limit(1).count());
+    }
+    assertTrue(parentClosed.get());
+  }
+
+  /** A layer holding key -> value, a negative value being a deletion. */
+  private LayeredKeyValueStorage withLayer(final Map<Integer, Integer> entries) {
+    final var layer = createSegmentMap();
+    entries.forEach(
+        (key, value) ->
+            layer
+                .get(segmentId)
+                .put(
+                    Bytes.of(key),
+                    value < 0 ? Optional.empty() : Optional.of(new byte[] {value.byteValue()})));
+    return new LayeredKeyValueStorage(layer, parentStorage);
+  }
+
+  private static Pair<byte[], byte[]> pair(final int key) {
+    return Pair.of(new byte[] {(byte) key}, new byte[] {(byte) key});
+  }
+
+  private static List<String> entries(final Stream<Pair<byte[], byte[]>> stream) {
+    try (stream) {
+      return stream
+          .map(
+              e ->
+                  Bytes.wrap(e.getKey()).toUnprefixedHexString()
+                      + "="
+                      + Bytes.wrap(e.getValue()).toUnprefixedHexString())
+          .toList();
+    }
   }
 }

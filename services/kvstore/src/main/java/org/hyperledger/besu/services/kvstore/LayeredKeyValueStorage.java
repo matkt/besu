@@ -25,6 +25,7 @@ import org.hyperledger.besu.plugin.services.storage.SegmentedKeyValueStorageTran
 import org.hyperledger.besu.plugin.services.storage.SnappedKeyValueStorage;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -301,17 +302,52 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
   @Override
   public Stream<Pair<byte[], byte[]>> stream(final SegmentIdentifier segmentId) {
     throwIfClosed();
-    var ourLayerState = hashValueStore.computeIfAbsent(segmentId, s -> newSegmentMap());
+    return merge(layer(segmentId), parent.stream(segmentId));
+  }
 
-    PeekingIterator<Map.Entry<Bytes, Optional<byte[]>>> ourIterator =
-        new PeekingIterator<>(ourLayerState.entrySet().stream().iterator());
-    PeekingIterator<Pair<byte[], byte[]>> parentIterator =
-        new PeekingIterator<>(parent.stream(segmentId).iterator());
+  @Override
+  public Stream<Pair<byte[], byte[]>> streamFromKey(
+      final SegmentIdentifier segmentId, final byte[] startKey) {
+    throwIfClosed();
+    return merge(
+        layer(segmentId).tailMap(Bytes.wrap(startKey), true),
+        parent.streamFromKey(segmentId, startKey));
+  }
 
+  @Override
+  public Stream<Pair<byte[], byte[]>> streamFromKey(
+      final SegmentIdentifier segmentId, final byte[] startKey, final byte[] endKey) {
+    throwIfClosed();
+    if (Arrays.compareUnsigned(startKey, endKey) > 0) {
+      return Stream.empty();
+    }
+    return merge(
+        layer(segmentId).subMap(Bytes.wrap(startKey), true, Bytes.wrap(endKey), true),
+        parent.streamFromKey(segmentId, startKey, endKey));
+  }
+
+  private NavigableMap<Bytes, Optional<byte[]>> layer(final SegmentIdentifier segmentId) {
+    return hashValueStore.computeIfAbsent(segmentId, s -> newSegmentMap());
+  }
+
+  /** Merges this layer's entries over the parent's; closing the result closes the parent's. */
+  private static Stream<Pair<byte[], byte[]>> merge(
+      final NavigableMap<Bytes, Optional<byte[]>> ours,
+      final Stream<Pair<byte[], byte[]>> parentStream) {
+    final PeekingIterator<Pair<byte[], byte[]>> parentIterator;
+    try {
+      parentIterator = new PeekingIterator<>(parentStream.iterator());
+    } catch (final RuntimeException e) {
+      parentStream.close();
+      throw e;
+    }
+    final PeekingIterator<Map.Entry<Bytes, Optional<byte[]>>> ourIterator =
+        new PeekingIterator<>(ours.entrySet().iterator());
     return StreamSupport.stream(
             Spliterators.spliteratorUnknownSize(
                 new LayeredIterator(ourIterator, parentIterator), ORDERED | SORTED | DISTINCT),
             false)
+        .onClose(parentStream::close)
         .filter(e -> e.getValue() != null);
   }
 
@@ -357,23 +393,6 @@ public class LayeredKeyValueStorage extends SegmentedInMemoryKeyValueStorage
         return parentIterator.next();
       }
     }
-  }
-
-  @Override
-  public Stream<Pair<byte[], byte[]>> streamFromKey(
-      final SegmentIdentifier segmentId, final byte[] startKey) {
-    final Bytes startKeyBytes = Bytes.wrap(startKey);
-    return stream(segmentId).filter(e -> startKeyBytes.compareTo(Bytes.wrap(e.getKey())) <= 0);
-  }
-
-  @Override
-  public Stream<Pair<byte[], byte[]>> streamFromKey(
-      final SegmentIdentifier segmentId, final byte[] startKey, final byte[] endKey) {
-    final Bytes startKeyBytes = Bytes.wrap(startKey);
-    final Bytes endKeyBytes = Bytes.wrap(endKey);
-    return stream(segmentId)
-        .filter(e -> startKeyBytes.compareTo(Bytes.wrap(e.getKey())) <= 0)
-        .filter(e -> endKeyBytes.compareTo(Bytes.wrap(e.getKey())) >= 0);
   }
 
   @Override
