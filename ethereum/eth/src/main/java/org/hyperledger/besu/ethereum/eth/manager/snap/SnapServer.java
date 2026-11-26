@@ -40,6 +40,7 @@ import org.hyperledger.besu.ethereum.trie.CompactEncoding;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.BonsaiWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.worldstate.FlatDbMode;
 import org.hyperledger.besu.ethereum.worldstate.WorldStateStorageCoordinator;
 import org.hyperledger.besu.plugin.services.BesuEvents;
@@ -70,7 +71,6 @@ import org.slf4j.LoggerFactory;
 /** See <a href="https://github.com/ethereum/devp2p/blob/master/caps/snap.md">snap</a> */
 class SnapServer implements BesuEvents.InitialSyncCompletionListener {
   private static final Logger LOGGER = LoggerFactory.getLogger(SnapServer.class);
-  private static final int PRIME_STATE_ROOT_CACHE_LIMIT = 128;
   private static final int MAX_ENTRIES_PER_REQUEST = 100000;
   private static final int MAX_RESPONSE_SIZE = 2 * 1024 * 1024;
   private static final int MAX_CODE_LOOKUPS_PER_REQUEST = 1024;
@@ -85,6 +85,8 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
       ByteCodesMessage.create(new ArrayDeque<>());
   static final BlockAccessListsMessage EMPTY_BLOCK_ACCESS_LISTS =
       BlockAccessListsMessage.create(List.of());
+
+  private static final StorageSubscriber STATE_READER = new StorageSubscriber() {};
 
   static final Hash HASH_LAST = Hash.wrap(Bytes32.leftPad(Bytes.fromHexString("FF"), (byte) 0xFF));
 
@@ -198,19 +200,10 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
             bonsaiArchive.map(archive -> archive.getWorldStateCacheManager());
 
         if (cachedStorageManagerOpt.isPresent()) {
-          var cachedStorageManager = cachedStorageManagerOpt.get();
+          // only the world states the node already caches are served: a peer never makes the
+          // node roll trie logs back, nor waits on the lock the block import takes
           this.worldStateStorageProvider =
-              rootHash ->
-                  cachedStorageManager
-                      .getStorageByRootHash(rootHash)
-                      .map(BonsaiWorldStateKeyValueStorage.class::cast);
-
-          // when we start we need to build the cache of latest 128 worldstates
-          // trielogs-to-root-hash:
-          var blockchain = protocolContext.map(ProtocolContext::getBlockchain).orElse(null);
-
-          // at startup, prime the latest worldstates by roothash:
-          cachedStorageManager.primeRootToBlockHashCache(blockchain, PRIME_STATE_ROOT_CACHE_LIMIT);
+              cachedStorageManagerOpt.get()::getCachedStorageByRootHash;
 
           var flatDbStrategy =
               ((BonsaiWorldStateKeyValueStorage)
@@ -340,9 +333,8 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
       if (range.worldStateRootHash().equals(Hash.EMPTY_TRIE_HASH)) {
         return AccountRangeMessage.create(new HashMap<>(), List.of(MerkleTrie.EMPTY_TRIE_NODE));
       }
-      return worldStateStorageProvider
-          .apply(range.worldStateRootHash())
-          .map(
+      return readState(
+              range.worldStateRootHash(),
               storage -> {
                 LOGGER.trace("obtained worldstate in {}", stopWatch);
                 ResponseSizePredicate<Pair<Bytes32, Bytes>> responseSizePredicate =
@@ -443,9 +435,8 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
                     .collect(Collectors.joining(",", "[", "]")))
         .log();
     try {
-      return worldStateStorageProvider
-          .apply(range.worldStateRootHash())
-          .map(
+      return readState(
+              range.worldStateRootHash(),
               storage -> {
                 LOGGER.trace("obtained worldstate in {}", stopWatch);
                 // reusable predicate to limit by rec count and bytes:
@@ -647,9 +638,8 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
     LOGGER.atTrace().setMessage("Received get trie nodes message").log();
 
     try {
-      return worldStateStorageProvider
-          .apply(triePaths.worldStateRootHash())
-          .map(
+      return readState(
+              triePaths.worldStateRootHash(),
               storage -> {
                 LOGGER.trace("obtained worldstate in {}", stopWatch);
                 ArrayList<Bytes> trieNodes = new ArrayList<>();
@@ -725,6 +715,29 @@ class SnapServer implements BesuEvents.InitialSyncCompletionListener {
     } catch (Exception ex) {
       LOGGER.error("Unexpected exception serving trienodes request", ex);
       return EMPTY_TRIE_NODES_MESSAGE;
+    }
+  }
+
+  /** Reads a cached world state, subscribed to it so that the cache cannot close it meanwhile. */
+  private <T> Optional<T> readState(
+      final Hash rootHash, final Function<BonsaiWorldStateKeyValueStorage, T> read) {
+    final Optional<BonsaiWorldStateKeyValueStorage> maybeStorage =
+        worldStateStorageProvider.apply(rootHash);
+    if (maybeStorage.isEmpty()) {
+      return Optional.empty();
+    }
+    final BonsaiWorldStateKeyValueStorage storage = maybeStorage.get();
+    final long subscription;
+    try {
+      subscription = storage.subscribe(STATE_READER);
+    } catch (final RuntimeException closed) {
+      // the cache closed it after the lookup
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(read.apply(storage));
+    } finally {
+      storage.unSubscribe(subscription);
     }
   }
 

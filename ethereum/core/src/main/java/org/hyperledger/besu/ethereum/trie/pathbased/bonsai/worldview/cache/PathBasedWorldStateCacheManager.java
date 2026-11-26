@@ -14,15 +14,11 @@
  */
 package org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.cache;
 
-import static org.hyperledger.besu.ethereum.worldstate.WorldStateQueryParams.withBlockHeaderAndNoUpdateNodeHead;
-
 import org.hyperledger.besu.datatypes.Hash;
-import org.hyperledger.besu.ethereum.chain.Blockchain;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.provider.PathBasedWorldStateProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateLayerStorage;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
-import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.BonsaiWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.PathBasedWorldState;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.worldview.WorldStateConfig;
 import org.hyperledger.besu.evm.internal.EvmConfiguration;
@@ -236,42 +232,18 @@ public abstract class PathBasedWorldStateCacheManager implements StorageSubscrib
     this.stateRootToBlockHeaderCache.clear();
   }
 
-  public void primeRootToBlockHashCache(final Blockchain blockchain, final int numEntries) {
-    // prime the stateroot-to-blockhash cache
-    long head = blockchain.getChainHeadHeader().getNumber();
-    for (long i = head; i > Math.max(0, head - numEntries); i--) {
-      blockchain
-          .getBlockHeader(i)
-          .ifPresent(header -> stateRootToBlockHeaderCache.put(header.getStateRoot(), header));
-    }
-  }
-
   /**
-   * Returns the worldstate for the supplied root hash. If the worldstate is not already in cache,
-   * this method will attempt to fetch it and add it to the cache. synchronized to prevent
-   * concurrent loads/adds to the cache of the same root hash.
+   * Returns the storage of a cached world state by its root hash. It takes no lock and loads
+   * nothing, so a caller never holds back the blocks being imported. The storage can be closed once
+   * the cache drops it: a reader subscribes to it to keep it open.
    *
-   * @param rootHash rootHash to supply worldstate storage for
-   * @return Optional worldstate storage
+   * @param rootHash the state root of the world state
+   * @return the storage, empty when no cached world state has this root
    */
-  public synchronized Optional<BonsaiWorldStateKeyValueStorage> getStorageByRootHash(
-      final Hash rootHash) {
+  public Optional<BonsaiWorldStateKeyValueStorage> getCachedStorageByRootHash(final Hash rootHash) {
     return Optional.ofNullable(stateRootToBlockHeaderCache.get(rootHash))
-        .flatMap(
-            header ->
-                Optional.ofNullable(cachedWorldStatesByHash.get(header.getBlockHash()))
-                    .map(BonsaiCachedWorldStateView::getWorldStateStorage)
-                    .or(
-                        () -> {
-                          // if not cached already, maybe fetch and cache this worldstate
-                          var maybeWorldState =
-                              archive
-                                  .getWorldState(withBlockHeaderAndNoUpdateNodeHead(header))
-                                  .map(BonsaiWorldState.class::cast);
-                          maybeWorldState.ifPresent(
-                              ws -> addCachedLayer(header, header.getStateRoot(), ws));
-                          return maybeWorldState.map(BonsaiWorldState::getWorldStateStorage);
-                        }));
+        .map(header -> cachedWorldStatesByHash.get(header.getBlockHash()))
+        .map(BonsaiCachedWorldStateView::getWorldStateStorage);
   }
 
   @Override
