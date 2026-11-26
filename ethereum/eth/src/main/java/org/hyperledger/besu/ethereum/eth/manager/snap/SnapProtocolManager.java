@@ -48,8 +48,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
@@ -57,6 +59,8 @@ import org.slf4j.LoggerFactory;
 
 public class SnapProtocolManager implements ProtocolManager {
   private static final Logger LOG = LoggerFactory.getLogger(SnapProtocolManager.class);
+  // well below the request timeout of a snap client, so that an answer can still reach it
+  static final long MAX_QUEUE_WAIT_NANOS = TimeUnit.SECONDS.toNanos(5);
 
   // replaced when snap/2 is added
   private volatile List<Capability> supportedCapabilities;
@@ -73,6 +77,8 @@ public class SnapProtocolManager implements ProtocolManager {
   private final Map<PeerConnection, AtomicInteger> perPeerInFlightRequests =
       new ConcurrentHashMap<>();
   private final Counter rejectedRequestsCounter;
+  private final Counter expiredRequestsCounter;
+  private final LongSupplier nanoTime;
 
   public SnapProtocolManager(
       final WorldStateStorageCoordinator worldStateStorageCoordinator,
@@ -84,7 +90,32 @@ public class SnapProtocolManager implements ProtocolManager {
       final ProtocolContext protocolContext,
       final Synchronizer synchronizer,
       final MetricsSystem metricsSystem) {
+    this(
+        worldStateStorageCoordinator,
+        snapConfig,
+        advertiseSnap2,
+        ethPeers,
+        snapMessages,
+        ethScheduler,
+        protocolContext,
+        synchronizer,
+        metricsSystem,
+        System::nanoTime);
+  }
+
+  SnapProtocolManager(
+      final WorldStateStorageCoordinator worldStateStorageCoordinator,
+      final SnapSyncConfiguration snapConfig,
+      final boolean advertiseSnap2,
+      final EthPeers ethPeers,
+      final EthMessages snapMessages,
+      final EthScheduler ethScheduler,
+      final ProtocolContext protocolContext,
+      final Synchronizer synchronizer,
+      final MetricsSystem metricsSystem,
+      final LongSupplier nanoTime) {
     this.ethPeers = ethPeers;
+    this.nanoTime = nanoTime;
     this.snapMessages = snapMessages;
     this.ethScheduler = ethScheduler;
     this.supportedCapabilities = calculateCapabilities(advertiseSnap2);
@@ -104,6 +135,11 @@ public class SnapProtocolManager implements ProtocolManager {
             BesuMetricCategory.PEERS,
             "snap_service_requests_rejected_total",
             "Total number of snap sync GET_* requests answered with an empty response because a concurrency cap was reached");
+    this.expiredRequestsCounter =
+        metricsSystem.createCounter(
+            BesuMetricCategory.PEERS,
+            "snap_service_requests_expired_total",
+            "Total number of snap sync GET_* requests answered with an empty response because they waited too long for a snap server thread");
   }
 
   private List<Capability> calculateCapabilities(final boolean advertiseSnap2) {
@@ -203,7 +239,8 @@ public class SnapProtocolManager implements ProtocolManager {
     // Dispatch to pending response handlers (no-op for inbound requests).
     ethPeers.dispatchMessage(ethPeer, decodedEthMessage, getSupportedProtocol());
 
-    // GET_* requests are handled off the Netty event loop to avoid blocking ETH protocol traffic.
+    // GET_* requests are served by the snap server threads, off the Netty event loop and off the
+    // threads of the node, so that peers neither block ETH protocol traffic nor slow the node.
     if (SnapV1.REQUEST_CODES.contains(code) || SnapV2.REQUEST_CODES.contains(code)) {
       scheduleSnapRequest(ethPeer, decodedEthMessage, cap, code);
     }
@@ -215,21 +252,21 @@ public class SnapProtocolManager implements ProtocolManager {
       final Capability cap,
       final int code) {
     if (!reserveSnapRequestSlot(ethPeer)) {
-      respondEmptyDueToOverload(ethPeer, decodedEthMessage, code);
+      respondEmpty(ethPeer, decodedEthMessage, code);
       return;
     }
     try {
       scheduleReservedSnapRequest(ethPeer, decodedEthMessage, cap, code);
     } catch (final RuntimeException e) {
-      // Only reachable during shutdown: the services executor rejects synchronously once shut
+      // Only reachable during shutdown: the snap server executor rejects synchronously once shut
       // down. Release the slot so it isn't leaked.
       releaseSnapRequestSlot(ethPeer);
       throw e;
     }
   }
 
-  /** Cap was hit; reply empty instead of leaving the peer to time out. */
-  private void respondEmptyDueToOverload(
+  /** Replies empty to a request not served, instead of leaving the peer to time out. */
+  private void respondEmpty(
       final EthPeer ethPeer, final EthMessage decodedEthMessage, final int code) {
     final BigInteger requestId;
     try {
@@ -248,11 +285,11 @@ public class SnapProtocolManager implements ProtocolManager {
 
   private static MessageData emptyResponseFor(final int code) {
     return switch (code) {
-      case SnapV1.GET_ACCOUNT_RANGE -> SnapServer.EMPTY_ACCOUNT_RANGE;
-      case SnapV1.GET_STORAGE_RANGE -> SnapServer.EMPTY_STORAGE_RANGE;
-      case SnapV1.GET_BYTECODES -> SnapServer.EMPTY_BYTE_CODES_MESSAGE;
-      case SnapV1.GET_TRIE_NODES -> SnapServer.EMPTY_TRIE_NODES_MESSAGE;
-      case SnapV2.GET_BLOCK_ACCESS_LISTS -> SnapServer.EMPTY_BLOCK_ACCESS_LISTS;
+      case SnapV1.GET_ACCOUNT_RANGE -> AccountRangeResponder.EMPTY;
+      case SnapV1.GET_STORAGE_RANGE -> StorageRangeResponder.EMPTY;
+      case SnapV1.GET_BYTECODES -> ByteCodesResponder.EMPTY;
+      case SnapV1.GET_TRIE_NODES -> TrieNodesResponder.EMPTY;
+      case SnapV2.GET_BLOCK_ACCESS_LISTS -> BlockAccessListsResponder.EMPTY;
       default -> throw new IllegalStateException("Unhandled snap GET_* code: " + code);
     };
   }
@@ -262,9 +299,16 @@ public class SnapProtocolManager implements ProtocolManager {
       final EthMessage decodedEthMessage,
       final Capability cap,
       final int code) {
+    final long queuedAt = nanoTime.getAsLong();
     ethScheduler
-        .scheduleServiceTask(
+        .scheduleSnapServerTask(
             () -> {
+              if (nanoTime.getAsLong() - queuedAt > MAX_QUEUE_WAIT_NANOS) {
+                // the peer is about to give the request up: reading for it would be wasted
+                expiredRequestsCounter.inc();
+                respondEmpty(ethPeer, decodedEthMessage, code);
+                return;
+              }
               Optional<MessageData> maybeResponseData = Optional.empty();
               try {
                 final Map.Entry<BigInteger, MessageData> requestIdAndEthMessage =

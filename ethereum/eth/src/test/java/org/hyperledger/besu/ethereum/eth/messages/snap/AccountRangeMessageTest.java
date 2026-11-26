@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
@@ -75,6 +76,30 @@ public final class AccountRangeMessageTest {
     assertThat(wireBytes.toHexString())
         .doesNotContain(Hash.EMPTY_TRIE_HASH.toHexString().substring(2));
     assertThat(wireBytes.toHexString()).doesNotContain(Hash.EMPTY.toHexString().substring(2));
+  }
+
+  @Test
+  public void createFromSlimAccountsWritesTheSameMessage() {
+    final Hash codeHash = Hash.wrap(Bytes32.leftPad(Bytes.fromHexString("0xcafebabe")));
+    final Map<Bytes32, Bytes> accounts = new TreeMap<>();
+    accounts.put(
+        Bytes32.leftPad(Bytes.of(1)),
+        RLP.encode(
+            new PatriciaTrieAccountValue(1L, Wei.of(2L), Hash.EMPTY_TRIE_HASH, Hash.EMPTY)
+                ::writeTo));
+    accounts.put(
+        Bytes32.leftPad(Bytes.of(2)),
+        RLP.encode(
+            new PatriciaTrieAccountValue(5L, Wei.of(100L), Hash.EMPTY_TRIE_HASH, codeHash)
+                ::writeTo));
+    final Map<Bytes32, Bytes> slimAccounts = new TreeMap<>();
+    accounts.forEach(
+        (hash, account) ->
+            slimAccounts.put(hash, AccountRangeMessage.toSlimAccount(RLP.input(account))));
+    final List<Bytes> proof = List.of(Bytes.of(7));
+
+    assertThat(AccountRangeMessage.createFromSlimAccounts(slimAccounts, proof).getData())
+        .isEqualTo(AccountRangeMessage.create(accounts, proof).getData());
   }
 
   @Test

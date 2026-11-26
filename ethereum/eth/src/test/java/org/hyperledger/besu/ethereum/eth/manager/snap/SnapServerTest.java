@@ -15,10 +15,13 @@
 package org.hyperledger.besu.ethereum.eth.manager.snap;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.hyperledger.besu.ethereum.eth.manager.snap.SnapServer.HASH_LAST;
 import static org.hyperledger.besu.ethereum.storage.keyvalue.KeyValueSegmentIdentifier.TRIE_BRANCH_STORAGE;
 import static org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage.WORLD_BLOCK_NUMBER_KEY;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -41,6 +44,7 @@ import org.hyperledger.besu.ethereum.trie.CompactEncoding;
 import org.hyperledger.besu.ethereum.trie.MerkleTrie;
 import org.hyperledger.besu.ethereum.trie.common.PatriciaTrieAccountValue;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.BonsaiWorldStateKeyValueStorage;
+import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.StorageSubscriber;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.cache.VersionedFlatDbCacheManager;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.flat.BonsaiFlatDbStrategyProvider;
 import org.hyperledger.besu.ethereum.trie.pathbased.bonsai.storage.trienode.TrieNodeKey;
@@ -65,6 +69,7 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Random;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -216,6 +221,30 @@ public class SnapServerTest {
             .codes();
     assertThat(codes.isEmpty()).isTrue();
     verify(spyProvider, never()).apply(any());
+  }
+
+  @ParameterizedTest
+  @MethodSource("flatDbMode")
+  @SuppressWarnings("unchecked")
+  public void worldStateDroppedByTheCacheStaysOpenUntilServed(final FlatDbMode flatDbMode) {
+    setup(flatDbMode);
+    insertTestAccounts(acct1, acct2, acct3, acct4);
+    final BonsaiWorldStateKeyValueStorage served = spy(inMemoryStorage);
+    final StorageSubscriber probe = new StorageSubscriber() {};
+    doAnswer(
+            read -> {
+              // the cache drops the world state while the request reads it
+              served.close();
+              served.unSubscribe(served.subscribe(probe));
+              return read.callRealMethod();
+            })
+        .when(served)
+        .streamFlatAccounts(any(Bytes.class), any(Predicate.class));
+    doReturn(Optional.of(served)).when(spyProvider).apply(any());
+
+    getAndVerifyAccountRangeData(requestAccountRange(acct1.addressHash, acct4.addressHash), 4);
+
+    assertThatThrownBy(() -> served.subscribe(probe)).isInstanceOf(RuntimeException.class);
   }
 
   @ParameterizedTest

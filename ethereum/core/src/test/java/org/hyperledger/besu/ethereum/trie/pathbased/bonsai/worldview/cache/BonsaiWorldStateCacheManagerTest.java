@@ -81,9 +81,9 @@ class BonsaiWorldStateCacheManagerTest {
     }
 
     // Perform reads on entries that will eventually fall below the final waterline.
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(0))).isPresent();
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(50))).isPresent();
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(100))).isPresent();
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(0))).isPresent();
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(50))).isPresent();
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(100))).isPresent();
 
     // Insert remaining blocks.
     for (int i = readPoint + 1; i <= BLOCK_COUNT; i++) {
@@ -91,15 +91,15 @@ class BonsaiWorldStateCacheManagerTest {
     }
 
     // Read blocks are evicted despite the earlier read.
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(0)))
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(0)))
         .describedAs(
             "block 0 read at block %d then evicted (below waterline %d)", readPoint, WATERLINE)
         .isEmpty();
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(50)))
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(50)))
         .describedAs(
             "block 50 read at block %d then evicted (below waterline %d)", readPoint, WATERLINE)
         .isEmpty();
-    assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(100)))
+    assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(100)))
         .describedAs(
             "block 100 read at block %d then evicted (below waterline %d)", readPoint, WATERLINE)
         .isEmpty();
@@ -108,7 +108,7 @@ class BonsaiWorldStateCacheManagerTest {
     LongStream.range(0, WATERLINE)
         .forEach(
             i ->
-                assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(i)))
+                assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(i)))
                     .describedAs("block %d (below waterline %d)", i, WATERLINE)
                     .isEmpty());
 
@@ -116,7 +116,7 @@ class BonsaiWorldStateCacheManagerTest {
     LongStream.range(WATERLINE, HEAD + 1)
         .forEach(
             i ->
-                assertThat(cacheManager.getStorageByRootHash(uniqueStateRoot(i)))
+                assertThat(cacheManager.getCachedStorageByRootHash(uniqueStateRoot(i)))
                     .describedAs("block %d (at/above waterline %d)", i, WATERLINE)
                     .isPresent());
   }
@@ -145,7 +145,7 @@ class BonsaiWorldStateCacheManagerTest {
         .isPresent();
 
     assertThat(headCacheManager.contains(headers[2].getBlockHash())).isFalse();
-    assertThat(headCacheManager.getStorageByRootHash(headers[1].getStateRoot()))
+    assertThat(headCacheManager.getCachedStorageByRootHash(headers[1].getStateRoot()))
         .containsSame(headSnapshot);
   }
 

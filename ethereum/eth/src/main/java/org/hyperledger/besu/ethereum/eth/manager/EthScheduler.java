@@ -49,7 +49,7 @@ public class EthScheduler {
 
   private final AtomicBoolean stopped = new AtomicBoolean(false);
   private final CountDownLatch shutdown = new CountDownLatch(1);
-  private static final int TX_WORKER_CAPACITY = 1_000;
+  public static final int TX_WORKER_CAPACITY = 1_000;
 
   protected final ExecutorService syncWorkerExecutor;
   protected final ScheduledExecutorService scheduler;
@@ -57,6 +57,7 @@ public class EthScheduler {
   protected final ExecutorService servicesExecutor;
   protected final ExecutorService computationExecutor;
   protected final ExecutorService blockCreationExecutor;
+  protected final ExecutorService snapServerExecutor;
 
   private final Collection<CompletableFuture<?>> pendingFutures = new ConcurrentLinkedDeque<>();
 
@@ -75,6 +76,32 @@ public class EthScheduler {
       final int computationWorkerCount,
       final MetricsSystem metricsSystem) {
     this(
+        syncWorkerCount,
+        txWorkerCount,
+        txWorkerQueueSize,
+        computationWorkerCount,
+        1,
+        metricsSystem);
+  }
+
+  /**
+   * Creates the scheduler of the node.
+   *
+   * @param syncWorkerCount the sync worker threads
+   * @param txWorkerCount the transaction worker threads
+   * @param txWorkerQueueSize the transactions waiting for a worker
+   * @param computationWorkerCount the computation threads
+   * @param snapServerWorkerCount the threads answering snap requests, apart from the node's own
+   * @param metricsSystem the metrics system
+   */
+  public EthScheduler(
+      final int syncWorkerCount,
+      final int txWorkerCount,
+      final int txWorkerQueueSize,
+      final int computationWorkerCount,
+      final int snapServerWorkerCount,
+      final MetricsSystem metricsSystem) {
+    this(
         MonitoredExecutors.newFixedThreadPool(
             EthScheduler.class.getSimpleName() + "-Workers", syncWorkerCount, metricsSystem),
         MonitoredExecutors.newScheduledThreadPool(
@@ -91,7 +118,11 @@ public class EthScheduler {
             computationWorkerCount,
             metricsSystem),
         MonitoredExecutors.newCachedThreadPool(
-            EthScheduler.class.getSimpleName() + "-BlockCreation", metricsSystem));
+            EthScheduler.class.getSimpleName() + "-BlockCreation", metricsSystem),
+        MonitoredExecutors.newFixedThreadPool(
+            EthScheduler.class.getSimpleName() + "-SnapServer",
+            snapServerWorkerCount,
+            metricsSystem));
   }
 
   protected EthScheduler(
@@ -100,13 +131,15 @@ public class EthScheduler {
       final ExecutorService txWorkerExecutor,
       final ExecutorService servicesExecutor,
       final ExecutorService computationExecutor,
-      final ExecutorService blockCreationExecutor) {
+      final ExecutorService blockCreationExecutor,
+      final ExecutorService snapServerExecutor) {
     this.syncWorkerExecutor = syncWorkerExecutor;
     this.scheduler = scheduler;
     this.txWorkerExecutor = txWorkerExecutor;
     this.servicesExecutor = servicesExecutor;
     this.computationExecutor = computationExecutor;
     this.blockCreationExecutor = blockCreationExecutor;
+    this.snapServerExecutor = snapServerExecutor;
   }
 
   public <T> CompletableFuture<T> scheduleSyncWorkerTask(
@@ -146,6 +179,17 @@ public class EthScheduler {
 
   public CompletableFuture<Void> scheduleServiceTask(final Runnable task) {
     return CompletableFuture.runAsync(task, servicesExecutor);
+  }
+
+  /**
+   * Runs a request of a snap peer on the threads of the snap server, so that peers never take the
+   * threads of the node.
+   *
+   * @param task the request to answer
+   * @return a future completed once the request is answered
+   */
+  public CompletableFuture<Void> scheduleSnapServerTask(final Runnable task) {
+    return CompletableFuture.runAsync(task, snapServerExecutor);
   }
 
   @SuppressWarnings("CollectionUndefinedEquality") // CompletableFuture uses identity equality
@@ -275,6 +319,7 @@ public class EthScheduler {
       servicesExecutor.shutdownNow();
       computationExecutor.shutdownNow();
       blockCreationExecutor.shutdownNow();
+      snapServerExecutor.shutdownNow();
       shutdown.countDown();
     } else {
       LOG.atTrace()
@@ -309,6 +354,10 @@ public class EthScheduler {
     if (!blockCreationExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
       LOG.error(
           "{} block creation executor did not shutdown cleanly.", this.getClass().getSimpleName());
+    }
+    if (!snapServerExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+      LOG.error(
+          "{} snap server executor did not shutdown cleanly.", this.getClass().getSimpleName());
     }
     LOG.trace("{} stopped.", this.getClass().getSimpleName());
   }

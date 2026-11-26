@@ -33,6 +33,7 @@ public class EthSchedulerShutdownTest {
   private ExecutorService servicesExecutor;
   private ExecutorService computationExecutor;
   private ExecutorService blockCreationExecutor;
+  private ExecutorService snapServerExecutor;
 
   @BeforeEach
   public void setup() {
@@ -42,6 +43,7 @@ public class EthSchedulerShutdownTest {
     servicesExecutor = Executors.newSingleThreadExecutor();
     computationExecutor = Executors.newSingleThreadExecutor();
     blockCreationExecutor = Executors.newSingleThreadExecutor();
+    snapServerExecutor = Executors.newSingleThreadExecutor();
     ethScheduler =
         new EthScheduler(
             syncWorkerExecutor,
@@ -49,7 +51,8 @@ public class EthSchedulerShutdownTest {
             txWorkerExecutor,
             servicesExecutor,
             computationExecutor,
-            blockCreationExecutor);
+            blockCreationExecutor,
+            snapServerExecutor);
   }
 
   @Test
@@ -162,6 +165,24 @@ public class EthSchedulerShutdownTest {
 
     assertThat(blockCreationExecutor.isShutdown()).isTrue();
     assertThat(blockCreationExecutor.isTerminated()).isTrue();
+    assertThat(task2.hasBeenStarted()).isFalse();
+  }
+
+  @Test
+  public void shutdown_snapServerShutsDown() throws InterruptedException {
+    final MockEthTask task1 = new MockEthTask(1);
+    final MockEthTask task2 = new MockEthTask();
+
+    ethScheduler.scheduleSnapServerTask(task1::executeTask);
+    ethScheduler.scheduleSnapServerTask(task2::executeTask);
+    ethScheduler.stop();
+
+    assertThat(snapServerExecutor.isShutdown()).isTrue();
+
+    ethScheduler.awaitStop();
+
+    assertThat(snapServerExecutor.isShutdown()).isTrue();
+    assertThat(snapServerExecutor.isTerminated()).isTrue();
     assertThat(task2.hasBeenStarted()).isFalse();
   }
 }

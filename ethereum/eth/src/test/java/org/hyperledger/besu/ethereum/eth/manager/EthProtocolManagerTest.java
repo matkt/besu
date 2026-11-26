@@ -1359,8 +1359,10 @@ public final class EthProtocolManagerTest {
     final ExecutorService services = mock(ExecutorService.class);
     final ExecutorService computations = mock(ExecutorService.class);
     final ExecutorService blockCreation = mock(ExecutorService.class);
+    final ExecutorService snapServer = mock(ExecutorService.class);
     final EthScheduler ethScheduler =
-        new EthScheduler(worker, scheduled, transactions, services, computations, blockCreation);
+        new EthScheduler(
+            worker, scheduled, transactions, services, computations, blockCreation, snapServer);
 
     // Create the fake TransactionMessage to feed to the EthManager.
     final BlockDataGenerator gen = new BlockDataGenerator(1);

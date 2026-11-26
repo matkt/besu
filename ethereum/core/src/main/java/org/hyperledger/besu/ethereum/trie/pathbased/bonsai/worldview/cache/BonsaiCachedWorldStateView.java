@@ -23,7 +23,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class BonsaiCachedWorldStateView implements StorageSubscriber {
-  private BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
+  // read without the lock by getWorldStateStorage
+  private volatile BonsaiWorldStateKeyValueStorage worldStateKeyValueStorage;
   private final BlockHeader blockHeader;
   private long worldViewSubscriberId;
   private static final Logger LOG = LoggerFactory.getLogger(BonsaiCachedWorldStateView.class);
