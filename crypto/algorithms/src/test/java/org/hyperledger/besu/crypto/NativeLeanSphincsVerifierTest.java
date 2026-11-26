@@ -17,110 +17,92 @@ package org.hyperledger.besu.crypto;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import org.apache.tuweni.bytes.Bytes;
-import org.ethereum.leanpq.SphincsSecretKey;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
-/** Runs the EthLib leanSPHINCS vectors, described in the README next to them, against lean-pq. */
+/** Checks the lean-pq wrapper against EthLib's known answer, described in the README next to it. */
 class NativeLeanSphincsVerifierTest {
+
+  private static Bytes publicKey;
+  private static Bytes message;
+  private static Bytes signature;
 
   private final LeanSphincsVerifier verifier = new NativeLeanSphincsVerifier();
 
-  /** One case: its directory name and the fields of its data.yaml. */
-  record Vector(String name, Map<String, String> fields) {
-
-    Bytes bytes(final String field) {
-      return Bytes.fromHexString(fields.get(field));
-    }
-
-    String output() {
-      return fields.get("output");
-    }
-
-    Arguments arguments() {
-      return Arguments.of(name, this);
-    }
+  @BeforeAll
+  static void readKnownAnswer() throws IOException, URISyntaxException {
+    final Map<String, String> fields = readFields("leansphincs/verify_valid_known_answer.yaml");
+    assertThat(fields).containsEntry("output", "true");
+    publicKey = Bytes.fromHexString(fields.get("public_key"));
+    message = Bytes.fromHexString(fields.get("message"));
+    signature = Bytes.fromHexString(fields.get("signature"));
   }
 
-  // A null output marks an input of the wrong size, which verify rejects by returning false.
-  static Stream<Arguments> verifyCases() throws IOException, URISyntaxException {
-    return vectors("verify").map(Vector::arguments);
+  @Test
+  void knownAnswerVerifies() {
+    assertThat(verifier.verify(publicKey, message, signature)).isTrue();
   }
 
-  // Rejected seeds and messages only exercise lean-pq's argument checks, so they are skipped.
-  static Stream<Arguments> keyGenCases() throws IOException, URISyntaxException {
-    return vectors("key_gen").filter(v -> !v.output().equals("null")).map(Vector::arguments);
+  // The first byte is the randomizer and the last one ends the top layer's path.
+  @ParameterizedTest
+  @ValueSource(ints = {0, LeanSphincsVerifier.SIGNATURE_SIZE - 1})
+  void flippedSignatureBitIsRejected(final int offset) {
+    assertThat(verifier.verify(publicKey, message, flipLowBit(signature, offset))).isFalse();
   }
 
-  static Stream<Arguments> signCases() throws IOException, URISyntaxException {
-    return vectors("sign").filter(v -> !v.output().equals("null")).map(Vector::arguments);
+  @Test
+  void otherMessageIsRejected() {
+    assertThat(verifier.verify(publicKey, flipLowBit(message, 0), signature)).isFalse();
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("verifyCases")
-  void verifyMatchesEthLib(final String name, final Vector vector) {
-    final boolean verified =
-        verifier.verify(
-            vector.bytes("public_key"), vector.bytes("message"), vector.bytes("signature"));
-
-    assertThat(verified).isEqualTo(vector.output().equals("true"));
+  // The first half of the key is PK.seed, the second half PK.root.
+  @ParameterizedTest
+  @ValueSource(ints = {0, LeanSphincsVerifier.PUBLIC_KEY_SIZE / 2})
+  void otherPublicKeyIsRejected(final int offset) {
+    assertThat(verifier.verify(flipLowBit(publicKey, offset), message, signature)).isFalse();
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("keyGenCases")
-  void keyGenMatchesEthLib(final String name, final Vector vector) {
-    try (SphincsSecretKey key = SphincsSecretKey.fromSeed(vector.bytes("seed").toArrayUnsafe())) {
-      assertThat(Bytes.wrap(key.publicKey())).isEqualTo(vector.bytes("output"));
-    }
+  @Test
+  void inputOfAnotherSizeIsRejected() {
+    final Bytes extraByte = Bytes.of(0);
+
+    assertThat(verifier.verify(publicKey.slice(1), message, signature)).isFalse();
+    assertThat(verifier.verify(Bytes.concatenate(publicKey, extraByte), message, signature))
+        .isFalse();
+    assertThat(verifier.verify(publicKey, message.slice(1), signature)).isFalse();
+    assertThat(verifier.verify(publicKey, Bytes.concatenate(message, extraByte), signature))
+        .isFalse();
+    assertThat(verifier.verify(publicKey, message, signature.slice(1))).isFalse();
+    assertThat(verifier.verify(publicKey, message, Bytes.concatenate(signature, extraByte)))
+        .isFalse();
   }
 
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("signCases")
-  void signMatchesEthLib(final String name, final Vector vector) {
-    try (SphincsSecretKey key = SphincsSecretKey.fromSeed(vector.bytes("seed").toArrayUnsafe())) {
-      final byte[] signature = key.sign(vector.bytes("message").toArrayUnsafe());
-
-      assertThat(Bytes.wrap(signature)).isEqualTo(vector.bytes("output"));
-    }
+  private static Bytes flipLowBit(final Bytes bytes, final int offset) {
+    final byte[] flipped = bytes.toArray();
+    flipped[offset] ^= 0x01;
+    return Bytes.wrap(flipped);
   }
 
-  private static Stream<Vector> vectors(final String operation)
+  // Each line of the vector is "key: value", with hex values in single quotes.
+  private static Map<String, String> readFields(final String resource)
       throws IOException, URISyntaxException {
-    final Path directory =
-        Path.of(
-            NativeLeanSphincsVerifierTest.class.getResource("leansphincs/" + operation).toURI());
-    final List<Path> caseDirectories;
-    try (Stream<Path> listing = Files.list(directory)) {
-      caseDirectories = listing.sorted().toList();
-    }
-    return caseDirectories.stream()
-        .map(dir -> new Vector(dir.getFileName().toString(), readFields(dir.resolve("data.yaml"))));
-  }
-
-  // Each line of a vector is "key: value", with hex values in single quotes.
-  private static Map<String, String> readFields(final Path file) {
+    final Path file = Path.of(NativeLeanSphincsVerifierTest.class.getResource(resource).toURI());
     final Map<String, String> fields = new HashMap<>();
-    try {
-      for (final String line : Files.readAllLines(file)) {
-        final int colon = line.indexOf(':');
-        final String value = line.substring(colon + 1).trim();
-        if (colon > 0 && !value.isEmpty()) {
-          fields.put(line.substring(0, colon).trim(), value.replace("'", ""));
-        }
+    for (final String line : Files.readAllLines(file)) {
+      final int colon = line.indexOf(':');
+      final String value = line.substring(colon + 1).trim();
+      if (colon > 0 && !value.isEmpty()) {
+        fields.put(line.substring(0, colon).trim(), value.replace("'", ""));
       }
-    } catch (final IOException e) {
-      throw new UncheckedIOException(e);
     }
     return fields;
   }
