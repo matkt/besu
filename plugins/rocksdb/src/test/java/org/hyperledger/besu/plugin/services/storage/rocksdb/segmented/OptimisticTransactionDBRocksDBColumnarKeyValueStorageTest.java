@@ -28,10 +28,16 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.tuweni.bytes.Bytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.FlushOptions;
+import org.rocksdb.RocksDBException;
 
 @ExtendWith(MockitoExtension.class)
 public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
@@ -103,6 +109,44 @@ public class OptimisticTransactionDBRocksDBColumnarKeyValueStorageTest
       snapshot.close();
       store.close();
     }
+  }
+
+  @Test
+  public void snapshotScansLeaveTheBlockCacheToReads() throws Exception {
+    final OptimisticRocksDBColumnarKeyValueStorage store =
+        (OptimisticRocksDBColumnarKeyValueStorage) createSegmentedStore();
+    final ColumnFamilyHandle foo = store.safeColumnHandle(TestSegment.FOO);
+    final SegmentedKeyValueStorageTransaction tx = store.startTransaction();
+    for (int i = 0; i < 1_000; i++) {
+      tx.put(TestSegment.FOO, Bytes.ofUnsignedInt(i).toArrayUnsafe(), new byte[100]);
+    }
+    tx.commit();
+    try (FlushOptions flush = new FlushOptions().setWaitForFlush(true)) {
+      store.getDB().flush(flush, foo);
+    }
+
+    final RocksDBColumnarKeyValueSnapshot snapshot = store.takeSnapshot();
+    try {
+      final long usage = blockCacheUsage(store, foo);
+      try (Stream<Pair<byte[], byte[]>> scan =
+          snapshot.streamFromKey(TestSegment.FOO, new byte[] {0})) {
+        assertThat(scan.count()).isEqualTo(1_000);
+      }
+      assertThat(blockCacheUsage(store, foo)).isEqualTo(usage);
+
+      assertThat(snapshot.get(TestSegment.FOO, Bytes.ofUnsignedInt(999).toArrayUnsafe()))
+          .isPresent();
+      assertThat(blockCacheUsage(store, foo)).isGreaterThan(usage);
+    } finally {
+      snapshot.close();
+      store.close();
+    }
+  }
+
+  private static long blockCacheUsage(
+      final OptimisticRocksDBColumnarKeyValueStorage store, final ColumnFamilyHandle segment)
+      throws RocksDBException {
+    return Long.parseLong(store.getDB().getProperty(segment, "rocksdb.block-cache-usage"));
   }
 
   @Test
