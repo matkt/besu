@@ -248,11 +248,11 @@ public class SnapProtocolManager implements ProtocolManager {
 
   private static MessageData emptyResponseFor(final int code) {
     return switch (code) {
-      case SnapV1.GET_ACCOUNT_RANGE -> SnapServer.EMPTY_ACCOUNT_RANGE;
-      case SnapV1.GET_STORAGE_RANGE -> SnapServer.EMPTY_STORAGE_RANGE;
-      case SnapV1.GET_BYTECODES -> SnapServer.EMPTY_BYTE_CODES_MESSAGE;
-      case SnapV1.GET_TRIE_NODES -> SnapServer.EMPTY_TRIE_NODES_MESSAGE;
-      case SnapV2.GET_BLOCK_ACCESS_LISTS -> SnapServer.EMPTY_BLOCK_ACCESS_LISTS;
+      case SnapV1.GET_ACCOUNT_RANGE -> AccountRangeResponder.EMPTY;
+      case SnapV1.GET_STORAGE_RANGE -> StorageRangeResponder.EMPTY;
+      case SnapV1.GET_BYTECODES -> ByteCodesResponder.EMPTY;
+      case SnapV1.GET_TRIE_NODES -> TrieNodesResponder.EMPTY;
+      case SnapV2.GET_BLOCK_ACCESS_LISTS -> BlockAccessListsResponder.EMPTY;
       default -> throw new IllegalStateException("Unhandled snap GET_* code: " + code);
     };
   }
